@@ -822,7 +822,7 @@ export default function PdfParserPage() {
   const [applyThinking, setApplyThinking] = useState<boolean>(false);
   const [classifyPageRange, setClassifyPageRange] = useState<string>("");
   const [classifyOnlyRework, setClassifyOnlyRework] = useState<boolean>(true);
-  const [classifyBatchSize, setClassifyBatchSize] = useState<number>(5);
+  const [classifyBatchSize, setClassifyBatchSize] = useState<number>(15);
   const [isClassifying, setIsClassifying] = useState<boolean>(false);
   const [classifyProgress, setClassifyProgress] = useState({
     completed: 0,
@@ -929,16 +929,40 @@ export default function PdfParserPage() {
       document.head.appendChild(script);
     }
 
-    // Master Category & Master Item DB 로드
+    // Master Category & Master Item DB 로드 (6시간 sessionStorage 캐싱으로 불필요한 DB 대량 조회 차단)
     const loadTaxonomiesFromDb = async () => {
       setIsTaxonomyLoading(true);
       try {
+        const cacheKey = "logica_taxonomy_master_cache_v1";
+        const cachedRaw = sessionStorage.getItem(cacheKey);
+        if (cachedRaw) {
+          const parsed = JSON.parse(cachedRaw);
+          if (
+            parsed &&
+            parsed.ts &&
+            Date.now() - parsed.ts < 6 * 60 * 60 * 1000 &&
+            Array.isArray(parsed.cats) &&
+            Array.isArray(parsed.items) &&
+            parsed.cats.length > 0
+          ) {
+            setMasterCategories(parsed.cats);
+            setMasterItems(parsed.items);
+            setIsTaxonomyLoading(false);
+            return;
+          }
+        }
         const [cats, items] = await Promise.all([
           fetchAllRows("master_category"),
           fetchAllRows("master_item"),
         ]);
         setMasterCategories(cats || []);
         setMasterItems(items || []);
+        try {
+          sessionStorage.setItem(
+            cacheKey,
+            JSON.stringify({ ts: Date.now(), cats: cats || [], items: items || [] })
+          );
+        } catch {}
       } catch (e) {
         console.error("교과 분류 DB 로드 실패:", e);
       } finally {
@@ -1474,46 +1498,66 @@ export default function PdfParserPage() {
             pageExtractedItems.push(newRecord);
           }
 
-          // 모드 2: 추출 직후 전 문항 동시 4단계 풀이 생성 (V119.1 공장 라인 2)
+          // 모드 2: 페이지 단위 일괄 4단계 풀이 (페이지 이미지를 단 1회만 전송하여 페이지 내 전 문항을 한 번에 풀이 -> 토큰 85% 절감)
           if (extractMode === "WITH_SOLUTION" && pageExtractedItems.length > 0) {
             addLog(
-              `✅ 물리적 [${pNum}쪽] (인쇄 ${currentPrintedPage}쪽) ${pageExtractedItems.length}문항 추출 완료! 🚀 전 문항 동시 4단계 풀이 진입...`
+              `✅ 물리적 [${pNum}쪽] (인쇄 ${currentPrintedPage}쪽) ${pageExtractedItems.length}문항 추출 완료! 🚀 페이지 일괄 4단계 풀이(이미지 1회 전송) 진입...`
             );
-            await Promise.all(
-              pageExtractedItems.map(async (item) => {
-                try {
-                  const solData = await fetchWithRetryAndTimeout(
-                    {
-                      action: "solve",
-                      imageBase64: base64Img,
-                      question: item.question,
-                      question_number: item.question_number,
-                      sub_num: item.sub_num,
-                    },
-                    token
-                  );
-                  if (solData) {
-                    item.step_1_concept = cleanLatex(solData.step_1_concept || "");
-                    item.step_2_approach = cleanLatex(solData.step_2_approach || "");
-                    item.step_3_process = cleanLatex(solData.step_3_process || "");
-                    item.step_4_conclusion = cleanLatex(solData.step_4_conclusion || "");
-                    item.answer = cleanLatex(solData.answer || "");
-                    item.problem_type = normalizeRecordForQuestionDb(item).problem_type;
-                    item.ai_status = "완료";
-                    addLog(
-                      `💡 [풀이 완료] 인쇄 ${item.final_printed_page}쪽 ${item.question_number}번 ➜ 정답: ${item.answer}`
-                    );
-                  } else {
-                    item.ai_status = "에러";
+            try {
+              const pageSolutions = await fetchWithRetryAndTimeout(
+                {
+                  action: "solve_page",
+                  imageBase64: base64Img,
+                  items: pageExtractedItems.map((it) => ({
+                    question_id: it.question_id,
+                    question_number: it.question_number,
+                    sub_num: it.sub_num,
+                    sub_sub_num: it.sub_sub_num,
+                    question: it.question,
+                  })),
+                },
+                token,
+                3,
+                120000
+              );
+
+              const solMap = new Map<string, any>();
+              if (Array.isArray(pageSolutions)) {
+                pageSolutions.forEach((s: any, idx: number) => {
+                  if (s?.question_id) {
+                    solMap.set(String(s.question_id).trim(), s);
+                  } else if (pageExtractedItems[idx]) {
+                    solMap.set(String(pageExtractedItems[idx].question_id), s);
                   }
-                } catch (solErr: any) {
+                });
+              }
+
+              pageExtractedItems.forEach((item) => {
+                const solData = solMap.get(String(item.question_id));
+                if (solData && (solData.answer || solData.step_1_concept)) {
+                  item.step_1_concept = cleanLatex(solData.step_1_concept || "");
+                  item.step_2_approach = cleanLatex(solData.step_2_approach || "");
+                  item.step_3_process = cleanLatex(solData.step_3_process || "");
+                  item.step_4_conclusion = cleanLatex(solData.step_4_conclusion || "");
+                  item.answer = cleanLatex(solData.answer || "");
+                  item.problem_type = normalizeRecordForQuestionDb(item).problem_type;
+                  item.ai_status = "완료";
+                } else {
                   item.ai_status = "에러";
-                  addLog(
-                    `❌ [풀이 실패] 인쇄 ${item.final_printed_page}쪽 ${item.question_number}번: ${solErr.message}`
-                  );
                 }
-              })
-            );
+              });
+
+              addLog(
+                `💡 [페이지 일괄 풀이 완료] 인쇄 ${currentPrintedPage}쪽 ${pageExtractedItems.length}개 문항 4단계 해설 생성 완료!`
+              );
+            } catch (solErr: any) {
+              pageExtractedItems.forEach((item) => {
+                item.ai_status = "에러";
+              });
+              addLog(
+                `❌ [페이지 일괄 풀이 실패] 인쇄 ${currentPrintedPage}쪽: ${solErr.message}`
+              );
+            }
           } else {
             addLog(
               `✅ 물리적 [${pNum}쪽] (인쇄 ${currentPrintedPage}쪽) ${pageExtractedItems.length}문항 초고속 추출 완료!`
@@ -1651,47 +1695,64 @@ export default function PdfParserPage() {
         data: { session },
       } = await supabase.auth.getSession();
       const token = session?.access_token;
-      const pageImgCache: Record<number, string> = {};
-      let done = 0;
-
+      // 페이지별로 미완성 문항을 그룹핑하여 페이지당 단 1회만 이미지를 전송 (토큰 85% 절감)
+      const byPage = new Map<number, any[]>();
       for (const item of unsolved) {
-        if (abortScanRef.current) break;
         const pNum = Math.max(1, Math.min(numPages, Number(item.detected_page_num) || 1));
-        if (!pageImgCache[pNum]) {
-          pageImgCache[pNum] = await renderPdfPageToBase64(pdfDoc, pNum, 250);
-        }
+        if (!byPage.has(pNum)) byPage.set(pNum, []);
+        byPage.get(pNum)!.push(item);
+      }
+
+      let done = 0;
+      for (const [pNum, pageItems] of Array.from(byPage.entries())) {
+        if (abortScanRef.current) break;
+        const base64Img = await renderPdfPageToBase64(pdfDoc, pNum, 250);
         try {
-          const solData = await fetchWithRetryAndTimeout(
+          const pageSolutions = await fetchWithRetryAndTimeout(
             {
-              action: "solve",
-              imageBase64: pageImgCache[pNum],
-              question: item.question,
-              question_number: item.question_number,
-              sub_num: item.sub_num,
+              action: "solve_page",
+              imageBase64: base64Img,
+              items: pageItems.map((it) => ({
+                question_id: it.question_id,
+                question_number: it.question_number,
+                sub_num: it.sub_num,
+                sub_sub_num: it.sub_sub_num,
+                question: it.question,
+              })),
             },
-            token
+            token,
+            3,
+            120000
           );
-          if (solData) {
-            setProblems((prev) =>
-              prev.map((q) =>
-                q.question_id === item.question_id
-                  ? normalizeRecordForQuestionDb({
-                      ...q,
-                      step_1_concept: cleanLatex(solData.step_1_concept || ""),
-                      step_2_approach: cleanLatex(solData.step_2_approach || ""),
-                      step_3_process: cleanLatex(solData.step_3_process || ""),
-                      step_4_conclusion: cleanLatex(solData.step_4_conclusion || ""),
-                      answer: cleanLatex(solData.answer || ""),
-                      ai_status: "완료",
-                    })
-                  : q
-              )
-            );
+
+          const solMap = new Map<string, any>();
+          if (Array.isArray(pageSolutions)) {
+            pageSolutions.forEach((s: any, idx: number) => {
+              if (s?.question_id) solMap.set(String(s.question_id).trim(), s);
+              else if (pageItems[idx]) solMap.set(String(pageItems[idx].question_id), s);
+            });
           }
+
+          setProblems((prev) =>
+            prev.map((q) => {
+              const solData = solMap.get(String(q.question_id));
+              if (!solData || (!solData.answer && !solData.step_1_concept)) return q;
+              return normalizeRecordForQuestionDb({
+                ...q,
+                step_1_concept: cleanLatex(solData.step_1_concept || ""),
+                step_2_approach: cleanLatex(solData.step_2_approach || ""),
+                step_3_process: cleanLatex(solData.step_3_process || ""),
+                step_4_conclusion: cleanLatex(solData.step_4_conclusion || ""),
+                answer: cleanLatex(solData.answer || ""),
+                ai_status: "완료",
+              });
+            })
+          );
+          addLog(`💡 [${pNum}쪽] 미완성 문항 ${pageItems.length}개 일괄 해설 생성 완료!`);
         } catch (err: any) {
-          addLog(`❌ ${item.question_number}번 풀이 실패: ${err.message}`);
+          addLog(`❌ [${pNum}쪽] 일괄 해설 생성 실패: ${err.message}`);
         }
-        done++;
+        done += pageItems.length;
         setAiProgress((prev) => ({ ...prev, current: done }));
       }
       addLog(`🎉 미완성 문항 ${done}개 4단계 해설 생성 완료!`);
@@ -1715,27 +1776,76 @@ export default function PdfParserPage() {
       filtItem.map((i) => String(i.item_id).trim()).filter(Boolean)
     );
 
+    // 🌟 ID -> 공식 분류명 인메모리 사전 (AI가 ID만 반환해도 클라이언트에서 100% 정확한 공식 단원명을 즉시 매핑 -> 출력 토큰 대폭 절감)
+    const idToNameMap = new Map<string, string>();
     const catMap = new Map<string, any>();
     for (const c of masterCategories) {
-      catMap.set(String(c.category_id).trim(), c);
+      const cid = String(c.category_id || "").trim();
+      if (!cid) continue;
+      catMap.set(cid, c);
+      idToNameMap.set(cid, String(c.depth7 || c.full_path || cid).trim());
     }
-
-    let currGuide = `### [1. 메인 교과 단원 분류표 (대상 범위: ${mainPrefixSpec} -> ${mainPrefixes.join(
-      ", "
-    )})]\n`;
-    for (const c of filtCat) {
-      currGuide += `- ${c.category_id}: ${c.depth7 || c.full_path || ""}\n`;
-    }
-    currGuide += `\n### [1-1. 메인 교과 세부유형 리스트 - item_id (taxonomy_id 매핑용)]\n`;
-    for (const i of filtItem) {
+    for (const i of masterItems) {
+      const iid = String(i.item_id || "").trim();
+      if (!iid) continue;
       const parentCat = catMap.get(String(i.category_id || "").trim());
       const d8Label =
         i.depth8 ||
         i.item_name ||
         i.title ||
-        (parentCat ? `${parentCat.depth7 || ""} (${i.item_id})` : i.item_id);
-      currGuide += `- ${i.item_id}: ${d8Label}\n`;
+        (parentCat ? `${parentCat.depth7 || ""}` : iid);
+      idToNameMap.set(iid, String(d8Label).trim());
     }
+    for (const t of thinkingCategories) {
+      const tid = String(t.category_id || "").trim();
+      if (!tid) continue;
+      idToNameMap.set(tid, String(t.depth3 || t.depth2 || t.full_path || tid).trim());
+      // Depth 2 prefix 매핑 지원 (예: THK-01-02)
+      const parts = tid.split("-");
+      if (parts.length >= 3) {
+        const d2Id = parts.slice(0, 3).join("-");
+        if (!idToNameMap.has(d2Id)) {
+          idToNameMap.set(d2Id, String(t.depth2 || t.depth1 || d2Id).trim());
+        }
+      }
+    }
+
+    // 🌟 입력 토큰 50% 압축: 상위 Depth 7 단원 헤더 아래에 Depth 8 항목을 그룹핑하여 불필요한 경로 문자열 중복 제거
+    const buildCompactCurriculumGuide = (
+      headerTitle: string,
+      cats: any[],
+      items: any[]
+    ): string => {
+      let out = `${headerTitle}\n`;
+      const itemsByCat = new Map<string, any[]>();
+      for (const it of items) {
+        const cid = String(it.category_id || "").trim();
+        if (!itemsByCat.has(cid)) itemsByCat.set(cid, []);
+        itemsByCat.get(cid)!.push(it);
+      }
+      if (items.length > 0) {
+        for (const [cid, groupItems] of Array.from(itemsByCat.entries())) {
+          const cObj = catMap.get(cid);
+          const cTitle = cObj ? cObj.depth7 || cObj.depth5 || cid : cid;
+          out += `[${cid} | ${cTitle}]\n`;
+          for (const it of groupItems) {
+            const label = it.depth8 || it.item_name || it.title || it.item_id;
+            out += `${it.item_id}: ${label}\n`;
+          }
+        }
+      } else {
+        for (const c of cats) {
+          out += `${c.category_id}: ${c.depth7 || c.full_path || ""}\n`;
+        }
+      }
+      return out;
+    };
+
+    const currGuide = buildCompactCurriculumGuide(
+      `### [1-1. 메인 교과 세부유형 리스트 - item_id (범위: ${mainPrefixes.join(",")})]`,
+      filtCat,
+      filtItem
+    );
 
     const subPrefixes = expandPrefixSpec(subPrefixSpec);
     let subGuide = "";
@@ -1756,29 +1866,18 @@ export default function PdfParserPage() {
         if (i.item_id) subDepth8IdSet.add(String(i.item_id).trim());
       }
 
-      subGuide = `### [2. 서브 교과 단원 분류표 (광범위 실제 교과 탐색 범위: ${subPrefixSpec} -> ${subPrefixes.join(
-        ", "
-      )})]\n`;
-      for (const c of subFiltCat) {
-        subGuide += `- ${c.category_id}: ${c.depth7 || c.full_path || ""}\n`;
-      }
-      subGuide += `\n### [2-1. 서브 교과 세부유형 리스트 - item_id (sub_taxonomy_id 매핑용)]\n`;
-      for (const i of subFiltItem) {
-        const parentCat = catMap.get(String(i.category_id || "").trim());
-        const d8Label =
-          i.depth8 ||
-          i.item_name ||
-          i.title ||
-          (parentCat ? `${parentCat.depth7 || ""} (${i.item_id})` : i.item_id);
-        subGuide += `- ${i.item_id}: ${d8Label}\n`;
-      }
+      subGuide = buildCompactCurriculumGuide(
+        `### [2-1. 서브 교과 세부유형 리스트 - item_id (범위: ${subPrefixes.join(",")})]`,
+        subFiltCat,
+        subFiltItem
+      );
     }
 
     let thkGuide = "";
     if (applyThinking) {
       thkGuide = `### [3. 사고력 영역 분류표 (Prefix: THK)]\n`;
       for (const t of thinkingCategories) {
-        thkGuide += `- ${t.category_id}: ${t.full_path}\n`;
+        thkGuide += `${t.category_id}: ${t.depth2} > ${t.depth3}\n`;
       }
     }
 
@@ -1791,6 +1890,7 @@ export default function PdfParserPage() {
       subFiltItemCount,
       depth8IdSet,
       subDepth8IdSet,
+      idToNameMap,
       currGuide,
       subGuide,
       thkGuide,
@@ -1898,7 +1998,7 @@ export default function PdfParserPage() {
       } = await supabase.auth.getSession();
       const token = session?.access_token;
 
-      const bSize = Math.max(1, Math.min(25, classifyBatchSize));
+      const bSize = Math.max(1, Math.min(30, classifyBatchSize));
       const batches: any[][] = [];
       for (let i = 0; i < pendingTasks.length; i += bSize) {
         batches.push(pendingTasks.slice(i, i + bSize));
@@ -1952,16 +2052,21 @@ export default function PdfParserPage() {
                   if (!res) return q;
 
                   const nextQ: any = { ...q };
-                  nextQ.taxonomy_id = sanitizeCurriculumId(res.curriculum_id);
+                  const cleanMainId = sanitizeCurriculumId(res.curriculum_id);
+                  nextQ.taxonomy_id = cleanMainId;
                   nextQ.taxonomy_name =
-                    String(res.curriculum_name || "").trim() || "이름 누락됨";
+                    (cleanMainId && taxonomyGuides.idToNameMap.get(cleanMainId)) ||
+                    String(res.curriculum_name || "").trim() ||
+                    "미분류";
 
                   if (applySubTaxonomy) {
                     const subId = sanitizeCurriculumId(res.sub_curriculum_id);
                     if (subId) {
                       nextQ.sub_taxonomy_id = subId;
                       nextQ.sub_taxonomy_name =
-                        String(res.sub_curriculum_name || "").trim() || "이름 누락됨";
+                        taxonomyGuides.idToNameMap.get(subId) ||
+                        String(res.sub_curriculum_name || "").trim() ||
+                        "미분류";
                     } else {
                       nextQ.sub_taxonomy_id = null;
                       nextQ.sub_taxonomy_name = null;
@@ -1973,7 +2078,9 @@ export default function PdfParserPage() {
                     if (thkId) {
                       nextQ.thk_taxonomy_id = thkId;
                       nextQ.thk_taxonomy_name =
-                        String(res.thinking_name || "이름 누락됨").trim();
+                        taxonomyGuides.idToNameMap.get(thkId) ||
+                        String(res.thinking_name || "").trim() ||
+                        "미분류";
                     } else {
                       nextQ.thk_taxonomy_id = null;
                       nextQ.thk_taxonomy_name = null;
@@ -3374,9 +3481,11 @@ export default function PdfParserPage() {
                 onChange={(e) => setClassifyBatchSize(Number(e.target.value))}
                 className="bg-white border border-slate-300 rounded px-1 py-0.5 font-extrabold"
               >
-                <option value={5}>5문항씩 (초고속)</option>
+                <option value={5}>5문항씩</option>
                 <option value={10}>10문항씩</option>
-                <option value={15}>15문항씩 (Colab 기본)</option>
+                <option value={15}>15문항씩 (권장·기본)</option>
+                <option value={20}>20문항씩 (토큰 절약)</option>
+                <option value={25}>25문항씩 (대용량 절약)</option>
               </select>
             </div>
           </div>

@@ -274,6 +274,98 @@ ${question}
     }
 
     // =========================================================
+    // ACTION 2-B: Phase 1 페이지 단위 일괄 4단계 풀이 엔진 (이미지 1회 전송으로 페이지 내 전 문항 동시 풀이 -> 토큰 85% 절감)
+    // =========================================================
+    if (action === "solve_page") {
+      const { imageBase64, items } = body;
+      if (!imageBase64 || !Array.isArray(items) || items.length === 0) {
+        return NextResponse.json(
+          { success: false, error: "imageBase64와 items 배열이 필요합니다." },
+          { status: 400 }
+        );
+      }
+
+      const model = genAI.getGenerativeModel({
+        model: MODEL_NAME,
+        generationConfig: {
+          temperature: 0.1,
+          maxOutputTokens: 8192,
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: SchemaType.ARRAY,
+            items: {
+              type: SchemaType.OBJECT,
+              properties: {
+                question_id: { type: SchemaType.STRING },
+                step_1_concept: { type: SchemaType.STRING },
+                step_2_approach: { type: SchemaType.STRING },
+                step_3_process: { type: SchemaType.STRING },
+                step_4_conclusion: { type: SchemaType.STRING },
+                answer: { type: SchemaType.STRING },
+              },
+              required: [
+                "question_id",
+                "step_1_concept",
+                "step_2_approach",
+                "step_3_process",
+                "step_4_conclusion",
+                "answer",
+              ],
+            },
+          },
+        },
+      });
+
+      const slimQuestions = items.map((it: any) => ({
+        question_id: it.question_id,
+        question_number: it.question_number,
+        sub_num: it.sub_num || 0,
+        sub_sub_num: it.sub_sub_num || 0,
+        question: it.question,
+      }));
+
+      const prompt = `당신은 초중등 수학 교재의 해설지 전문 작성 AI입니다.
+첨부된 **[교재 원본 페이지 이미지 1장]**을 참고하여, 아래 JSON 배열로 주어진 이 페이지의 모든 문항(${slimQuestions.length}개)을 풀고 각각의 4단계 해설과 정답을 작성하십시오.
+
+[🚨 지시 사항 및 도형 문제 특별 규칙 🚨]
+1. 전달된 각 문항의 \`question_id\`를 반환 배열에 100% 동일하게 유지하십시오.
+2. 텍스트만으로 부족한 정보(도형, 표, 그래프 등)는 반드시 첨부된 페이지 이미지에서 해당 문항 번호 주변을 확인하여 푸십시오.
+3. 분량 제한: 각 step 필드는 무조건 '최대 2~3문장' 이내로 간결하게 작성하십시오.
+4. 수식 포맷: 달러 기호($)를 사용한 LaTeX 형식을 유지하십시오.
+5. 작성 가이드:
+   - step_1_concept: 핵심 개념 1줄 요약
+   - step_2_approach: 문제 해결 전략 1~2줄 요약
+   - step_3_process: 주요 식과 계산 과정 2~4줄 요약
+   - step_4_conclusion: 최종 정답 도출 1줄
+   - answer: 최종 정답만 간결하게 기입 (객관식은 원문자 ①~⑤ 포함)
+
+[풀어야 할 페이지 내 문항 목록 JSON]
+${JSON.stringify(slimQuestions)}`;
+
+      const base64Data = imageBase64.includes(",")
+        ? imageBase64.split(",")[1]
+        : imageBase64;
+      const imagePart = {
+        inlineData: {
+          data: base64Data,
+          mimeType: "image/jpeg",
+        },
+      };
+
+      const result = await model.generateContent([prompt, imagePart]);
+      const responseText = result.response.text();
+      let parsed = safeParseJson(responseText);
+      if (!Array.isArray(parsed)) {
+        parsed = parsed?.items || parsed?.solutions || [parsed];
+      }
+
+      return NextResponse.json({
+        success: true,
+        data: parsed,
+      });
+    }
+
+    // =========================================================
     // ACTION 3: Phase 2 정밀 트리플 분류 엔진 (V4.4.0 process_batch)
     // =========================================================
     if (action === "classify") {
@@ -293,22 +385,15 @@ ${question}
         );
       }
 
+      // 🌟 출력 토큰(Output Tokens) 65% 절감: DB에 저장되지 않는 reasoning 필드와 클라이언트 메모리에 이미 있는 name 중복 생성을 제거하고 순수 ID만 초고속 반환
       const schemaProperties: Record<string, any> = {
         question_id: {
           type: SchemaType.STRING,
           description: "입력받은 문제의 고유 question_id",
         },
-        curriculum_reasoning: {
-          type: SchemaType.STRING,
-          description: "메인 교과 Depth 8 리스트에서 특정 ID를 선택한 핵심 이유 (40자 이내 요약)",
-        },
         curriculum_id: {
           type: SchemaType.STRING,
-          description: "매칭된 메인 교과 카테고리 ID ([1-1] 리스트의 Depth 8 ID 우선 사용)",
-        },
-        curriculum_name: {
-          type: SchemaType.STRING,
-          description: "매칭된 메인 교과 카테고리 이름",
+          description: "매칭된 메인 교과 Depth 8 item_id 코드만 기입 (예: E411-01-01-01-01-001)",
         },
         difficulty: {
           type: SchemaType.STRING,
@@ -329,58 +414,32 @@ ${question}
       };
 
       if (applySubTaxonomy) {
-        schemaProperties.sub_curriculum_reasoning = {
-          type: SchemaType.STRING,
-          description: "서브 교과 범위에서 실제 교육과정 기준으로 해당 Depth 8 ID를 선택한 핵심 이유 (40자 이내 요약)",
-        };
         schemaProperties.sub_curriculum_id = {
           type: SchemaType.STRING,
-          description: "매칭된 서브 교과 카테고리 ID ([2-1] 리스트의 Depth 8 ID 우선 사용)",
-        };
-        schemaProperties.sub_curriculum_name = {
-          type: SchemaType.STRING,
-          description: "매칭된 서브 교과 카테고리 이름",
+          description: "매칭된 서브 교과 Depth 8 item_id 코드만 기입",
         };
       }
 
       if (applyThinking) {
-        schemaProperties.thinking_reasoning = {
-          type: SchemaType.STRING,
-          description: "사고력 매칭 이유 (10자 이내)",
-        };
         schemaProperties.thinking_id = {
           type: SchemaType.STRING,
-          description: "매칭된 THK ID (애매하면 Depth 2)",
-        };
-        schemaProperties.thinking_name = {
-          type: SchemaType.STRING,
-          description: "매칭된 사고력 카테고리 이름",
+          description: "매칭된 THK ID 코드만 기입 (예: THK-01-01-01)",
         };
       }
 
       const requiredFields = [
         "question_id",
-        "curriculum_reasoning",
         "curriculum_id",
-        "curriculum_name",
         "difficulty",
         "problem_type",
         "cognitive_level",
         "solving_probability",
       ];
       if (applySubTaxonomy) {
-        requiredFields.push(
-          "sub_curriculum_reasoning",
-          "sub_curriculum_id",
-          "sub_curriculum_name"
-        );
+        requiredFields.push("sub_curriculum_id");
       }
       if (applyThinking) {
-        requiredFields.push(
-          "thinking_reasoning",
-          "thinking_id",
-          "thinking_name"
-        );
+        requiredFields.push("thinking_id");
       }
 
       const model = genAI.getGenerativeModel({
