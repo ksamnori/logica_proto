@@ -209,6 +209,15 @@ function buildExamQuestionScoreMap(
   return { scoreByQuestionId, groupCount };
 }
 
+export function buildCompactGradingStatusTag(actorName: string, nowIso?: string): string {
+  // student_answer.grading_status 컬럼이 varchar(20)인 환경에서도 22001 에러가 절대 나지 않도록 최대 19자로 압축
+  // 형식: "완료(확인:"(6자) + 이름(최대 5자) + "|"(1자) + Base36초타임스탬프(6자) + ")"(1자) <= 19자
+  const safeActor = (actorName || "선생님").replace(/[|)]/g, "").trim().slice(0, 5) || "선생님";
+  const tsMs = nowIso ? new Date(nowIso).getTime() : Date.now();
+  const ts36 = Math.floor((Number.isFinite(tsMs) ? tsMs : Date.now()) / 1000).toString(36);
+  return `완료(확인:${safeActor}|${ts36})`;
+}
+
 export function parseVerifierFromGradingStatus(raw?: string | null): {
   verifierName: string | null;
   verifiedAt: string | null;
@@ -216,9 +225,18 @@ export function parseVerifierFromGradingStatus(raw?: string | null): {
   if (!raw) return { verifierName: null, verifiedAt: null };
   const m = String(raw).match(/확인:([^|)]+)(?:\|([^)]+))?/);
   if (!m) return { verifierName: null, verifiedAt: null };
+  const verifierName = m[1]?.trim() || null;
+  const rawTime = m[2]?.trim() || null;
+  let verifiedAt: string | null = rawTime;
+  if (rawTime && /^[0-9a-z]{5,8}$/i.test(rawTime)) {
+    const sec = parseInt(rawTime, 36);
+    if (Number.isFinite(sec) && sec > 1000000000) {
+      verifiedAt = new Date(sec * 1000).toISOString();
+    }
+  }
   return {
-    verifierName: m[1]?.trim() || null,
-    verifiedAt: m[2]?.trim() || null,
+    verifierName,
+    verifiedAt,
   };
 }
 
@@ -374,7 +392,6 @@ export default function UnlockPanel({
         const aid = Number(r.assignment_id);
         const dbMeta = answerVerifierMap[aid];
         const cached = localCache[aid];
-        if (!dbMeta && !cached) return;
 
         seenIds.add(aid);
         mergedHistory.push({
@@ -383,7 +400,7 @@ export default function UnlockPanel({
           studentName: unwrap(r.student)?.name || cached?.studentName || "학생",
           examTitle: unwrap(r.exam_master)?.title || cached?.examTitle || "-",
           finalScore: Number(r.total_score ?? cached?.finalScore ?? 0),
-          verifierName: dbMeta?.verifierName || cached?.verifierName || "선생님",
+          verifierName: dbMeta?.verifierName || cached?.verifierName || "확인완료",
           verifiedAt: dbMeta?.verifiedAt || cached?.verifiedAt || r.created_at || new Date().toISOString(),
         });
       });
@@ -408,11 +425,12 @@ export default function UnlockPanel({
   }, []);
 
   useEffect(() => {
-    // 초기 로컬 캐시 즉시 반영
+    // 초기 로컬 캐시 즉시 반영 + DB 확정 내역 1회 동기화(상단 '확인 기록' 배지 카운트 표시용)
     const localCache = Object.values(readVerifiedRecordsFromLocalCache());
     if (localCache.length > 0) {
       setHistoryRows(localCache.slice(0, 25));
     }
+    loadHistory();
 
     // externalPendingRows가 없는 경우(/clinic/ta/pad)에만 20초 주기로 가볍게 폴링 (화면이 보일 때만)
     let t: ReturnType<typeof setInterval> | null = null;
@@ -525,7 +543,7 @@ export default function UnlockPanel({
     setBusyId(assignmentId);
     try {
       const nowIso = new Date().toISOString();
-      const statusTag = `완료(확인:${actorName}|${nowIso})`;
+      const statusTag = buildCompactGradingStatusTag(actorName, nowIso);
       const hasOverrides = Object.keys(overrides).length > 0;
 
       let finalScore = Number(row.total_score ?? 0);

@@ -1,7 +1,7 @@
 // src/app/supervisor/useSupervisorData.tsx
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { supabaseClient, CLINIC_ROOM, getKSTDateString, DEFAULT_CLINIC_DURATION_MS, LOG_AUTO_EXPIRE_MS, PENDING_GUARD_MS, HEARTBEAT_TIMEOUT_MS, SUBMITTED_VERIFICATION_TIMEOUT_MS } from './supervisorUtils';
-import { saveVerifiedRecordToLocalCache, VerifiedGradingRecord } from '@/components/clinic/UnlockPanel';
+import { saveVerifiedRecordToLocalCache, VerifiedGradingRecord, buildCompactGradingStatusTag } from '@/components/clinic/UnlockPanel';
 import { endTodaySession, pickLatestSessionPerStudent, resolveEndSessionForStudent, END_REQUEST_COOLDOWN_MS, clearAway } from '@/lib/clinicSession';
 import { getActiveSeatLayout } from '@/app/actions/clinicSeatLayout';
 import { listPadDevicesByTenant } from '@/app/actions/clinicPadDevice';
@@ -397,7 +397,7 @@ export function useSupervisorData() {
         try {
             const actorName = (verifierNameOverride || (typeof window !== 'undefined' && (localStorage.getItem('logica_instructor_name') || localStorage.getItem('logica_ta_name'))) || '총책임자').trim();
             const nowIso = new Date().toISOString();
-            const statusTag = `완료(확인:${actorName}|${nowIso})`;
+            const statusTag = buildCompactGradingStatusTag(actorName, nowIso);
 
             const [{ data: allAnswers }, { data: asgData }, { data: gcData }] = await Promise.all([
                 supabaseClient.from('student_answer').select('answer_id, question_id, is_correct, grading_code, earned_score').eq('exam_assignment_id', assignmentId),
