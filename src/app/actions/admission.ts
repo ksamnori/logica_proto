@@ -18,6 +18,50 @@ async function getTenantId() {
   return cookieStore.get("logica_tenant_id")?.value;
 }
 
+function buildStandardCandidateList(standardName: string): string[] {
+  const raw = String(standardName || "").trim();
+  const list: string[] = [];
+  const pushUnique = (v: string) => {
+    const t = String(v || "").trim();
+    if (t && !list.includes(t)) list.push(t);
+  };
+
+  const midMatch =
+    raw.match(/중(?:등|학교)?\s*([1-3])\s*[-_]\s*([1-2])/) ||
+    raw.match(/\bM\s*([1-3])\s*[-_]\s*([1-2])/i);
+  if (midMatch) {
+    const mapped = `${parseInt(midMatch[1], 10) + 6}-${midMatch[2]}`;
+    pushUnique(mapped);
+    pushUnique(`${midMatch[1]}-${midMatch[2]}`);
+    pushUnique(raw);
+  }
+
+  const matchTag = raw.match(/\d+-\d+/);
+  const coreTag = matchTag ? matchTag[0] : raw;
+  pushUnique(raw);
+  pushUnique(coreTag);
+
+  if (coreTag === "1-1") {
+    pushUnique("7-1");
+    pushUnique("중1-1");
+    pushUnique("중등 1-1");
+    pushUnique("2-2");
+  } else if (coreTag === "7-1") {
+    pushUnique("1-1");
+    pushUnique("중1-1");
+    pushUnique("중등 1-1");
+  } else if (coreTag === "1-2") {
+    pushUnique("7-2");
+    pushUnique("7-1");
+    pushUnique("2-2");
+  } else if (coreTag === "2-1") {
+    pushUnique("8-1");
+    pushUnique("2-2");
+  }
+
+  return list;
+}
+
 function matchesStandardName(row: any, targetStd: string, coreTag: string): boolean {
   if (!row) return false;
   const candidates = [
@@ -42,17 +86,10 @@ function matchesStandardName(row: any, targetStd: string, coreTag: string): bool
   return false;
 }
 
-/**
- * 🌟 진단평가 기준표(admission_standard_meta_2610 / admission_standard_baseline_2610) 서버 액션 로더
- * - Service Role Key(supabaseAdmin)를 사용하여 신규 테이블의 RLS(Row Level Security) 차단 문제를 완벽 우회합니다.
- * - standard_name 표기 차이('5-2', '초등 5-2', '초5-2' 등)를 유연하게 매칭하며,
- *   _2610 테이블에 해당 학기 데이터가 없을 경우 기존 테이블(admission_standard_meta / admission_standard_baseline)로 자동 폴백합니다.
- */
 export async function fetchAdmissionStandardDataAction(standardName: string) {
   try {
     const rawStd = String(standardName || "").trim();
-    const matchTag = rawStd.match(/\d+-\d+/);
-    const coreTag = matchTag ? matchTag[0] : rawStd;
+    const candidates = buildStandardCandidateList(rawStd);
 
     let metaRows: any[] = [];
     let baselineRow: any = null;
@@ -63,11 +100,24 @@ export async function fetchAdmissionStandardDataAction(standardName: string) {
       .select("*");
 
     if (!meta2610Err && Array.isArray(meta2610) && meta2610.length > 0) {
-      const exact = meta2610.filter(
-        (r: any) => String(r.standard_name ?? r.standard ?? "").trim() === rawStd ||
-                    String(r.standard_name ?? r.standard ?? "").trim() === coreTag
-      );
-      metaRows = exact.length > 0 ? exact : meta2610.filter((r: any) => matchesStandardName(r, rawStd, coreTag));
+      for (const cand of candidates) {
+        const exact = meta2610.filter(
+          (r: any) => String(r.standard_name ?? r.standard ?? "").trim() === cand
+        );
+        if (exact.length > 0) {
+          metaRows = exact;
+          break;
+        }
+      }
+      if (metaRows.length === 0) {
+        for (const cand of candidates) {
+          const matched = meta2610.filter((r: any) => matchesStandardName(r, cand, cand));
+          if (matched.length > 0) {
+            metaRows = matched;
+            break;
+          }
+        }
+      }
     }
 
     // 폴백: admission_standard_meta
@@ -76,11 +126,15 @@ export async function fetchAdmissionStandardDataAction(standardName: string) {
         .from("admission_standard_meta")
         .select("*");
       if (Array.isArray(metaLegacy) && metaLegacy.length > 0) {
-        const exact = metaLegacy.filter(
-          (r: any) => String(r.standard_name ?? r.standard ?? "").trim() === rawStd ||
-                      String(r.standard_name ?? r.standard ?? "").trim() === coreTag
-        );
-        metaRows = exact.length > 0 ? exact : metaLegacy.filter((r: any) => matchesStandardName(r, rawStd, coreTag));
+        for (const cand of candidates) {
+          const exact = metaLegacy.filter(
+            (r: any) => String(r.standard_name ?? r.standard ?? "").trim() === cand
+          );
+          if (exact.length > 0) {
+            metaRows = exact;
+            break;
+          }
+        }
       }
     }
 
@@ -90,13 +144,15 @@ export async function fetchAdmissionStandardDataAction(standardName: string) {
       .select("*");
 
     if (!base2610Err && Array.isArray(base2610) && base2610.length > 0) {
-      baselineRow =
-        base2610.find(
-          (r: any) => String(r.standard_name ?? r.standard ?? "").trim() === rawStd ||
-                      String(r.standard_name ?? r.standard ?? "").trim() === coreTag
-        ) ||
-        base2610.find((r: any) => matchesStandardName(r, rawStd, coreTag)) ||
-        null;
+      for (const cand of candidates) {
+        const found = base2610.find(
+          (r: any) => String(r.standard_name ?? r.standard ?? "").trim() === cand
+        );
+        if (found) {
+          baselineRow = found;
+          break;
+        }
+      }
     }
 
     // 폴백: admission_standard_baseline
@@ -105,13 +161,15 @@ export async function fetchAdmissionStandardDataAction(standardName: string) {
         .from("admission_standard_baseline")
         .select("*");
       if (Array.isArray(baseLegacy) && baseLegacy.length > 0) {
-        baselineRow =
-          baseLegacy.find(
-            (r: any) => String(r.standard_name ?? r.standard ?? "").trim() === rawStd ||
-                        String(r.standard_name ?? r.standard ?? "").trim() === coreTag
-          ) ||
-          baseLegacy.find((r: any) => matchesStandardName(r, rawStd, coreTag)) ||
-          null;
+        for (const cand of candidates) {
+          const found = baseLegacy.find(
+            (r: any) => String(r.standard_name ?? r.standard ?? "").trim() === cand
+          );
+          if (found) {
+            baselineRow = found;
+            break;
+          }
+        }
       }
     }
 

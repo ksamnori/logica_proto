@@ -193,53 +193,169 @@ function computeItemEarnedByStandard(
   return { earned: 0, isFullCorrect: false };
 }
 
+function resolveAdmissionStandardName(subTitle?: string, title?: string, majorGrade?: string): string {
+  const combined = [subTitle, title, majorGrade].filter(Boolean).join(" ");
+  const midMatch =
+    combined.match(/중(?:등|학교)?\s*([1-3])\s*[-_]\s*([1-2])/) ||
+    combined.match(/\bM\s*([1-3])\s*[-_]\s*([1-2])/i);
+  if (midMatch) {
+    return `${parseInt(midMatch[1], 10) + 6}-${midMatch[2]}`;
+  }
+  if (/중(?:등|학교|[1-3])/.test(combined)) {
+    const tag =
+      (subTitle || "").match(/([1-3])\s*[-_]\s*([1-2])/) ||
+      (title || "").match(/([1-3])\s*[-_]\s*([1-2])/);
+    if (tag) {
+      return `${parseInt(tag[1], 10) + 6}-${tag[2]}`;
+    }
+  }
+  const matchTag = (subTitle || "").match(/\d+-\d+/) || (title || "").match(/\d+-\d+/);
+  if (matchTag) {
+    const rawTag = matchTag[0];
+    if (rawTag === "1-1" && !/초(?:등|학교)?\s*1/.test(combined)) {
+      return "7-1";
+    }
+    return rawTag;
+  }
+  return "";
+}
+
+function buildStandardCandidateList(standardName: string): string[] {
+  const raw = String(standardName || "").trim();
+  const list: string[] = [];
+  const pushUnique = (v: string) => {
+    const t = String(v || "").trim();
+    if (t && !list.includes(t)) list.push(t);
+  };
+
+  const midMatch =
+    raw.match(/중(?:등|학교)?\s*([1-3])\s*[-_]\s*([1-2])/) ||
+    raw.match(/\bM\s*([1-3])\s*[-_]\s*([1-2])/i);
+  if (midMatch) {
+    const mapped = `${parseInt(midMatch[1], 10) + 6}-${midMatch[2]}`;
+    pushUnique(mapped);
+    pushUnique(`${midMatch[1]}-${midMatch[2]}`);
+    pushUnique(raw);
+  }
+
+  const matchTag = raw.match(/\d+-\d+/);
+  const coreTag = matchTag ? matchTag[0] : raw;
+  pushUnique(raw);
+  pushUnique(coreTag);
+
+  if (coreTag === "1-1") {
+    pushUnique("7-1");
+    pushUnique("중1-1");
+    pushUnique("중등 1-1");
+    pushUnique("2-2");
+  } else if (coreTag === "7-1") {
+    pushUnique("1-1");
+    pushUnique("중1-1");
+    pushUnique("중등 1-1");
+  } else if (coreTag === "1-2") {
+    pushUnique("7-2");
+    pushUnique("7-1");
+    pushUnique("2-2");
+  } else if (coreTag === "2-1") {
+    pushUnique("8-1");
+    pushUnique("2-2");
+  }
+
+  return list;
+}
+
+function pickRowsByStandardCandidates(rows: any[], candidates: string[]): any[] {
+  if (!Array.isArray(rows) || rows.length === 0) return [];
+  for (const cand of candidates) {
+    const exact = rows.filter(
+      (r: any) => String(r.standard_name ?? r.standard ?? "").trim() === cand
+    );
+    if (exact.length > 0) return exact;
+  }
+  for (const cand of candidates) {
+    const partial = rows.filter((r: any) =>
+      String(r.standard_name ?? r.standard ?? "").includes(cand)
+    );
+    if (partial.length > 0) return partial;
+  }
+  return [];
+}
+
+function pickSingleByStandardCandidates(rows: any[], candidates: string[]): any {
+  if (!Array.isArray(rows) || rows.length === 0) return null;
+  for (const cand of candidates) {
+    const exact = rows.find(
+      (r: any) => String(r.standard_name ?? r.standard ?? "").trim() === cand
+    );
+    if (exact) return exact;
+  }
+  for (const cand of candidates) {
+    const partial = rows.find((r: any) =>
+      String(r.standard_name ?? r.standard ?? "").includes(cand)
+    );
+    if (partial) return partial;
+  }
+  return null;
+}
+
 async function loadAdmissionStandardData(supabaseClient: any, standardName: string) {
   const rawStd = String(standardName || "").trim();
-  const matchTag = rawStd.match(/\d+-\d+/);
-  const coreTag = matchTag ? matchTag[0] : rawStd;
+  const candidates = buildStandardCandidateList(rawStd);
+  const primaryTag = candidates[0] || "7-1";
 
   let rawMetaRows: any[] = [];
   let rawBaselineRow: any = null;
 
-  if (supabaseClient) {
+  // 1. 서버 액션(Service Role Key) 우선 시도 (RLS 우회)
+  try {
+    const admMod: any = await import("@/app/actions/admission").catch(() => null);
+    if (admMod && typeof admMod.fetchAdmissionStandardDataAction === "function") {
+      const serverRes = await admMod.fetchAdmissionStandardDataAction(rawStd);
+      if (serverRes && serverRes.success && Array.isArray(serverRes.metaRows) && serverRes.metaRows.length > 0) {
+        rawMetaRows = serverRes.metaRows;
+        rawBaselineRow = serverRes.baselineRow || null;
+      }
+    }
+  } catch (e) {}
+
+  // 2. 클라이언트 쿼리 (admission_standard_meta_2610 -> admission_standard_meta)
+  if ((!rawMetaRows || rawMetaRows.length === 0) && supabaseClient) {
     try {
-      const { data: m2610 } = await supabaseClient
+      const { data: mAll2610 } = await supabaseClient
         .from("admission_standard_meta_2610")
-        .select("*")
-        .eq("standard_name", coreTag);
-      if (Array.isArray(m2610) && m2610.length > 0) {
-        rawMetaRows = m2610;
-      } else {
-        const { data: mAll2610 } = await supabaseClient.from("admission_standard_meta_2610").select("*");
-        if (Array.isArray(mAll2610) && mAll2610.length > 0) {
-          rawMetaRows = mAll2610.filter((r: any) => String(r.standard_name ?? r.standard ?? "").includes(coreTag));
-        }
+        .select("*");
+      if (Array.isArray(mAll2610) && mAll2610.length > 0) {
+        rawMetaRows = pickRowsByStandardCandidates(mAll2610, candidates);
       }
       if (!rawMetaRows || rawMetaRows.length === 0) {
         const { data: mLegacy } = await supabaseClient
           .from("admission_standard_meta")
-          .select("*")
-          .eq("standard_name", coreTag);
+          .select("*");
         if (Array.isArray(mLegacy) && mLegacy.length > 0) {
-          rawMetaRows = mLegacy;
+          rawMetaRows = pickRowsByStandardCandidates(mLegacy, candidates);
         }
       }
     } catch (e) {}
 
     try {
-      const { data: b2610 } = await supabaseClient
-        .from("admission_standard_baseline_2610")
-        .select("*")
-        .eq("standard_name", coreTag)
-        .maybeSingle();
-      if (b2610) rawBaselineRow = b2610;
+      if (!rawBaselineRow) {
+        const { data: bAll2610 } = await supabaseClient
+          .from("admission_standard_baseline_2610")
+          .select("*");
+        if (Array.isArray(bAll2610) && bAll2610.length > 0) {
+          rawBaselineRow = pickSingleByStandardCandidates(bAll2610, candidates);
+        }
+      }
     } catch (e) {}
   }
 
+  // 3. 내장 2610 기준표 폴백 (RLS 차단 또는 중1-1 -> 7-1 매핑 보장)
   if (!rawMetaRows || rawMetaRows.length === 0) {
-    rawMetaRows = FALLBACK_META_2610_INLINE.filter(
-      (r) => r.standard_name === coreTag || r.standard_name === rawStd
-    );
+    rawMetaRows = pickRowsByStandardCandidates(FALLBACK_META_2610_INLINE, candidates);
+  }
+  if (!rawMetaRows || rawMetaRows.length === 0) {
+    const fallbackStd = rawStd.includes("1-1") || rawStd.includes("중") ? "7-1" : "4-2";
+    rawMetaRows = FALLBACK_META_2610_INLINE.filter((r) => r.standard_name === fallbackStd);
   }
 
   const normalizedMeta = (rawMetaRows || [])
@@ -269,6 +385,7 @@ async function loadAdmissionStandardData(supabaseClient: any, standardName: stri
     metaScores,
     baselineRow: rawBaselineRow,
     rBase,
+    resolvedStandardName: primaryTag,
   };
 }
 
@@ -883,8 +1000,7 @@ function ReviewContent() {
       const exMaster = Array.isArray(aData.exam_master) ? aData.exam_master[0] : aData.exam_master;
       const exType = exMaster?.exam_type || '';
       const exTitle = exMaster?.title || '문제지';
-      const matchTag = (exMaster?.sub_title || '').match(/\d+-\d+/) || exTitle.match(/\d+-\d+/);
-      const stdName = matchTag ? matchTag[0] : '';
+      const stdName = resolveAdmissionStandardName(exMaster?.sub_title, exTitle, exMaster?.major_grade);
       
       setContextIds({ studentId: sId, examPaperId: epId, standardName: stdName });
 

@@ -1,0 +1,4461 @@
+// src/app/(dashboard)/pdf-parser/page.tsx
+"use client";
+
+import React, { useState, useEffect, useRef, useMemo, useCallback } from "react";
+import { useRouter } from "next/navigation";
+import { supabase } from "@/lib/supabase";
+import { fetchAllRows } from "@/app/(dashboard)/taxonomy-editor/taxonomyUtils";
+
+export interface ThinkingCategoryItem { category_id: string; depth1: string; depth2: string; depth3: string; full_path: string; }
+export const THINKING_CATEGORIES: ThinkingCategoryItem[] = [
+  {"category_id": "THK-01-01-01", "depth1": "수와 연산 감각", "depth2": "숨겨진 수 찾기", "depth3": "복면산", "full_path": "수와 연산 감각 > 숨겨진 수 찾기 > 복면산"},
+  {"category_id": "THK-01-01-02", "depth1": "수와 연산 감각", "depth2": "숨겨진 수 찾기", "depth3": "벌레먹은 셈", "full_path": "수와 연산 감각 > 숨겨진 수 찾기 > 벌레먹은 셈"},
+  {"category_id": "THK-01-02-01", "depth1": "수와 연산 감각", "depth2": "조건부 연산", "depth3": "수 카드 연산", "full_path": "수와 연산 감각 > 조건부 연산 > 수 카드 연산"},
+  {"category_id": "THK-01-02-02", "depth1": "수와 연산 감각", "depth2": "조건부 연산", "depth3": "목표 수 만들기", "full_path": "수와 연산 감각 > 조건부 연산 > 목표 수 만들기"},
+  {"category_id": "THK-01-02-03", "depth1": "수와 연산 감각", "depth2": "조건부 연산", "depth3": "수 카드로 큰 수/작은 수 만들기", "full_path": "수와 연산 감각 > 조건부 연산 > 수 카드로 큰 수/작은 수 만들기"},
+  {"category_id": "THK-01-02-04", "depth1": "수와 연산 감각", "depth2": "조건부 연산", "depth3": "새 연산과 기호 정의", "full_path": "수와 연산 감각 > 조건부 연산 > 새 연산과 기호 정의"},
+  {"category_id": "THK-01-03-01", "depth1": "수와 연산 감각", "depth2": "연산 퍼즐", "depth3": "마방진", "full_path": "수와 연산 감각 > 연산 퍼즐 > 마방진"},
+  {"category_id": "THK-01-03-02", "depth1": "수와 연산 감각", "depth2": "연산 퍼즐", "depth3": "스도쿠 및 켄켄퍼즐", "full_path": "수와 연산 감각 > 연산 퍼즐 > 스도쿠 및 켄켄퍼즐"},
+  {"category_id": "THK-01-04-01", "depth1": "수와 연산 감각", "depth2": "수열과 규칙", "depth3": "단순 수열", "full_path": "수와 연산 감각 > 수열과 규칙 > 단순 수열"},
+  {"category_id": "THK-01-04-02", "depth1": "수와 연산 감각", "depth2": "수열과 규칙", "depth3": "군수열 및 배열표", "full_path": "수와 연산 감각 > 수열과 규칙 > 군수열 및 배열표"},
+  {"category_id": "THK-01-04-03", "depth1": "수와 연산 감각", "depth2": "수열과 규칙", "depth3": "식의 배열과 규칙", "full_path": "수와 연산 감각 > 수열과 규칙 > 식의 배열과 규칙"},
+  {"category_id": "THK-01-04-04", "depth1": "수와 연산 감각", "depth2": "수열과 규칙", "depth3": "도형의 배열 규칙 (형상수)", "full_path": "수와 연산 감각 > 수열과 규칙 > 도형의 배열 규칙 (형상수)"},
+  {"category_id": "THK-01-04-05", "depth1": "수와 연산 감각", "depth2": "수열과 규칙", "depth3": "등차/계차수열과 수열의 합", "full_path": "수와 연산 감각 > 수열과 규칙 > 등차/계차수열과 수열의 합"},
+  {"category_id": "THK-01-04-06", "depth1": "수와 연산 감각", "depth2": "수열과 규칙", "depth3": "주기성과 대책 문제", "full_path": "수와 연산 감각 > 수열과 규칙 > 주기성과 대책 문제"},
+  {"category_id": "THK-01-05-01", "depth1": "수와 연산 감각", "depth2": "수의 체계와 크기", "depth3": "자릿수와 대소 비교", "full_path": "수와 연산 감각 > 수의 체계와 크기 > 자릿수와 대소 비교"},
+  {"category_id": "THK-01-05-02", "depth1": "수와 연산 감각", "depth2": "수의 체계와 크기", "depth3": "진법과 기수법", "full_path": "수와 연산 감각 > 수의 체계와 크기 > 진법과 기수법"},
+  {"category_id": "THK-01-05-03", "depth1": "수와 연산 감각", "depth2": "수의 체계와 크기", "depth3": "수의 범위와 어림", "full_path": "수와 연산 감각 > 수의 체계와 크기 > 수의 범위와 어림"},
+  {"category_id": "THK-01-05-04", "depth1": "수와 연산 감각", "depth2": "수의 체계와 크기", "depth3": "숫자 개수와 페이지 수", "full_path": "수와 연산 감각 > 수의 체계와 크기 > 숫자 개수와 페이지 수"},
+  {"category_id": "THK-01-05-05", "depth1": "수와 연산 감각", "depth2": "수의 체계와 크기", "depth3": "홀수와 짝수의 성질 (패리티)", "full_path": "수와 연산 감각 > 수의 체계와 크기 > 홀수와 짝수의 성질 (패리티)"},
+  {"category_id": "THK-01-06-01", "depth1": "수와 연산 감각", "depth2": "연산의 구조와 역연산", "depth3": "나눗셈의 원리", "full_path": "수와 연산 감각 > 연산의 구조와 역연산 > 나눗셈의 원리"},
+  {"category_id": "THK-01-06-02", "depth1": "수와 연산 감각", "depth2": "연산의 구조와 역연산", "depth3": "어떤 수 구하기", "full_path": "수와 연산 감각 > 연산의 구조와 역연산 > 어떤 수 구하기"},
+  {"category_id": "THK-01-06-03", "depth1": "수와 연산 감각", "depth2": "연산의 구조와 역연산", "depth3": "거꾸로 계산하기", "full_path": "수와 연산 감각 > 연산의 구조와 역연산 > 거꾸로 계산하기"},
+  {"category_id": "THK-01-07-01", "depth1": "수와 연산 감각", "depth2": "실생활 연산 활용", "depth3": "몫과 나머지 활용", "full_path": "수와 연산 감각 > 실생활 연산 활용 > 몫과 나머지 활용"},
+  {"category_id": "THK-01-07-02", "depth1": "수와 연산 감각", "depth2": "실생활 연산 활용", "depth3": "복합 연산 문장제", "full_path": "수와 연산 감각 > 실생활 연산 활용 > 복합 연산 문장제"},
+  {"category_id": "THK-01-07-03", "depth1": "수와 연산 감각", "depth2": "실생활 연산 활용", "depth3": "금액과 동전 계산", "full_path": "수와 연산 감각 > 실생활 연산 활용 > 금액과 동전 계산"},
+  {"category_id": "THK-01-08-01", "depth1": "수와 연산 감각", "depth2": "약수와 배수", "depth3": "배수 판정법과 배수 만들기", "full_path": "수와 연산 감각 > 약수와 배수 > 배수 판정법과 배수 만들기"},
+  {"category_id": "THK-01-08-02", "depth1": "수와 연산 감각", "depth2": "약수와 배수", "depth3": "최대공약수와 최소공배수 활용", "full_path": "수와 연산 감각 > 약수와 배수 > 최대공약수와 최소공배수 활용"},
+  {"category_id": "THK-01-08-03", "depth1": "수와 연산 감각", "depth2": "약수와 배수", "depth3": "소인수분해와 약수의 개수", "full_path": "수와 연산 감각 > 약수와 배수 > 소인수분해와 약수의 개수"},
+  {"category_id": "THK-01-08-04", "depth1": "수와 연산 감각", "depth2": "약수와 배수", "depth3": "나머지의 관찰과 분류", "full_path": "수와 연산 감각 > 약수와 배수 > 나머지의 관찰과 분류"},
+  {"category_id": "THK-01-09-01", "depth1": "수와 연산 감각", "depth2": "방정식적 사고", "depth3": "합과 차를 이용한 문제 (합차산)", "full_path": "수와 연산 감각 > 방정식적 사고 > 합과 차를 이용한 문제 (합차산)"},
+  {"category_id": "THK-01-09-02", "depth1": "수와 연산 감각", "depth2": "방정식적 사고", "depth3": "묶음과 대입 연산 (대입산)", "full_path": "수와 연산 감각 > 방정식적 사고 > 묶음과 대입 연산 (대입산)"},
+  {"category_id": "THK-01-09-03", "depth1": "수와 연산 감각", "depth2": "방정식적 사고", "depth3": "일차방정식과 연립방정식", "full_path": "수와 연산 감각 > 방정식적 사고 > 일차방정식과 연립방정식"},
+  {"category_id": "THK-01-09-04", "depth1": "수와 연산 감각", "depth2": "방정식적 사고", "depth3": "부정방정식과 디오판토스", "full_path": "수와 연산 감각 > 방정식적 사고 > 부정방정식과 디오판토스"},
+  {"category_id": "THK-01-09-05", "depth1": "수와 연산 감각", "depth2": "방정식적 사고", "depth3": "나이 계산과 연도 추론", "full_path": "수와 연산 감각 > 방정식적 사고 > 나이 계산과 연도 추론"},
+  {"category_id": "THK-01-10-01", "depth1": "수와 연산 감각", "depth2": "분수와 소수 심화", "depth3": "분수의 크기 비교와 혼합 계산", "full_path": "수와 연산 감각 > 분수와 소수 심화 > 분수의 크기 비교와 혼합 계산"},
+  {"category_id": "THK-01-10-02", "depth1": "수와 연산 감각", "depth2": "분수와 소수 심화", "depth3": "분수 응용 문장제", "full_path": "수와 연산 감각 > 분수와 소수 심화 > 분수 응용 문장제"},
+  {"category_id": "THK-01-11-01", "depth1": "수와 연산 감각", "depth2": "비와 비율", "depth3": "비율과 비례배분", "full_path": "수와 연산 감각 > 비와 비율 > 비율과 비례배분"},
+  {"category_id": "THK-01-11-02", "depth1": "수와 연산 감각", "depth2": "비와 비율", "depth3": "농도와 혼합물", "full_path": "수와 연산 감각 > 비와 비율 > 농도와 혼합물"},
+  {"category_id": "THK-01-11-03", "depth1": "수와 연산 감각", "depth2": "비와 비율", "depth3": "원가, 정가, 이익 계산", "full_path": "수와 연산 감각 > 비와 비율 > 원가, 정가, 이익 계산"},
+  {"category_id": "THK-02-01-01", "depth1": "공간과 도형 감각", "depth2": "평면도형 조작", "depth3": "칠교놀이 및 펜토미노", "full_path": "공간과 도형 감각 > 평면도형 조작 > 칠교놀이 및 펜토미노"},
+  {"category_id": "THK-02-01-02", "depth1": "공간과 도형 감각", "depth2": "평면도형 조작", "depth3": "도형 분할 및 합성", "full_path": "공간과 도형 감각 > 평면도형 조작 > 도형 분할 및 합성"},
+  {"category_id": "THK-02-02-01", "depth1": "공간과 도형 감각", "depth2": "입체도형 분석", "depth3": "쌓기나무", "full_path": "공간과 도형 감각 > 입체도형 분석 > 쌓기나무"},
+  {"category_id": "THK-02-02-02", "depth1": "공간과 도형 감각", "depth2": "입체도형 분석", "depth3": "전개도", "full_path": "공간과 도형 감각 > 입체도형 분석 > 전개도"},
+  {"category_id": "THK-02-02-03", "depth1": "공간과 도형 감각", "depth2": "입체도형 분석", "depth3": "입체도형의 관찰과 단면", "full_path": "공간과 도형 감각 > 입체도형 분석 > 입체도형의 관찰과 단면"},
+  {"category_id": "THK-02-02-04", "depth1": "공간과 도형 감각", "depth2": "입체도형 분석", "depth3": "입체도형의 겉넓이와 부피", "full_path": "공간과 도형 감각 > 입체도형 분석 > 입체도형의 겉넓이와 부피"},
+  {"category_id": "THK-02-03-01", "depth1": "공간과 도형 감각", "depth2": "도형의 이동", "depth3": "도형 변환 (밀기, 뒤집기, 돌리기)", "full_path": "공간과 도형 감각 > 도형의 이동 > 도형 변환 (밀기, 뒤집기, 돌리기)"},
+  {"category_id": "THK-02-03-02", "depth1": "공간과 도형 감각", "depth2": "도형의 이동", "depth3": "거울과 대칭", "full_path": "공간과 도형 감각 > 도형의 이동 > 거울과 대칭"},
+  {"category_id": "THK-02-03-03", "depth1": "공간과 도형 감각", "depth2": "도형의 이동", "depth3": "도형의 합동과 닮음 응용", "full_path": "공간과 도형 감각 > 도형의 이동 > 도형의 합동과 닮음 응용"},
+  {"category_id": "THK-02-03-04", "depth1": "공간과 도형 감각", "depth2": "도형의 이동", "depth3": "점과 도형의 이동 자취", "full_path": "공간과 도형 감각 > 도형의 이동 > 점과 도형의 이동 자취"},
+  {"category_id": "THK-02-04-01", "depth1": "공간과 도형 감각", "depth2": "종이 접기와 자르기", "depth3": "접어 자르기 및 구멍 뚫기", "full_path": "공간과 도형 감각 > 종이 접기와 자르기 > 접어 자르기 및 구멍 뚫기"},
+  {"category_id": "THK-02-05-01", "depth1": "공간과 도형 감각", "depth2": "도형 세기", "depth3": "크고 작은 도형과 각 세기", "full_path": "공간과 도형 감각 > 도형 세기 > 크고 작은 도형과 각 세기"},
+  {"category_id": "THK-02-06-01", "depth1": "공간과 도형 감각", "depth2": "도형의 성질과 각도", "depth3": "다각형의 내각과 외각", "full_path": "공간과 도형 감각 > 도형의 성질과 각도 > 다각형의 내각과 외각"},
+  {"category_id": "THK-02-06-02", "depth1": "공간과 도형 감각", "depth2": "도형의 성질과 각도", "depth3": "평각 활용과 직선의 교각", "full_path": "공간과 도형 감각 > 도형의 성질과 각도 > 평각 활용과 직선의 교각"},
+  {"category_id": "THK-02-06-03", "depth1": "공간과 도형 감각", "depth2": "도형의 성질과 각도", "depth3": "접거나 겹친 도형의 각도", "full_path": "공간과 도형 감각 > 도형의 성질과 각도 > 접거나 겹친 도형의 각도"},
+  {"category_id": "THK-02-06-04", "depth1": "공간과 도형 감각", "depth2": "도형의 성질과 각도", "depth3": "평행선과 동위각/엇각", "full_path": "공간과 도형 감각 > 도형의 성질과 각도 > 평행선과 동위각/엇각"},
+  {"category_id": "THK-02-06-05", "depth1": "공간과 도형 감각", "depth2": "도형의 성질과 각도", "depth3": "식을 이용한 각도 추론", "full_path": "공간과 도형 감각 > 도형의 성질과 각도 > 식을 이용한 각도 추론"},
+  {"category_id": "THK-02-07-01", "depth1": "공간과 도형 감각", "depth2": "도형의 둘레와 넓이", "depth3": "등적 변형과 높이가 같은 삼각형", "full_path": "공간과 도형 감각 > 도형의 둘레와 넓이 > 등적 변형과 높이가 같은 삼각형"},
+  {"category_id": "THK-02-07-02", "depth1": "공간과 도형 감각", "depth2": "도형의 둘레와 넓이", "depth3": "도형 분할과 넓이 쪼개기", "full_path": "공간과 도형 감각 > 도형의 둘레와 넓이 > 도형 분할과 넓이 쪼개기"},
+  {"category_id": "THK-02-07-03", "depth1": "공간과 도형 감각", "depth2": "도형의 둘레와 넓이", "depth3": "식을 이용한 넓이와 둘레 추론", "full_path": "공간과 도형 감각 > 도형의 둘레와 넓이 > 식을 이용한 넓이와 둘레 추론"},
+  {"category_id": "THK-02-08-01", "depth1": "공간과 도형 감각", "depth2": "원과 곡선 도형", "depth3": "원의 둘레와 넓이 및 내접 다각형", "full_path": "공간과 도형 감각 > 원과 곡선 도형 > 원의 둘레와 넓이 및 내접 다각형"},
+  {"category_id": "THK-02-08-02", "depth1": "공간과 도형 감각", "depth2": "원과 곡선 도형", "depth3": "굴러가는 바퀴와 자취", "full_path": "공간과 도형 감각 > 원과 곡선 도형 > 굴러가는 바퀴와 자취"},
+  {"category_id": "THK-03-01-01", "depth1": "논리와 추론", "depth2": "참과 거짓", "depth3": "진실게임과 범인 찾기", "full_path": "논리와 추론 > 참과 거짓 > 진실게임과 범인 찾기"},
+  {"category_id": "THK-03-02-01", "depth1": "논리와 추론", "depth2": "조건부 배치", "depth3": "순서 및 자리 배치", "full_path": "논리와 추론 > 조건부 배치 > 순서 및 자리 배치"},
+  {"category_id": "THK-03-02-02", "depth1": "논리와 추론", "depth2": "조건부 배치", "depth3": "매트릭스 논리", "full_path": "논리와 추론 > 조건부 배치 > 매트릭스 논리"},
+  {"category_id": "THK-03-02-03", "depth1": "논리와 추론", "depth2": "조건부 배치", "depth3": "제한 조건에 따른 공간 배치", "full_path": "논리와 추론 > 조건부 배치 > 제한 조건에 따른 공간 배치"},
+  {"category_id": "THK-03-03-01", "depth1": "논리와 추론", "depth2": "극단적 가정", "depth3": "비둘기집의 원리", "full_path": "논리와 추론 > 극단적 가정 > 비둘기집의 원리"},
+  {"category_id": "THK-03-03-02", "depth1": "논리와 추론", "depth2": "극단적 가정", "depth3": "가정하여 풀기 (우기기)", "full_path": "논리와 추론 > 극단적 가정 > 가정하여 풀기 (우기기)"},
+  {"category_id": "THK-03-04-01", "depth1": "논리와 추론", "depth2": "집합과 논리", "depth3": "포함과 배제의 원리 (벤다이어그램)", "full_path": "논리와 추론 > 집합과 논리 > 포함과 배제의 원리 (벤다이어그램)"},
+  {"category_id": "THK-03-05-01", "depth1": "논리와 추론", "depth2": "패턴과 논리 추론", "depth3": "연역적 논리와 수 추리", "full_path": "논리와 추론 > 패턴과 논리 추론 > 연역적 논리와 수 추리"},
+  {"category_id": "THK-04-01-01", "depth1": "측정과 변화", "depth2": "시간과 시계", "depth3": "시계 각도", "full_path": "측정과 변화 > 시간과 시계 > 시계 각도"},
+  {"category_id": "THK-04-01-02", "depth1": "측정과 변화", "depth2": "시간과 시계", "depth3": "고장 난 시계와 달력", "full_path": "측정과 변화 > 시간과 시계 > 고장 난 시계와 달력"},
+  {"category_id": "THK-04-01-03", "depth1": "측정과 변화", "depth2": "시간과 시계", "depth3": "날짜와 요일 계산", "full_path": "측정과 변화 > 시간과 시계 > 날짜와 요일 계산"},
+  {"category_id": "THK-04-02-01", "depth1": "측정과 변화", "depth2": "무게와 부피", "depth3": "양팔 저울과 가짜 동전", "full_path": "측정과 변화 > 무게와 부피 > 양팔 저울과 가짜 동전"},
+  {"category_id": "THK-04-02-02", "depth1": "측정과 변화", "depth2": "무게와 부피", "depth3": "수조와 용기", "full_path": "측정과 변화 > 무게와 부피 > 수조와 용기"},
+  {"category_id": "THK-04-02-03", "depth1": "측정과 변화", "depth2": "무게와 부피", "depth3": "분동과 무게의 조합", "full_path": "측정과 변화 > 무게와 부피 > 분동과 무게의 조합"},
+  {"category_id": "THK-04-02-04", "depth1": "측정과 변화", "depth2": "무게와 부피", "depth3": "수조에 물 채우기 및 물의 부피", "full_path": "측정과 변화 > 무게와 부피 > 수조에 물 채우기 및 물의 부피"},
+  {"category_id": "THK-04-03-01", "depth1": "측정과 변화", "depth2": "속력과 움직임", "depth3": "상대 속도 (마주 보기, 강물)", "full_path": "측정과 변화 > 속력과 움직임 > 상대 속도 (마주 보기, 강물)"},
+  {"category_id": "THK-04-03-02", "depth1": "측정과 변화", "depth2": "속력과 움직임", "depth3": "기차 통과", "full_path": "측정과 변화 > 속력과 움직임 > 기차 통과"},
+  {"category_id": "THK-04-03-03", "depth1": "측정과 변화", "depth2": "속력과 움직임", "depth3": "비율과 그래프를 이용한 속력", "full_path": "측정과 변화 > 속력과 움직임 > 비율과 그래프를 이용한 속력"},
+  {"category_id": "THK-04-03-04", "depth1": "측정과 변화", "depth2": "속력과 움직임", "depth3": "왕복, 오르막/내리막, 강물 속력", "full_path": "측정과 변화 > 속력과 움직임 > 왕복, 오르막/내리막, 강물 속력"},
+  {"category_id": "THK-04-04-01", "depth1": "측정과 변화", "depth2": "측정값의 배분", "depth3": "전체와 부분의 측정값", "full_path": "측정과 변화 > 측정값의 배분 > 전체와 부분의 측정값"},
+  {"category_id": "THK-04-05-01", "depth1": "측정과 변화", "depth2": "일률과 생산성", "depth3": "일에 관한 문제 (일률)", "full_path": "측정과 변화 > 일률과 생산성 > 일에 관한 문제 (일률)"},
+  {"category_id": "THK-04-06-01", "depth1": "측정과 변화", "depth2": "과학적 수학 추론", "depth3": "빛의 반사와 그림자", "full_path": "측정과 변화 > 과학적 수학 추론 > 빛의 반사와 그림자"},
+  {"category_id": "THK-05-01-01", "depth1": "게임 이론과 전략", "depth2": "승리 전략", "depth3": "님 게임 (Nim Game)", "full_path": "게임 이론과 전략 > 승리 전략 > 님 게임 (Nim Game)"},
+  {"category_id": "THK-05-02-01", "depth1": "게임 이론과 전략", "depth2": "보드 및 점 게임", "depth3": "땅따먹기 및 선 긋기", "full_path": "게임 이론과 전략 > 보드 및 점 게임 > 땅따먹기 및 선 긋기"},
+  {"category_id": "THK-05-03-01", "depth1": "게임 이론과 전략", "depth2": "추리 게임", "depth3": "숫자 야구 및 스무고개", "full_path": "게임 이론과 전략 > 추리 게임 > 숫자 야구 및 스무고개"},
+  {"category_id": "THK-06-01-01", "depth1": "조합과 경우의 수", "depth2": "경로 탐색", "depth3": "최단 거리", "full_path": "조합과 경우의 수 > 경로 탐색 > 최단 거리"},
+  {"category_id": "THK-06-01-02", "depth1": "조합과 경우의 수", "depth2": "경로 탐색", "depth3": "한붓그리기 (오일러 경로)", "full_path": "조합과 경우의 수 > 경로 탐색 > 한붓그리기 (오일러 경로)"},
+  {"category_id": "THK-06-01-03", "depth1": "조합과 경우의 수", "depth2": "경로 탐색", "depth3": "입체도형과 제약 조건 길 찾기", "full_path": "조합과 경우의 수 > 경로 탐색 > 입체도형과 제약 조건 길 찾기"},
+  {"category_id": "THK-06-02-01", "depth1": "조합과 경우의 수", "depth2": "경우 세기", "depth3": "수형도 (나뭇가지 그림)", "full_path": "조합과 경우의 수 > 경우 세기 > 수형도 (나뭇가지 그림)"},
+  {"category_id": "THK-06-02-02", "depth1": "조합과 경우의 수", "depth2": "경우 세기", "depth3": "대표 및 순서 뽑기", "full_path": "조합과 경우의 수 > 경우 세기 > 대표 및 순서 뽑기"},
+  {"category_id": "THK-06-02-03", "depth1": "조합과 경우의 수", "depth2": "경우 세기", "depth3": "점, 선, 면과 교점 세기", "full_path": "조합과 경우의 수 > 경우 세기 > 점, 선, 면과 교점 세기"},
+  {"category_id": "THK-06-02-04", "depth1": "조합과 경우의 수", "depth2": "경우 세기", "depth3": "합이나 곱이 일정한 경우의 수", "full_path": "조합과 경우의 수 > 경우 세기 > 합이나 곱이 일정한 경우의 수"},
+  {"category_id": "THK-06-03-01", "depth1": "조합과 경우의 수", "depth2": "색칠하기", "depth3": "인접 영역 색칠하기", "full_path": "조합과 경우의 수 > 색칠하기 > 인접 영역 색칠하기"},
+  {"category_id": "THK-06-04-01", "depth1": "조합과 경우의 수", "depth2": "최적화와 극단값", "depth3": "조건에 맞는 최대/최소 추론", "full_path": "조합과 경우의 수 > 최적화와 극단값 > 조건에 맞는 최대/최소 추론"},
+  {"category_id": "THK-06-05-01", "depth1": "조합과 경우의 수", "depth2": "확률", "depth3": "경우의 수와 확률 계산", "full_path": "조합과 경우의 수 > 확률 > 경우의 수와 확률 계산"},
+  {"category_id": "THK-07-01-01", "depth1": "자료와 그래프 추론", "depth2": "표와 그래프 분석", "depth3": "숨은 자료 찾기 및 비례 추론", "full_path": "자료와 그래프 추론 > 표와 그래프 분석 > 숨은 자료 찾기 및 비례 추론"},
+  {"category_id": "THK-07-02-01", "depth1": "자료와 그래프 추론", "depth2": "통계와 평균", "depth3": "평균의 원리와 점수 계산", "full_path": "자료와 그래프 추론 > 통계와 평균 > 평균의 원리와 점수 계산"},
+];
+
+export const generateUUID = (): string => {
+  if (typeof crypto !== "undefined" && crypto.randomUUID) return crypto.randomUUID();
+  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    const v = c === "x" ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+};
+
+export const TARGET_FIELDS = [
+  "question",
+  "question_2",
+  "answer",
+  "step_1_concept",
+  "step_2_approach",
+  "step_3_process",
+  "step_4_conclusion",
+] as const;
+
+export type TargetFieldKey = (typeof TARGET_FIELDS)[number];
+
+export const ALLOWED_DIFFICULTIES = ["최상", "상", "중", "하", "최하"] as const;
+
+export const INTEGRATED_PROBLEM_TYPES = [
+  "MULTIPLE_CHOICE",
+  "SUBJECTIVE",
+  "DESCRIPTIVE",
+  "대표 문제",
+  "유사 문제",
+  "연습 문제",
+  "도전 문제",
+  "문제 해결 전략 탐구",
+  "일반",
+  "기타",
+];
+
+export const COGNITIVE_LEVEL_OPTIONS = [
+  "이해 및 연산",
+  "적용 및 응용",
+  "추론 및 문제 해결",
+  "미지정",
+];
+
+// =========================================================
+// Phase 2: 학년·학기 Prefix 범위 확장 엔진 (V4.4.0 100% 호환)
+// =========================================================
+export const ALL_SEMESTER_PREFIXES = [
+  "E11", "E12", "E21", "E22", "E31", "E32",
+  "E41", "E42", "E51", "E52", "E61", "E62",
+  "M11", "M12", "M21", "M22", "M31", "M32",
+  "H11", "H12", "H21", "H22", "H31", "H32",
+];
+
+export function normalizeBoundToken(token: string, isEnd = false): string {
+  const t = token.trim().toUpperCase();
+  if (/^[EMH][1-6][1-2]$/.test(t)) return t;
+  const mGrade = t.match(/^([EMH])([1-6])$/);
+  if (mGrade) {
+    return `${mGrade[1]}${mGrade[2]}${isEnd ? "2" : "1"}`;
+  }
+  if (t === "E") return isEnd ? "E62" : "E11";
+  if (t === "M") return isEnd ? "M32" : "M11";
+  if (t === "H") return isEnd ? "H32" : "H11";
+  return t;
+}
+
+export function expandPrefixSpec(specStr: string): string[] {
+  if (!specStr || !specStr.trim()) return [];
+  const result: string[] = [];
+  const parts = specStr
+    .split(/,+/)
+    .map((p) => p.trim())
+    .filter(Boolean);
+
+  for (const part of parts) {
+    if (part.includes("~") || part.includes("-")) {
+      const sep = part.includes("~") ? "~" : "-";
+      const idxSep = part.indexOf(sep);
+      const b0 = part.slice(0, idxSep).trim();
+      const b1 = part.slice(idxSep + 1).trim();
+      if (b0 && b1) {
+        const startTok = normalizeBoundToken(b0, false);
+        const endTok = normalizeBoundToken(b1, true);
+        const idx1 = ALL_SEMESTER_PREFIXES.indexOf(startTok);
+        const idx2 = ALL_SEMESTER_PREFIXES.indexOf(endTok);
+        if (idx1 !== -1 && idx2 !== -1) {
+          const lo = Math.min(idx1, idx2);
+          const hi = Math.max(idx1, idx2);
+          for (let i = lo; i <= hi; i++) {
+            const p = ALL_SEMESTER_PREFIXES[i];
+            if (!result.includes(p)) result.push(p);
+          }
+          continue;
+        }
+      }
+    }
+    const normalizedSingle = normalizeBoundToken(part, false);
+    const normalizedEnd = normalizeBoundToken(part, true);
+    if (
+      normalizedSingle !== normalizedEnd &&
+      ALL_SEMESTER_PREFIXES.includes(normalizedSingle) &&
+      ALL_SEMESTER_PREFIXES.includes(normalizedEnd)
+    ) {
+      const idx1 = ALL_SEMESTER_PREFIXES.indexOf(normalizedSingle);
+      const idx2 = ALL_SEMESTER_PREFIXES.indexOf(normalizedEnd);
+      for (let i = Math.min(idx1, idx2); i <= Math.max(idx1, idx2); i++) {
+        const p = ALL_SEMESTER_PREFIXES[i];
+        if (!result.includes(p)) result.push(p);
+      }
+      continue;
+    }
+    const tok = part.trim().toUpperCase();
+    if (tok && !result.includes(tok)) result.push(tok);
+  }
+  return result;
+}
+
+export function matchesAnyPrefix(codeVal: string | null | undefined, prefixes: string[]): boolean {
+  const c = String(codeVal || "").trim().toUpperCase();
+  if (!c) return false;
+  return prefixes.some((p) => c.startsWith(p.toUpperCase()));
+}
+
+// =========================================================
+// Phase 1 & V302: 무적의 텍스트/수식 정제 엔진 & 18종 마법 도구
+// =========================================================
+export function applySafeCleaner(text: string | null | undefined): string {
+  if (!text || typeof text !== "string") return text || "";
+  let cleaned = text.replace(/@@/g, "\\").replace(/<\{/g, "{").replace(/\}>/g, "}");
+  cleaned = cleaned.replace(/\xa0/g, " ").replace(/\u200b/g, "");
+  cleaned = cleaned.replace(/∠/g, "\\angle ").replace(/°/g, "^{\\circ}");
+  cleaned = cleaned.replace(/\\?degree\b/g, "^{\\circ}");
+  return cleaned.trim();
+}
+
+export function fixJsonEscapes(text: string | null | undefined): string {
+  if (!text) return text || "";
+  let res = text
+    .replace(/\x0c/g, "\\f")
+    .replace(/\x08/g, "\\b")
+    .replace(/\x0b/g, "\\v")
+    .replace(/\x07/g, "\\a")
+    .replace(/♀/g, "\\f");
+  res = res.replace(/(?<![a-zA-Z\\])rac\s*\{/g, "\\frac{");
+  return res;
+}
+
+const UNICODE_TO_LATEX: Record<string, string> = {
+  "□": "\\square",
+  "■": "\\blacksquare",
+  "★": "\\star",
+  "♥": "\\heartsuit",
+  "♡": "\\heartsuit",
+  "○": "\\bigcirc",
+  "●": "\\bullet",
+  "△": "\\triangle",
+  "▲": "\\blacktriangle",
+  "⊙": "\\odot",
+  "◊": "\\lozenge",
+  "◇": "\\diamond",
+  "▶": "\\blacktriangleright",
+  "▷": "\\triangleright",
+  "◀": "\\blacktriangleleft",
+  "◁": "\\triangleleft",
+  "▼": "\\blacktriangledown",
+  "▽": "\\triangledown",
+  "⟹": "\\implies",
+  "⇒": "\\Rightarrow",
+  "→": "\\rightarrow",
+  "←": "\\leftarrow",
+  "⟺": "\\iff",
+  "÷": "\\div",
+  "×": "\\times",
+};
+
+const NUM_CIRCLE_MAP: Record<string, string> = {
+  "1": "①",
+  "2": "②",
+  "3": "③",
+  "4": "④",
+  "5": "⑤",
+  "6": "⑥",
+  "7": "⑦",
+  "8": "⑧",
+  "9": "⑨",
+  "10": "⑩",
+  "11": "⑪",
+  "12": "⑫",
+  "13": "⑬",
+  "14": "⑭",
+  "15": "⑮",
+};
+
+export function cleanLatex(input: string | null | undefined): string {
+  if (!input || typeof input !== "string") return input || "";
+  let text = input;
+
+  // 백슬래시가 날아간 ext{ } 복구 및 빈 껍데기 제거
+  text = text.replace(/(?:\t|\\t| )?ext\s*\{/g, "\\text{");
+  text = text.replace(/\\text\s*\{\s*\}/g, " ");
+  text = text.replace(/\\text\s*\{÷\}/g, "\\div");
+  text = text.replace(/\\text\s*\{×\}/g, "\\times");
+  text = text.replace(/\\text\s*\{=\}/g, "=");
+
+  // 탭(\t)으로 변환되어 날아간 imes 및 extdiv 구출
+  text = text.replace(/(?<![a-zA-Z\\])imes(?![a-zA-Z])/g, "\\times");
+  text = text.replace(/(?<![a-zA-Z\\])extdiv(?![a-zA-Z])/g, "\\div");
+
+  text = fixJsonEscapes(text);
+  text = text.replace(/ *(?=\n)/g, "  ");
+
+  for (const [k, v] of Object.entries(NUM_CIRCLE_MAP)) {
+    text = text
+      .replaceAll(`\\num{${k}}`, v)
+      .replaceAll(`\\num {${k}}`, v)
+      .replaceAll(`\\circled{${k}}`, v)
+      .replaceAll(`\\circled {${k}}`, v);
+  }
+
+  text = text
+    .replaceAll("\\square", "□")
+    .replaceAll("\\frac", "\\dfrac")
+    .replaceAll("\\ddfrac", "\\dfrac")
+    .replaceAll("\\textdiv", "\\div")
+    .replaceAll("\\textbraceleft", "\\{")
+    .replaceAll("\\textbraceright", "\\}")
+    .replaceAll("\\textcdots", "\\cdots")
+    .replaceAll("\\textcdot", "\\cdot")
+    .replaceAll("\\textcircled{*}", "\\circledast")
+    .replaceAll("\\boldsysbol", "\\mathbf")
+    .replaceAll("\\boldsymbol", "\\mathbf")
+    .replaceAll("\\textellipsis", "\\dots")
+    .replaceAll("(::", "(\\because ")
+    .replaceAll("::", "\\therefore ")
+    .replaceAll("₩", "\\");
+
+  text = text.replace(/\\abs\s*\{\s*([^{}]+)\s*\}/g, "|$1|");
+  text = text.replace(/\\abs\s*([a-zA-Z0-9가-힣])/g, "|$1|");
+  text = text.replaceAll("\\abs", "|");
+
+  text = text.replace(/\^(\d{2,})/g, "^{$1}");
+  text = text.replace(/\$\{4,\}/g, "$$").replaceAll("$$$", "$$");
+  text = text.replace(/(\$\$?)\s*(\d+\.)(?=\s)/g, "$1  \n  \n$2");
+
+  const mathPattern = /(\$\$[\s\S]+?\$\$|\$(?:(?!\n\n)(?:\\\$|[^$]))+\$|\\begin\{[a-zA-Z*]+\}[\s\S]*?\\end\{[a-zA-Z*]+\})/g;
+  const parts = text.split(mathPattern);
+
+  for (let i = 1; i < parts.length; i += 2) {
+    let m = parts[i];
+    for (const [ch, latex] of Object.entries(UNICODE_TO_LATEX)) {
+      m = m.replaceAll(ch, latex);
+    }
+    if (m.startsWith("$$") && m.endsWith("$$")) {
+      let inner = m.slice(2, -2);
+      let prevInner = "";
+      while (prevInner !== inner) {
+        prevInner = inner;
+        inner = inner.replace(/\\+text\s*\{\s*([^{}]*)\s*\}/g, "$1");
+      }
+      inner = inner.replace(/([ \t]*[가-힣ㄱ-ㅎㅏ-ㅣ][가-힣ㄱ-ㅎㅏ-ㅣ \t.,!?~]*[ \t]*)/g, "\\text{$1}");
+      m = `$$${inner}$$`;
+    } else if (m.startsWith("$") && m.endsWith("$")) {
+      let inner = m.slice(1, -1);
+      if (!/^\s*[가-힣ㄱ-ㅎㅏ-ㅣ]+\s*$/.test(inner)) {
+        let prevInner = "";
+        while (prevInner !== inner) {
+          prevInner = inner;
+          inner = inner.replace(/\\+text\s*\{\s*([^{}]*)\s*\}/g, "$1");
+        }
+        inner = inner.replace(/([ \t]*[가-힣ㄱ-ㅎㅏ-ㅣ][가-힣ㄱ-ㅎㅏ-ㅣ \t.,!?~]*[ \t]*)/g, "\\text{$1}");
+        m = `$${inner}$`;
+      }
+    }
+    parts[i] = m;
+  }
+
+  return parts.join("").trim();
+}
+
+export function resetDollarAndText(text: string | null | undefined): string {
+  if (!text) return "";
+  let raw = text.replaceAll("$", "");
+  let prev = "";
+  while (prev !== raw) {
+    prev = raw;
+    raw = raw.replace(/\\+text\s*\{\s*([^{}]*)\s*\}/g, "$1");
+  }
+  return raw;
+}
+
+export function forceInsertDfracDollar(text: string | null | undefined): string {
+  if (!text) return "";
+  return text.replace(
+    /(?<!\$)(\\dfrac\s*\{(?:[^{}]|\{[^{}]*\})*\}\s*\{(?:[^{}]|\{[^{}]*\})*\})(?!\$)/g,
+    "$$$1$$"
+  );
+}
+
+export function safeWrapMathSymbol(text: string | null | undefined, symbol: string): string {
+  if (!text) return "";
+  const mathPattern = /(\$\$[\s\S]+?\$\$|\$(?:(?!\n\n)(?:\\\$|[^$]))+\$|\\begin\{[a-zA-Z*]+\}[\s\S]*?\\end\{[a-zA-Z*]+\})/g;
+  const parts = text.split(mathPattern);
+  const re = new RegExp(`(?<!\\$)\\\\${symbol}(?!\\$)`, "g");
+  for (let i = 0; i < parts.length; i += 2) {
+    parts[i] = parts[i].replace(re, `$\\${symbol}$`);
+  }
+  return parts.join("");
+}
+
+export const forceInsertDivDollar = (t: string) => safeWrapMathSymbol(t, "div");
+export const forceInsertTimesDollar = (t: string) => safeWrapMathSymbol(t, "times");
+export const forceInsertBigcircDollar = (t: string) => safeWrapMathSymbol(t, "bigcirc");
+export const forceInsertRightarrowDollar = (t: string) => safeWrapMathSymbol(t, "rightarrow");
+export const forceInsertAngleDollar = (t: string) => safeWrapMathSymbol(t, "angle");
+export const forceInsertTriangleDollar = (t: string) => safeWrapMathSymbol(t, "triangle");
+
+export function forceInsertUnitDollar(text: string | null | undefined): string {
+  if (!text) return "";
+  const mathPattern = /(\$\$[\s\S]+?\$\$|\$(?:(?!\n\n)(?:\\\$|[^$]))+\$|\\begin\{[a-zA-Z*]+\}[\s\S]*?\\end\{[a-zA-Z*]+\})/g;
+  const parts = text.split(mathPattern);
+  for (let i = 0; i < parts.length; i += 2) {
+    parts[i] = parts[i].replace(/(?<!\$)(cm\^2|m\^2|mm\^2|cm\^3|m\^3|mm\^3)(?!\$)/g, "$$$1$$");
+  }
+  return parts.join("");
+}
+
+export function forceInsertDotDollar(text: string | null | undefined): string {
+  if (!text) return "";
+  return text.replace(
+    /(?<!\$)(?<!\d)(-?\d+\.(?:\d|\\d?dot\s*\{?\s*\d\s*\}?|\\cdots)+)(?!\$)/g,
+    "$$$1$$"
+  );
+}
+
+export function convertSlashToDfrac(text: string | null | undefined): string {
+  if (!text) return "";
+  let res = text.replace(/\$\s*(\d+)\s*\/\s*(\d+)\s*\$/g, "$\\dfrac{$1}{$2}$");
+  res = res.replace(/(?<!\$)(\d+)(?:와|과)\s*(\d+)\s*\/\s*(\d+)(?!\$)/g, "$$$1\\dfrac{$2}{$3}$$");
+  res = res.replace(/(?<!\$)(?<!\d)(\d+)\s*\/\s*(\d+)(?!\d)(?!\$)/g, "$\\dfrac{$1}{$2}$");
+  return res;
+}
+
+export function autoWrapNakedMath(text: string | null | undefined): string {
+  if (!text) return "";
+  let res = fixJsonEscapes(text);
+  res = res.replace(
+    /(?<!\$)(\\d?frac\s*\{(?:[^{}]|\{[^{}]*\})*\}\s*\{(?:[^{}]|\{[^{}]*\})*\})(?!\$)/g,
+    "$$$1$$"
+  );
+  res = res.replaceAll("\\frac", "\\dfrac").replaceAll("\\ddfrac", "\\dfrac");
+  for (let i = 0; i < 3; i++) {
+    res = res.replace(/(?<!\$)\$([^$]+)\$[ \t]*\$([^$]+)\$(?!\$)/g, "$$$1 $2$$");
+  }
+  return res;
+}
+
+export function fixLeftRightBraces(text: string | null | undefined): string {
+  if (!text) return "";
+  return text.replaceAll("\\left{", "\\left\\{").replaceAll("\\right}", "\\right\\}");
+}
+
+export function removeExcessiveNewlines(text: string | null | undefined): string {
+  if (!text) return "";
+  return text.replaceAll("\xa0", " ").replace(/\n[ \t]*\n+/g, "\n").trim();
+}
+
+export function forceInsertThereforeDollar(text: string | null | undefined): string {
+  if (!text) return "";
+  return text.replace(/(?<!\$)\\therefore/g, "$\\therefore");
+}
+
+export function fixCircledNumbers(text: string | null | undefined): string {
+  if (!text) return "";
+  let res = text;
+  const map: Record<string, string> = {
+    "1": "①", "2": "②", "3": "③", "4": "④", "5": "⑤",
+    "6": "⑥", "7": "⑦", "8": "⑧", "9": "⑨", "10": "⑩",
+  };
+  for (const [k, v] of Object.entries(map)) {
+    res = res.replace(new RegExp(`\\\\circled\\s*\\{\\s*${k}\\s*\\}`, "g"), v);
+    res = res.replace(new RegExp(`\\\\textcircled\\s*\\{\\s*${k}\\s*\\}`, "g"), v);
+  }
+  return res;
+}
+
+export function forceRemoveNDebris(text: string | null | undefined): string {
+  if (!text) return "";
+  return text
+    .replaceAll("\\n", "")
+    .replace(/\$\s+\$/g, "")
+    .replace(/\n\s*\n+/g, "\n")
+    .trim();
+}
+
+export function runFiveCombo(text: string | null | undefined): string {
+  if (!text) return "";
+  let res = resetDollarAndText(text);
+  res = forceInsertDfracDollar(res);
+  res = forceInsertDivDollar(res);
+  res = forceInsertTimesDollar(res);
+  res = forceInsertDotDollar(res);
+  return res;
+}
+
+// =========================================================
+// Phase 1·2·V302: 완벽 동기화 정렬 (sort_db_key) 및 question_db 정규화
+// =========================================================
+export function sortDbKey(item: any): [number, number, number, number, number] {
+  let pVal = item?.detected_page_num;
+  if (pVal === null || pVal === undefined || String(pVal).trim() === "") {
+    pVal = item?.final_printed_page;
+  }
+  const p = parseInt(String(pVal), 10);
+  const safeP = isNaN(p) ? 9999 : p;
+
+  const qStr = String(item?.question_number || "");
+  const qMatch = qStr.match(/\d+/);
+  const qNum = qMatch ? parseInt(qMatch[0], 10) : 9999;
+
+  const weight = qStr.includes("확인") ? 1 : 0;
+
+  const sVal = parseInt(String(item?.sub_num ?? 0), 10);
+  const safeS = isNaN(sVal) ? 0 : sVal;
+
+  const ssVal = parseInt(String(item?.sub_sub_num ?? 0), 10);
+  const safeSs = isNaN(ssVal) ? 0 : ssVal;
+
+  return [safeP, qNum, weight, safeS, safeSs];
+}
+
+export function sortProblemsList<T>(items: T[]): T[] {
+  return [...items].sort((a, b) => {
+    const ka = sortDbKey(a);
+    const kb = sortDbKey(b);
+    for (let i = 0; i < ka.length; i++) {
+      if (ka[i] !== kb[i]) return ka[i] - kb[i];
+    }
+    return 0;
+  });
+}
+
+export function normalizeDifficultyForDb(val: any): string {
+  if (!val) return "중";
+  const s = String(val).trim();
+  if (s === "중상") return "상";
+  if (s === "중하") return "중";
+  if ((ALLOWED_DIFFICULTIES as readonly string[]).includes(s)) return s;
+  return "중";
+}
+
+export function autoInferProblemType(qText: string, q2Text: string, ansText: string, currentPt?: string | null): string {
+  if (currentPt && ["MULTIPLE_CHOICE", "SUBJECTIVE", "DESCRIPTIVE"].includes(currentPt)) {
+    return currentPt;
+  }
+  const fullQ = `${qText || ""}\n${q2Text || ""}`;
+  const ans = String(ansText || "").trim();
+  if (/[①②③④⑤]/.test(fullQ) && /[①②③④⑤]/.test(ans)) {
+    return "MULTIPLE_CHOICE";
+  }
+  if (
+    /풀이\s*과정|설명하세요|설명하시오|방정식을\s*세우고/.test(fullQ) ||
+    ans === "해설 참조"
+  ) {
+    return "DESCRIPTIVE";
+  }
+  if (currentPt && !["일반", "유사", "쌍둥이", "None", "null", ""].includes(currentPt)) {
+    return currentPt;
+  }
+  return "SUBJECTIVE";
+}
+
+export function normalizeRecordForQuestionDb(raw: any, fallbackBookTitle = ""): any {
+  const rec = { ...raw };
+
+  if (!rec.question_id) {
+    rec.question_id = rec.id || generateUUID();
+  }
+
+  rec.question = rec.question !== undefined && rec.question !== null ? String(rec.question) : String(rec.questionText || "");
+  const q2Val = rec.question_2 !== undefined ? rec.question_2 : rec.questionText2;
+  rec.question_2 = q2Val && String(q2Val).trim() !== "" ? String(q2Val) : null;
+
+  rec.difficulty = normalizeDifficultyForDb(rec.difficulty);
+
+  const probVal = rec.solving_probability;
+  if (probVal === null || probVal === undefined || String(probVal).trim() === "" || String(probVal) === "None") {
+    rec.solving_probability = 50;
+  } else {
+    const parsed = parseInt(String(probVal), 10);
+    rec.solving_probability = isNaN(parsed) ? 50 : Math.max(5, Math.min(100, parsed));
+  }
+
+  for (const k of ["sub_num", "sub_sub_num"] as const) {
+    const v = rec[k];
+    const parsed = parseInt(String(v ?? 0), 10);
+    rec[k] = isNaN(parsed) ? 0 : parsed;
+  }
+
+  const fpp = rec.final_printed_page ?? rec.pageNum;
+  if (fpp !== null && fpp !== undefined && String(fpp).trim() !== "") {
+    rec.final_printed_page = String(fpp).trim().slice(0, 20);
+    if (rec.detected_page_num === null || rec.detected_page_num === undefined) {
+      const m = rec.final_printed_page.match(/\d+/);
+      if (m) rec.detected_page_num = parseInt(m[0], 10);
+    }
+  } else {
+    rec.final_printed_page = null;
+  }
+
+  const dpn = rec.detected_page_num;
+  if (dpn !== null && dpn !== undefined && String(dpn).trim() !== "") {
+    const parsed = parseInt(String(dpn), 10);
+    rec.detected_page_num = isNaN(parsed) ? 1 : parsed;
+  } else {
+    rec.detected_page_num = 1;
+  }
+
+  const qn = rec.question_number ?? rec.qNum;
+  rec.question_number = qn !== null && qn !== undefined && String(qn).trim() !== "" ? String(qn).trim().slice(0, 20) : "1";
+
+  rec.problem_type = autoInferProblemType(rec.question, rec.question_2 || "", rec.answer || "", rec.problem_type);
+
+  const cog = rec.cognitive_level;
+  rec.cognitive_level = !cog || String(cog).trim() === "" || cog === "미지정" || cog === "None" ? null : String(cog).trim();
+
+  const bn = rec.book_name || rec.source_book_name || fallbackBookTitle || (rec.pdf_source ? String(rec.pdf_source).replace(/\.pdf$/i, "") : "");
+  rec.book_name = bn || null;
+  rec.source_book_name = bn || null;
+
+  if (!rec.sub_taxonomy_id || String(rec.sub_taxonomy_id).trim() in { "": 1, None: 1, null: 1 }) {
+    rec.sub_taxonomy_id = null;
+    rec.sub_taxonomy_name = null;
+  }
+  if (!rec.thk_taxonomy_id || String(rec.thk_taxonomy_id).trim() in { "": 1, None: 1, null: 1 }) {
+    rec.thk_taxonomy_id = null;
+    rec.thk_taxonomy_name = null;
+  }
+
+  const verified = Boolean(rec.is_human_verified || rec.human_verified || rec.verification_status === "APPROVED");
+  rec.is_human_verified = verified;
+  rec.human_verified = verified;
+  if (!rec.verification_status) {
+    rec.verification_status = verified ? "APPROVED" : "PENDING";
+  }
+
+  return rec;
+}
+
+type ImageSlotField =
+  | "image_url"
+  | "image_2_url"
+  | "answer_image_url"
+  | "answer_image_2_url";
+
+interface QueuedPdfFile {
+  name: string;
+  file: File;
+  numPages: number;
+}
+
+const STORAGE_CACHE_KEY = "logica_pdf_parser_v302_workspace";
+const PROGRESS_CACHE_KEY = "logica_pdf_parser_v302_progress";
+
+export default function PdfParserPage() {
+  const router = useRouter();
+  const [isAuthorized, setIsAuthorized] = useState<boolean | null>(null);
+
+  // PDF.js & MathJax
+  const [pdfjsLoaded, setPdfjsLoaded] = useState(false);
+  const [ocrLoaded, setOcrLoaded] = useState(false);
+  const mathJaxRef = useRef<boolean>(false);
+
+  // Multi-PDF 대기열 및 현재 선택된 PDF
+  const [pdfQueue, setPdfQueue] = useState<QueuedPdfFile[]>([]);
+  const [selectedPdfName, setSelectedPdfName] = useState<string>("");
+  const [pdfSearchKeyword, setPdfSearchKeyword] = useState<string>("");
+  const [runAllPdfsMode, setRunAllPdfsMode] = useState<boolean>(false);
+
+  const [pdfDoc, setPdfDoc] = useState<any>(null);
+  const [pageNum, setPageNum] = useState<number>(1);
+  const [numPages, setNumPages] = useState<number>(0);
+  const [pdfScale, setPdfScale] = useState<number>(2.0);
+
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const overlayRef = useRef<HTMLDivElement>(null);
+  const isCroppingRef = useRef(false);
+  const cropStartRef = useRef<{ x: number; y: number } | null>(null);
+  const cropRectRef = useRef<{ x: number; y: number; w: number; h: number } | null>(null);
+
+  // 현재 활성화된 이미지 크롭 슬롯
+  const [activeCropTarget, setActiveCropTarget] = useState<{
+    questionId: string;
+    field: ImageSlotField;
+  } | null>(null);
+
+  // 슬롯 내 이미지 자체 재크롭 모달 상태
+  const [inPlaceCropModal, setInPlaceCropModal] = useState<{
+    questionId: string;
+    field: ImageSlotField;
+    srcUrl: string;
+  } | null>(null);
+  const inPlaceImgRef = useRef<HTMLImageElement>(null);
+  const inPlaceOverlayRef = useRef<HTMLDivElement>(null);
+  const inPlaceCropStartRef = useRef<{ x: number; y: number } | null>(null);
+  const inPlaceCropRectRef = useRef<{ x: number; y: number; w: number; h: number } | null>(null);
+  const isInPlaceCroppingRef = useRef(false);
+
+  // 마스터 교재명 & 문항 데이터
+  const [bookTitle, setBookTitle] = useState("");
+  const [isDragOver, setIsDragOver] = useState(false);
+
+  // 핵심 문항 배열 (Phase 1·2·V302 통합 스키마)
+  const [problems, setProblems] = useState<any[]>([]);
+  const [currentIdx, setCurrentIdx] = useState<number>(0);
+  const [statusFilter, setStatusFilter] = useState<
+    "ALL" | "PENDING" | "APPROVED" | "REJECTED" | "NEEDS_REWORK"
+  >("ALL");
+
+  // 이미지 Blob 및 해상도 맵 (question_id_field -> { blob, previewUrl, width, height })
+  const [imageAssets, setImageAssets] = useState<
+    Record<
+      string,
+      {
+        blob?: Blob;
+        previewUrl: string;
+        width?: number;
+        height?: number;
+      }
+    >
+  >({});
+  const [targetWidths, setTargetWidths] = useState<Record<string, number>>({});
+
+  // =========================================================
+  // Phase 1 설정 상태 (V114.1 초고속 문제 추출 + V119.1 4단계 풀이 스트리밍)
+  // =========================================================
+  const [extractMode, setExtractMode] = useState<"PROBLEMS_ONLY" | "WITH_SOLUTION">(
+    "WITH_SOLUTION"
+  );
+  const [aiStartPage, setAiStartPage] = useState<number>(1);
+  const [aiEndPage, setAiEndPage] = useState<number>(1);
+  const [pageConcurrency, setPageConcurrency] = useState<number>(3);
+  const [useResumeTracker, setUseResumeTracker] = useState<boolean>(true);
+  const [completedPagesMap, setCompletedPagesMap] = useState<Record<string, number[]>>({});
+  const [isAiScanning, setIsAiScanning] = useState(false);
+  const [aiProgress, setAiProgress] = useState({
+    current: 0,
+    total: 0,
+    phaseLabel: "",
+  });
+  const [pipelineLogs, setPipelineLogs] = useState<string[]>([]);
+  const abortScanRef = useRef<boolean>(false);
+
+  // =========================================================
+  // Phase 2 설정 상태 (V4.4.0 교과 + 광범위 서브교과 + 사고력 트리플 분류)
+  // =========================================================
+  const [masterCategories, setMasterCategories] = useState<any[]>([]);
+  const [masterItems, setMasterItems] = useState<any[]>([]);
+  const [thinkingCategories, setThinkingCategories] =
+    useState<ThinkingCategoryItem[]>(THINKING_CATEGORIES);
+  const [isTaxonomyLoading, setIsTaxonomyLoading] = useState(false);
+
+  const [mainPrefixSpec, setMainPrefixSpec] = useState<string>("E61");
+  const [subPrefixSpec, setSubPrefixSpec] = useState<string>("");
+  const [applyThinking, setApplyThinking] = useState<boolean>(false);
+  const [classifyPageRange, setClassifyPageRange] = useState<string>("");
+  const [classifyOnlyRework, setClassifyOnlyRework] = useState<boolean>(true);
+  const [classifyBatchSize, setClassifyBatchSize] = useState<number>(5);
+  const [isClassifying, setIsClassifying] = useState<boolean>(false);
+  const [classifyProgress, setClassifyProgress] = useState({
+    completed: 0,
+    total: 0,
+  });
+
+  // =========================================================
+  // Phase 3 (V302) 검수 어드민 상태
+  // =========================================================
+  const [activePipelineTab, setActivePipelineTab] = useState<
+    "PHASE1" | "PHASE2" | "PHASE3"
+  >("PHASE1");
+  const [editorTab, setEditorTab] = useState<"VIEW" | "EDIT">("EDIT");
+  const [debugMode, setDebugMode] = useState<boolean>(false);
+  const [magicScopeAll, setMagicScopeAll] = useState<boolean>(false);
+  const [isAiFixingLatex, setIsAiFixingLatex] = useState<boolean>(false);
+  const [isUploadingDb, setIsUploadingDb] = useState<boolean>(false);
+  const [updateExistingOnlyMeta, setUpdateExistingOnlyMeta] = useState<boolean>(false);
+
+  const addLog = useCallback((msg: string) => {
+    const timeStr = new Date().toLocaleTimeString("ko-KR", { hour12: false });
+    setPipelineLogs((prev) => [`[${timeStr}] ${msg}`, ...prev.slice(0, 199)]);
+  }, []);
+
+  // =========================================================
+  // 초기화: 권한 체크 + PDF.js / MathJax / Taxonomy 로드 + 자동 복구
+  // =========================================================
+  useEffect(() => {
+    const checkAccess = async () => {
+      const role = localStorage.getItem("logica_instructor_role") || "";
+      const tId = localStorage.getItem("logica_tenant_id") || "";
+
+      if (role === "SUPER_ADMIN") {
+        setIsAuthorized(true);
+        return;
+      }
+
+      if (!role || !tId) {
+        alert("로그인 정보가 없습니다.");
+        router.replace("/home");
+        return;
+      }
+
+      const { data, error } = await supabase
+        .from("tenant_role_permissions")
+        .select("allowed_menus")
+        .eq("tenant_id", tId)
+        .eq("role_name", role)
+        .single();
+
+      if (!error && data && data.allowed_menus.includes("/pdf-parser")) {
+        setIsAuthorized(true);
+      } else {
+        alert("⛔ PDF 문항 추출기 접근 권한이 없습니다.");
+        router.replace("/home");
+      }
+    };
+    checkAccess();
+
+    if (!(window as any).pdfjsLib) {
+      const script = document.createElement("script");
+      script.src =
+        "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js";
+      script.onload = () => {
+        (window as any).pdfjsLib.GlobalWorkerOptions.workerSrc =
+          "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+        setPdfjsLoaded(true);
+      };
+      document.head.appendChild(script);
+    } else {
+      setPdfjsLoaded(true);
+    }
+
+    if (!(window as any).Tesseract) {
+      const scriptOCR = document.createElement("script");
+      scriptOCR.src =
+        "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
+      scriptOCR.onload = () => setOcrLoaded(true);
+      document.head.appendChild(scriptOCR);
+    } else {
+      setOcrLoaded(true);
+    }
+
+    if (!document.getElementById("MathJax-script") && !mathJaxRef.current) {
+      mathJaxRef.current = true;
+      (window as any).MathJax = {
+        tex: {
+          inlineMath: [
+            ["$", "$"],
+            ["\\(", "\\)"],
+          ],
+          displayMath: [
+            ["$$", "$$"],
+            ["\\[", "\\]"],
+          ],
+        },
+        startup: { typeset: false },
+      };
+      const script = document.createElement("script");
+      script.id = "MathJax-script";
+      script.src =
+        "https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-chtml.js";
+      script.async = true;
+      document.head.appendChild(script);
+    }
+
+    // Master Category & Master Item DB 로드
+    const loadTaxonomiesFromDb = async () => {
+      setIsTaxonomyLoading(true);
+      try {
+        const [cats, items] = await Promise.all([
+          fetchAllRows("master_category"),
+          fetchAllRows("master_item"),
+        ]);
+        setMasterCategories(cats || []);
+        setMasterItems(items || []);
+      } catch (e) {
+        console.error("교과 분류 DB 로드 실패:", e);
+      } finally {
+        setIsTaxonomyLoading(false);
+      }
+    };
+    loadTaxonomiesFromDb();
+
+    // 🛡️ 강제종료 방어(Atomic Save) 로컬 백업 복원
+    try {
+      const savedWorkspace = localStorage.getItem(STORAGE_CACHE_KEY);
+      if (savedWorkspace) {
+        const parsed = JSON.parse(savedWorkspace);
+        if (Array.isArray(parsed.problems) && parsed.problems.length > 0) {
+          setProblems(parsed.problems);
+          if (parsed.bookTitle) setBookTitle(parsed.bookTitle);
+        }
+      }
+      const savedProgress = localStorage.getItem(PROGRESS_CACHE_KEY);
+      if (savedProgress) {
+        setCompletedPagesMap(JSON.parse(savedProgress));
+      }
+    } catch {}
+  }, [router]);
+
+  // 🛡️ 원자적 자동 저장 (problems 또는 bookTitle 변경 시 즉시 백업)
+  useEffect(() => {
+    try {
+      if (problems.length > 0) {
+        localStorage.setItem(
+          STORAGE_CACHE_KEY,
+          JSON.stringify({
+            bookTitle,
+            updatedAt: new Date().toISOString(),
+            problems,
+          })
+        );
+      }
+    } catch {}
+  }, [problems, bookTitle]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(
+        PROGRESS_CACHE_KEY,
+        JSON.stringify(completedPagesMap)
+      );
+    } catch {}
+  }, [completedPagesMap]);
+
+  // MathJax 렌더링 트리거
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if ((window as any).MathJax && (window as any).MathJax.typesetPromise) {
+        (window as any).MathJax.typesetPromise().catch(() => {});
+      }
+    }, 120);
+    return () => clearTimeout(timer);
+  }, [problems, currentIdx, editorTab, activePipelineTab]);
+
+  // 필터링된 문제 목록 및 현재 문항
+  const filteredIndices = useMemo(() => {
+    const mainPrefixes = expandPrefixSpec(mainPrefixSpec);
+    const depth8Set = new Set(
+      masterItems
+        .filter((i) => matchesAnyPrefix(i.item_id, mainPrefixes))
+        .map((i) => String(i.item_id).trim())
+    );
+
+    return problems
+      .map((p, idx) => ({ p, idx }))
+      .filter(({ p }) => {
+        if (statusFilter === "ALL") return true;
+        if (statusFilter === "APPROVED")
+          return p.verification_status === "APPROVED";
+        if (statusFilter === "REJECTED")
+          return p.verification_status === "REJECTED";
+        if (statusFilter === "PENDING")
+          return !p.verification_status || p.verification_status === "PENDING";
+        if (statusFilter === "NEEDS_REWORK") {
+          const taxId = String(p.taxonomy_id || "").trim();
+          if (!taxId || taxId === "None") return true;
+          if (
+            matchesAnyPrefix(taxId, mainPrefixes) &&
+            depth8Set.size > 0 &&
+            !depth8Set.has(taxId)
+          ) {
+            return true;
+          }
+          return false;
+        }
+        return true;
+      })
+      .map((x) => x.idx);
+  }, [problems, statusFilter, mainPrefixSpec, masterItems]);
+
+  const currentProblem = problems[currentIdx] || null;
+
+  // 문항 이동 시 PDF 페이지 자동 동기화
+  const selectProblemIndex = useCallback(
+    (newIdx: number) => {
+      if (newIdx < 0 || newIdx >= problems.length) return;
+      setCurrentIdx(newIdx);
+      const targetP = problems[newIdx];
+      if (targetP && pdfDoc && !isAiScanning) {
+        const detPage = Number(targetP.detected_page_num);
+        if (detPage >= 1 && detPage <= numPages && detPage !== pageNum) {
+          setPageNum(detPage);
+        }
+      }
+    },
+    [problems, pdfDoc, isAiScanning, numPages, pageNum]
+  );
+
+  // =========================================================
+  // PDF 렌더링 및 다중 파일 로드
+  // =========================================================
+  const renderPage = useCallback(
+    async (num: number, pdf: any = pdfDoc, scale = pdfScale) => {
+      if (!pdf || !canvasRef.current) return;
+      try {
+        const page = await pdf.getPage(num);
+        const viewport = page.getViewport({ scale });
+        const canvas = canvasRef.current;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) return;
+        canvas.width = viewport.width;
+        canvas.height = viewport.height;
+        canvas.style.width = `${Math.round(viewport.width * 0.65)}px`;
+        canvas.style.height = `${Math.round(viewport.height * 0.65)}px`;
+        await page.render({ canvasContext: ctx, viewport }).promise;
+      } catch (e) {
+        console.error("PDF 렌더링 에러:", e);
+      }
+    },
+    [pdfDoc, pdfScale]
+  );
+
+  useEffect(() => {
+    if (pdfDoc && !isAiScanning) {
+      renderPage(pageNum, pdfDoc, pdfScale);
+    }
+  }, [pageNum, pdfDoc, pdfScale, isAiScanning, renderPage]);
+
+  const loadPdfFileObject = async (file: File) => {
+    if (!pdfjsLoaded) {
+      alert("PDF 파싱 엔진 로딩 중입니다. 잠시만 기다려주세요.");
+      return null;
+    }
+    const arrayBuffer = await file.arrayBuffer();
+    const pdf = await (window as any).pdfjsLib.getDocument({
+      data: arrayBuffer,
+    }).promise;
+    return pdf;
+  };
+
+  const clearWorkspaceData = useCallback((resetCompletedPages = false) => {
+    setProblems([]);
+    setImageAssets({});
+    setCurrentIdx(0);
+    setActiveCropTarget(null);
+    try {
+      localStorage.removeItem(STORAGE_CACHE_KEY);
+      if (resetCompletedPages) {
+        localStorage.removeItem(PROGRESS_CACHE_KEY);
+        setCompletedPagesMap({});
+      }
+    } catch {}
+  }, []);
+
+  const activateQueuedPdf = async (item: QueuedPdfFile, clearExisting = true) => {
+    const pdf = await loadPdfFileObject(item.file);
+    if (!pdf) return;
+    if (clearExisting) {
+      setProblems((prev) => {
+        const onlyThisPdf = prev.filter((p) => p.pdf_source === item.name);
+        if (onlyThisPdf.length === 0) {
+          try { localStorage.removeItem(STORAGE_CACHE_KEY); } catch {}
+        }
+        return onlyThisPdf;
+      });
+      setImageAssets({});
+      setCurrentIdx(0);
+      setActiveCropTarget(null);
+    }
+    setSelectedPdfName(item.name);
+    setBookTitle(item.name.replace(/\.pdf$/i, ""));
+    setPdfDoc(pdf);
+    setNumPages(pdf.numPages);
+    setPageNum(1);
+    setAiStartPage(1);
+    setAiEndPage(pdf.numPages);
+  };
+
+  const handleFilesSelected = async (fileList: FileList | null) => {
+    if (!fileList || fileList.length === 0) return;
+    const pdfFiles: File[] = [];
+    const jsonFiles: File[] = [];
+
+    Array.from(fileList).forEach((f) => {
+      if (f.name.toLowerCase().endsWith(".pdf")) pdfFiles.push(f);
+      else if (f.name.toLowerCase().endsWith(".json")) jsonFiles.push(f);
+    });
+
+    // JSON 파일이 들어오면 즉시 문항 데이터(또는 Thinking_Category)로 로드
+    for (const jf of jsonFiles) {
+      try {
+        const text = await jf.text();
+        const parsed = JSON.parse(text);
+        const arr = Array.isArray(parsed)
+          ? parsed
+          : Array.isArray(parsed?.problems)
+          ? parsed.problems
+          : [];
+        if (arr.length > 0 && arr[0]?.category_id?.startsWith("THK-")) {
+          setThinkingCategories(arr);
+          addLog(`🧠 사고력 분류표(${jf.name}) ${arr.length}개 로드 완료!`);
+        } else if (arr.length > 0) {
+          const fallbackBn = jf.name
+            .replace(/_Classified\.json$/i, "")
+            .replace(/_Problems_Final\.json$/i, "")
+            .replace(/_Problems_Extracted\.json$/i, "")
+            .replace(/\.json$/i, "");
+          const normalized = sortProblemsList(
+            arr.map((r: any) => {
+              const norm = normalizeRecordForQuestionDb(r, bookTitle || fallbackBn);
+              for (const f of TARGET_FIELDS) {
+                if (norm[f]) norm[f] = cleanLatex(norm[f]);
+              }
+              return norm;
+            })
+          );
+          setImageAssets({});
+          setActiveCropTarget(null);
+          setProblems(normalized);
+          setCurrentIdx(0);
+          setBookTitle(normalized[0]?.book_name || normalized[0]?.source_book_name || fallbackBn);
+          addLog(
+            `📂 JSON 파일(${jf.name})에서 ${normalized.length}개 문항을 불러오고 V302 수식 정제 및 정렬을 완료했습니다.`
+          );
+        }
+      } catch (e: any) {
+        alert(`JSON 파일 로드 오류 (${jf.name}): ${e.message}`);
+      }
+    }
+
+    if (pdfFiles.length > 0 && pdfjsLoaded) {
+      const newQueueItems: QueuedPdfFile[] = [];
+      for (const pf of pdfFiles) {
+        try {
+          const pdf = await loadPdfFileObject(pf);
+          if (pdf) {
+            newQueueItems.push({
+              name: pf.name,
+              file: pf,
+              numPages: pdf.numPages,
+            });
+          }
+        } catch (e) {
+          console.error("PDF 읽기 실패:", pf.name, e);
+        }
+      }
+      if (newQueueItems.length > 0) {
+        // 새 PDF 파일을 넣으면 이전 작업 파일의 문항/이미지/진도 캐시를 깨끗하게 초기화하여 중복 적재 방지
+        clearWorkspaceData(false);
+        setCompletedPagesMap((prev) => {
+          const next = { ...prev };
+          for (const item of newQueueItems) delete next[item.name];
+          return next;
+        });
+        setPdfQueue(newQueueItems);
+        await activateQueuedPdf(newQueueItems[0], false);
+        addLog(
+          `📂 새 PDF 파일 ${newQueueItems.length}개 로드 및 이전 작업 데이터 초기화 완료 (선택됨: ${newQueueItems[0].name})`
+        );
+      }
+    }
+  };
+
+  // =========================================================
+  // ⚡ Phase 1: 비동기 추출 + 4단계 풀이 파이프라인 (60초 타임아웃 + 지수 백오프 + 이어하기)
+  // =========================================================
+  const fetchWithRetryAndTimeout = async (
+    payload: any,
+    token: string | undefined,
+    maxRetries = 5,
+    timeoutMs = 60000
+  ): Promise<any> => {
+    let delay = 3000;
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+      const controller = new AbortController();
+      const timer =
+        timeoutMs > 0
+          ? setTimeout(() => controller.abort(), timeoutMs)
+          : null;
+      try {
+        const res = await fetch("/api/gemini-parse", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token || ""}`,
+          },
+          body: JSON.stringify(payload),
+          ...(timeoutMs > 0 ? { signal: controller.signal } : {}),
+        });
+        if (timer) clearTimeout(timer);
+
+        const data = await res.json();
+        if (!res.ok || !data.success) {
+          const errMsg = String(data?.error || `HTTP ${res.status}`);
+          if (
+            errMsg.includes("503") ||
+            errMsg.includes("429") ||
+            errMsg.includes("Quota") ||
+            errMsg.includes("ResourceExhausted")
+          ) {
+            const jitter = 500 + Math.random() * 2000;
+            const waitTime = delay + jitter;
+            addLog(
+              `⚠️ [API 지연/제한] ${(waitTime / 1000).toFixed(
+                1
+              )}초 대기 후 재도전... (${attempt + 1}/${maxRetries})`
+            );
+            await new Promise((r) => setTimeout(r, waitTime));
+            delay *= 1.5;
+            continue;
+          }
+          throw new Error(errMsg);
+        }
+        return data.data;
+      } catch (err: any) {
+        if (timer) clearTimeout(timer);
+        if (err?.name === "AbortError") {
+          addLog(
+            `⚠️ [API 응답 시간 초과] ${Math.round(timeoutMs / 1000)}초 초과로 재요청합니다... (${
+              attempt + 1
+            }/${maxRetries})`
+          );
+          await new Promise((r) => setTimeout(r, delay));
+          delay *= 1.5;
+          continue;
+        }
+        addLog(`⚠️ [API 통신 오류] ${err?.message || err} (시도 ${attempt + 1}/${maxRetries})`);
+        if (attempt === maxRetries - 1) throw err;
+        await new Promise((r) => setTimeout(r, delay));
+        delay *= 1.5;
+      }
+    }
+    return null;
+  };
+
+  // PDF 한 페이지를 250 DPI (scale ≈ 3.47) JPEG Base64로 렌더링
+  const renderPdfPageToBase64 = async (
+    targetPdf: any,
+    targetPageNum: number,
+    dpi = 250
+  ): Promise<string> => {
+    const page = await targetPdf.getPage(targetPageNum);
+    const scale = dpi / 72.0;
+    const viewport = page.getViewport({ scale });
+    const tempCanvas = document.createElement("canvas");
+    tempCanvas.width = viewport.width;
+    tempCanvas.height = viewport.height;
+    const ctx = tempCanvas.getContext("2d");
+    if (!ctx) throw new Error("Canvas context 생성 실패");
+    await page.render({ canvasContext: ctx, viewport }).promise;
+    return tempCanvas.toDataURL("image/jpeg", 0.82);
+  };
+
+  const runSinglePdfPipeline = async (
+    targetPdfDoc: any,
+    pdfFileName: string,
+    startP: number,
+    endP: number,
+    token: string | undefined
+  ) => {
+    const cleanBookName = pdfFileName.replace(/\.pdf$/i, "");
+    const completedSet = new Set<number>(
+      useResumeTracker ? completedPagesMap[pdfFileName] || [] : []
+    );
+
+    const pagesToProcess: number[] = [];
+    for (let p = startP; p <= endP; p++) {
+      if (!completedSet.has(p)) pagesToProcess.push(p);
+    }
+
+    const skipCount = endP - startP + 1 - pagesToProcess.length;
+    if (skipCount > 0) {
+      addLog(
+        `🔄 [이어하기 감지] ${pdfFileName}: 이미 완료된 ${skipCount}개 페이지를 0.1초 만에 건너뜁니다.`
+      );
+    }
+    if (pagesToProcess.length === 0) {
+      addLog(`🎉 [${pdfFileName}] 지정된 모든 페이지(${startP}~${endP}쪽)가 이미 처리되었습니다!`);
+      return;
+    }
+
+    addLog(
+      `🚀 [${pdfFileName}] 남은 ${pagesToProcess.length}장 스트리밍 스캔 시작 (모드: ${
+        extractMode === "WITH_SOLUTION" ? "추출+4단계풀이(V119.1)" : "문제만 초고속 추출(V114.1)"
+      }, 동시성: ${pageConcurrency})`
+    );
+
+    setAiProgress({
+      current: 0,
+      total: pagesToProcess.length,
+      phaseLabel: `${pdfFileName} 스캔 중`,
+    });
+
+    const sharedPrintedPages: Record<number, number> = {};
+    let doneCount = 0;
+
+    // 동시성 워커 풀 실행
+    let queueIdx = 0;
+    const workerCount = Math.max(1, Math.min(pageConcurrency, pagesToProcess.length));
+
+    const runWorker = async () => {
+      while (queueIdx < pagesToProcess.length) {
+        if (abortScanRef.current) break;
+        const myIndex = queueIdx++;
+        const pNum = pagesToProcess[myIndex];
+
+        try {
+          setPageNum(pNum);
+          addLog(`📂 물리적 [${pNum}쪽] 이미지 렌더링(250 DPI) 및 문제 추출 시작...`);
+          const base64Img = await renderPdfPageToBase64(targetPdfDoc, pNum, 250);
+
+          const extractRes = await fetchWithRetryAndTimeout(
+            {
+              action: "extract",
+              imageBase64: base64Img,
+              pageNum: pNum,
+            },
+            token
+          );
+
+          const rawItems: any[] = extractRes?.problems || [];
+          if (!rawItems || rawItems.length === 0) {
+            addLog(`⏭️ 물리적 [${pNum}쪽] 문제 없음 (빈 페이지 완료 도장 기록)`);
+            completedSet.add(pNum);
+            setCompletedPagesMap((prev) => ({
+              ...prev,
+              [pdfFileName]: Array.from(completedSet),
+            }));
+            doneCount++;
+            setAiProgress((prev) => ({ ...prev, current: doneCount }));
+            continue;
+          }
+
+          // 인쇄된 페이지 번호 추론
+          let currentPrintedPage: number | null = null;
+          for (const item of rawItems) {
+            const rawPage = String(item?.final_printed_page || "");
+            const cleaned = rawPage.replace(/\D/g, "").replace(/^0+/, "");
+            if (cleaned) {
+              currentPrintedPage = parseInt(cleaned, 10);
+              break;
+            }
+          }
+          if (currentPrintedPage === null) {
+            const prevPrinted = sharedPrintedPages[pNum - 1];
+            currentPrintedPage = prevPrinted ? prevPrinted + 1 : pNum;
+          }
+          sharedPrintedPages[pNum] = currentPrintedPage;
+
+          const seenInPage = new Set<string>();
+          const pageExtractedItems: any[] = [];
+
+          for (const item of rawItems) {
+            if (!item || typeof item !== "object") continue;
+            let qNum = String(item.question_number || "")
+              .trim()
+              .replace(/^0+/, "");
+            if (!qNum || qNum.toLowerCase() === "none" || qNum.toLowerCase() === "null") {
+              continue;
+            }
+
+            const cleanQText = cleanLatex(applySafeCleaner(item.question));
+            if (!cleanQText) continue;
+
+            if (
+              qNum.includes("개념") ||
+              qNum.toUpperCase().includes("QUIZ") ||
+              qNum.includes("노트")
+            ) {
+              qNum = "Q";
+            } else if (qNum.includes("확인")) {
+              qNum = qNum.replace(/\s+/g, "");
+            } else if (/^확인\s*\d+/.test(cleanQText) && !qNum.includes("확인")) {
+              qNum = `확인${qNum}`.replace(/\s+/g, "");
+            }
+
+            const normText = cleanQText.replace(/\s+/g, "");
+            if (seenInPage.has(normText)) continue;
+            seenInPage.add(normText);
+
+            const newRecord = normalizeRecordForQuestionDb(
+              {
+                question_id: generateUUID(),
+                parent_question_id: null,
+                pdf_source: pdfFileName,
+                book_name: bookTitle || cleanBookName,
+                source_book_name: bookTitle || cleanBookName,
+                detected_page_num: pNum,
+                final_printed_page: String(currentPrintedPage),
+                question_number: qNum,
+                sub_num: item.sub_num ?? 0,
+                sub_sub_num: item.sub_sub_num ?? 0,
+                problem_type: "SUBJECTIVE",
+                difficulty: "중",
+                solving_probability: 50,
+                question: cleanQText,
+                question_2: null,
+                options: null,
+                answer: "",
+                step_1_concept: "",
+                step_2_approach: "",
+                step_3_process: "",
+                step_4_conclusion: "",
+                ai_status: extractMode === "WITH_SOLUTION" ? "대기" : "추출완료",
+                classification_status: "PENDING",
+                verification_status: "PENDING",
+                is_human_verified: false,
+                human_verified: false,
+                engine_ver:
+                  extractMode === "WITH_SOLUTION"
+                    ? "V119.1_Stream_Bulletproof"
+                    : "V114.1_SOTA_Async_Parser",
+              },
+              bookTitle || cleanBookName
+            );
+
+            pageExtractedItems.push(newRecord);
+          }
+
+          // 모드 2: 추출 직후 전 문항 동시 4단계 풀이 생성 (V119.1 공장 라인 2)
+          if (extractMode === "WITH_SOLUTION" && pageExtractedItems.length > 0) {
+            addLog(
+              `✅ 물리적 [${pNum}쪽] (인쇄 ${currentPrintedPage}쪽) ${pageExtractedItems.length}문항 추출 완료! 🚀 전 문항 동시 4단계 풀이 진입...`
+            );
+            await Promise.all(
+              pageExtractedItems.map(async (item) => {
+                try {
+                  const solData = await fetchWithRetryAndTimeout(
+                    {
+                      action: "solve",
+                      imageBase64: base64Img,
+                      question: item.question,
+                      question_number: item.question_number,
+                      sub_num: item.sub_num,
+                    },
+                    token
+                  );
+                  if (solData) {
+                    item.step_1_concept = cleanLatex(solData.step_1_concept || "");
+                    item.step_2_approach = cleanLatex(solData.step_2_approach || "");
+                    item.step_3_process = cleanLatex(solData.step_3_process || "");
+                    item.step_4_conclusion = cleanLatex(solData.step_4_conclusion || "");
+                    item.answer = cleanLatex(solData.answer || "");
+                    item.problem_type = normalizeRecordForQuestionDb(item).problem_type;
+                    item.ai_status = "완료";
+                    addLog(
+                      `💡 [풀이 완료] 인쇄 ${item.final_printed_page}쪽 ${item.question_number}번 ➜ 정답: ${item.answer}`
+                    );
+                  } else {
+                    item.ai_status = "에러";
+                  }
+                } catch (solErr: any) {
+                  item.ai_status = "에러";
+                  addLog(
+                    `❌ [풀이 실패] 인쇄 ${item.final_printed_page}쪽 ${item.question_number}번: ${solErr.message}`
+                  );
+                }
+              })
+            );
+          } else {
+            addLog(
+              `✅ 물리적 [${pNum}쪽] (인쇄 ${currentPrintedPage}쪽) ${pageExtractedItems.length}문항 초고속 추출 완료!`
+            );
+          }
+
+          // 원자적 병합 및 정렬 (이전 다른 파일 잔여 데이터 배제 + 같은 페이지 기존 데이터 교체 + 고유키 중복 제거)
+          setProblems((prev) => {
+            const baseList = runAllPdfsMode
+              ? prev
+              : prev.filter((p) => !p.pdf_source || p.pdf_source === pdfFileName);
+
+            const filtered = baseList.filter(
+              (p) =>
+                !(
+                  (p.pdf_source === pdfFileName || !p.pdf_source) &&
+                  Number(p.detected_page_num) === pNum
+                )
+            );
+
+            const dedupMap = new Map<string, any>();
+            for (const item of [...filtered, ...pageExtractedItems]) {
+              const uKey = `${item.pdf_source || pdfFileName}_${item.detected_page_num}_${item.question_number}_${item.sub_num || 0}_${item.sub_sub_num || 0}`;
+              dedupMap.set(uKey, item);
+            }
+            const merged = sortProblemsList(Array.from(dedupMap.values()));
+
+            // 단일 소문항 sub_num 정리 (같은 페이지+문항번호가 1개뿐이고 sub_sub_num이 0이면 sub_num=0)
+            const qCounts: Record<string, number> = {};
+            for (const m of merged) {
+              const key = `${m.pdf_source || ""}_${m.detected_page_num}_${m.question_number}`;
+              qCounts[key] = (qCounts[key] || 0) + 1;
+            }
+            return merged.map((m) => {
+              const key = `${m.pdf_source || ""}_${m.detected_page_num}_${m.question_number}`;
+              if (qCounts[key] === 1 && (!m.sub_sub_num || m.sub_sub_num === 0)) {
+                return { ...m, sub_num: 0 };
+              }
+              return m;
+            });
+          });
+
+          completedSet.add(pNum);
+          setCompletedPagesMap((prev) => ({
+            ...prev,
+            [pdfFileName]: Array.from(completedSet),
+          }));
+        } catch (pageErr: any) {
+          addLog(`❌ 물리적 [${pNum}쪽] 처리 실패 (진행도 미기록, 다음 실행 시 재시도): ${pageErr.message}`);
+        } finally {
+          doneCount++;
+          setAiProgress((prev) => ({ ...prev, current: doneCount }));
+        }
+      }
+    };
+
+    await Promise.all(Array.from({ length: workerCount }, () => runWorker()));
+  };
+
+  const handleStartPhase1Scan = async () => {
+    if (!runAllPdfsMode && !pdfDoc) {
+      return alert("먼저 PDF 파일을 드래그하거나 선택해주세요.");
+    }
+    if (!runAllPdfsMode && aiStartPage > aiEndPage) {
+      return alert("시작 페이지가 끝 페이지보다 클 수 없습니다.");
+    }
+
+    abortScanRef.current = false;
+    setIsAiScanning(true);
+
+    try {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      const token = session?.access_token;
+
+      if (runAllPdfsMode && pdfQueue.length > 0) {
+        addLog(`🚀 대기열 내 전체 PDF 파일(${pdfQueue.length}개) 일괄 처리를 시작합니다!`);
+        for (const qItem of pdfQueue) {
+          if (abortScanRef.current) break;
+          const loadedPdf = await loadPdfFileObject(qItem.file);
+          if (!loadedPdf) continue;
+          setSelectedPdfName(qItem.name);
+          setPdfDoc(loadedPdf);
+          setNumPages(loadedPdf.numPages);
+          await runSinglePdfPipeline(
+            loadedPdf,
+            qItem.name,
+            1,
+            loadedPdf.numPages,
+            token
+          );
+        }
+        addLog(`🎉 대기열 내 모든 PDF 파일 일괄 처리가 완료되었습니다!`);
+      } else {
+        const targetName = selectedPdfName || `${bookTitle || "workbook"}.pdf`;
+        await runSinglePdfPipeline(
+          pdfDoc,
+          targetName,
+          aiStartPage,
+          aiEndPage,
+          token
+        );
+        addLog(`🎉 [${targetName}] 지정 구간(${aiStartPage}~${aiEndPage}쪽) 스캔 완료!`);
+      }
+    } catch (e: any) {
+      alert(`스캔 중 오류 발생: ${e.message}`);
+    } finally {
+      setIsAiScanning(false);
+    }
+  };
+
+  // 문제만 추출된 문항들에 대해 사후 4단계 AI 풀이 일괄 실행
+  const handleSolveMissingAnswers = async () => {
+    if (!pdfDoc) {
+      return alert("원본 도형/이미지를 참조하기 위해 해당 PDF 파일이 열려 있어야 합니다.");
+    }
+    const unsolved = problems.filter(
+      (p) => !p.answer || !p.step_1_concept || p.ai_status !== "완료"
+    );
+    if (unsolved.length === 0) {
+      return alert("모든 문항에 이미 정답과 4단계 해설이 작성되어 있습니다.");
+    }
+
+    setIsAiScanning(true);
+    abortScanRef.current = false;
+    setAiProgress({
+      current: 0,
+      total: unsolved.length,
+      phaseLabel: "미완성 4단계 해설 생성 중",
+    });
+
+    try {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      const token = session?.access_token;
+      const pageImgCache: Record<number, string> = {};
+      let done = 0;
+
+      for (const item of unsolved) {
+        if (abortScanRef.current) break;
+        const pNum = Math.max(1, Math.min(numPages, Number(item.detected_page_num) || 1));
+        if (!pageImgCache[pNum]) {
+          pageImgCache[pNum] = await renderPdfPageToBase64(pdfDoc, pNum, 250);
+        }
+        try {
+          const solData = await fetchWithRetryAndTimeout(
+            {
+              action: "solve",
+              imageBase64: pageImgCache[pNum],
+              question: item.question,
+              question_number: item.question_number,
+              sub_num: item.sub_num,
+            },
+            token
+          );
+          if (solData) {
+            setProblems((prev) =>
+              prev.map((q) =>
+                q.question_id === item.question_id
+                  ? normalizeRecordForQuestionDb({
+                      ...q,
+                      step_1_concept: cleanLatex(solData.step_1_concept || ""),
+                      step_2_approach: cleanLatex(solData.step_2_approach || ""),
+                      step_3_process: cleanLatex(solData.step_3_process || ""),
+                      step_4_conclusion: cleanLatex(solData.step_4_conclusion || ""),
+                      answer: cleanLatex(solData.answer || ""),
+                      ai_status: "완료",
+                    })
+                  : q
+              )
+            );
+          }
+        } catch (err: any) {
+          addLog(`❌ ${item.question_number}번 풀이 실패: ${err.message}`);
+        }
+        done++;
+        setAiProgress((prev) => ({ ...prev, current: done }));
+      }
+      addLog(`🎉 미완성 문항 ${done}개 4단계 해설 생성 완료!`);
+    } finally {
+      setIsAiScanning(false);
+    }
+  };
+
+  // =========================================================
+  // 🧭 Phase 2: 정밀 분류 (교과 Depth 8 + 광범위 서브교과 + 사고력 트리플 분류 V4.4.0)
+  // =========================================================
+  const taxonomyGuides = useMemo(() => {
+    const mainPrefixes = expandPrefixSpec(mainPrefixSpec);
+    const filtCat = masterCategories.filter((c) =>
+      matchesAnyPrefix(c.category_id, mainPrefixes)
+    );
+    const filtItem = masterItems.filter((i) =>
+      matchesAnyPrefix(i.item_id, mainPrefixes)
+    );
+    const depth8IdSet = new Set(
+      filtItem.map((i) => String(i.item_id).trim()).filter(Boolean)
+    );
+
+    const catMap = new Map<string, any>();
+    for (const c of masterCategories) {
+      catMap.set(String(c.category_id).trim(), c);
+    }
+
+    let currGuide = `### [1. 메인 교과 단원 분류표 (대상 범위: ${mainPrefixSpec} -> ${mainPrefixes.join(
+      ", "
+    )})]\n`;
+    for (const c of filtCat) {
+      currGuide += `- ${c.category_id}: ${c.depth7 || c.full_path || ""}\n`;
+    }
+    currGuide += `\n### [1-1. 메인 교과 세부유형 리스트 - item_id (taxonomy_id 매핑용)]\n`;
+    for (const i of filtItem) {
+      const parentCat = catMap.get(String(i.category_id || "").trim());
+      const d8Label =
+        i.depth8 ||
+        i.item_name ||
+        i.title ||
+        (parentCat ? `${parentCat.depth7 || ""} (${i.item_id})` : i.item_id);
+      currGuide += `- ${i.item_id}: ${d8Label}\n`;
+    }
+
+    const subPrefixes = expandPrefixSpec(subPrefixSpec);
+    let subGuide = "";
+    let subFiltCatCount = 0;
+    let subFiltItemCount = 0;
+    const subDepth8IdSet = new Set<string>();
+
+    if (subPrefixes.length > 0) {
+      const subFiltCat = masterCategories.filter((c) =>
+        matchesAnyPrefix(c.category_id, subPrefixes)
+      );
+      const subFiltItem = masterItems.filter((i) =>
+        matchesAnyPrefix(i.item_id, subPrefixes)
+      );
+      subFiltCatCount = subFiltCat.length;
+      subFiltItemCount = subFiltItem.length;
+      for (const i of subFiltItem) {
+        if (i.item_id) subDepth8IdSet.add(String(i.item_id).trim());
+      }
+
+      subGuide = `### [2. 서브 교과 단원 분류표 (광범위 실제 교과 탐색 범위: ${subPrefixSpec} -> ${subPrefixes.join(
+        ", "
+      )})]\n`;
+      for (const c of subFiltCat) {
+        subGuide += `- ${c.category_id}: ${c.depth7 || c.full_path || ""}\n`;
+      }
+      subGuide += `\n### [2-1. 서브 교과 세부유형 리스트 - item_id (sub_taxonomy_id 매핑용)]\n`;
+      for (const i of subFiltItem) {
+        const parentCat = catMap.get(String(i.category_id || "").trim());
+        const d8Label =
+          i.depth8 ||
+          i.item_name ||
+          i.title ||
+          (parentCat ? `${parentCat.depth7 || ""} (${i.item_id})` : i.item_id);
+        subGuide += `- ${i.item_id}: ${d8Label}\n`;
+      }
+    }
+
+    let thkGuide = "";
+    if (applyThinking) {
+      thkGuide = `### [3. 사고력 영역 분류표 (Prefix: THK)]\n`;
+      for (const t of thinkingCategories) {
+        thkGuide += `- ${t.category_id}: ${t.full_path}\n`;
+      }
+    }
+
+    return {
+      mainPrefixes,
+      subPrefixes,
+      filtCatCount: filtCat.length,
+      filtItemCount: filtItem.length,
+      subFiltCatCount,
+      subFiltItemCount,
+      depth8IdSet,
+      subDepth8IdSet,
+      currGuide,
+      subGuide,
+      thkGuide,
+    };
+  }, [
+    mainPrefixSpec,
+    subPrefixSpec,
+    applyThinking,
+    masterCategories,
+    masterItems,
+    thinkingCategories,
+  ]);
+
+  const handleRunPhase2Classification = async () => {
+    if (problems.length === 0) {
+      return alert("분류할 문항이 없습니다. 먼저 PDF 스캔 또는 JSON 불러오기를 실행하세요.");
+    }
+    if (taxonomyGuides.filtCatCount === 0 && taxonomyGuides.filtItemCount === 0) {
+      return alert(
+        `입력하신 메인 교과 단원 코드(${mainPrefixSpec})에 해당하는 마스터 분류가 없습니다. (예: E41, E4, E61, M11 등)`
+      );
+    }
+
+    // 페이지 범위 파싱 (예: "15" 또는 "10-20")
+    let startP = 0;
+    let endP = 99999;
+    const rangeTrim = classifyPageRange.trim();
+    if (rangeTrim) {
+      if (rangeTrim.includes("-")) {
+        const [s, e] = rangeTrim.split("-").map((x) => parseInt(x.trim(), 10));
+        if (!isNaN(s) && !isNaN(e)) {
+          startP = Math.min(s, e);
+          endP = Math.max(s, e);
+        }
+      } else {
+        const single = parseInt(rangeTrim, 10);
+        if (!isNaN(single)) {
+          startP = single;
+          endP = single;
+        }
+      }
+    }
+
+    const applySubTaxonomy = taxonomyGuides.subPrefixes.length > 0;
+
+    // V4.4.0 needs_rework 필터링 로직
+    const pendingTasks = problems.filter((q) => {
+      const pNum =
+        parseInt(String(q.detected_page_num || q.final_printed_page || 0), 10) || 0;
+      if (pNum < startP || pNum > endP) return false;
+
+      if (!classifyOnlyRework) return true;
+
+      const status = q.classification_status;
+      const taxId = String(q.taxonomy_id || "").trim();
+      const subTaxId = String(q.sub_taxonomy_id || "").trim();
+
+      if (status !== "COMPLETE" || !taxId || taxId === "None") return true;
+      if (
+        matchesAnyPrefix(taxId, taxonomyGuides.mainPrefixes) &&
+        taxonomyGuides.depth8IdSet.size > 0 &&
+        !taxonomyGuides.depth8IdSet.has(taxId)
+      ) {
+        return true;
+      }
+      if (applySubTaxonomy) {
+        if (!subTaxId || subTaxId === "None") return true;
+        if (
+          matchesAnyPrefix(subTaxId, taxonomyGuides.subPrefixes) &&
+          taxonomyGuides.subDepth8IdSet.size > 0 &&
+          !taxonomyGuides.subDepth8IdSet.has(subTaxId)
+        ) {
+          return true;
+        }
+      }
+      return false;
+    });
+
+    if (pendingTasks.length === 0) {
+      return alert(
+        "✅ 지정된 범위 내의 모든 문항이 이미 Depth 8까지 완벽하게 분류되어 있습니다! (전체를 다시 분류하려면 '미분류/Depth7 이하만 재분류' 체크를 해제하세요.)"
+      );
+    }
+
+    setIsClassifying(true);
+    setClassifyProgress({ completed: 0, total: pendingTasks.length });
+    addLog(
+      `📚 [메인 교과] DB 필터링 완료! (범위: ${taxonomyGuides.mainPrefixes.join(", ")} | Depth7: ${taxonomyGuides.filtCatCount}개, Depth8: ${taxonomyGuides.filtItemCount}개)`
+    );
+    if (applySubTaxonomy) {
+      addLog(
+        `🧭 [서브 교과] 광범위 DB 필터링 완료! (범위: ${taxonomyGuides.subPrefixes.join(", ")} | Depth7: ${taxonomyGuides.subFiltCatCount}개, Depth8: ${taxonomyGuides.subFiltItemCount}개)`
+      );
+    }
+    if (applyThinking) {
+      addLog(`🧠 [사고력] DB 로드 완료! (후보: ${thinkingCategories.length}개)`);
+    }
+    addLog(
+      `⚡ 타겟 페이지(${startP}~${endP === 99999 ? "전체" : endP}쪽) 대기 및 재분류 대상: ${pendingTasks.length}개 문항`
+    );
+
+    try {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      const token = session?.access_token;
+
+      const bSize = Math.max(1, Math.min(25, classifyBatchSize));
+      const batches: any[][] = [];
+      for (let i = 0; i < pendingTasks.length; i += bSize) {
+        batches.push(pendingTasks.slice(i, i + bSize));
+      }
+
+      let completedCount = 0;
+      let batchIdx = 0;
+      const maxWorkers = 2; // V4.4.0 MAX_WORKERS = 2
+
+      const runBatchWorker = async () => {
+        while (batchIdx < batches.length) {
+          const currentBatchNum = batchIdx + 1;
+          const myBatch = batches[batchIdx++];
+          const slimBatch = myBatch.map((q) => ({
+            question_id: q.question_id,
+            question: q.question,
+            answer: q.answer,
+          }));
+          const t0 = Date.now();
+          addLog(
+            `⏳ [Phase 2 배치 ${currentBatchNum}/${batches.length}] 문항 ${slimBatch.length}개 AI 정밀 분류 요청 중...`
+          );
+          try {
+            const results = await fetchWithRetryAndTimeout(
+              {
+                action: "classify",
+                batchData: slimBatch,
+                currGuide: taxonomyGuides.currGuide,
+                subGuide: taxonomyGuides.subGuide,
+                thkGuide: taxonomyGuides.thkGuide,
+                applySubTaxonomy,
+                applyThinking,
+              },
+              token,
+              3,
+              0
+            );
+
+            if (Array.isArray(results) && results.length > 0) {
+              const resultMap = new Map<string, any>();
+              for (const r of results) {
+                if (r?.question_id) resultMap.set(String(r.question_id).trim(), r);
+              }
+              if (resultMap.size === 0) {
+                addLog(`⚠️ [배치 ${currentBatchNum}] AI 응답에 유효한 question_id 매핑이 없습니다.`);
+              }
+
+              setProblems((prev) => {
+                const updated = prev.map((q) => {
+                  const res = resultMap.get(String(q.question_id));
+                  if (!res) return q;
+
+                  const nextQ = { ...q };
+                  nextQ.taxonomy_id = String(res.curriculum_id || "").trim() || null;
+                  nextQ.taxonomy_name =
+                    String(res.curriculum_name || "").trim() || "이름 누락됨";
+
+                  if (applySubTaxonomy) {
+                    const subId = String(res.sub_curriculum_id || "").trim();
+                    if (subId && !["NONE", "NULL"].includes(subId.toUpperCase())) {
+                      nextQ.sub_taxonomy_id = subId;
+                      nextQ.sub_taxonomy_name =
+                        String(res.sub_curriculum_name || "").trim() || "이름 누락됨";
+                    } else {
+                      nextQ.sub_taxonomy_id = null;
+                      nextQ.sub_taxonomy_name = null;
+                    }
+                  }
+
+                  if (applyThinking) {
+                    const thkId = String(res.thinking_id || "").trim();
+                    if (thkId && !["NONE", "NULL"].includes(thkId.toUpperCase())) {
+                      nextQ.thk_taxonomy_id = thkId;
+                      nextQ.thk_taxonomy_name =
+                        String(res.thinking_name || "이름 누락됨").trim();
+                    } else {
+                      nextQ.thk_taxonomy_id = null;
+                      nextQ.thk_taxonomy_name = null;
+                    }
+                  }
+
+                  nextQ.difficulty = normalizeDifficultyForDb(res.difficulty);
+                  nextQ.problem_type = res.problem_type || nextQ.problem_type;
+                  nextQ.cognitive_level = res.cognitive_level || nextQ.cognitive_level;
+
+                  if (
+                    res.solving_probability !== null &&
+                    res.solving_probability !== undefined
+                  ) {
+                    const probInt = parseInt(String(res.solving_probability), 10);
+                    if (!isNaN(probInt)) {
+                      nextQ.solving_probability = Math.max(15, Math.min(95, probInt));
+                    }
+                  }
+
+                  nextQ.classification_status = "COMPLETE";
+                  return normalizeRecordForQuestionDb(nextQ, bookTitle);
+                });
+
+                return sortProblemsList(updated);
+              });
+
+              const elapsedSec = ((Date.now() - t0) / 1000).toFixed(1);
+              for (const qItem of myBatch) {
+                const r = resultMap.get(String(qItem.question_id).trim());
+                if (r) {
+                  completedCount++;
+                  const probDisp = r.solving_probability ? `${r.solving_probability}%` : "N/A";
+                  const subDisp = applySubTaxonomy ? ` | 서브교과: ${r.sub_curriculum_id || "-"}` : "";
+                  const thkDisp = applyThinking ? ` | 사고력: ${r.thinking_id || "-"}` : "";
+                  addLog(
+                    `✅ [타겟 완료: ${completedCount}/${pendingTasks.length}] Page: ${qItem.detected_page_num} (${qItem.question_number}번) | 교과: ${r.curriculum_id || "-"}${subDisp}${thkDisp} | 난이도: ${r.difficulty || "중"} (${probDisp}) [${elapsedSec}초]`
+                  );
+                }
+              }
+              setClassifyProgress({
+                completed: Math.min(completedCount, pendingTasks.length),
+                total: pendingTasks.length,
+              });
+            }
+          } catch (batchErr: any) {
+            addLog(`❌ 배치 분류 오류: ${batchErr.message}`);
+          }
+        }
+      };
+
+      await Promise.all(
+        Array.from({ length: Math.min(maxWorkers, batches.length) }, () =>
+          runBatchWorker()
+        )
+      );
+      addLog(`🎉 [Phase 2 트리플 분류 완료] 총 ${pendingTasks.length}개 문항 분류 및 정렬이 완료되었습니다!`);
+    } finally {
+      setIsClassifying(false);
+    }
+  };
+
+  // =========================================================
+  // 🛠️ Phase 3 (V302): 수식 마법 도구, 텍스트 편집, 4슬롯 이미지 크롭 & 클립보드 붙여넣기
+  // =========================================================
+  const updateCurrentProblemField = useCallback(
+    (field: string, value: any) => {
+      if (!currentProblem) return;
+      setProblems((prev) =>
+        prev.map((item, idx) => {
+          if (idx !== currentIdx) return item;
+          const updated = { ...item, [field]: value };
+          if (field === "book_name") {
+            updated.source_book_name = value;
+            setBookTitle(value);
+          }
+          return normalizeRecordForQuestionDb(updated, bookTitle);
+        })
+      );
+    },
+    [currentProblem, currentIdx, bookTitle]
+  );
+
+  const applyMagicFunction = (fn: (text: string) => string, label: string) => {
+    if (problems.length === 0) return;
+    setProblems((prev) =>
+      prev.map((item, idx) => {
+        if (!magicScopeAll && idx !== currentIdx) return item;
+        const copy = { ...item };
+        for (const f of TARGET_FIELDS) {
+          if (copy[f] && typeof copy[f] === "string") {
+            copy[f] = fn(copy[f]);
+          }
+        }
+        return copy;
+      })
+    );
+    addLog(
+      `🪄 [${label}] ${
+        magicScopeAll ? `전체 ${problems.length}문항` : `현재 문항(#${currentIdx + 1})`
+      } 적용 완료`
+    );
+  };
+
+  const handleAiFixLatex = async () => {
+    if (!currentProblem) return;
+    setIsAiFixingLatex(true);
+    try {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      const fieldsPayload: Record<string, string> = {};
+      for (const f of TARGET_FIELDS) {
+        if (currentProblem[f]) fieldsPayload[f] = currentProblem[f];
+      }
+
+      const res = await fetchWithRetryAndTimeout(
+        {
+          action: "fix_latex",
+          fields: fieldsPayload,
+        },
+        session?.access_token,
+        3,
+        60000
+      );
+
+      if (res && typeof res === "object") {
+        setProblems((prev) =>
+          prev.map((item, idx) => {
+            if (idx !== currentIdx) return item;
+            const next = { ...item };
+            for (const f of TARGET_FIELDS) {
+              if (res[f] && typeof res[f] === "string") {
+                next[f] = res[f].trim();
+              }
+            }
+            return next;
+          })
+        );
+        addLog(`🤖 AI 수식 자동 교정 완료 (문항 #${currentIdx + 1})`);
+      }
+    } catch (e: any) {
+      alert(`AI 수식 교정 실패: ${e.message}`);
+    } finally {
+      setIsAiFixingLatex(false);
+    }
+  };
+
+  // V302: 문제 1의 마지막 줄을 문제 2(question_2)로 내리기 / 다시 합치기
+  const handleSplitLastLineToQ2 = () => {
+    if (!currentProblem) return;
+    const rawQ = String(currentProblem.question || "").trimEnd();
+    const lines = rawQ.split("\n");
+    if (lines.length < 2) {
+      return alert(
+        "문제 1(question)이 한 줄뿐이어서 자동 분리할 수 없습니다. 직접 잘라내어 붙여넣어 주세요."
+      );
+    }
+    const lastLine = lines[lines.length - 1].trim();
+    const remainQ = lines.slice(0, -1).join("\n").trimEnd();
+    const existingQ2 = String(currentProblem.question_2 || "").trim();
+    const newQ2 = existingQ2 ? `${lastLine}\n${existingQ2}`.trim() : lastLine;
+
+    setProblems((prev) =>
+      prev.map((item, idx) =>
+        idx === currentIdx
+          ? { ...item, question: remainQ, question_2: newQ2 }
+          : item
+      )
+    );
+  };
+
+  const handleMergeQ2ToQ1 = () => {
+    if (!currentProblem) return;
+    const q2Curr = String(currentProblem.question_2 || "").trim();
+    if (!q2Curr) return;
+    const q1Curr = String(currentProblem.question || "").trimEnd();
+    const mergedQ = q1Curr ? `${q1Curr}\n${q2Curr}`.trim() : q2Curr;
+
+    setProblems((prev) =>
+      prev.map((item, idx) =>
+        idx === currentIdx
+          ? { ...item, question: mergedQ, question_2: null }
+          : item
+      )
+    );
+  };
+
+  // 이미지 슬롯 저장 헬퍼 (해상도 자동 측정 + image_box 기록)
+  const attachImageBlobToProblem = useCallback(
+    async (questionId: string, field: ImageSlotField, blob: Blob) => {
+      const previewUrl = URL.createObjectURL(blob);
+      const dims = await new Promise<{ w: number; h: number }>((resolve) => {
+        const img = new Image();
+        img.onload = () => resolve({ w: img.width, h: img.height });
+        img.onerror = () => resolve({ w: 0, h: 0 });
+        img.src = previewUrl;
+      });
+
+      const assetKey = `${questionId}_${field}`;
+      setImageAssets((prev) => ({
+        ...prev,
+        [assetKey]: {
+          blob,
+          previewUrl,
+          width: dims.w,
+          height: dims.h,
+        },
+      }));
+
+      const suffixMap: Record<ImageSlotField, string> = {
+        image_url: "core_1",
+        image_2_url: "core_2",
+        answer_image_url: "sol_1",
+        answer_image_2_url: "sol_2",
+      };
+      const fileName = `${questionId}_${suffixMap[field]}_paste.png`;
+
+      setProblems((prev) =>
+        prev.map((p) => {
+          if (p.question_id !== questionId) return p;
+          const next = { ...p, [field]: fileName };
+          if (field === "image_url") {
+            next.image_box = [0, 0, 1000, 1000];
+            next.image_type = "core";
+          } else if (field === "image_2_url") {
+            next.image_2_box = JSON.stringify([0, 0, 1000, 1000]);
+            next.image_2_type = "core";
+          } else if (field === "answer_image_url") {
+            next.answer_image_box = [0, 0, 1000, 1000];
+            next.answer_image_type = "solution";
+          }
+          return next;
+        })
+      );
+    },
+    []
+  );
+
+  // 전역 클립보드 붙여넣기(Ctrl+V) 리스너: activeCropTarget 슬롯이 선택되어 있으면 즉시 붙여넣기
+  useEffect(() => {
+    const handleGlobalPaste = async (e: ClipboardEvent) => {
+      if (!activeCropTarget) return;
+      const items = e.clipboardData?.items;
+      if (!items) return;
+      for (const item of Array.from(items)) {
+        if (item.type.startsWith("image/")) {
+          e.preventDefault();
+          const blob = item.getAsFile();
+          if (blob) {
+            await attachImageBlobToProblem(
+              activeCropTarget.questionId,
+              activeCropTarget.field,
+              blob
+            );
+            addLog(
+              `📋 클립보드 이미지 붙여넣기 완료 (${activeCropTarget.field})`
+            );
+            setActiveCropTarget(null);
+          }
+          break;
+        }
+      }
+    };
+    window.addEventListener("paste", handleGlobalPaste);
+    return () => window.removeEventListener("paste", handleGlobalPaste);
+  }, [activeCropTarget, attachImageBlobToProblem, addLog]);
+
+  // 클립보드 API 직접 읽기 버튼
+  const handleClipboardButtonPaste = async (
+    questionId: string,
+    field: ImageSlotField
+  ) => {
+    try {
+      if (!navigator.clipboard || !navigator.clipboard.read) {
+        setActiveCropTarget({ questionId, field });
+        return alert(
+          "슬롯이 선택되었습니다! 이제 키보드에서 Ctrl+V를 누르면 클립보드 이미지가 바로 들어갑니다."
+        );
+      }
+      const items = await navigator.clipboard.read();
+      for (const item of items) {
+        const imgType = item.types.find((t) => t.startsWith("image/"));
+        if (imgType) {
+          const blob = await item.getType(imgType);
+          await attachImageBlobToProblem(questionId, field, blob);
+          addLog(`📋 클립보드 이미지 붙여넣기 완료 (${field})`);
+          return;
+        }
+      }
+      setActiveCropTarget({ questionId, field });
+      alert("클립보드에 이미지가 없거나 권한이 필요합니다. Ctrl+V를 눌러 붙여넣으세요.");
+    } catch {
+      setActiveCropTarget({ questionId, field });
+      alert("타겟 슬롯이 활성화되었습니다. 이제 키보드 Ctrl+V를 누르면 바로 붙여넣어집니다!");
+    }
+  };
+
+  // V302: 가로 길이 통일 (비율 유지 리사이즈)
+  const handleResizeImageWidth = async (
+    questionId: string,
+    field: ImageSlotField,
+    targetWidth: number
+  ) => {
+    const assetKey = `${questionId}_${field}`;
+    const asset = imageAssets[assetKey];
+    const rawUrl = asset?.previewUrl || currentProblem?.[field];
+    if (!rawUrl) return;
+
+    try {
+      const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+        const el = new Image();
+        el.crossOrigin = "anonymous";
+        el.onload = () => resolve(el);
+        el.onerror = reject;
+        el.src = rawUrl;
+      });
+
+      if (img.width === targetWidth) return;
+      const newHeight = Math.round(img.height * (targetWidth / img.width));
+      const canvas = document.createElement("canvas");
+      canvas.width = targetWidth;
+      canvas.height = newHeight;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return;
+      ctx.drawImage(img, 0, 0, targetWidth, newHeight);
+
+      const resizedBlob = await new Promise<Blob | null>((res) =>
+        canvas.toBlob(res, "image/png")
+      );
+      if (resizedBlob) {
+        await attachImageBlobToProblem(questionId, field, resizedBlob);
+        addLog(
+          `📏 [${field}] 가로 해상도 ${targetWidth} x ${newHeight} px 통일 완료`
+        );
+      }
+    } catch (e: any) {
+      alert(`이미지 리사이즈 실패: ${e.message}`);
+    }
+  };
+
+  // 좌측 PDF 캔버스에서 드래그 크롭
+  const handleMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    if (!pdfDoc) return;
+    isCroppingRef.current = true;
+    const rect = e.currentTarget.getBoundingClientRect();
+    cropStartRef.current = { x: e.clientX - rect.left, y: e.clientY - rect.top };
+    cropRectRef.current = {
+      x: e.clientX - rect.left,
+      y: e.clientY - rect.top,
+      w: 0,
+      h: 0,
+    };
+
+    if (overlayRef.current) {
+      overlayRef.current.style.display = "none";
+      const isAns =
+        activeCropTarget?.field === "answer_image_url" ||
+        activeCropTarget?.field === "answer_image_2_url";
+      overlayRef.current.className = isAns
+        ? "absolute border-[3px] border-emerald-500 bg-emerald-500/20 pointer-events-none hidden z-20"
+        : "absolute border-[3px] border-indigo-500 bg-indigo-500/20 pointer-events-none hidden z-20";
+    }
+  };
+
+  const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!isCroppingRef.current || !cropStartRef.current) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const newRect = {
+      x: Math.min(cropStartRef.current.x, e.clientX - rect.left),
+      y: Math.min(cropStartRef.current.y, e.clientY - rect.top),
+      w: Math.abs(e.clientX - rect.left - cropStartRef.current.x),
+      h: Math.abs(e.clientY - rect.top - cropStartRef.current.y),
+    };
+    cropRectRef.current = newRect;
+
+    if (overlayRef.current) {
+      overlayRef.current.style.display = "block";
+      overlayRef.current.style.left = `${newRect.x}px`;
+      overlayRef.current.style.top = `${newRect.y}px`;
+      overlayRef.current.style.width = `${newRect.w}px`;
+      overlayRef.current.style.height = `${newRect.h}px`;
+    }
+  };
+
+  const handleMouseUp = async () => {
+    if (!isCroppingRef.current) return;
+    isCroppingRef.current = false;
+    if (overlayRef.current) overlayRef.current.style.display = "none";
+
+    const box = cropRectRef.current;
+    if (!box || box.w < 15 || box.h < 15 || !canvasRef.current) {
+      cropRectRef.current = null;
+      return;
+    }
+
+    const canvas = canvasRef.current;
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+
+    const tempCanvas = document.createElement("canvas");
+    tempCanvas.width = Math.round(box.w * scaleX);
+    tempCanvas.height = Math.round(box.h * scaleY);
+    const tCtx = tempCanvas.getContext("2d");
+    if (!tCtx) return;
+
+    tCtx.drawImage(
+      canvas,
+      box.x * scaleX,
+      box.y * scaleY,
+      box.w * scaleX,
+      box.h * scaleY,
+      0,
+      0,
+      tempCanvas.width,
+      tempCanvas.height
+    );
+    const blob = await new Promise<Blob | null>((res) =>
+      tempCanvas.toBlob(res, "image/png")
+    );
+    if (!blob) return;
+
+    if (activeCropTarget) {
+      await attachImageBlobToProblem(
+        activeCropTarget.questionId,
+        activeCropTarget.field,
+        blob
+      );
+      setActiveCropTarget(null);
+    } else if (currentProblem) {
+      await attachImageBlobToProblem(
+        currentProblem.question_id,
+        "image_url",
+        blob
+      );
+    } else {
+      // 문항이 하나도 없을 때 드래그하면 새 문항을 자동 생성하고 메인 이미지에 할당
+      const newId = generateUUID();
+      const newProb = normalizeRecordForQuestionDb(
+        {
+          question_id: newId,
+          detected_page_num: pageNum,
+          final_printed_page: String(pageNum),
+          question_number: "1",
+          sub_num: 0,
+          sub_sub_num: 0,
+          question: "",
+          answer: "",
+          difficulty: "중",
+          solving_probability: 50,
+          problem_type: "SUBJECTIVE",
+        },
+        bookTitle
+      );
+      setProblems([newProb]);
+      setCurrentIdx(0);
+      await attachImageBlobToProblem(newId, "image_url", blob);
+    }
+    cropRectRef.current = null;
+  };
+
+  // 슬롯 내 이미지 자체 재크롭 (V302 st_cropper 대응)
+  const handleInPlaceCropSave = async () => {
+    if (
+      !inPlaceCropModal ||
+      !inPlaceImgRef.current ||
+      !inPlaceCropRectRef.current
+    )
+      return;
+    const box = inPlaceCropRectRef.current;
+    if (box.w < 10 || box.h < 10) return;
+
+    const imgEl = inPlaceImgRef.current;
+    const rect = imgEl.getBoundingClientRect();
+    const scaleX = imgEl.naturalWidth / rect.width;
+    const scaleY = imgEl.naturalHeight / rect.height;
+
+    const tempCanvas = document.createElement("canvas");
+    tempCanvas.width = Math.round(box.w * scaleX);
+    tempCanvas.height = Math.round(box.h * scaleY);
+    const ctx = tempCanvas.getContext("2d");
+    if (!ctx) return;
+
+    ctx.drawImage(
+      imgEl,
+      box.x * scaleX,
+      box.y * scaleY,
+      box.w * scaleX,
+      box.h * scaleY,
+      0,
+      0,
+      tempCanvas.width,
+      tempCanvas.height
+    );
+    const blob = await new Promise<Blob | null>((res) =>
+      tempCanvas.toBlob(res, "image/png")
+    );
+    if (blob) {
+      await attachImageBlobToProblem(
+        inPlaceCropModal.questionId,
+        inPlaceCropModal.field,
+        blob
+      );
+      setInPlaceCropModal(null);
+      inPlaceCropRectRef.current = null;
+    }
+  };
+
+  // 4-Way 결재 핸들러 (V302)
+  const handleVerificationDecision = (
+    status: "APPROVED" | "PENDING" | "REJECTED"
+  ) => {
+    if (!currentProblem) return;
+    const isVerified = status === "APPROVED";
+    setProblems((prev) =>
+      prev.map((item, idx) =>
+        idx === currentIdx
+          ? {
+              ...item,
+              verification_status: status,
+              is_human_verified: isVerified,
+              human_verified: isVerified,
+            }
+          : item
+      )
+    );
+    if (currentIdx < problems.length - 1) {
+      selectProblemIndex(currentIdx + 1);
+    }
+  };
+
+  // 문항 추가 / 삭제
+  const handleAddEmptyProblem = () => {
+    const base = currentProblem || {};
+    const newProb = normalizeRecordForQuestionDb(
+      {
+        question_id: generateUUID(),
+        book_name: bookTitle || base.book_name || "",
+        source_book_name: bookTitle || base.source_book_name || "",
+        pdf_source: selectedPdfName || base.pdf_source || null,
+        final_printed_page: base.final_printed_page || String(pageNum),
+        detected_page_num: base.detected_page_num || pageNum,
+        question_number: "",
+        sub_num: 0,
+        sub_sub_num: 0,
+        problem_type: "SUBJECTIVE",
+        cognitive_level: "이해 및 연산",
+        difficulty: "중",
+        solving_probability: 50,
+        taxonomy_id: null,
+        taxonomy_name: "미분류",
+        sub_taxonomy_id: null,
+        sub_taxonomy_name: null,
+        thk_taxonomy_id: null,
+        thk_taxonomy_name: null,
+        question: "",
+        question_2: null,
+        answer: "",
+        step_1_concept: "",
+        step_2_approach: "",
+        step_3_process: "",
+        step_4_conclusion: "",
+        ai_status: "완료",
+        classification_status: "COMPLETE",
+        verification_status: "PENDING",
+        is_human_verified: false,
+        human_verified: false,
+      },
+      bookTitle
+    );
+
+    setProblems((prev) => {
+      const next = [...prev];
+      next.splice(currentIdx + 1, 0, newProb);
+      return next;
+    });
+    setCurrentIdx((prev) => prev + 1);
+  };
+
+  const handleDeleteCurrentProblem = () => {
+    if (!currentProblem) return;
+    if (problems.length <= 1) {
+      if (!confirm("마지막 남은 문항입니다. 대기열을 모두 비우시겠습니까?")) return;
+      setProblems([]);
+      setCurrentIdx(0);
+      localStorage.removeItem(STORAGE_CACHE_KEY);
+      return;
+    }
+    setProblems((prev) => prev.filter((_, idx) => idx !== currentIdx));
+    if (currentIdx >= problems.length - 1) {
+      setCurrentIdx(Math.max(0, problems.length - 2));
+    }
+  };
+
+  // =========================================================
+  // 💾 JSON 내보내기 & 🚀 Supabase question_db + textbook_question 일괄 적재
+  // =========================================================
+  const handleForceApplyBookTitle = () => {
+    const forced = bookTitle.trim();
+    if (!forced) return alert("강제 지정할 교재 이름을 입력해주세요.");
+    setProblems((prev) =>
+      prev.map((p) => ({
+        ...p,
+        book_name: forced,
+        source_book_name: forced,
+      }))
+    );
+    addLog(`📚 전체 ${problems.length}개 문항의 교재명을 [${forced}](으)로 일괄 변경했습니다.`);
+  };
+
+  const handleExportJson = () => {
+    if (problems.length === 0) return alert("내보낼 문항 데이터가 없습니다.");
+    const forced = bookTitle.trim();
+    const normalized = sortProblemsList(
+      problems.map((p) => {
+        const norm = normalizeRecordForQuestionDb(p, forced);
+        if (forced) {
+          norm.book_name = forced;
+          norm.source_book_name = forced;
+        }
+        return norm;
+      })
+    );
+    const blob = new Blob([JSON.stringify(normalized, null, 2)], {
+      type: "application/json;charset=utf-8",
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    const safeTitle = (bookTitle || "Problems").replace(/[\\/:*?"<>|]/g, "_");
+    a.download = `${safeTitle}_Classified.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleUploadToSupabase = async () => {
+    if (!bookTitle.trim()) return alert("저장될 마스터 교재명을 입력해주세요.");
+    if (problems.length === 0) return alert("업로드할 문항이 없습니다.");
+
+    setIsUploadingDb(true);
+    try {
+      const sorted = sortProblemsList(
+        problems.map((p) => normalizeRecordForQuestionDb(p, bookTitle.trim()))
+      );
+
+      let upsertedCount = 0;
+
+      for (const item of sorted) {
+        const qId = item.question_id;
+        const uploadedUrls: Partial<Record<ImageSlotField, string | null>> = {};
+
+        const slotConfigs: { field: ImageSlotField; suffix: string }[] = [
+          { field: "image_url", suffix: "core_1" },
+          { field: "image_2_url", suffix: "core_2" },
+          { field: "answer_image_url", suffix: "sol_1" },
+          { field: "answer_image_2_url", suffix: "sol_2" },
+        ];
+
+        for (const { field, suffix } of slotConfigs) {
+          const asset = imageAssets[`${qId}_${field}`];
+          if (asset?.blob) {
+            const storagePath = `questions/${qId}_${suffix}_${Date.now()}.png`;
+            const { error: upErr } = await supabase.storage
+              .from("system_images")
+              .upload(storagePath, asset.blob, { upsert: true });
+            if (!upErr) {
+              uploadedUrls[field] = supabase.storage
+                .from("system_images")
+                .getPublicUrl(storagePath).data.publicUrl;
+            }
+          } else {
+            uploadedUrls[field] = item[field] || null;
+          }
+        }
+
+        const finalBookName = bookTitle.trim();
+
+        if (updateExistingOnlyMeta) {
+          const { error: metaErr } = await supabase
+            .from("question_db")
+            .update({
+              taxonomy_id: item.taxonomy_id || null,
+              taxonomy_name: item.taxonomy_name || null,
+              sub_taxonomy_id: item.sub_taxonomy_id || null,
+              sub_taxonomy_name: item.sub_taxonomy_name || null,
+              thk_taxonomy_id: item.thk_taxonomy_id || null,
+              thk_taxonomy_name: item.thk_taxonomy_name || null,
+              difficulty: item.difficulty || "중",
+              solving_probability: item.solving_probability ?? 50,
+              cognitive_level: item.cognitive_level || null,
+              problem_type: item.problem_type || "SUBJECTIVE",
+              ...(finalBookName
+                ? { book_name: finalBookName, source_book_name: finalBookName }
+                : {}),
+              updated_at: new Date().toISOString(),
+            })
+            .eq("question_id", qId);
+          if (metaErr) throw metaErr;
+          upsertedCount++;
+          continue;
+        }
+
+        const dbPayload = {
+          question_id: qId,
+          parent_question_id: item.parent_question_id || null,
+          pdf_source: item.pdf_source || selectedPdfName || null,
+          book_name: finalBookName || item.book_name || null,
+          source_book_name: finalBookName || item.source_book_name || item.book_name || null,
+          detected_page_num: Number(item.detected_page_num) || 1,
+          final_printed_page: item.final_printed_page || String(item.detected_page_num || 1),
+          question_number: String(item.question_number || "1"),
+          sub_num: Number(item.sub_num) || 0,
+          sub_sub_num: Number(item.sub_sub_num) || 0,
+          problem_type: item.problem_type || "SUBJECTIVE",
+          difficulty: item.difficulty || "중",
+          solving_probability: item.solving_probability ?? 50,
+          cognitive_level: item.cognitive_level || null,
+          taxonomy_id: item.taxonomy_id || null,
+          taxonomy_name: item.taxonomy_name || null,
+          sub_taxonomy_id: item.sub_taxonomy_id || null,
+          sub_taxonomy_name: item.sub_taxonomy_name || null,
+          thk_taxonomy_id: item.thk_taxonomy_id || null,
+          thk_taxonomy_name: item.thk_taxonomy_name || null,
+          question: item.question || "수동 이미지 추출 문항",
+          question_2: item.question_2 || null,
+          options: item.options || null,
+          answer: item.answer || null,
+          step_1_concept: item.step_1_concept || null,
+          step_2_approach: item.step_2_approach || null,
+          step_3_process: item.step_3_process || null,
+          step_4_conclusion: item.step_4_conclusion || null,
+          image_url: uploadedUrls.image_url ?? null,
+          image_box: item.image_box || null,
+          image_type: item.image_type || null,
+          image_2_url: uploadedUrls.image_2_url ?? null,
+          image_2_box: item.image_2_box || null,
+          image_2_type: item.image_2_type || null,
+          answer_image_url: uploadedUrls.answer_image_url ?? null,
+          answer_image_box: item.answer_image_box || null,
+          answer_image_type: item.answer_image_type || null,
+          answer_image_2_url: uploadedUrls.answer_image_2_url ?? null,
+          ai_status: item.ai_status || "완료",
+          classification_status: item.classification_status || "COMPLETE",
+          verification_status: item.verification_status || "APPROVED",
+          is_human_verified: Boolean(item.is_human_verified ?? true),
+          ai_gradable: item.ai_gradable ?? true,
+        };
+
+        const { error: dbErr } = await supabase
+          .from("question_db")
+          .upsert(dbPayload, { onConflict: "question_id" });
+
+        if (dbErr) throw dbErr;
+        upsertedCount++;
+      }
+
+      alert(`✅ 총 ${upsertedCount}개의 문항이 Supabase question_db에 완벽히 반영되었습니다!\n\n적용된 강제 교재명(book_name): ${bookTitle.trim()}`);
+      addLog(`🚀 Supabase question_db에 ${upsertedCount}개 문항 일괄 반영 완료!`);
+    } catch (e: any) {
+      alert(`DB 적재 중 오류 발생: ${e.message}`);
+    } finally {
+      setIsUploadingDb(false);
+    }
+  };
+
+  // 이미지 슬롯 렌더러 (V302 4슬롯 대응)
+  const renderImageSlotCard = (
+    field: ImageSlotField,
+    title: string,
+    badgeColor: string
+  ) => {
+    if (!currentProblem) return null;
+    const qId = currentProblem.question_id;
+    const assetKey = `${qId}_${field}`;
+    const asset = imageAssets[assetKey];
+    const rawVal = currentProblem[field];
+    const displayUrl =
+      asset?.previewUrl ||
+      (rawVal &&
+      (String(rawVal).startsWith("http") ||
+        String(rawVal).startsWith("data:") ||
+        String(rawVal).startsWith("blob:"))
+        ? String(rawVal)
+        : rawVal
+        ? `${
+            process.env.NEXT_PUBLIC_SUPABASE_URL ||
+            "https://kfwlmbwornivkrvoeqdh.supabase.co"
+          }/storage/v1/object/public/question_images/${String(rawVal).replace(
+            /^\/+/,
+            ""
+          )}`
+        : "");
+
+    const isTargeted =
+      activeCropTarget?.questionId === qId && activeCropTarget?.field === field;
+    const targetW = targetWidths[assetKey] || 800;
+
+    return (
+      <div
+        key={field}
+        className={`rounded-xl border p-3 flex flex-col gap-2 transition-all ${
+          isTargeted
+            ? "border-indigo-500 bg-indigo-50/40 ring-2 ring-indigo-400"
+            : "border-slate-200 bg-white"
+        }`}
+      >
+        <div className="flex items-center justify-between gap-2">
+          <span className={`text-xs font-extrabold px-2 py-0.5 rounded ${badgeColor}`}>
+            {title}
+          </span>
+          {asset?.width && asset?.height ? (
+            <span className="text-[11px] font-bold text-slate-500">
+              해상도: {asset.width} × {asset.height} px
+            </span>
+          ) : rawVal ? (
+            <span className="text-[11px] font-mono text-slate-400 truncate max-w-[160px]">
+              {String(rawVal)}
+            </span>
+          ) : (
+            <span className="text-[11px] text-slate-400 font-semibold">없음</span>
+          )}
+        </div>
+
+        {displayUrl ? (
+          <div className="flex flex-col gap-2">
+            <div className="relative w-full h-36 bg-slate-100 rounded-lg border border-slate-200 flex items-center justify-center p-1.5 overflow-hidden">
+              <img
+                src={displayUrl}
+                alt={title}
+                className="max-w-full max-h-full object-contain mix-blend-multiply"
+              />
+            </div>
+            <div className="grid grid-cols-3 gap-1.5">
+              <button
+                onClick={() =>
+                  setInPlaceCropModal({
+                    questionId: qId,
+                    field,
+                    srcUrl: displayUrl,
+                  })
+                }
+                className="px-2 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded text-[11px] font-bold"
+              >
+                ✂️ 다시 자르기
+              </button>
+              <div className="flex items-center gap-1">
+                <input
+                  type="number"
+                  min={100}
+                  max={3000}
+                  step={50}
+                  value={targetW}
+                  onChange={(e) =>
+                    setTargetWidths((prev) => ({
+                      ...prev,
+                      [assetKey]: Number(e.target.value) || 800,
+                    }))
+                  }
+                  className="w-14 px-1 py-1 border border-slate-300 rounded text-[11px] font-bold text-center"
+                />
+                <button
+                  onClick={() => handleResizeImageWidth(qId, field, targetW)}
+                  className="flex-1 px-1.5 py-1.5 bg-slate-700 hover:bg-slate-600 text-white rounded text-[11px] font-bold whitespace-nowrap"
+                >
+                  📏 폭통일
+                </button>
+              </div>
+              <button
+                onClick={() => {
+                  setImageAssets((prev) => {
+                    const copy = { ...prev };
+                    delete copy[assetKey];
+                    return copy;
+                  });
+                  updateCurrentProblemField(field, null);
+                }}
+                className="px-2 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 rounded text-[11px] font-bold"
+              >
+                ❌ 사진 폭파
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="grid grid-cols-3 gap-1.5">
+            <button
+              onClick={() =>
+                setActiveCropTarget(isTargeted ? null : { questionId: qId, field })
+              }
+              className={`py-2 px-2 rounded-lg border-2 border-dashed text-[11px] font-bold flex flex-col items-center justify-center gap-0.5 transition-colors ${
+                isTargeted
+                  ? "border-indigo-500 bg-indigo-100 text-indigo-800 animate-pulse"
+                  : "border-slate-300 bg-slate-50 hover:bg-slate-100 text-slate-600"
+              }`}
+            >
+              <span>🎯 PDF 드래그</span>
+              <span className="text-[10px] opacity-75">
+                {isTargeted ? "좌측 드래그 대기중" : "영역 자르기"}
+              </span>
+            </button>
+            <button
+              onClick={() => handleClipboardButtonPaste(qId, field)}
+              className="py-2 px-2 rounded-lg border border-emerald-300 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 text-[11px] font-bold flex flex-col items-center justify-center gap-0.5"
+            >
+              <span>📋 클립보드</span>
+              <span className="text-[10px] opacity-75">Ctrl+V 붙여넣기</span>
+            </button>
+            <label className="py-2 px-2 rounded-lg border border-slate-300 bg-slate-50 hover:bg-slate-100 text-slate-700 text-[11px] font-bold flex flex-col items-center justify-center gap-0.5 cursor-pointer">
+              <span>📥 파일 업로드</span>
+              <span className="text-[10px] opacity-75">PNG / JPG</span>
+              <input
+                type="file"
+                accept="image/png,image/jpeg"
+                className="hidden"
+                onChange={async (e) => {
+                  const f = e.target.files?.[0];
+                  if (f) await attachImageBlobToProblem(qId, field, f);
+                  e.target.value = "";
+                }}
+              />
+            </label>
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  if (isAuthorized === null) {
+    return (
+      <div className="p-10 text-center font-bold text-slate-400">
+        권한 확인 중...
+      </div>
+    );
+  }
+  if (isAuthorized === false) return null;
+
+  const filteredPdfQueue = pdfQueue.filter(
+    (item) =>
+      !pdfSearchKeyword.trim() ||
+      item.name.toLowerCase().includes(pdfSearchKeyword.trim().toLowerCase())
+  );
+
+  return (
+    <div className="flex flex-col h-full bg-slate-100 font-pretendard p-3 sm:p-4 overflow-hidden gap-3">
+      {/* =========================================================
+          상단 컨트롤 헤더: 파이프라인 탭 (Phase 1 / Phase 2 / Phase 3 V302) & JSON/DB 입출력
+      ========================================================= */}
+      <div className="bg-slate-900 rounded-2xl px-4 py-3 shadow-lg flex flex-wrap justify-between items-center shrink-0 gap-3">
+        <div className="flex items-center gap-3">
+          <div>
+            <h1 className="text-lg sm:text-xl font-extrabold text-white flex items-center gap-2">
+              <span>👑</span> Ultimate 로지카 PDF 추출·분류·검수 센터
+              <span className="text-[11px] bg-indigo-500 text-white px-2 py-0.5 rounded-full font-bold">
+                V119.1 + V4.4.0 + V302 통합판
+              </span>
+            </h1>
+            <p className="text-xs text-slate-400 font-medium">
+              Phase 1 (비전 추출 + 4단계 풀이) ➔ Phase 2 (교과 Depth8 + 서브교과 + 사고력 분류) ➔ Phase 3 (V302 수식 마법도구 & 4슬롯 이미지 검수)
+            </p>
+          </div>
+        </div>
+
+        {/* 단계 전환 탭 */}
+        <div className="flex items-center gap-1.5 bg-slate-800 p-1 rounded-xl border border-slate-700">
+          <button
+            onClick={() => setActivePipelineTab("PHASE1")}
+            className={`px-3 py-1.5 rounded-lg text-xs font-extrabold transition-all ${
+              activePipelineTab === "PHASE1"
+                ? "bg-indigo-600 text-white shadow"
+                : "text-slate-300 hover:text-white hover:bg-slate-700"
+            }`}
+          >
+            1️⃣ Phase 1: PDF 추출 & 풀이
+          </button>
+          <button
+            onClick={() => setActivePipelineTab("PHASE2")}
+            className={`px-3 py-1.5 rounded-lg text-xs font-extrabold transition-all ${
+              activePipelineTab === "PHASE2"
+                ? "bg-violet-600 text-white shadow"
+                : "text-slate-300 hover:text-white hover:bg-slate-700"
+            }`}
+          >
+            2️⃣ Phase 2: 트리플 정밀 분류
+          </button>
+          <button
+            onClick={() => setActivePipelineTab("PHASE3")}
+            className={`px-3 py-1.5 rounded-lg text-xs font-extrabold transition-all ${
+              activePipelineTab === "PHASE3"
+                ? "bg-emerald-600 text-white shadow"
+                : "text-slate-300 hover:text-white hover:bg-slate-700"
+            }`}
+          >
+            3️⃣ Phase 3: V302 수식·이미지 검수 ({problems.length})
+          </button>
+        </div>
+
+        {/* 우측: 강제 지정 교재명(book_name) + JSON 불러오기 / 내보내기 / DB 저장 */}
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="flex items-center gap-1.5 bg-slate-800 px-2.5 py-1 rounded-xl border border-indigo-500/50">
+            <span className="text-[11px] font-extrabold text-indigo-300 whitespace-nowrap">
+              📚 강제 지정 교재명(book_name):
+            </span>
+            <input
+              type="text"
+              value={bookTitle}
+              onChange={(e) => setBookTitle(e.target.value)}
+              placeholder="PDF/JSON 업로드 시 자동입력 (직접 수정 시 강제 덮어쓰기)"
+              className="w-52 px-2 py-1 bg-slate-900 text-white border border-slate-600 rounded-lg text-xs font-extrabold focus:outline-none focus:border-indigo-400"
+            />
+            <button
+              onClick={handleForceApplyBookTitle}
+              disabled={problems.length === 0 || !bookTitle.trim()}
+              className="px-2 py-1 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white rounded-md text-[11px] font-extrabold whitespace-nowrap"
+              title="현재 대기열의 모든 문항 book_name / source_book_name에 이 교재명을 즉시 일괄 덮어씁니다."
+            >
+              전체적용
+            </button>
+          </div>
+          <label className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-600 rounded-lg text-xs font-bold cursor-pointer flex items-center gap-1">
+            <span>📂</span> PDF / JSON 불러오기
+            <input
+              type="file"
+              accept=".pdf,.json"
+              multiple
+              className="hidden"
+              onChange={(e) => handleFilesSelected(e.target.files)}
+            />
+          </label>
+          <button
+            onClick={handleExportJson}
+            disabled={problems.length === 0}
+            className="px-3 py-1.5 bg-amber-500 hover:bg-amber-400 disabled:opacity-40 text-slate-950 rounded-lg text-xs font-extrabold flex items-center gap-1"
+          >
+            <span>💾</span> JSON 저장 ({problems.length})
+          </button>
+          <button
+            onClick={handleUploadToSupabase}
+            disabled={problems.length === 0 || isUploadingDb}
+            className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white rounded-lg text-xs font-extrabold flex items-center gap-1 shadow"
+          >
+            {isUploadingDb ? "🚀 적재 중..." : "🚀 DB 일괄 적재"}
+          </button>
+          <button
+            onClick={() => {
+              if (problems.length === 0 || confirm("현재 대기열의 모든 문항과 임시저장 캐시를 초기화하시겠습니까?")) {
+                clearWorkspaceData(true);
+                addLog("🗑️ 작업 대기열 및 임시저장 캐시를 모두 초기화했습니다.");
+              }
+            }}
+            disabled={problems.length === 0}
+            className="px-2.5 py-1.5 bg-rose-600/80 hover:bg-rose-600 disabled:opacity-40 text-white rounded-lg text-xs font-extrabold flex items-center gap-1"
+            title="이전 작업 문항과 로컬 임시저장 데이터를 깨끗하게 비웁니다."
+          >
+            🗑️ 초기화
+          </button>
+        </div>
+      </div>
+
+      {/* =========================================================
+          단계별 설정 컨트롤 바 (Phase 1 / Phase 2 / Phase 3 마법도구)
+      ========================================================= */}
+      {activePipelineTab === "PHASE1" && (
+        <div className="bg-white rounded-xl border border-slate-200 p-3 shadow-sm flex flex-wrap items-center justify-between gap-3 shrink-0">
+          {/* 1. 파일 선택 / 전체 일괄 모드 */}
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="flex items-center gap-1.5 bg-slate-100 px-2.5 py-1.5 rounded-lg border border-slate-200">
+              <label className="flex items-center gap-1.5 text-xs font-extrabold text-slate-700 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={runAllPdfsMode}
+                  onChange={(e) => setRunAllPdfsMode(e.target.checked)}
+                  className="rounded text-indigo-600"
+                />
+                <span>🎯 [1/2] 대기열 모든 PDF 일괄 작업 ({pdfQueue.length}개)</span>
+              </label>
+            </div>
+
+            {!runAllPdfsMode && pdfQueue.length > 0 && (
+              <div className="flex items-center gap-1.5">
+                <input
+                  type="text"
+                  value={pdfSearchKeyword}
+                  onChange={(e) => setPdfSearchKeyword(e.target.value)}
+                  placeholder="파일명 일부 검색..."
+                  className="w-32 px-2 py-1 border border-slate-300 rounded text-xs font-bold"
+                />
+                <select
+                  value={selectedPdfName}
+                  onChange={(e) => {
+                    const found = pdfQueue.find((p) => p.name === e.target.value);
+                    if (found) activateQueuedPdf(found);
+                  }}
+                  className="px-2 py-1 border border-slate-300 rounded text-xs font-bold text-indigo-700 bg-white max-w-[220px]"
+                >
+                  {filteredPdfQueue.map((item) => (
+                    <option key={item.name} value={item.name}>
+                      {item.name} ({item.numPages}쪽)
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            {/* 추출 모드 선택 (문제만 vs 문제+4단계해설) */}
+            <div className="flex items-center gap-1 bg-indigo-50 p-1 rounded-lg border border-indigo-200">
+              <button
+                onClick={() => setExtractMode("PROBLEMS_ONLY")}
+                className={`px-2.5 py-1 rounded text-xs font-extrabold transition-colors ${
+                  extractMode === "PROBLEMS_ONLY"
+                    ? "bg-indigo-600 text-white"
+                    : "text-indigo-700 hover:bg-indigo-100"
+                }`}
+              >
+                ⚡ 문제만 추출 (V114.1 초고속)
+              </button>
+              <button
+                onClick={() => setExtractMode("WITH_SOLUTION")}
+                className={`px-2.5 py-1 rounded text-xs font-extrabold transition-colors ${
+                  extractMode === "WITH_SOLUTION"
+                    ? "bg-indigo-600 text-white"
+                    : "text-indigo-700 hover:bg-indigo-100"
+                }`}
+              >
+                🧠 문제 + 4단계 해설 추출 (V119.1)
+              </button>
+            </div>
+          </div>
+
+          {/* 2. 페이지 범위 & 동시성 & 이어하기 & 실행 버튼 */}
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="flex items-center gap-1 text-xs font-bold text-slate-700 bg-slate-50 px-2.5 py-1 rounded-lg border border-slate-200">
+              <span>스캔 페이지:</span>
+              <input
+                type="number"
+                min={1}
+                max={numPages || 999}
+                value={aiStartPage}
+                onChange={(e) => setAiStartPage(Number(e.target.value) || 1)}
+                className="w-12 px-1 py-0.5 border border-slate-300 rounded text-center font-extrabold"
+              />
+              <span>~</span>
+              <input
+                type="number"
+                min={1}
+                max={numPages || 999}
+                value={aiEndPage}
+                onChange={(e) => setAiEndPage(Number(e.target.value) || 1)}
+                className="w-12 px-1 py-0.5 border border-slate-300 rounded text-center font-extrabold"
+              />
+            </div>
+
+            <div className="flex items-center gap-1 text-xs font-bold text-slate-700 bg-slate-50 px-2.5 py-1 rounded-lg border border-slate-200">
+              <span>병렬 페이지:</span>
+              <select
+                value={pageConcurrency}
+                onChange={(e) => setPageConcurrency(Number(e.target.value))}
+                className="px-1 py-0.5 border border-slate-300 rounded font-extrabold bg-white"
+              >
+                {[1, 2, 3, 4, 5].map((n) => (
+                  <option key={n} value={n}>
+                    {n}장 동시
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <label className="flex items-center gap-1 text-xs font-bold text-slate-700 bg-emerald-50 px-2.5 py-1 rounded-lg border border-emerald-200 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={useResumeTracker}
+                onChange={(e) => setUseResumeTracker(e.target.checked)}
+              />
+              <span>🛡️ 완료 페이지 이어하기</span>
+            </label>
+            {selectedPdfName &&
+              (completedPagesMap[selectedPdfName]?.length || 0) > 0 && (
+                <button
+                  onClick={() =>
+                    setCompletedPagesMap((prev) => ({
+                      ...prev,
+                      [selectedPdfName]: [],
+                    }))
+                  }
+                  className="text-[11px] font-bold text-rose-600 hover:underline"
+                >
+                  (진도장 초기화: {completedPagesMap[selectedPdfName].length}쪽 완료됨)
+                </button>
+              )}
+
+            {isAiScanning ? (
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-extrabold text-indigo-700 bg-indigo-50 px-3 py-1.5 rounded-lg border border-indigo-200 animate-pulse">
+                  ⏳ {aiProgress.phaseLabel} ({aiProgress.current}/{aiProgress.total})
+                </span>
+                <button
+                  onClick={() => {
+                    abortScanRef.current = true;
+                  }}
+                  className="px-3 py-1.5 bg-rose-600 hover:bg-rose-500 text-white text-xs font-extrabold rounded-lg"
+                >
+                  ⏹ 중단
+                </button>
+              </div>
+            ) : (
+              <>
+                <button
+                  onClick={handleStartPhase1Scan}
+                  className="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-extrabold rounded-lg shadow flex items-center gap-1.5"
+                >
+                  <span>🚀</span> Phase 1 추출 시작
+                </button>
+                <button
+                  onClick={handleSolveMissingAnswers}
+                  disabled={problems.length === 0}
+                  className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-white text-xs font-bold rounded-lg"
+                  title="문제만 추출한 뒤 정답/4단계 해설이 비어있는 문항만 골라 해설을 생성합니다."
+                >
+                  💡 미완성 4단계 해설 생성
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
+      {activePipelineTab === "PHASE2" && (
+        <div className="bg-white rounded-xl border border-violet-200 p-3 shadow-sm flex flex-wrap items-center justify-between gap-3 shrink-0">
+          <div className="flex flex-wrap items-center gap-2.5">
+            {/* [1/5] 메인 교과 단원 코드 */}
+            <div className="flex items-center gap-1.5 bg-violet-50 px-2.5 py-1.5 rounded-lg border border-violet-200">
+              <span className="text-xs font-extrabold text-violet-900">
+                🎯 [1/5] 메인 교과 Prefix:
+              </span>
+              <input
+                type="text"
+                value={mainPrefixSpec}
+                onChange={(e) => setMainPrefixSpec(e.target.value)}
+                placeholder="예: E41 또는 E4"
+                className="w-24 px-2 py-0.5 border border-violet-300 rounded text-xs font-extrabold text-violet-900 bg-white"
+              />
+              <span className="text-[11px] font-bold text-violet-600">
+                (D7: {taxonomyGuides.filtCatCount} / D8: {taxonomyGuides.filtItemCount})
+              </span>
+            </div>
+
+            {/* [2/5] 서브 단원 코드 범위 */}
+            <div className="flex items-center gap-1.5 bg-blue-50 px-2.5 py-1.5 rounded-lg border border-blue-200">
+              <span className="text-xs font-extrabold text-blue-900">
+                🧭 [2/5] 서브 교과 범위:
+              </span>
+              <input
+                type="text"
+                value={subPrefixSpec}
+                onChange={(e) => setSubPrefixSpec(e.target.value)}
+                placeholder="예: E31~E52 (미사용시 비움)"
+                className="w-36 px-2 py-0.5 border border-blue-300 rounded text-xs font-extrabold text-blue-900 bg-white"
+              />
+              {taxonomyGuides.subPrefixes.length > 0 && (
+                <span className="text-[11px] font-bold text-blue-600">
+                  ({taxonomyGuides.subPrefixes.join(",")} | D8:{" "}
+                  {taxonomyGuides.subFiltItemCount})
+                </span>
+              )}
+            </div>
+
+            {/* [3/5] 사고력(THK) 분류 진행 */}
+            <label className="flex items-center gap-1.5 bg-amber-50 px-2.5 py-1.5 rounded-lg border border-amber-200 text-xs font-extrabold text-amber-900 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={applyThinking}
+                onChange={(e) => setApplyThinking(e.target.checked)}
+              />
+              <span>🧠 [3/5] 사고력(THK) 분류 ({thinkingCategories.length}개 후보)</span>
+            </label>
+
+            {/* [4/5] 타겟 페이지 범위 */}
+            <div className="flex items-center gap-1.5 bg-slate-50 px-2.5 py-1.5 rounded-lg border border-slate-200">
+              <span className="text-xs font-bold text-slate-700">
+                📄 [4/5] 페이지 범위:
+              </span>
+              <input
+                type="text"
+                value={classifyPageRange}
+                onChange={(e) => setClassifyPageRange(e.target.value)}
+                placeholder="예: 15 또는 10-20 (전체는 비움)"
+                className="w-36 px-2 py-0.5 border border-slate-300 rounded text-xs font-bold bg-white"
+              />
+            </div>
+
+            {/* [5/5] Depth 7 이하 자동 재작업 필터 & 배치 크기 */}
+            <label className="flex items-center gap-1.5 bg-slate-50 px-2.5 py-1.5 rounded-lg border border-slate-200 text-xs font-bold text-slate-700 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={classifyOnlyRework}
+                onChange={(e) => setClassifyOnlyRework(e.target.checked)}
+              />
+              <span>🔍 미분류 & Depth 7 이하만 재작업</span>
+            </label>
+            <div className="flex items-center gap-1 bg-slate-50 px-2 py-1.5 rounded-lg border border-slate-200 text-xs font-bold text-slate-700">
+              <span>배치:</span>
+              <select
+                value={classifyBatchSize}
+                onChange={(e) => setClassifyBatchSize(Number(e.target.value))}
+                className="bg-white border border-slate-300 rounded px-1 py-0.5 font-extrabold"
+              >
+                <option value={5}>5문항씩 (초고속)</option>
+                <option value={10}>10문항씩</option>
+                <option value={15}>15문항씩 (Colab 기본)</option>
+              </select>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            {isTaxonomyLoading && (
+              <span className="text-xs font-bold text-slate-400">
+                교과 DB 로딩 중...
+              </span>
+            )}
+            <button
+              onClick={handleRunPhase2Classification}
+              disabled={isClassifying || problems.length === 0 || isTaxonomyLoading}
+              className="px-4 py-1.5 bg-violet-600 hover:bg-violet-500 disabled:opacity-40 text-white text-xs font-extrabold rounded-lg shadow flex items-center gap-1.5"
+            >
+              {isClassifying
+                ? `🧭 분류 중... (${classifyProgress.completed}/${classifyProgress.total})`
+                : "🚀 Phase 2 정밀 분류 실행"}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {activePipelineTab === "PHASE3" && (
+        <div className="bg-white rounded-xl border border-emerald-200 p-2.5 shadow-sm flex flex-wrap items-center justify-between gap-2 shrink-0">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="text-xs font-extrabold text-slate-800 mr-1">
+              🛠️ V302 수식 마법 도구:
+            </span>
+            <label className="flex items-center gap-1 text-[11px] font-extrabold text-indigo-700 bg-indigo-50 px-2 py-1 rounded border border-indigo-200 cursor-pointer mr-1">
+              <input
+                type="checkbox"
+                checked={magicScopeAll}
+                onChange={(e) => setMagicScopeAll(e.target.checked)}
+              />
+              <span>전체 문항 일괄 적용</span>
+            </label>
+
+            <button
+              onClick={handleAiFixLatex}
+              disabled={isAiFixingLatex || !currentProblem}
+              className="px-2.5 py-1 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white rounded text-[11px] font-extrabold"
+            >
+              {isAiFixingLatex ? "🤖 교정 중..." : "🤖 ✨ AI 수식 자동 교정"}
+            </button>
+            <button
+              onClick={() => applyMagicFunction(runFiveCombo, "5단 콤보")}
+              className="px-2.5 py-1 bg-rose-600 hover:bg-rose-500 text-white rounded text-[11px] font-extrabold"
+            >
+              🚀 5단 콤보
+            </button>
+            <button
+              onClick={() => applyMagicFunction(cleanLatex, "V302 정제엔진")}
+              className="px-2 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded text-[11px] font-extrabold"
+            >
+              ✨ 자동정제
+            </button>
+            <button
+              onClick={() =>
+                applyMagicFunction(resetDollarAndText, "$/\\text 초기화")
+              }
+              className="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded text-[11px] font-bold border border-slate-300"
+            >
+              🗑️ $/\text 초기화
+            </button>
+            <button
+              onClick={() => applyMagicFunction(forceInsertDfracDollar, "\\dfrac")}
+              className="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded text-[11px] font-bold border border-slate-300"
+            >
+              💵 \dfrac
+            </button>
+            <button
+              onClick={() => applyMagicFunction(forceInsertDivDollar, "\\div")}
+              className="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded text-[11px] font-bold border border-slate-300"
+            >
+              ➗ \div
+            </button>
+            <button
+              onClick={() => applyMagicFunction(forceInsertTimesDollar, "\\times")}
+              className="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded text-[11px] font-bold border border-slate-300"
+            >
+              ✖️ \times
+            </button>
+            <button
+              onClick={() => applyMagicFunction(convertSlashToDfrac, "분수화")}
+              className="px-2 py-1 bg-amber-50 hover:bg-amber-100 text-amber-800 rounded text-[11px] font-bold border border-amber-300"
+            >
+              🍰 분수화
+            </button>
+            <button
+              onClick={() => applyMagicFunction(forceInsertDotDollar, "순환소수")}
+              className="px-2 py-1 bg-amber-50 hover:bg-amber-100 text-amber-800 rounded text-[11px] font-bold border border-amber-300"
+            >
+              ➰ 순환소수
+            </button>
+            <button
+              onClick={() => applyMagicFunction(autoWrapNakedMath, "부분융합")}
+              className="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded text-[11px] font-bold border border-slate-300"
+            >
+              🪄 부분융합
+            </button>
+            <button
+              onClick={() => applyMagicFunction(fixLeftRightBraces, "\\left{")}
+              className="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded text-[11px] font-bold border border-slate-300"
+            >
+              {"❴ \\left{"}
+            </button>
+            <button
+              onClick={() =>
+                applyMagicFunction(removeExcessiveNewlines, "빈줄압축")
+              }
+              className="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded text-[11px] font-bold border border-slate-300"
+            >
+              📉 빈줄압축
+            </button>
+            <button
+              onClick={() =>
+                applyMagicFunction(forceInsertThereforeDollar, "\\therefore")
+              }
+              className="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded text-[11px] font-bold border border-slate-300"
+            >
+              ∴ \therefore
+            </button>
+            <button
+              onClick={() => applyMagicFunction(fixCircledNumbers, "\\circled")}
+              className="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded text-[11px] font-bold border border-slate-300"
+            >
+              ① \circled
+            </button>
+            <button
+              onClick={() => applyMagicFunction(forceRemoveNDebris, "\\n 삭제")}
+              className="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded text-[11px] font-bold border border-slate-300"
+            >
+              🧹 \n 삭제
+            </button>
+            <button
+              onClick={() =>
+                applyMagicFunction(forceInsertBigcircDollar, "\\bigcirc")
+              }
+              className="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded text-[11px] font-bold border border-slate-300"
+            >
+              ⭕ \bigcirc
+            </button>
+            <button
+              onClick={() =>
+                applyMagicFunction(forceInsertRightarrowDollar, "\\rightarrow")
+              }
+              className="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded text-[11px] font-bold border border-slate-300"
+            >
+              ➡️ \rightarrow
+            </button>
+            <button
+              onClick={() => applyMagicFunction(forceInsertAngleDollar, "\\angle")}
+              className="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded text-[11px] font-bold border border-slate-300"
+            >
+              📐 \angle
+            </button>
+            <button
+              onClick={() => applyMagicFunction(forceInsertUnitDollar, "단위달러")}
+              className="px-2 py-1 bg-amber-50 hover:bg-amber-100 text-amber-800 rounded text-[11px] font-bold border border-amber-300"
+            >
+              📏 단위달러
+            </button>
+            <button
+              onClick={() =>
+                applyMagicFunction(forceInsertTriangleDollar, "\\triangle")
+              }
+              className="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded text-[11px] font-bold border border-slate-300"
+            >
+              🔺 \triangle
+            </button>
+          </div>
+
+          <label className="flex items-center gap-1.5 text-xs font-bold text-rose-600 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={debugMode}
+              onChange={(e) => setDebugMode(e.target.checked)}
+            />
+            <span>🐛 디버그(원본 엑스레이)</span>
+          </label>
+        </div>
+      )}
+
+      {/* =========================================================
+          메인 본문: 좌측 PDF 뷰어 & 크롭퍼 + 우측 V302 통합 어드민 워크스테이션
+      ========================================================= */}
+      <div className="flex-1 flex gap-3 overflow-hidden min-h-0">
+        {/* 좌측: PDF 원본 뷰어 & 실시간 드래그 크롭퍼 */}
+        <div className="flex-[1.15] bg-slate-800 rounded-2xl border border-slate-700 shadow-sm flex flex-col overflow-hidden relative min-w-[360px]">
+          <div className="p-2.5 bg-slate-900/80 border-b border-slate-700 flex flex-wrap justify-between items-center gap-2 shrink-0">
+            <div className="flex items-center gap-2">
+              <span className="font-bold text-white text-xs flex items-center gap-1.5">
+                📄 PDF 원본 뷰어
+                {selectedPdfName && (
+                  <span className="text-indigo-300 font-extrabold truncate max-w-[180px]">
+                    ({selectedPdfName})
+                  </span>
+                )}
+              </span>
+              {ocrLoaded && (
+                <span className="text-[10px] font-bold bg-emerald-500/20 text-emerald-400 px-1.5 py-0.5 rounded border border-emerald-500/30">
+                  OCR ON
+                </span>
+              )}
+            </div>
+
+            {pdfDoc && (
+              <div className="flex items-center gap-2">
+                <div className="flex items-center gap-1 bg-slate-800 rounded-lg p-1 border border-slate-600">
+                  <button
+                    onClick={() => setPageNum((p) => Math.max(1, p - 1))}
+                    disabled={pageNum <= 1 || isAiScanning}
+                    className="px-2 py-0.5 hover:bg-slate-700 text-white rounded text-xs font-bold disabled:opacity-30"
+                  >
+                    ◀
+                  </button>
+                  <input
+                    type="number"
+                    min={1}
+                    max={numPages}
+                    value={pageNum}
+                    onChange={(e) =>
+                      setPageNum(
+                        Math.max(1, Math.min(numPages, Number(e.target.value) || 1))
+                      )
+                    }
+                    className="w-12 bg-slate-900 text-indigo-300 text-xs font-extrabold text-center rounded border border-slate-700 py-0.5"
+                  />
+                  <span className="text-xs font-bold text-slate-400">
+                    / {numPages}쪽
+                  </span>
+                  <button
+                    onClick={() => setPageNum((p) => Math.min(numPages, p + 1))}
+                    disabled={pageNum >= numPages || isAiScanning}
+                    className="px-2 py-0.5 hover:bg-slate-700 text-white rounded text-xs font-bold disabled:opacity-30"
+                  >
+                    ▶
+                  </button>
+                </div>
+
+                <div className="flex items-center gap-1 bg-slate-800 rounded-lg p-1 border border-slate-600">
+                  <button
+                    onClick={() => setPdfScale((s) => Math.max(1.0, Math.round((s - 0.5) * 10) / 10))}
+                    disabled={pdfScale <= 1.0}
+                    className="px-2 py-0.5 hover:bg-slate-700 text-white rounded text-xs font-extrabold disabled:opacity-30"
+                    title="배율 축소"
+                  >
+                    －
+                  </button>
+                  <select
+                    value={pdfScale}
+                    onChange={(e) => setPdfScale(Number(e.target.value))}
+                    className="bg-slate-900 text-indigo-300 text-xs font-extrabold px-2 py-0.5 rounded border border-slate-700 outline-none"
+                  >
+                    <option value={1.0}>배율 100%</option>
+                    <option value={1.5}>배율 150%</option>
+                    <option value={2.0}>배율 200%</option>
+                    <option value={2.5}>배율 250%</option>
+                    <option value={3.0}>배율 300%</option>
+                    <option value={3.5}>배율 350%</option>
+                    <option value={4.0}>배율 400%</option>
+                    <option value={4.5}>배율 450%</option>
+                    <option value={5.0}>배율 500%</option>
+                  </select>
+                  <button
+                    onClick={() => setPdfScale((s) => Math.min(5.0, Math.round((s + 0.5) * 10) / 10))}
+                    disabled={pdfScale >= 5.0}
+                    className="px-2 py-0.5 hover:bg-slate-700 text-white rounded text-xs font-extrabold disabled:opacity-30"
+                    title="배율 확대"
+                  >
+                    ＋
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div
+            className={`flex-1 overflow-auto custom-scroll relative ${
+              !pdfDoc
+                ? "flex items-center justify-center p-6"
+                : "p-4 bg-slate-700"
+            }`}
+            onDragOver={(e) => {
+              e.preventDefault();
+              setIsDragOver(true);
+            }}
+            onDragLeave={() => setIsDragOver(false)}
+            onDrop={(e) => {
+              e.preventDefault();
+              setIsDragOver(false);
+              handleFilesSelected(e.dataTransfer.files);
+            }}
+          >
+            {activeCropTarget && (
+              <div className="sticky top-0 left-0 w-full bg-amber-400 text-slate-950 font-extrabold text-xs p-2.5 mb-3 text-center rounded-lg shadow-lg z-30 flex items-center justify-between">
+                <span>
+                  🎯 [{activeCropTarget.field}] 슬롯 타겟 모드 작동 중! PDF 위에서 마우스로 드래그하거나 키보드 Ctrl+V를 누르세요.
+                </span>
+                <button
+                  onClick={() => setActiveCropTarget(null)}
+                  className="px-2 py-0.5 bg-slate-900 text-white rounded text-[11px]"
+                >
+                  취소
+                </button>
+              </div>
+            )}
+
+            {!pdfDoc ? (
+              <label
+                className={`w-full max-w-md p-8 border-2 border-dashed rounded-2xl text-center transition-colors cursor-pointer block ${
+                  isDragOver
+                    ? "border-indigo-400 bg-indigo-500/10"
+                    : "border-slate-500 hover:border-slate-400 hover:bg-slate-700/50"
+                }`}
+              >
+                <input
+                  type="file"
+                  accept=".pdf,.json"
+                  multiple
+                  onChange={(e) => handleFilesSelected(e.target.files)}
+                  className="hidden"
+                />
+                <span className="text-4xl block mb-3">📁</span>
+                <p className="text-base font-extrabold text-white mb-1">
+                  PDF 교재 파일(여러 개 가능) 또는 JSON 파일을 드롭하세요
+                </p>
+                <p className="text-xs font-medium text-slate-400">
+                  Phase 1 추출용 PDF 또는 기존 _Problems_Final.json / _Classified.json 모두 지원합니다.
+                </p>
+              </label>
+            ) : (
+              <div
+                className="relative mx-auto shadow-2xl"
+                style={{ width: "fit-content" }}
+              >
+                <canvas
+                  ref={canvasRef}
+                  className="block bg-white rounded"
+                />
+                {!isAiScanning && (
+                  <>
+                    <div
+                      className="absolute inset-0 cursor-crosshair z-10"
+                      onMouseDown={handleMouseDown}
+                      onMouseMove={handleMouseMove}
+                      onMouseUp={handleMouseUp}
+                      onMouseLeave={handleMouseUp}
+                    />
+                    <div
+                      ref={overlayRef}
+                      className="absolute border-[3px] border-indigo-500 bg-indigo-500/20 pointer-events-none hidden z-20"
+                    />
+                  </>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* 하단 실시간 파이프라인 콘솔 로그 */}
+          <div className="h-28 bg-slate-950 border-t border-slate-800 p-2 overflow-y-auto font-mono text-[11px] text-slate-300 shrink-0">
+            <div className="flex justify-between items-center mb-1 text-[10px] text-slate-500 font-sans font-bold">
+              <span>⚡ 파이프라인 실시간 로그 (Phase 1 & Phase 2 & V302)</span>
+              <button
+                onClick={() => setPipelineLogs([])}
+                className="hover:text-slate-300"
+              >
+                지우기
+              </button>
+            </div>
+            {pipelineLogs.length === 0 ? (
+              <div className="text-slate-600">
+                대기 중... (PDF 추출, 트리플 분류, 수식 마법 도구 실행 로그가 여기에 표시됩니다)
+              </div>
+            ) : (
+              pipelineLogs.map((log, i) => (
+                <div key={i} className="leading-relaxed">
+                  {log}
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+
+        {/* 우측: V302 Ultimate 통합 검수 어드민 & 4슬롯 이미지 센터 */}
+        <div className="flex-[1.45] bg-white rounded-2xl border border-slate-200 shadow-sm flex flex-col overflow-hidden min-w-[520px]">
+          {/* 상단 빠른 문제 이동 & 상태 필터 바 */}
+          <div className="p-3 bg-slate-50 border-b border-slate-200 flex flex-wrap items-center justify-between gap-2 shrink-0">
+            <div className="flex items-center gap-1.5 flex-1 min-w-[260px]">
+              <select
+                value={statusFilter}
+                onChange={(e) => setStatusFilter(e.target.value as any)}
+                className="px-2 py-1.5 border border-slate-300 rounded-lg text-xs font-extrabold bg-white text-slate-700"
+              >
+                <option value="ALL">전체 ({problems.length})</option>
+                <option value="PENDING">
+                  ⏳ 미검수 (
+                  {
+                    problems.filter(
+                      (p) =>
+                        !p.verification_status ||
+                        p.verification_status === "PENDING"
+                    ).length
+                  }
+                  )
+                </option>
+                <option value="APPROVED">
+                  ✅ 승인됨 (
+                  {
+                    problems.filter((p) => p.verification_status === "APPROVED")
+                      .length
+                  }
+                  )
+                </option>
+                <option value="REJECTED">
+                  ❌ 반려됨 (
+                  {
+                    problems.filter((p) => p.verification_status === "REJECTED")
+                      .length
+                  }
+                  )
+                </option>
+                <option value="NEEDS_REWORK">⚠️ 미분류/Depth7이하</option>
+              </select>
+
+              <select
+                value={currentIdx}
+                onChange={(e) => selectProblemIndex(Number(e.target.value))}
+                disabled={problems.length === 0}
+                className="flex-1 px-2.5 py-1.5 border border-indigo-300 rounded-lg text-xs font-extrabold text-indigo-900 bg-indigo-50/50 outline-none"
+              >
+                {filteredIndices.length === 0 ? (
+                  <option value={0}>표시할 문항 없음</option>
+                ) : (
+                  filteredIndices.map((idx) => {
+                    const p = problems[idx];
+                    const st = p.verification_status || "PENDING";
+                    const icon =
+                      st === "APPROVED" ? "✅" : st === "REJECTED" ? "❌" : "⏳";
+                    const pNum =
+                      p.final_printed_page || p.detected_page_num || "?";
+                    const qNum = p.question_number || "?";
+                    const sText =
+                      p.sub_num && String(p.sub_num) !== "0"
+                        ? `-${p.sub_num}`
+                        : "";
+                    const ssText =
+                      p.sub_sub_num && String(p.sub_sub_num) !== "0"
+                        ? `-${p.sub_sub_num}`
+                        : "";
+                    const q2Badge = p.question_2 ? " [Q2]" : "";
+                    return (
+                      <option key={p.question_id || idx} value={idx}>
+                        {icon} P.{pNum} | 문항: {qNum}
+                        {sText}
+                        {ssText}
+                        {q2Badge} (순번:{idx + 1}/{problems.length})
+                      </option>
+                    );
+                  })
+                )}
+              </select>
+            </div>
+
+            <div className="flex items-center gap-1.5">
+              <button
+                onClick={() => selectProblemIndex(Math.max(0, currentIdx - 1))}
+                disabled={currentIdx <= 0}
+                className="px-2.5 py-1.5 bg-slate-200 hover:bg-slate-300 disabled:opacity-40 text-slate-800 rounded-lg text-xs font-extrabold"
+              >
+                ⬅️ 이전
+              </button>
+              <button
+                onClick={() => handleVerificationDecision("APPROVED")}
+                disabled={!currentProblem}
+                className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white rounded-lg text-xs font-extrabold shadow-sm"
+              >
+                ✅ 쾌속 승인
+              </button>
+              <button
+                onClick={handleAddEmptyProblem}
+                className="px-2.5 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 rounded-lg text-xs font-extrabold"
+                title="현재 문항 바로 뒤에 새 빈 문항을 추가합니다"
+              >
+                ➕ 추가
+              </button>
+              <button
+                onClick={handleDeleteCurrentProblem}
+                disabled={!currentProblem}
+                className="px-2.5 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 rounded-lg text-xs font-extrabold"
+                title="현재 문항을 영구 삭제합니다"
+              >
+                🚨 삭제
+              </button>
+            </div>
+          </div>
+
+          {/* 문항이 없을 때 안내 */}
+          {!currentProblem ? (
+            <div className="flex-1 flex flex-col items-center justify-center p-10 text-slate-400 gap-3">
+              <span className="text-5xl opacity-30">✂️</span>
+              <p className="text-sm font-extrabold text-slate-600">
+                추출되거나 불러온 문항이 없습니다.
+              </p>
+              <p className="text-xs text-slate-400 text-center max-w-md">
+                상단에서 PDF 파일을 넣고 [🚀 Phase 1 추출 시작]을 누르거나, 기존 JSON 파일을 불러오거나, 좌측 PDF 뷰어에서 마우스로 문제를 드래그하면 문항이 생성됩니다.
+              </p>
+            </div>
+          ) : (
+            <div className="flex-1 overflow-y-auto custom-scroll p-4 space-y-4">
+              {/* =========================================================
+                  V302 메타데이터 3단 레이아웃 (1열: 분류 3종 / 2열: 인지·난이도·정답률·유형 / 3열: 교재·쪽·번호·소문항·3단계)
+              ========================================================= */}
+              <div className="space-y-2.5 bg-slate-50 p-3 rounded-xl border border-slate-200">
+                {/* 1열: 메인분류 / 서브분류 / 사고력분류 */}
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+                  <div className="bg-indigo-50/70 border border-indigo-200 rounded-lg p-2">
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-[11px] font-extrabold text-indigo-900">
+                        📚 메인분류 (Depth 8)
+                      </span>
+                      <input
+                        type="text"
+                        value={currentProblem.taxonomy_id || ""}
+                        onChange={(e) =>
+                          updateCurrentProblemField("taxonomy_id", e.target.value)
+                        }
+                        placeholder="코드 (예: E512-...)"
+                        className="w-32 px-1.5 py-0.5 text-[11px] font-mono bg-white border border-indigo-200 rounded"
+                      />
+                    </div>
+                    <input
+                      type="text"
+                      value={currentProblem.taxonomy_name || ""}
+                      onChange={(e) =>
+                        updateCurrentProblemField("taxonomy_name", e.target.value)
+                      }
+                      placeholder="메인 교과 분류명"
+                      className="w-full px-2 py-1 text-xs font-bold text-indigo-950 bg-white border border-indigo-200 rounded"
+                    />
+                  </div>
+
+                  <div className="bg-blue-50/70 border border-blue-200 rounded-lg p-2">
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-[11px] font-extrabold text-blue-900">
+                        🧭 서브분류 (광범위)
+                      </span>
+                      <input
+                        type="text"
+                        value={currentProblem.sub_taxonomy_id || ""}
+                        onChange={(e) =>
+                          updateCurrentProblemField(
+                            "sub_taxonomy_id",
+                            e.target.value || null
+                          )
+                        }
+                        placeholder="코드 (없음)"
+                        className="w-32 px-1.5 py-0.5 text-[11px] font-mono bg-white border border-blue-200 rounded"
+                      />
+                    </div>
+                    <input
+                      type="text"
+                      value={currentProblem.sub_taxonomy_name || ""}
+                      onChange={(e) =>
+                        updateCurrentProblemField(
+                          "sub_taxonomy_name",
+                          e.target.value || null
+                        )
+                      }
+                      placeholder="서브 교과 분류명 (없음)"
+                      className="w-full px-2 py-1 text-xs font-bold text-blue-950 bg-white border border-blue-200 rounded"
+                    />
+                  </div>
+
+                  <div className="bg-amber-50/70 border border-amber-200 rounded-lg p-2">
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-[11px] font-extrabold text-amber-900">
+                        🧠 사고력분류 (THK)
+                      </span>
+                      <select
+                        value={currentProblem.thk_taxonomy_id || ""}
+                        onChange={(e) => {
+                          const code = e.target.value;
+                          const found = thinkingCategories.find(
+                            (t) => t.category_id === code
+                          );
+                          updateCurrentProblemField(
+                            "thk_taxonomy_id",
+                            code || null
+                          );
+                          updateCurrentProblemField(
+                            "thk_taxonomy_name",
+                            found ? found.full_path : null
+                          );
+                        }}
+                        className="w-32 px-1 py-0.5 text-[11px] font-mono bg-white border border-amber-200 rounded"
+                      >
+                        <option value="">미분류</option>
+                        {thinkingCategories.map((t) => (
+                          <option key={t.category_id} value={t.category_id}>
+                            {t.category_id} ({t.depth3})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <input
+                      type="text"
+                      value={currentProblem.thk_taxonomy_name || ""}
+                      onChange={(e) =>
+                        updateCurrentProblemField(
+                          "thk_taxonomy_name",
+                          e.target.value || null
+                        )
+                      }
+                      placeholder="사고력 분류 경로"
+                      className="w-full px-2 py-1 text-xs font-bold text-amber-950 bg-white border border-amber-200 rounded"
+                    />
+                  </div>
+                </div>
+
+                {/* 2열: 인지영역 / 난이도 / 정답률 / 문제유형 */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-600 mb-0.5">
+                      🧠 인지영역
+                    </label>
+                    <select
+                      value={currentProblem.cognitive_level || "미지정"}
+                      onChange={(e) =>
+                        updateCurrentProblemField(
+                          "cognitive_level",
+                          e.target.value === "미지정" ? null : e.target.value
+                        )
+                      }
+                      className="w-full px-2 py-1.5 border border-slate-300 rounded-lg text-xs font-bold bg-white"
+                    >
+                      {COGNITIVE_LEVEL_OPTIONS.map((opt) => (
+                        <option key={opt} value={opt}>
+                          {opt}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-600 mb-0.5">
+                      📊 난이도
+                    </label>
+                    <select
+                      value={normalizeDifficultyForDb(currentProblem.difficulty)}
+                      onChange={(e) =>
+                        updateCurrentProblemField("difficulty", e.target.value)
+                      }
+                      className="w-full px-2 py-1.5 border border-slate-300 rounded-lg text-xs font-bold bg-white"
+                    >
+                      {ALLOWED_DIFFICULTIES.map((d) => (
+                        <option key={d} value={d}>
+                          {d}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-600 mb-0.5">
+                      🎯 정답률 (%)
+                    </label>
+                    <select
+                      value={String(currentProblem.solving_probability ?? 50)}
+                      onChange={(e) =>
+                        updateCurrentProblemField(
+                          "solving_probability",
+                          Number(e.target.value)
+                        )
+                      }
+                      className="w-full px-2 py-1.5 border border-slate-300 rounded-lg text-xs font-bold bg-white"
+                    >
+                      {Array.from({ length: 20 }, (_, i) => (i + 1) * 5).map(
+                        (val) => (
+                          <option key={val} value={String(val)}>
+                            {val}%
+                          </option>
+                        )
+                      )}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-600 mb-0.5">
+                      🏷️ 문제유형 (problem_type)
+                    </label>
+                    <select
+                      value={currentProblem.problem_type || "SUBJECTIVE"}
+                      onChange={(e) =>
+                        updateCurrentProblemField("problem_type", e.target.value)
+                      }
+                      className="w-full px-2 py-1.5 border border-indigo-300 rounded-lg text-xs font-extrabold text-indigo-800 bg-white"
+                    >
+                      {INTEGRATED_PROBLEM_TYPES.map((pt) => (
+                        <option key={pt} value={pt}>
+                          {pt === "MULTIPLE_CHOICE"
+                            ? "MULTIPLE_CHOICE (객관식)"
+                            : pt === "SUBJECTIVE"
+                            ? "SUBJECTIVE (단답형)"
+                            : pt === "DESCRIPTIVE"
+                            ? "DESCRIPTIVE (서술형)"
+                            : pt}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                {/* 3열: 교재 이름 / 인쇄쪽 / 문항번호 / 소문항 / 3단계 */}
+                <div className="grid grid-cols-2 sm:grid-cols-6 gap-2">
+                  <div className="sm:col-span-2">
+                    <label className="block text-[11px] font-bold text-slate-600 mb-0.5">
+                      📚 교재 이름
+                    </label>
+                    <input
+                      type="text"
+                      value={
+                        currentProblem.book_name ||
+                        currentProblem.source_book_name ||
+                        bookTitle
+                      }
+                      onChange={(e) =>
+                        updateCurrentProblemField("book_name", e.target.value)
+                      }
+                      className="w-full px-2 py-1.5 border border-slate-300 rounded-lg text-xs font-bold bg-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-600 mb-0.5">
+                      📄 인쇄쪽
+                    </label>
+                    <input
+                      type="text"
+                      value={currentProblem.final_printed_page || ""}
+                      onChange={(e) =>
+                        updateCurrentProblemField(
+                          "final_printed_page",
+                          e.target.value
+                        )
+                      }
+                      className="w-full px-2 py-1.5 border border-slate-300 rounded-lg text-xs font-bold bg-white text-center"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-600 mb-0.5">
+                      🔢 문항번호
+                    </label>
+                    <input
+                      type="text"
+                      value={currentProblem.question_number || ""}
+                      onChange={(e) =>
+                        updateCurrentProblemField(
+                          "question_number",
+                          e.target.value
+                        )
+                      }
+                      className="w-full px-2 py-1.5 border border-slate-300 rounded-lg text-xs font-bold bg-white text-center"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-600 mb-0.5">
+                      🔗 소문항 (sub)
+                    </label>
+                    <input
+                      type="number"
+                      min={0}
+                      value={currentProblem.sub_num ?? 0}
+                      onChange={(e) =>
+                        updateCurrentProblemField(
+                          "sub_num",
+                          parseInt(e.target.value, 10) || 0
+                        )
+                      }
+                      className="w-full px-2 py-1.5 border border-slate-300 rounded-lg text-xs font-bold bg-white text-center"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-600 mb-0.5">
+                      🔗 3단계 (sub_sub)
+                    </label>
+                    <input
+                      type="number"
+                      min={0}
+                      value={currentProblem.sub_sub_num ?? 0}
+                      onChange={(e) =>
+                        updateCurrentProblemField(
+                          "sub_sub_num",
+                          parseInt(e.target.value, 10) || 0
+                        )
+                      }
+                      className="w-full px-2 py-1.5 border border-slate-300 rounded-lg text-xs font-bold bg-white text-center"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* 엑스레이 디버그 모드 */}
+              {debugMode && (
+                <div className="bg-rose-950 text-rose-100 p-3 rounded-xl font-mono text-xs space-y-1">
+                  <div className="font-bold text-rose-300">
+                    🚨 [엑스레이 모드] 원본 LaTeX 데이터 (ID: {currentProblem.question_id})
+                  </div>
+                  <pre className="whitespace-pre-wrap break-all">
+                    [question]{"\n"}
+                    {currentProblem.question || ""}
+                    {"\n\n"}[question_2]{"\n"}
+                    {currentProblem.question_2 || "(null)"}
+                  </pre>
+                </div>
+              )}
+
+              {/* =========================================================
+                  텍스트 미리보기 & 직접 수정 탭 (question ➔ image ➔ question_2 + 4단계 해설)
+              ========================================================= */}
+              <div className="border border-slate-200 rounded-xl overflow-hidden">
+                <div className="bg-slate-100 border-b border-slate-200 px-3 py-2 flex items-center justify-between">
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      onClick={() => setEditorTab("EDIT")}
+                      className={`px-3 py-1 rounded-lg text-xs font-extrabold transition-colors ${
+                        editorTab === "EDIT"
+                          ? "bg-indigo-600 text-white"
+                          : "text-slate-600 hover:bg-slate-200"
+                      }`}
+                    >
+                      ✏️ 직접 수정하기
+                    </button>
+                    <button
+                      onClick={() => setEditorTab("VIEW")}
+                      className={`px-3 py-1 rounded-lg text-xs font-extrabold transition-colors ${
+                        editorTab === "VIEW"
+                          ? "bg-indigo-600 text-white"
+                          : "text-slate-600 hover:bg-slate-200"
+                      }`}
+                    >
+                      👀 렌더링 미리보기 (실제 출력 순서)
+                    </button>
+                  </div>
+                  <span className="text-[11px] font-bold text-slate-500">
+                    출력 순서: question ➔ image_1 ➔ image_2 ➔ question_2
+                  </span>
+                </div>
+
+                {editorTab === "VIEW" ? (
+                  <div className="p-4 space-y-3 bg-white text-sm text-slate-800">
+                    <div className="p-3 rounded-lg bg-slate-50 border border-slate-200">
+                      <div className="text-xs font-extrabold text-indigo-700 mb-1">
+                        [문제 1 — 이미지 상단 (question)]
+                      </div>
+                      <div className="whitespace-pre-wrap leading-relaxed">
+                        {currentProblem.question || "(내용 없음)"}
+                      </div>
+                    </div>
+
+                    {(currentProblem.image_url || currentProblem.image_2_url) && (
+                      <div className="text-center text-xs font-bold text-slate-500 py-1 bg-slate-100 rounded">
+                        ⬇️ 이미지 출력 위치 (
+                        {[
+                          currentProblem.image_url ? "문제 이미지 1" : null,
+                          currentProblem.image_2_url ? "문제 이미지 2" : null,
+                        ]
+                          .filter(Boolean)
+                          .join(" / ")}
+                        ) ⬇️
+                      </div>
+                    )}
+
+                    {currentProblem.question_2 && (
+                      <div className="p-3 rounded-lg bg-violet-50/50 border border-violet-200">
+                        <div className="text-xs font-extrabold text-violet-700 mb-1">
+                          [문제 2 — 이미지 하단 (question_2)]
+                        </div>
+                        <div className="whitespace-pre-wrap leading-relaxed">
+                          {currentProblem.question_2}
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="grid grid-cols-1 gap-2 pt-2 border-t border-slate-200">
+                      <div className="p-2.5 rounded-lg bg-emerald-50 border border-emerald-200">
+                        <span className="text-xs font-extrabold text-emerald-800 mr-2">
+                          🎯 [정답]
+                        </span>
+                        <span className="font-bold text-emerald-950">
+                          {currentProblem.answer || "(미입력)"}
+                        </span>
+                      </div>
+                      <div className="p-2.5 rounded-lg bg-slate-50 border border-slate-200 space-y-1.5 text-xs">
+                        <div>
+                          <strong className="text-indigo-700">[스텝 1: 개념]</strong>{" "}
+                          {currentProblem.step_1_concept || "-"}
+                        </div>
+                        <div>
+                          <strong className="text-indigo-700">[스텝 2: 전략]</strong>{" "}
+                          {currentProblem.step_2_approach || "-"}
+                        </div>
+                        <div className="whitespace-pre-wrap">
+                          <strong className="text-indigo-700">[스텝 3: 풀이]</strong>{" "}
+                          {currentProblem.step_3_process || "-"}
+                        </div>
+                        <div>
+                          <strong className="text-indigo-700">[스텝 4: 결론]</strong>{" "}
+                          {currentProblem.step_4_conclusion || "-"}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="p-3 space-y-2.5 bg-white">
+                    <div>
+                      <label className="block text-xs font-extrabold text-slate-700 mb-1">
+                        📌 문제 1 — 이미지 상단 출력 (question)
+                      </label>
+                      <textarea
+                        value={currentProblem.question || ""}
+                        onChange={(e) =>
+                          updateCurrentProblemField("question", e.target.value)
+                        }
+                        rows={4}
+                        className="w-full p-2.5 border border-slate-300 rounded-lg font-mono text-xs leading-relaxed focus:ring-2 focus:ring-indigo-500 outline-none bg-yellow-50/20"
+                      />
+                    </div>
+
+                    {/* V302 원클릭 분리/병합 버튼 */}
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        onClick={handleSplitLastLineToQ2}
+                        className="py-1.5 px-3 bg-violet-50 hover:bg-violet-100 text-violet-800 border border-violet-200 rounded-lg text-xs font-extrabold"
+                      >
+                        ✂️ 문제 1의 마지막 줄(문단)을 문제 2(question_2)로 내리기
+                      </button>
+                      <button
+                        onClick={handleMergeQ2ToQ1}
+                        className="py-1.5 px-3 bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300 rounded-lg text-xs font-extrabold"
+                      >
+                        ⬆️ 문제 2(question_2)를 문제 1 끝으로 다시 합치기
+                      </button>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-extrabold text-slate-700 mb-1">
+                        📌 문제 2 — 이미지 하단 출력 (question_2, 선택)
+                      </label>
+                      <textarea
+                        value={currentProblem.question_2 || ""}
+                        onChange={(e) =>
+                          updateCurrentProblemField(
+                            "question_2",
+                            e.target.value || null
+                          )
+                        }
+                        placeholder="그래프/도형 이미지 아래에 출력될 발문이나 소문항이 있을 때 여기에 분리해 넣어주세요."
+                        rows={2}
+                        className="w-full p-2 border border-slate-300 rounded-lg font-mono text-xs leading-relaxed focus:ring-2 focus:ring-violet-500 outline-none"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-extrabold text-emerald-700 mb-1">
+                        🎯 정답 (answer)
+                      </label>
+                      <input
+                        type="text"
+                        value={currentProblem.answer || ""}
+                        onChange={(e) =>
+                          updateCurrentProblemField("answer", e.target.value)
+                        }
+                        className="w-full p-2 border border-emerald-300 rounded-lg font-mono text-xs font-bold bg-emerald-50/20 focus:ring-2 focus:ring-emerald-500 outline-none"
+                      />
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+                      <div>
+                        <label className="block text-[11px] font-bold text-slate-600 mb-0.5">
+                          📖 해설 1: 핵심 개념 (step_1_concept)
+                        </label>
+                        <textarea
+                          value={currentProblem.step_1_concept || ""}
+                          onChange={(e) =>
+                            updateCurrentProblemField(
+                              "step_1_concept",
+                              e.target.value
+                            )
+                          }
+                          rows={2}
+                          className="w-full p-2 border border-slate-300 rounded-lg font-mono text-xs"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[11px] font-bold text-slate-600 mb-0.5">
+                          🤔 해설 2: 접근 전략 (step_2_approach)
+                        </label>
+                        <textarea
+                          value={currentProblem.step_2_approach || ""}
+                          onChange={(e) =>
+                            updateCurrentProblemField(
+                              "step_2_approach",
+                              e.target.value
+                            )
+                          }
+                          rows={2}
+                          className="w-full p-2 border border-slate-300 rounded-lg font-mono text-xs"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[11px] font-bold text-slate-600 mb-0.5">
+                          ✍️ 해설 3: 풀이 과정 (step_3_process)
+                        </label>
+                        <textarea
+                          value={currentProblem.step_3_process || ""}
+                          onChange={(e) =>
+                            updateCurrentProblemField(
+                              "step_3_process",
+                              e.target.value
+                            )
+                          }
+                          rows={3}
+                          className="w-full p-2 border border-slate-300 rounded-lg font-mono text-xs"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[11px] font-bold text-slate-600 mb-0.5">
+                          ✅ 해설 4: 결론 (step_4_conclusion)
+                        </label>
+                        <textarea
+                          value={currentProblem.step_4_conclusion || ""}
+                          onChange={(e) =>
+                            updateCurrentProblemField(
+                              "step_4_conclusion",
+                              e.target.value
+                            )
+                          }
+                          rows={3}
+                          className="w-full p-2 border border-slate-300 rounded-lg font-mono text-xs"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* =========================================================
+                  ✂️ 정밀 이미지 센터 (V302 4슬롯: 문제 이미지 1·2 / 해설 이미지 1·2)
+              ========================================================= */}
+              <div className="space-y-2">
+                <h3 className="text-xs font-extrabold text-slate-800 flex items-center gap-1.5">
+                  <span>✂️</span> 정밀 이미지 센터 (4슬롯: PDF 드래그 크롭 · Ctrl+V 클립보드 붙여넣기 · 가로 px 통일)
+                </h3>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                  {renderImageSlotCard(
+                    "image_url",
+                    "🖼️ 문제 이미지 1 (image_url)",
+                    "bg-indigo-100 text-indigo-800"
+                  )}
+                  {renderImageSlotCard(
+                    "image_2_url",
+                    "🖼️ 문제 이미지 2 (image_2_url)",
+                    "bg-violet-100 text-violet-800"
+                  )}
+                  {renderImageSlotCard(
+                    "answer_image_url",
+                    "📝 해설 이미지 1 (answer_image_url)",
+                    "bg-emerald-100 text-emerald-800"
+                  )}
+                  {renderImageSlotCard(
+                    "answer_image_2_url",
+                    "📝 해설 이미지 2 (answer_image_2_url)",
+                    "bg-teal-100 text-teal-800"
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* 하단 고정: V302 4-Way 결재 바 & DB 업로드 옵션 */}
+          <div className="p-3 bg-slate-50 border-t border-slate-200 flex flex-wrap items-center justify-between gap-2 shrink-0">
+            <div className="grid grid-cols-4 gap-2 flex-1 min-w-[280px]">
+              <button
+                onClick={() => selectProblemIndex(Math.max(0, currentIdx - 1))}
+                disabled={currentIdx <= 0}
+                className="py-2 bg-white hover:bg-slate-100 disabled:opacity-40 text-slate-800 border border-slate-300 rounded-xl text-xs font-extrabold"
+              >
+                ⬅️ 이전
+              </button>
+              <button
+                onClick={() => handleVerificationDecision("PENDING")}
+                disabled={!currentProblem}
+                className="py-2 bg-amber-50 hover:bg-amber-100 disabled:opacity-40 text-amber-800 border border-amber-300 rounded-xl text-xs font-extrabold"
+              >
+                ⏸️ 보류
+              </button>
+              <button
+                onClick={() => handleVerificationDecision("REJECTED")}
+                disabled={!currentProblem}
+                className="py-2 bg-rose-50 hover:bg-rose-100 disabled:opacity-40 text-rose-700 border border-rose-300 rounded-xl text-xs font-extrabold"
+              >
+                ❌ 반려
+              </button>
+              <button
+                onClick={() => handleVerificationDecision("APPROVED")}
+                disabled={!currentProblem}
+                className="py-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white rounded-xl text-xs font-extrabold shadow"
+              >
+                ✅ 승인 (다음)
+              </button>
+            </div>
+
+            <label className="flex items-center gap-1.5 text-[11px] font-bold text-slate-600 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={updateExistingOnlyMeta}
+                onChange={(e) => setUpdateExistingOnlyMeta(e.target.checked)}
+              />
+              <span>🔒 DB 적재 시 기존 문항은 분류/난이도/유형만 업데이트</span>
+            </label>
+          </div>
+        </div>
+      </div>
+
+      {/* =========================================================
+          슬롯 내부 이미지 재크롭 모달 (V302 st_cropper 대응)
+      ========================================================= */}
+      {inPlaceCropModal && (
+        <div className="fixed inset-0 bg-slate-950/75 z-50 flex items-center justify-center p-6">
+          <div className="bg-white rounded-2xl max-w-3xl w-full p-5 shadow-2xl flex flex-col gap-4 max-h-[90vh]">
+            <div className="flex justify-between items-center border-b border-slate-200 pb-3">
+              <h3 className="font-extrabold text-slate-900 text-sm">
+                ✂️ 이미지 영역 다시 자르기 ({inPlaceCropModal.field})
+              </h3>
+              <button
+                onClick={() => setInPlaceCropModal(null)}
+                className="text-slate-400 hover:text-slate-700 font-bold text-sm"
+              >
+                ✕ 닫기
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-auto flex items-center justify-center bg-slate-100 p-4 rounded-xl">
+              <div
+                className="relative inline-block select-none"
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  isInPlaceCroppingRef.current = true;
+                  const r = e.currentTarget.getBoundingClientRect();
+                  inPlaceCropStartRef.current = {
+                    x: e.clientX - r.left,
+                    y: e.clientY - r.top,
+                  };
+                  inPlaceCropRectRef.current = {
+                    x: e.clientX - r.left,
+                    y: e.clientY - r.top,
+                    w: 0,
+                    h: 0,
+                  };
+                  if (inPlaceOverlayRef.current) {
+                    inPlaceOverlayRef.current.style.display = "none";
+                  }
+                }}
+                onMouseMove={(e) => {
+                  if (
+                    !isInPlaceCroppingRef.current ||
+                    !inPlaceCropStartRef.current
+                  )
+                    return;
+                  const r = e.currentTarget.getBoundingClientRect();
+                  const nextR = {
+                    x: Math.min(inPlaceCropStartRef.current.x, e.clientX - r.left),
+                    y: Math.min(inPlaceCropStartRef.current.y, e.clientY - r.top),
+                    w: Math.abs(e.clientX - r.left - inPlaceCropStartRef.current.x),
+                    h: Math.abs(e.clientY - r.top - inPlaceCropStartRef.current.y),
+                  };
+                  inPlaceCropRectRef.current = nextR;
+                  if (inPlaceOverlayRef.current) {
+                    inPlaceOverlayRef.current.style.display = "block";
+                    inPlaceOverlayRef.current.style.left = `${nextR.x}px`;
+                    inPlaceOverlayRef.current.style.top = `${nextR.y}px`;
+                    inPlaceOverlayRef.current.style.width = `${nextR.w}px`;
+                    inPlaceOverlayRef.current.style.height = `${nextR.h}px`;
+                  }
+                }}
+                onMouseUp={() => {
+                  isInPlaceCroppingRef.current = false;
+                }}
+              >
+                <img
+                  ref={inPlaceImgRef}
+                  src={inPlaceCropModal.srcUrl}
+                  crossOrigin="anonymous"
+                  alt="Crop target"
+                  className="max-w-full max-h-[60vh] block pointer-events-none"
+                />
+                <div
+                  ref={inPlaceOverlayRef}
+                  className="absolute border-2 border-rose-500 bg-rose-500/20 pointer-events-none hidden"
+                />
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => setInPlaceCropModal(null)}
+                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-bold"
+              >
+                취소
+              </button>
+              <button
+                onClick={handleInPlaceCropSave}
+                className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-extrabold"
+              >
+                💾 자르기 저장
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
