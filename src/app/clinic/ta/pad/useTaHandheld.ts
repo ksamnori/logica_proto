@@ -310,6 +310,7 @@ export function useTaHandheld() {
 
       const dbCalls = row.active_calls || {};
       Object.keys(dbCalls).forEach(qNumKey => {
+        if (!qNumKey || qNumKey === 'REFRESH' || qNumKey.startsWith('__') || dbCalls[qNumKey]?.verdict || (qNumKey !== 'general' && isNaN(Number(qNumKey)))) return;
         const key = `${row.seat}::${qNumKey}`;
         if (!callsRef.current[key]) {
           const c = dbCalls[qNumKey] || {};

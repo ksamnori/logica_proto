@@ -372,7 +372,10 @@ export function useSupervisorData() {
         setLogs(prev => prev.filter(l => {
             const matchSeatAndType = l.data?.seat === seat && l.type === type;
             if (!matchSeatAndType) return true;
-            if (qNum != null && l.data?.qNum !== qNum) return true;
+            if (qNum != null) {
+                const bothNaN = typeof l.data?.qNum === 'number' && typeof qNum === 'number' && isNaN(l.data.qNum) && isNaN(qNum);
+                if (!bothNaN && String(l.data?.qNum) !== String(qNum)) return true;
+            }
             if (uid != null && l.data?.uid !== uid) return true;
             return false;
         }));
@@ -774,8 +777,11 @@ export function useSupervisorData() {
                     const dbCalls = dbRecord.active_calls || {};
                     const dbRechecks = dbRecord.active_rechecks || {};
 
+                    const isSystemCallKey = (k: string) =>
+                        !k || k === 'REFRESH' || k.startsWith('__') || (k !== 'general' && isNaN(Number(k)));
+
                     Object.keys(dbCalls).forEach(qNumKey => {
-                        if (qNumKey === 'REFRESH') return; 
+                        if (isSystemCallKey(qNumKey)) return;
                         if (dbCalls[qNumKey]?.verdict) return; 
                         if (st.calls[qNumKey]) return;
                         
@@ -793,7 +799,10 @@ export function useSupervisorData() {
                     });
                     
                     Object.keys(st.calls).forEach(qNumKey => {
-                        if (qNumKey === 'REFRESH') return;
+                        if (isSystemCallKey(qNumKey)) {
+                            delete st.calls[qNumKey];
+                            return;
+                        }
                         if (dbCalls[qNumKey] && !dbCalls[qNumKey].verdict) return; 
                         delete st.calls[qNumKey];
                         if (Object.keys(st.calls).length === 0 && st.status === 'call') st.status = 'idle';
@@ -1491,6 +1500,27 @@ export function useSupervisorData() {
         
         if (type === 'cancel_call') {
             if (qNum !== null) {
+                const qNumStr = String(qNum);
+                const isInvalidCallKey =
+                    !qNumStr ||
+                    qNumStr === 'NaN' ||
+                    qNumStr === 'REFRESH' ||
+                    qNumStr.startsWith('__') ||
+                    (qNumStr !== 'general' && isNaN(Number(qNumStr)));
+
+                if (isInvalidCallKey) {
+                    if (currentStudents[seat]?.calls) {
+                        delete currentStudents[seat].calls[qNum];
+                        delete currentStudents[seat].calls['__last_verified'];
+                    }
+                    if (Object.keys(currentStudents[seat]?.calls || {}).length === 0 && currentStudents[seat]?.status !== 'offline') {
+                        if (currentStudents[seat]) currentStudents[seat].status = 'idle';
+                    }
+                    removeLogsByTypeAndSeat('call', seat, qNum);
+                    updateStudents(currentStudents);
+                    return;
+                }
+
                 if (currentStudents[seat]?.sessionId) {
                      const sid = currentStudents[seat].sessionId;
                      const { data } = await supabaseClient.from('clinic_session_state').select('active_calls').eq('id', sid).maybeSingle();
