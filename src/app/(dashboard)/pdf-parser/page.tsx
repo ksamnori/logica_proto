@@ -552,15 +552,54 @@ export function sortProblemsList(items: any[]): any[] {
 export function normalizeDifficultyForDb(val: any): string {
   if (!val) return "중";
   const s = String(val).trim();
-  if (s === "중상") return "상";
-  if (s === "중하") return "중";
+  if (s.includes("최상")) return "최상";
+  if (s.includes("중상") || s === "상") return "상";
+  if (s.includes("중하") || s === "중") return "중";
+  if (s.includes("최하")) return "최하";
+  if (s.includes("하")) return "하";
   if ((ALLOWED_DIFFICULTIES as readonly string[]).includes(s)) return s;
   return "중";
 }
 
+export function sanitizeCurriculumId(val: any): string | null {
+  if (val === null || val === undefined) return null;
+  const s = String(val).trim();
+  if (!s || ["NONE", "NULL", "미분류", "-"].includes(s.toUpperCase())) return null;
+  const codeMatch = s.match(/[EMH]\d{2,3}(?:-[0-9A-Za-z]+)+/i);
+  if (codeMatch) return codeMatch[0].toUpperCase();
+  const firstToken = s.split(/[\s:()\[\]]+/)[0]?.trim() || "";
+  return firstToken ? firstToken.slice(0, 50) : null;
+}
+
+export function sanitizeThinkingId(val: any): string | null {
+  if (val === null || val === undefined) return null;
+  const s = String(val).trim();
+  if (!s || ["NONE", "NULL", "미분류", "-"].includes(s.toUpperCase())) return null;
+  const thkMatch = s.match(/THK-\d{2}(?:-\d{2}){0,2}/i);
+  if (thkMatch) return thkMatch[0].toUpperCase().slice(0, 20);
+  return null;
+}
+
+export function sanitizeCognitiveLevel(val: any): string | null {
+  if (val === null || val === undefined) return null;
+  const s = String(val).trim();
+  if (!s || s === "미지정" || ["NONE", "NULL"].includes(s.toUpperCase())) return null;
+  if (s.includes("추론") || s.includes("문제")) return "추론 및 문제 해결";
+  if (s.includes("적용") || s.includes("응용")) return "적용 및 응용";
+  if (s.includes("이해") || s.includes("연산")) return "이해 및 연산";
+  return s.slice(0, 20);
+}
+
 export function autoInferProblemType(qText: string, q2Text: string, ansText: string, currentPt?: string | null): string {
-  if (currentPt && ["MULTIPLE_CHOICE", "SUBJECTIVE", "DESCRIPTIVE"].includes(currentPt)) {
-    return currentPt;
+  const ptStr = String(currentPt || "").trim().toUpperCase();
+  if (ptStr.includes("MULTIPLE_CHOICE") || ptStr.includes("객관식")) {
+    return "MULTIPLE_CHOICE";
+  }
+  if (ptStr.includes("DESCRIPTIVE") || ptStr.includes("서술형")) {
+    return "DESCRIPTIVE";
+  }
+  if (ptStr.includes("SUBJECTIVE") || ptStr.includes("주관식") || ptStr.includes("단답형")) {
+    return "SUBJECTIVE";
   }
   const fullQ = `${qText || ""}\n${q2Text || ""}`;
   const ans = String(ansText || "").trim();
@@ -573,10 +612,14 @@ export function autoInferProblemType(qText: string, q2Text: string, ansText: str
   ) {
     return "DESCRIPTIVE";
   }
-  if (currentPt && !["일반", "유사", "쌍둥이", "None", "null", ""].includes(currentPt)) {
-    return currentPt;
-  }
   return "SUBJECTIVE";
+}
+
+export function clampVarchar(val: any, maxLen = 20, fallback: string | null = null): string | null {
+  if (val === null || val === undefined) return fallback;
+  const s = String(val).trim();
+  if (!s || ["NONE", "NULL", "UNDEFINED"].includes(s.toUpperCase())) return fallback;
+  return s.slice(0, maxLen);
 }
 
 export function normalizeRecordForQuestionDb(raw: any, fallbackBookTitle = ""): any {
@@ -629,29 +672,34 @@ export function normalizeRecordForQuestionDb(raw: any, fallbackBookTitle = ""): 
   rec.question_number = qn !== null && qn !== undefined && String(qn).trim() !== "" ? String(qn).trim().slice(0, 20) : "1";
 
   rec.problem_type = autoInferProblemType(rec.question, rec.question_2 || "", rec.answer || "", rec.problem_type);
-
-  const cog = rec.cognitive_level;
-  rec.cognitive_level = !cog || String(cog).trim() === "" || cog === "미지정" || cog === "None" ? null : String(cog).trim();
+  rec.cognitive_level = sanitizeCognitiveLevel(rec.cognitive_level);
 
   const bn = rec.book_name || rec.source_book_name || fallbackBookTitle || (rec.pdf_source ? String(rec.pdf_source).replace(/\.pdf$/i, "") : "");
   rec.book_name = bn || null;
   rec.source_book_name = bn || null;
 
-  if (!rec.sub_taxonomy_id || String(rec.sub_taxonomy_id).trim() in { "": 1, None: 1, null: 1 }) {
-    rec.sub_taxonomy_id = null;
+  rec.taxonomy_id = sanitizeCurriculumId(rec.taxonomy_id);
+  rec.sub_taxonomy_id = sanitizeCurriculumId(rec.sub_taxonomy_id);
+  if (!rec.sub_taxonomy_id) {
     rec.sub_taxonomy_name = null;
   }
-  if (!rec.thk_taxonomy_id || String(rec.thk_taxonomy_id).trim() in { "": 1, None: 1, null: 1 }) {
-    rec.thk_taxonomy_id = null;
+
+  rec.thk_taxonomy_id = sanitizeThinkingId(rec.thk_taxonomy_id);
+  if (!rec.thk_taxonomy_id) {
     rec.thk_taxonomy_name = null;
   }
+
+  rec.ai_status = clampVarchar(rec.ai_status, 20, "완료");
+  rec.classification_status = clampVarchar(rec.classification_status, 20, "COMPLETE");
+  rec.verification_status = clampVarchar(rec.verification_status, 20, "APPROVED");
+  rec.image_type = clampVarchar(rec.image_type, 20, null);
+  rec.image_2_type = clampVarchar(rec.image_2_type, 20, null);
+  rec.answer_image_type = clampVarchar(rec.answer_image_type, 20, null);
+  rec.engine_ver = clampVarchar(rec.engine_ver, 20, null);
 
   const verified = Boolean(rec.is_human_verified || rec.human_verified || rec.verification_status === "APPROVED");
   rec.is_human_verified = verified;
   rec.human_verified = verified;
-  if (!rec.verification_status) {
-    rec.verification_status = verified ? "APPROVED" : "PENDING";
-  }
 
   return rec;
 }
@@ -1417,8 +1465,8 @@ export default function PdfParserPage() {
                 human_verified: false,
                 engine_ver:
                   extractMode === "WITH_SOLUTION"
-                    ? "V119.1_Stream_Bulletproof"
-                    : "V114.1_SOTA_Async_Parser",
+                    ? "V119.1_Stream"
+                    : "V114.1_Async",
               },
               bookTitle || cleanBookName
             );
@@ -1904,13 +1952,13 @@ export default function PdfParserPage() {
                   if (!res) return q;
 
                   const nextQ: any = { ...q };
-                  nextQ.taxonomy_id = String(res.curriculum_id || "").trim() || null;
+                  nextQ.taxonomy_id = sanitizeCurriculumId(res.curriculum_id);
                   nextQ.taxonomy_name =
                     String(res.curriculum_name || "").trim() || "이름 누락됨";
 
                   if (applySubTaxonomy) {
-                    const subId = String(res.sub_curriculum_id || "").trim();
-                    if (subId && !["NONE", "NULL"].includes(subId.toUpperCase())) {
+                    const subId = sanitizeCurriculumId(res.sub_curriculum_id);
+                    if (subId) {
                       nextQ.sub_taxonomy_id = subId;
                       nextQ.sub_taxonomy_name =
                         String(res.sub_curriculum_name || "").trim() || "이름 누락됨";
@@ -1921,8 +1969,8 @@ export default function PdfParserPage() {
                   }
 
                   if (applyThinking) {
-                    const thkId = String(res.thinking_id || "").trim();
-                    if (thkId && !["NONE", "NULL"].includes(thkId.toUpperCase())) {
+                    const thkId = sanitizeThinkingId(res.thinking_id);
+                    if (thkId) {
                       nextQ.thk_taxonomy_id = thkId;
                       nextQ.thk_taxonomy_name =
                         String(res.thinking_name || "이름 누락됨").trim();
@@ -1933,8 +1981,15 @@ export default function PdfParserPage() {
                   }
 
                   nextQ.difficulty = normalizeDifficultyForDb(res.difficulty);
-                  nextQ.problem_type = res.problem_type || nextQ.problem_type;
-                  nextQ.cognitive_level = res.cognitive_level || nextQ.cognitive_level;
+                  nextQ.problem_type = autoInferProblemType(
+                    nextQ.question,
+                    nextQ.question_2 || "",
+                    nextQ.answer || "",
+                    res.problem_type || nextQ.problem_type
+                  );
+                  nextQ.cognitive_level = sanitizeCognitiveLevel(
+                    res.cognitive_level || nextQ.cognitive_level
+                  );
 
                   if (
                     res.solving_probability !== null &&
@@ -2605,52 +2660,74 @@ export default function PdfParserPage() {
 
         const finalBookName = bookTitle.trim();
 
+        const safeTaxId = sanitizeCurriculumId(item.taxonomy_id);
+        const safeSubTaxId = sanitizeCurriculumId(item.sub_taxonomy_id);
+        const safeThkId = sanitizeThinkingId(item.thk_taxonomy_id);
+        const safeCogLevel = sanitizeCognitiveLevel(item.cognitive_level);
+        const safeProbType = autoInferProblemType(
+          item.question,
+          item.question_2 || "",
+          item.answer || "",
+          item.problem_type
+        );
+        const safeDiff = normalizeDifficultyForDb(item.difficulty);
+
         if (updateExistingOnlyMeta) {
-          const { error: metaErr } = await supabase
+          const metaPatch: any = {
+            taxonomy_id: safeTaxId,
+            taxonomy_name: item.taxonomy_name || null,
+            sub_taxonomy_id: safeSubTaxId,
+            sub_taxonomy_name: safeSubTaxId ? item.sub_taxonomy_name || null : null,
+            thk_taxonomy_id: safeThkId,
+            thk_taxonomy_name: safeThkId ? item.thk_taxonomy_name || null : null,
+            difficulty: safeDiff,
+            solving_probability: item.solving_probability ?? 50,
+            cognitive_level: safeCogLevel,
+            problem_type: safeProbType,
+            ...(finalBookName
+              ? { book_name: finalBookName, source_book_name: finalBookName }
+              : {}),
+            updated_at: new Date().toISOString(),
+          };
+          let { error: metaErr } = await supabase
             .from("question_db")
-            .update({
-              taxonomy_id: item.taxonomy_id || null,
-              taxonomy_name: item.taxonomy_name || null,
-              sub_taxonomy_id: item.sub_taxonomy_id || null,
-              sub_taxonomy_name: item.sub_taxonomy_name || null,
-              thk_taxonomy_id: item.thk_taxonomy_id || null,
-              thk_taxonomy_name: item.thk_taxonomy_name || null,
-              difficulty: item.difficulty || "중",
-              solving_probability: item.solving_probability ?? 50,
-              cognitive_level: item.cognitive_level || null,
-              problem_type: item.problem_type || "SUBJECTIVE",
-              ...(finalBookName
-                ? { book_name: finalBookName, source_book_name: finalBookName }
-                : {}),
-              updated_at: new Date().toISOString(),
-            })
+            .update(metaPatch)
             .eq("question_id", qId);
+          if (metaErr && metaErr.code === "22001") {
+            metaPatch.taxonomy_id = clampVarchar(safeTaxId, 20, null);
+            metaPatch.sub_taxonomy_id = clampVarchar(safeSubTaxId, 20, null);
+            const retryRes = await supabase
+              .from("question_db")
+              .update(metaPatch)
+              .eq("question_id", qId);
+            metaErr = retryRes.error;
+          }
           if (metaErr) throw metaErr;
           upsertedCount++;
           continue;
         }
 
-        const dbPayload = {
+        const dbPayload: any = {
           question_id: qId,
           parent_question_id: item.parent_question_id || null,
           pdf_source: item.pdf_source || selectedPdfName || null,
           book_name: finalBookName || item.book_name || null,
           source_book_name: finalBookName || item.source_book_name || item.book_name || null,
           detected_page_num: Number(item.detected_page_num) || 1,
-          final_printed_page: item.final_printed_page || String(item.detected_page_num || 1),
-          question_number: String(item.question_number || "1"),
+          final_printed_page: clampVarchar(item.final_printed_page || String(item.detected_page_num || 1), 20, "1"),
+          question_number: clampVarchar(item.question_number || "1", 20, "1"),
           sub_num: Number(item.sub_num) || 0,
           sub_sub_num: Number(item.sub_sub_num) || 0,
-          problem_type: item.problem_type || "SUBJECTIVE",
-          difficulty: item.difficulty || "중",
+          problem_type: safeProbType,
+          difficulty: safeDiff,
           solving_probability: item.solving_probability ?? 50,
-          cognitive_level: item.cognitive_level || null,
-          taxonomy_id: item.taxonomy_id || null,
+          cognitive_level: safeCogLevel,
+          taxonomy_id: safeTaxId,
           taxonomy_name: item.taxonomy_name || null,
-          sub_taxonomy_id: item.sub_taxonomy_id || null,
-          sub_taxonomy_name: item.sub_taxonomy_name || null,
-          thk_taxonomy_id: item.thk_taxonomy_id || null,
-          thk_taxonomy_name: item.thk_taxonomy_name || null,
+          sub_taxonomy_id: safeSubTaxId,
+          sub_taxonomy_name: safeSubTaxId ? item.sub_taxonomy_name || null : null,
+          thk_taxonomy_id: safeThkId,
+          thk_taxonomy_name: safeThkId ? item.thk_taxonomy_name || null : null,
           question: item.question || "수동 이미지 추출 문항",
           question_2: item.question_2 || null,
           options: item.options || null,
@@ -2661,24 +2738,34 @@ export default function PdfParserPage() {
           step_4_conclusion: item.step_4_conclusion || null,
           image_url: uploadedUrls.image_url ?? null,
           image_box: item.image_box || null,
-          image_type: item.image_type || null,
+          image_type: clampVarchar(item.image_type, 20, null),
           image_2_url: uploadedUrls.image_2_url ?? null,
           image_2_box: item.image_2_box || null,
-          image_2_type: item.image_2_type || null,
+          image_2_type: clampVarchar(item.image_2_type, 20, null),
           answer_image_url: uploadedUrls.answer_image_url ?? null,
           answer_image_box: item.answer_image_box || null,
-          answer_image_type: item.answer_image_type || null,
+          answer_image_type: clampVarchar(item.answer_image_type, 20, null),
           answer_image_2_url: uploadedUrls.answer_image_2_url ?? null,
-          ai_status: item.ai_status || "완료",
-          classification_status: item.classification_status || "COMPLETE",
-          verification_status: item.verification_status || "APPROVED",
+          ai_status: clampVarchar(item.ai_status, 20, "완료"),
+          classification_status: clampVarchar(item.classification_status, 20, "COMPLETE"),
+          verification_status: clampVarchar(item.verification_status, 20, "APPROVED"),
           is_human_verified: Boolean(item.is_human_verified ?? true),
           ai_gradable: item.ai_gradable ?? true,
         };
 
-        const { error: dbErr } = await supabase
+        let { error: dbErr } = await supabase
           .from("question_db")
           .upsert(dbPayload, { onConflict: "question_id" });
+
+        // 만약 DB 특정 컬럼(예: taxonomy_id 등)이 varchar(20) 제한에 걸릴 경우 20자 안전 절삭 후 즉시 재시도
+        if (dbErr && dbErr.code === "22001") {
+          dbPayload.taxonomy_id = clampVarchar(safeTaxId, 20, null);
+          dbPayload.sub_taxonomy_id = clampVarchar(safeSubTaxId, 20, null);
+          const retryRes = await supabase
+            .from("question_db")
+            .upsert(dbPayload, { onConflict: "question_id" });
+          dbErr = retryRes.error;
+        }
 
         if (dbErr) throw dbErr;
         upsertedCount++;

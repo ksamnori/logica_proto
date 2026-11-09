@@ -206,6 +206,53 @@ export default function QuestionDBUploadPage() {
           return isNaN(parsed) ? defaultVal : parsed;
       };
 
+      const clampVarchar = (val: any, maxLen = 20, fallback: string | null = null): string | null => {
+          if (val === null || val === undefined) return fallback;
+          const s = String(val).trim();
+          if (!s || ['NONE', 'NULL', 'UNDEFINED'].includes(s.toUpperCase())) return fallback;
+          return s.slice(0, maxLen);
+      };
+
+      const sanitizeCurriculumId = (val: any): string | null => {
+          if (val === null || val === undefined) return null;
+          const s = String(val).trim();
+          if (!s || ['NONE', 'NULL', '미분류', '-'].includes(s.toUpperCase())) return null;
+          const m = s.match(/[EMH]\d{2,3}(?:-[0-9A-Za-z]+)+/i);
+          if (m) return m[0].toUpperCase();
+          const tok = s.split(/[\s:()\[\]]+/)[0]?.trim() || '';
+          return tok ? tok.slice(0, 50) : null;
+      };
+
+      const sanitizeThinkingId = (val: any): string | null => {
+          if (val === null || val === undefined) return null;
+          const s = String(val).trim();
+          if (!s || ['NONE', 'NULL', '미분류', '-'].includes(s.toUpperCase())) return null;
+          const m = s.match(/THK-\d{2}(?:-\d{2}){0,2}/i);
+          if (m) return m[0].toUpperCase().slice(0, 20);
+          return null;
+      };
+
+      const sanitizeCognitiveLevel = (val: any): string | null => {
+          if (val === null || val === undefined) return null;
+          const s = String(val).trim();
+          if (!s || s === '미지정' || ['NONE', 'NULL'].includes(s.toUpperCase())) return null;
+          if (s.includes('추론') || s.includes('문제')) return '추론 및 문제 해결';
+          if (s.includes('적용') || s.includes('응용')) return '적용 및 응용';
+          if (s.includes('이해') || s.includes('연산')) return '이해 및 연산';
+          return s.slice(0, 20);
+      };
+
+      const sanitizeProblemType = (val: any): string | null => {
+          if (val === null || val === undefined) return null;
+          const s = String(val).trim().toUpperCase();
+          if (!s || ['NONE', 'NULL'].includes(s)) return null;
+          if (s.includes('MULTIPLE_CHOICE') || s.includes('객관식')) return 'MULTIPLE_CHOICE';
+          if (s.includes('DESCRIPTIVE') || s.includes('서술형')) return 'DESCRIPTIVE';
+          if (s.includes('SUBJECTIVE') || s.includes('주관식') || s.includes('단답형')) return 'SUBJECTIVE';
+          return String(val).trim().slice(0, 20);
+      };
+
+
       // 🌟 [핵심] 이미 DB에 존재하는 question_id이고 분류 메타 전용 업데이트 모드가 켜져 있으면
       // 기존 이미지/정답/문제텍스트는 전혀 건드리지 않고 8개 분류·난이도 컬럼만 안전하게 UPDATE 합니다.
       const existingItemsToPatch: any[] = [];
@@ -235,16 +282,16 @@ export default function QuestionDBUploadPage() {
           await Promise.all(
             batch.map(async (q) => {
               const patchPayload: Record<string, any> = {
-                taxonomy_id: q.taxonomy_id ?? null,
+                taxonomy_id: sanitizeCurriculumId(q.taxonomy_id),
                 taxonomy_name: q.taxonomy_name ?? null,
-                sub_taxonomy_id: q.sub_taxonomy_id ?? null,
+                sub_taxonomy_id: sanitizeCurriculumId(q.sub_taxonomy_id),
                 sub_taxonomy_name: q.sub_taxonomy_name ?? null,
-                thk_taxonomy_id: q.thk_taxonomy_id ?? null,
+                thk_taxonomy_id: sanitizeThinkingId(q.thk_taxonomy_id),
                 thk_taxonomy_name: q.thk_taxonomy_name ?? null,
                 difficulty: mapDifficulty(q.difficulty),
                 solving_probability: safeInteger(q.solving_probability),
-                cognitive_level: q.cognitive_level ?? null,
-                problem_type: q.problem_type ?? null,
+                cognitive_level: sanitizeCognitiveLevel(q.cognitive_level),
+                problem_type: sanitizeProblemType(q.problem_type),
                 updated_at: new Date().toISOString(),
               };
               // 업로드된 JSON에 유효한 이미지/정답 정보가 포함된 경우에는 누락되지 않도록 함께 업데이트 (null이면 기존 DB 값 보존)
@@ -270,10 +317,20 @@ export default function QuestionDBUploadPage() {
               }
               if (q.answer_image_box) patchPayload.answer_image_box = safeJsonb(q.answer_image_box);
 
-              const { error: patchErr } = await supabase
+              let { error: patchErr } = await supabase
                 .from('question_db')
                 .update(patchPayload)
                 .eq('question_id', q.question_id);
+
+              if (patchErr && patchErr.code === '22001') {
+                patchPayload.taxonomy_id = clampVarchar(patchPayload.taxonomy_id, 20, null);
+                patchPayload.sub_taxonomy_id = clampVarchar(patchPayload.sub_taxonomy_id, 20, null);
+                const retryPatch = await supabase
+                  .from('question_db')
+                  .update(patchPayload)
+                  .eq('question_id', q.question_id);
+                patchErr = retryPatch.error;
+              }
 
               if (patchErr) {
                 throw new Error(`문항 부분 업데이트 오류 (${q.question_id}): ${patchErr.message}`);
@@ -324,11 +381,11 @@ export default function QuestionDBUploadPage() {
           parent_question_id: q.parent_question_id || null,
           pdf_source: q.pdf_source || null,
           detected_page_num: safeInteger(q.detected_page_num),
-          final_printed_page: q.final_printed_page ? String(q.final_printed_page) : null,
-          question_number: q.question_number ? String(q.question_number) : null,
+          final_printed_page: clampVarchar(q.final_printed_page, 20, null),
+          question_number: clampVarchar(q.question_number, 20, null),
           sub_num: safeInteger(q.sub_num, 0),
           sub_sub_num: safeInteger(q.sub_sub_num, 0),
-          problem_type: q.problem_type || null,
+          problem_type: sanitizeProblemType(q.problem_type),
           difficulty: mapDifficulty(q.difficulty), 
           solving_probability: safeInteger(q.solving_probability),
           question: q.question || "",
@@ -341,27 +398,27 @@ export default function QuestionDBUploadPage() {
           step_4_conclusion: q.step_4_conclusion || null,
           image_box: safeJsonb(q.image_box),
           image_url: q.image_url || null,
-          image_type: q.image_type || null,
+          image_type: clampVarchar(q.image_type, 20, null),
           is_new_trend: safeBoolean(q.is_new_trend, false),
-          ai_status: q.ai_status || '대기',
-          exposure_tier: q.exposure_tier || 'PUBLIC',
-          curriculum_type: q.curriculum_type || 'COMMON',
+          ai_status: clampVarchar(q.ai_status, 20, '대기'),
+          exposure_tier: clampVarchar(q.exposure_tier, 20, 'PUBLIC'),
+          curriculum_type: clampVarchar(q.curriculum_type, 20, 'COMMON'),
           related_question_ids: safeJsonb(q.related_question_ids),
-          classification_status: q.classification_status || 'PENDING',
-          engine_ver: q.engine_ver || null,
-          derivation_type: q.derivation_type || null,
-          group_id: q.group_id || null,
-          taxonomy_id: q.taxonomy_id || null,
+          classification_status: clampVarchar(q.classification_status, 20, 'PENDING'),
+          engine_ver: clampVarchar(q.engine_ver, 20, null),
+          derivation_type: clampVarchar(q.derivation_type, 20, null),
+          group_id: clampVarchar(q.group_id, 50, null),
+          taxonomy_id: sanitizeCurriculumId(q.taxonomy_id),
           taxonomy_name: q.taxonomy_name || null,
-          sub_taxonomy_id: q.sub_taxonomy_id || null,
+          sub_taxonomy_id: sanitizeCurriculumId(q.sub_taxonomy_id),
           sub_taxonomy_name: q.sub_taxonomy_name || null,
-          cognitive_level: q.cognitive_level || null,
-          verification_status: q.verification_status || 'PENDING',
+          cognitive_level: sanitizeCognitiveLevel(q.cognitive_level),
+          verification_status: clampVarchar(q.verification_status, 20, 'PENDING'),
           is_human_verified: safeBoolean(q.human_verified, false) || safeBoolean(q.is_human_verified, false),
           answer_image_box: safeJsonb(q.answer_image_box),
           answer_image_url: q.answer_image_url || null,
-          answer_image_type: q.answer_image_type || null,
-          thk_taxonomy_id: q.thk_taxonomy_id || null,
+          answer_image_type: clampVarchar(q.answer_image_type, 20, null),
+          thk_taxonomy_id: sanitizeThinkingId(q.thk_taxonomy_id),
           thk_taxonomy_name: q.thk_taxonomy_name || null,
           is_hidden: safeBoolean(q.is_hidden, false),
           parent_relations: safeJsonb(q.parent_relations),
@@ -370,7 +427,7 @@ export default function QuestionDBUploadPage() {
           solution: q.solution || null,
           image_2_box: typeof q.image_2_box === 'string' ? q.image_2_box : (q.image_2_box ? JSON.stringify(q.image_2_box) : null),
           image_2_url: q.image_2_url || null,
-          image_2_type: q.image_2_type || null,
+          image_2_type: clampVarchar(q.image_2_type, 20, null),
           answer_image_2_url: q.answer_image_2_url || null,
           ai_gradable: safeBoolean(q.ai_gradable, true),
           
@@ -389,9 +446,21 @@ export default function QuestionDBUploadPage() {
       for (let i = 0; i < questionsToUpsert.length; i += chunkSize) {
         const chunk = questionsToUpsert.slice(i, i + chunkSize);
         
-        const { error: upsertErr } = await supabase
+        let { error: upsertErr } = await supabase
           .from('question_db')
           .upsert(chunk, { onConflict: 'question_id' });
+
+        if (upsertErr && upsertErr.code === '22001') {
+          const safeChunk = chunk.map((row: any) => ({
+            ...row,
+            taxonomy_id: clampVarchar(row.taxonomy_id, 20, null),
+            sub_taxonomy_id: clampVarchar(row.sub_taxonomy_id, 20, null),
+          }));
+          const retryUpsert = await supabase
+            .from('question_db')
+            .upsert(safeChunk, { onConflict: 'question_id' });
+          upsertErr = retryUpsert.error;
+        }
 
         if (upsertErr) {
           throw new Error(`청크 DB 업로드 오류 (Row ${i}): ${upsertErr.message}`);
