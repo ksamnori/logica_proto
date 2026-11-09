@@ -2624,154 +2624,209 @@ export default function PdfParserPage() {
 
     setIsUploadingDb(true);
     try {
-      const sorted = sortProblemsList(
-        problems.map((p) => normalizeRecordForQuestionDb(p, bookTitle.trim()))
+      const finalBookName = bookTitle.trim();
+      const sorted: any[] = sortProblemsList(
+        problems.map((p) => normalizeRecordForQuestionDb(p, finalBookName))
       );
 
-      let upsertedCount = 0;
+      const slotConfigs: { field: ImageSlotField; suffix: string }[] = [
+        { field: "image_url", suffix: "core_1" },
+        { field: "image_2_url", suffix: "core_2" },
+        { field: "answer_image_url", suffix: "sol_1" },
+        { field: "answer_image_2_url", suffix: "sol_2" },
+      ];
+
+      // 1단계: 새로 크롭/붙여넣기된 이미지 Blob이 있는 슬롯만 먼저 업로드 (소규모 병렬 배치)
+      const uploadedUrlsByQId: Record<string, Partial<Record<ImageSlotField, string | null>>> = {};
+      const imageUploadTasks: { qId: string; field: ImageSlotField; suffix: string; blob: Blob }[] = [];
 
       for (const item of sorted) {
         const qId = item.question_id;
-        const uploadedUrls: Partial<Record<ImageSlotField, string | null>> = {};
-
-        const slotConfigs: { field: ImageSlotField; suffix: string }[] = [
-          { field: "image_url", suffix: "core_1" },
-          { field: "image_2_url", suffix: "core_2" },
-          { field: "answer_image_url", suffix: "sol_1" },
-          { field: "answer_image_2_url", suffix: "sol_2" },
-        ];
-
+        uploadedUrlsByQId[qId] = {};
         for (const { field, suffix } of slotConfigs) {
           const asset = imageAssets[`${qId}_${field}`];
           if (asset?.blob) {
-            const storagePath = `questions/${qId}_${suffix}_${Date.now()}.png`;
-            const { error: upErr } = await supabase.storage
-              .from("system_images")
-              .upload(storagePath, asset.blob, { upsert: true });
-            if (!upErr) {
-              uploadedUrls[field] = supabase.storage
-                .from("system_images")
-                .getPublicUrl(storagePath).data.publicUrl;
-            }
+            imageUploadTasks.push({ qId, field, suffix, blob: asset.blob });
           } else {
-            uploadedUrls[field] = item[field] || null;
+            uploadedUrlsByQId[qId][field] = item[field] || null;
           }
         }
+      }
 
-        const finalBookName = bookTitle.trim();
+      if (imageUploadTasks.length > 0) {
+        addLog(`🖼️ 신규 크롭 이미지 ${imageUploadTasks.length}개 Storage 업로드 중...`);
+        const imgBatchSize = 5;
+        for (let i = 0; i < imageUploadTasks.length; i += imgBatchSize) {
+          const batch = imageUploadTasks.slice(i, i + imgBatchSize);
+          await Promise.all(
+            batch.map(async ({ qId, field, suffix, blob }) => {
+              const storagePath = `questions/${qId}_${suffix}_${Date.now()}.png`;
+              const { error: upErr } = await supabase.storage
+                .from("system_images")
+                .upload(storagePath, blob, { upsert: true });
+              if (!upErr) {
+                uploadedUrlsByQId[qId][field] = supabase.storage
+                  .from("system_images")
+                  .getPublicUrl(storagePath).data.publicUrl;
+              }
+            })
+          );
+        }
+      }
 
-        const safeTaxId = sanitizeCurriculumId(item.taxonomy_id);
-        const safeSubTaxId = sanitizeCurriculumId(item.sub_taxonomy_id);
-        const safeThkId = sanitizeThinkingId(item.thk_taxonomy_id);
-        const safeCogLevel = sanitizeCognitiveLevel(item.cognitive_level);
-        const safeProbType = autoInferProblemType(
-          item.question,
-          item.question_2 || "",
-          item.answer || "",
-          item.problem_type
-        );
-        const safeDiff = normalizeDifficultyForDb(item.difficulty);
+      // 2단계: DB 일괄 적재 (단건 루프 대신 청크 단위 일괄 처리로 DB/Auth 커넥션 타임아웃 원천 차단)
+      let upsertedCount = 0;
 
-        if (updateExistingOnlyMeta) {
-          const metaPatch: any = {
+      if (updateExistingOnlyMeta) {
+        const patchBatchSize = 25;
+        for (let i = 0; i < sorted.length; i += patchBatchSize) {
+          const batch = sorted.slice(i, i + patchBatchSize);
+          await Promise.all(
+            batch.map(async (item) => {
+              const qId = item.question_id;
+              const safeTaxId = sanitizeCurriculumId(item.taxonomy_id);
+              const safeSubTaxId = sanitizeCurriculumId(item.sub_taxonomy_id);
+              const safeThkId = sanitizeThinkingId(item.thk_taxonomy_id);
+              const safeCogLevel = sanitizeCognitiveLevel(item.cognitive_level);
+              const safeProbType = autoInferProblemType(
+                item.question,
+                item.question_2 || "",
+                item.answer || "",
+                item.problem_type
+              );
+              const safeDiff = normalizeDifficultyForDb(item.difficulty);
+
+              const metaPatch: any = {
+                taxonomy_id: safeTaxId,
+                taxonomy_name: item.taxonomy_name || null,
+                sub_taxonomy_id: safeSubTaxId,
+                sub_taxonomy_name: safeSubTaxId ? item.sub_taxonomy_name || null : null,
+                thk_taxonomy_id: safeThkId,
+                thk_taxonomy_name: safeThkId ? item.thk_taxonomy_name || null : null,
+                difficulty: safeDiff,
+                solving_probability: item.solving_probability ?? 50,
+                cognitive_level: safeCogLevel,
+                problem_type: safeProbType,
+                ...(finalBookName
+                  ? { book_name: finalBookName, source_book_name: finalBookName }
+                  : {}),
+                updated_at: new Date().toISOString(),
+              };
+
+              let { error: metaErr } = await supabase
+                .from("question_db")
+                .update(metaPatch)
+                .eq("question_id", qId);
+              if (metaErr && metaErr.code === "22001") {
+                metaPatch.taxonomy_id = clampVarchar(safeTaxId, 20, null);
+                metaPatch.sub_taxonomy_id = clampVarchar(safeSubTaxId, 20, null);
+                const retryRes = await supabase
+                  .from("question_db")
+                  .update(metaPatch)
+                  .eq("question_id", qId);
+                metaErr = retryRes.error;
+              }
+              if (metaErr) throw metaErr;
+              upsertedCount++;
+            })
+          );
+          addLog(`⏳ 기존 문항 메타 업데이트 진행 중: ${upsertedCount}/${sorted.length} 완료`);
+        }
+      } else {
+        const payloads: any[] = sorted.map((item) => {
+          const qId = item.question_id;
+          const uploadedUrls = uploadedUrlsByQId[qId] || {};
+          const safeTaxId = sanitizeCurriculumId(item.taxonomy_id);
+          const safeSubTaxId = sanitizeCurriculumId(item.sub_taxonomy_id);
+          const safeThkId = sanitizeThinkingId(item.thk_taxonomy_id);
+          const safeCogLevel = sanitizeCognitiveLevel(item.cognitive_level);
+          const safeProbType = autoInferProblemType(
+            item.question,
+            item.question_2 || "",
+            item.answer || "",
+            item.problem_type
+          );
+          const safeDiff = normalizeDifficultyForDb(item.difficulty);
+
+          return {
+            question_id: qId,
+            parent_question_id: item.parent_question_id || null,
+            pdf_source: item.pdf_source || selectedPdfName || null,
+            book_name: finalBookName || item.book_name || null,
+            source_book_name: finalBookName || item.source_book_name || item.book_name || null,
+            detected_page_num: Number(item.detected_page_num) || 1,
+            final_printed_page: clampVarchar(
+              item.final_printed_page || String(item.detected_page_num || 1),
+              20,
+              "1"
+            ),
+            question_number: clampVarchar(item.question_number || "1", 20, "1"),
+            sub_num: Number(item.sub_num) || 0,
+            sub_sub_num: Number(item.sub_sub_num) || 0,
+            problem_type: safeProbType,
+            difficulty: safeDiff,
+            solving_probability: item.solving_probability ?? 50,
+            cognitive_level: safeCogLevel,
             taxonomy_id: safeTaxId,
             taxonomy_name: item.taxonomy_name || null,
             sub_taxonomy_id: safeSubTaxId,
             sub_taxonomy_name: safeSubTaxId ? item.sub_taxonomy_name || null : null,
             thk_taxonomy_id: safeThkId,
             thk_taxonomy_name: safeThkId ? item.thk_taxonomy_name || null : null,
-            difficulty: safeDiff,
-            solving_probability: item.solving_probability ?? 50,
-            cognitive_level: safeCogLevel,
-            problem_type: safeProbType,
-            ...(finalBookName
-              ? { book_name: finalBookName, source_book_name: finalBookName }
-              : {}),
-            updated_at: new Date().toISOString(),
+            question: item.question || "수동 이미지 추출 문항",
+            question_2: item.question_2 || null,
+            options: item.options || null,
+            answer: item.answer || null,
+            step_1_concept: item.step_1_concept || null,
+            step_2_approach: item.step_2_approach || null,
+            step_3_process: item.step_3_process || null,
+            step_4_conclusion: item.step_4_conclusion || null,
+            image_url: uploadedUrls.image_url ?? null,
+            image_box: item.image_box || null,
+            image_type: clampVarchar(item.image_type, 20, null),
+            image_2_url: uploadedUrls.image_2_url ?? null,
+            image_2_box: item.image_2_box || null,
+            image_2_type: clampVarchar(item.image_2_type, 20, null),
+            answer_image_url: uploadedUrls.answer_image_url ?? null,
+            answer_image_box: item.answer_image_box || null,
+            answer_image_type: clampVarchar(item.answer_image_type, 20, null),
+            answer_image_2_url: uploadedUrls.answer_image_2_url ?? null,
+            ai_status: clampVarchar(item.ai_status, 20, "완료"),
+            classification_status: clampVarchar(item.classification_status, 20, "COMPLETE"),
+            verification_status: clampVarchar(item.verification_status, 20, "APPROVED"),
+            is_human_verified: Boolean(item.is_human_verified ?? true),
+            ai_gradable: item.ai_gradable ?? true,
           };
-          let { error: metaErr } = await supabase
+        });
+
+        const chunkSize = 100;
+        for (let i = 0; i < payloads.length; i += chunkSize) {
+          const chunk = payloads.slice(i, i + chunkSize);
+          let { error: dbErr } = await supabase
             .from("question_db")
-            .update(metaPatch)
-            .eq("question_id", qId);
-          if (metaErr && metaErr.code === "22001") {
-            metaPatch.taxonomy_id = clampVarchar(safeTaxId, 20, null);
-            metaPatch.sub_taxonomy_id = clampVarchar(safeSubTaxId, 20, null);
+            .upsert(chunk, { onConflict: "question_id" });
+
+          if (dbErr && dbErr.code === "22001") {
+            const safeChunk = chunk.map((row: any) => ({
+              ...row,
+              taxonomy_id: clampVarchar(row.taxonomy_id, 20, null),
+              sub_taxonomy_id: clampVarchar(row.sub_taxonomy_id, 20, null),
+            }));
             const retryRes = await supabase
               .from("question_db")
-              .update(metaPatch)
-              .eq("question_id", qId);
-            metaErr = retryRes.error;
+              .upsert(safeChunk, { onConflict: "question_id" });
+            dbErr = retryRes.error;
           }
-          if (metaErr) throw metaErr;
-          upsertedCount++;
-          continue;
+
+          if (dbErr) throw dbErr;
+          upsertedCount += chunk.length;
+          addLog(`⏳ question_db 청크 업로드 진행 중: ${upsertedCount}/${payloads.length} 완료`);
         }
-
-        const dbPayload: any = {
-          question_id: qId,
-          parent_question_id: item.parent_question_id || null,
-          pdf_source: item.pdf_source || selectedPdfName || null,
-          book_name: finalBookName || item.book_name || null,
-          source_book_name: finalBookName || item.source_book_name || item.book_name || null,
-          detected_page_num: Number(item.detected_page_num) || 1,
-          final_printed_page: clampVarchar(item.final_printed_page || String(item.detected_page_num || 1), 20, "1"),
-          question_number: clampVarchar(item.question_number || "1", 20, "1"),
-          sub_num: Number(item.sub_num) || 0,
-          sub_sub_num: Number(item.sub_sub_num) || 0,
-          problem_type: safeProbType,
-          difficulty: safeDiff,
-          solving_probability: item.solving_probability ?? 50,
-          cognitive_level: safeCogLevel,
-          taxonomy_id: safeTaxId,
-          taxonomy_name: item.taxonomy_name || null,
-          sub_taxonomy_id: safeSubTaxId,
-          sub_taxonomy_name: safeSubTaxId ? item.sub_taxonomy_name || null : null,
-          thk_taxonomy_id: safeThkId,
-          thk_taxonomy_name: safeThkId ? item.thk_taxonomy_name || null : null,
-          question: item.question || "수동 이미지 추출 문항",
-          question_2: item.question_2 || null,
-          options: item.options || null,
-          answer: item.answer || null,
-          step_1_concept: item.step_1_concept || null,
-          step_2_approach: item.step_2_approach || null,
-          step_3_process: item.step_3_process || null,
-          step_4_conclusion: item.step_4_conclusion || null,
-          image_url: uploadedUrls.image_url ?? null,
-          image_box: item.image_box || null,
-          image_type: clampVarchar(item.image_type, 20, null),
-          image_2_url: uploadedUrls.image_2_url ?? null,
-          image_2_box: item.image_2_box || null,
-          image_2_type: clampVarchar(item.image_2_type, 20, null),
-          answer_image_url: uploadedUrls.answer_image_url ?? null,
-          answer_image_box: item.answer_image_box || null,
-          answer_image_type: clampVarchar(item.answer_image_type, 20, null),
-          answer_image_2_url: uploadedUrls.answer_image_2_url ?? null,
-          ai_status: clampVarchar(item.ai_status, 20, "완료"),
-          classification_status: clampVarchar(item.classification_status, 20, "COMPLETE"),
-          verification_status: clampVarchar(item.verification_status, 20, "APPROVED"),
-          is_human_verified: Boolean(item.is_human_verified ?? true),
-          ai_gradable: item.ai_gradable ?? true,
-        };
-
-        let { error: dbErr } = await supabase
-          .from("question_db")
-          .upsert(dbPayload, { onConflict: "question_id" });
-
-        // 만약 DB 특정 컬럼(예: taxonomy_id 등)이 varchar(20) 제한에 걸릴 경우 20자 안전 절삭 후 즉시 재시도
-        if (dbErr && dbErr.code === "22001") {
-          dbPayload.taxonomy_id = clampVarchar(safeTaxId, 20, null);
-          dbPayload.sub_taxonomy_id = clampVarchar(safeSubTaxId, 20, null);
-          const retryRes = await supabase
-            .from("question_db")
-            .upsert(dbPayload, { onConflict: "question_id" });
-          dbErr = retryRes.error;
-        }
-
-        if (dbErr) throw dbErr;
-        upsertedCount++;
       }
 
-      alert(`✅ 총 ${upsertedCount}개의 문항이 Supabase question_db에 완벽히 반영되었습니다!\n\n적용된 강제 교재명(book_name): ${bookTitle.trim()}`);
+      alert(
+        `✅ 총 ${upsertedCount}개의 문항이 Supabase question_db에 완벽히 반영되었습니다!\n\n적용된 강제 교재명(book_name): ${finalBookName}`
+      );
       addLog(`🚀 Supabase question_db에 ${upsertedCount}개 문항 일괄 반영 완료!`);
     } catch (e: any) {
       alert(`DB 적재 중 오류 발생: ${e.message}`);

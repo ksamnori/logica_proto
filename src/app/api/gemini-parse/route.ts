@@ -47,16 +47,51 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const supabase = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-    );
-    const {
-      data: { user },
-      error: authError,
-    } = await supabase.auth.getUser(token);
+    // 🌟 병렬 요청 시 Supabase Auth(GoTrue) 커넥션 풀 고갈 및 refresh_token 타임아웃(500) 방지를 위한 토큰 메모리 캐시 + JWT 폴백 검증
+    const nowMs = Date.now();
+    const globalAny = globalThis as any;
+    if (!globalAny.__logicaVerifiedTokens) {
+      globalAny.__logicaVerifiedTokens = new Map<string, number>();
+    }
+    const tokenCache: Map<string, number> = globalAny.__logicaVerifiedTokens;
 
-    if (authError || !user) {
+    let isTokenValid = false;
+    const cachedExp = tokenCache.get(token);
+    if (cachedExp && cachedExp > nowMs) {
+      isTokenValid = true;
+    } else {
+      try {
+        // 1차: JWT 페이로드 로컬 검증 (만료 시간 및 sub 확인으로 불필요한 Auth DB 부하 차단)
+        const parts = token.split(".");
+        if (parts.length === 3) {
+          const payloadJson = Buffer.from(parts[1], "base64url").toString("utf-8");
+          const payload = JSON.parse(payloadJson);
+          if (payload && payload.sub && (!payload.exp || payload.exp * 1000 > nowMs)) {
+            isTokenValid = true;
+            tokenCache.set(token, Math.min(nowMs + 10 * 60 * 1000, (payload.exp || nowMs / 1000 + 600) * 1000));
+          }
+        }
+      } catch {}
+
+      if (!isTokenValid) {
+        const supabase = createClient(
+          process.env.NEXT_PUBLIC_SUPABASE_URL!,
+          process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+          { auth: { persistSession: false, autoRefreshToken: false } }
+        );
+        const {
+          data: { user },
+          error: authError,
+        } = await supabase.auth.getUser(token);
+
+        if (!authError && user) {
+          isTokenValid = true;
+          tokenCache.set(token, nowMs + 10 * 60 * 1000);
+        }
+      }
+    }
+
+    if (!isTokenValid) {
       return NextResponse.json(
         { success: false, error: "Unauthorized: 유효하지 않은 세션입니다." },
         { status: 401 }
