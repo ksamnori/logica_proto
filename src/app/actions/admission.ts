@@ -93,11 +93,14 @@ export async function fetchAdmissionStandardDataAction(standardName: string) {
 
     let metaRows: any[] = [];
     let baselineRow: any = null;
+    let legacyMetaRows: any[] = [];
+    let legacyBaselineRow: any = null;
 
-    // 1. admission_standard_meta_2610 조회
-    const { data: meta2610, error: meta2610Err } = await supabaseAdmin
-      .from("admission_standard_meta_2610")
-      .select("*");
+    // 1. admission_standard_meta_2610 및 구 입학테스트용 admission_standard_meta 병렬 조회
+    const [{ data: meta2610, error: meta2610Err }, { data: metaLegacy }] = await Promise.all([
+      supabaseAdmin.from("admission_standard_meta_2610").select("*"),
+      supabaseAdmin.from("admission_standard_meta").select("*"),
+    ]);
 
     if (!meta2610Err && Array.isArray(meta2610) && meta2610.length > 0) {
       for (const cand of candidates) {
@@ -120,28 +123,36 @@ export async function fetchAdmissionStandardDataAction(standardName: string) {
       }
     }
 
-    // 폴백: admission_standard_meta
-    if (!metaRows || metaRows.length === 0) {
-      const { data: metaLegacy } = await supabaseAdmin
-        .from("admission_standard_meta")
-        .select("*");
-      if (Array.isArray(metaLegacy) && metaLegacy.length > 0) {
+    if (Array.isArray(metaLegacy) && metaLegacy.length > 0) {
+      for (const cand of candidates) {
+        const exact = metaLegacy.filter(
+          (r: any) => String(r.standard_name ?? r.standard ?? "").trim() === cand
+        );
+        if (exact.length > 0) {
+          legacyMetaRows = exact;
+          break;
+        }
+      }
+      if (legacyMetaRows.length === 0) {
         for (const cand of candidates) {
-          const exact = metaLegacy.filter(
-            (r: any) => String(r.standard_name ?? r.standard ?? "").trim() === cand
-          );
-          if (exact.length > 0) {
-            metaRows = exact;
+          const matched = metaLegacy.filter((r: any) => matchesStandardName(r, cand, cand));
+          if (matched.length > 0) {
+            legacyMetaRows = matched;
             break;
           }
         }
       }
     }
 
-    // 2. admission_standard_baseline_2610 조회
-    const { data: base2610, error: base2610Err } = await supabaseAdmin
-      .from("admission_standard_baseline_2610")
-      .select("*");
+    if (!metaRows || metaRows.length === 0) {
+      metaRows = legacyMetaRows;
+    }
+
+    // 2. admission_standard_baseline_2610 및 구 입학테스트용 admission_standard_baseline 병렬 조회
+    const [{ data: base2610, error: base2610Err }, { data: baseLegacy }] = await Promise.all([
+      supabaseAdmin.from("admission_standard_baseline_2610").select("*"),
+      supabaseAdmin.from("admission_standard_baseline").select("*"),
+    ]);
 
     if (!base2610Err && Array.isArray(base2610) && base2610.length > 0) {
       for (const cand of candidates) {
@@ -155,34 +166,36 @@ export async function fetchAdmissionStandardDataAction(standardName: string) {
       }
     }
 
-    // 폴백: admission_standard_baseline
-    if (!baselineRow) {
-      const { data: baseLegacy } = await supabaseAdmin
-        .from("admission_standard_baseline")
-        .select("*");
-      if (Array.isArray(baseLegacy) && baseLegacy.length > 0) {
-        for (const cand of candidates) {
-          const found = baseLegacy.find(
-            (r: any) => String(r.standard_name ?? r.standard ?? "").trim() === cand
-          );
-          if (found) {
-            baselineRow = found;
-            break;
-          }
+    if (Array.isArray(baseLegacy) && baseLegacy.length > 0) {
+      for (const cand of candidates) {
+        const found = baseLegacy.find(
+          (r: any) => String(r.standard_name ?? r.standard ?? "").trim() === cand
+        );
+        if (found) {
+          legacyBaselineRow = found;
+          break;
         }
       }
+    }
+
+    if (!baselineRow) {
+      baselineRow = legacyBaselineRow;
     }
 
     return {
       success: true,
       metaRows: metaRows || [],
       baselineRow: baselineRow || null,
+      legacyMetaRows: legacyMetaRows || [],
+      legacyBaselineRow: legacyBaselineRow || null,
     };
   } catch (error: any) {
     return {
       success: false,
       metaRows: [],
       baselineRow: null,
+      legacyMetaRows: [],
+      legacyBaselineRow: null,
       message: error?.message || "기준표 로드 실패",
     };
   }

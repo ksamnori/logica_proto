@@ -10,7 +10,64 @@ interface ExamOption {
   exam_id: string;
   title: string;
   sub_title: string;
+  standard_code?: string;
+  display_label?: string;
   count?: number;
+}
+
+// 🌟 구 '입학테스트'(예: 중등 7-1, 5-1)와 현 '진단평가'(예: 중등 1-1, 5-1) 과정 코드 정규화
+function resolveAdmissionCourseCode(subTitle?: string, title?: string, majorGrade?: string): string {
+  const rawCombined = [subTitle, title, majorGrade].filter(Boolean).join(" ");
+  const combined = rawCombined.replace(/20\d{2}\s*[-./]\s*\d{1,2}(?:\s*[-./]\s*\d{1,2})?/g, " ");
+  if (!combined.trim()) return "";
+
+  const sevenToNineMatch = combined.match(/(?:^|[^0-9])([7-9])\s*[-_]\s*([1-2])(?:$|[^0-9])/);
+  if (sevenToNineMatch) {
+    return `${sevenToNineMatch[1]}-${sevenToNineMatch[2]}`;
+  }
+
+  const midMatch =
+    combined.match(/중(?:등|학교|학)?\s*([1-3])\s*[-_]\s*([1-2])/) ||
+    combined.match(/\bM\s*([1-3])\s*[-_]\s*([1-2])/i);
+  if (midMatch) {
+    return `${parseInt(midMatch[1], 10) + 6}-${midMatch[2]}`;
+  }
+
+  if (/중(?:등|학교|학|[1-3])/.test(combined)) {
+    const cleanSub = String(subTitle || "").replace(/20\d{2}\s*[-./]\s*\d{1,2}(?:\s*[-./]\s*\d{1,2})?/g, " ");
+    const cleanTitle = String(title || "").replace(/20\d{2}\s*[-./]\s*\d{1,2}(?:\s*[-./]\s*\d{1,2})?/g, " ");
+    const tag =
+      cleanSub.match(/(?:^|[^0-9])([1-3])\s*[-_]\s*([1-2])(?:$|[^0-9])/) ||
+      cleanTitle.match(/(?:^|[^0-9])([1-3])\s*[-_]\s*([1-2])(?:$|[^0-9])/) ||
+      combined.match(/(?:^|[^0-9])([1-3])\s*[-_]\s*([1-2])(?:$|[^0-9])/);
+    if (tag) {
+      return `${parseInt(tag[1], 10) + 6}-${tag[2]}`;
+    }
+  }
+
+  const cleanSub = String(subTitle || "").replace(/20\d{2}\s*[-./]\s*\d{1,2}(?:\s*[-./]\s*\d{1,2})?/g, " ");
+  const cleanTitle = String(title || "").replace(/20\d{2}\s*[-./]\s*\d{1,2}(?:\s*[-./]\s*\d{1,2})?/g, " ");
+  const matchTag =
+    cleanSub.match(/(?:^|[^0-9])([1-9])\s*[-_]\s*([1-2])(?:$|[^0-9])/) ||
+    cleanTitle.match(/(?:^|[^0-9])([1-9])\s*[-_]\s*([1-2])(?:$|[^0-9])/) ||
+    combined.match(/(?:^|[^0-9])([1-9])\s*[-_]\s*([1-2])(?:$|[^0-9])/);
+  if (matchTag) {
+    const g = parseInt(matchTag[1], 10);
+    const s = matchTag[2];
+    if (g === 1 && !/초(?:등|학교)?\s*1/.test(combined)) {
+      return `7-${s}`;
+    }
+    return `${g}-${s}`;
+  }
+  return "";
+}
+
+function formatCourseDisplayLabel(code: string): string {
+  const m = String(code || "").match(/^([7-9])-([1-2])$/);
+  if (m) {
+    return `중${parseInt(m[1], 10) - 6}-${m[2]}(${code})`;
+  }
+  return code || "기타";
 }
 
 interface TenantOption {
@@ -58,6 +115,7 @@ export default function AdmissionAnalyticsPage() {
 
   const [selectedExamId, setSelectedExamId] = useState<string>("");
   const [excludeTest, setExcludeTest] = useState<boolean>(true);
+  const [mergeByStandard, setMergeByStandard] = useState<boolean>(true);
   
   const [selectedDate, setSelectedDate] = useState<string>("all");
   const [selectedTime, setSelectedTime] = useState<string>("all");
@@ -69,7 +127,7 @@ export default function AdmissionAnalyticsPage() {
   // 🌟 전체 진단평가 통합 데이터 (일정 + 지원자 + 채점완료 시험지)
   const [allEnrichedAssigns, setAllEnrichedAssigns] = useState<any[]>([]);
   const [allSessions, setAllSessions] = useState<any[]>([]);
-  const [examMetaMap, setExamMetaMap] = useState<Record<string, { exam_id: string; title: string; sub_title: string }>>({});
+  const [examMetaMap, setExamMetaMap] = useState<Record<string, { exam_id: string; title: string; sub_title: string; major_grade?: string; standard_code: string }>>({});
 
   // 선택된 시험지의 문항 및 학생 답안 상세 데이터
   const [rawExamDetails, setRawExamDetails] = useState<{
@@ -156,27 +214,45 @@ export default function AdmissionAnalyticsPage() {
             .range(from, to)
         );
 
-        // (3) 입학테스트 시험지 목록 확인
+        // (3) 입학테스트 및 진단평가 시험지 목록 통합 확인
         const { data: masterExams } = await supabase
           .from('exam_master')
-          .select('exam_id, title, sub_title, exam_type')
-          .eq('exam_type', '입학테스트');
+          .select('exam_id, title, sub_title, major_grade, exam_type')
+          .in('exam_type', ['입학테스트', '진단평가']);
 
-        const eMap: Record<string, { exam_id: string; title: string; sub_title: string }> = {};
+        const eMap: Record<string, { exam_id: string; title: string; sub_title: string; major_grade?: string; standard_code: string }> = {};
         (masterExams || []).forEach((m: any) => {
-          eMap[String(m.exam_id)] = { exam_id: String(m.exam_id), title: m.title || '제목 없음', sub_title: m.sub_title || '' };
+          const stdCode = resolveAdmissionCourseCode(m.sub_title, m.title, m.major_grade);
+          eMap[String(m.exam_id)] = {
+            exam_id: String(m.exam_id),
+            title: m.title || '제목 없음',
+            sub_title: m.sub_title || '',
+            major_grade: m.major_grade || '',
+            standard_code: stdCode,
+          };
         });
 
         const sessionMap = new Map<string, any>();
         (sessionsData || []).forEach((s: any) => {
           sessionMap.set(String(s.admission_session_id), s);
           const em = Array.isArray(s.exam_master) ? s.exam_master[0] : s.exam_master;
-          if (s.exam_id && em && !eMap[String(s.exam_id)]) {
-            eMap[String(s.exam_id)] = {
-              exam_id: String(s.exam_id),
-              title: em.title || s.title || '제목 없음',
-              sub_title: em.sub_title || ''
-            };
+          if (s.exam_id) {
+            const eid = String(s.exam_id);
+            const titleStr = em?.title || s.title || '제목 없음';
+            const subStr = em?.sub_title || '';
+            const majStr = em?.major_grade || '';
+            const stdCode = resolveAdmissionCourseCode(subStr, `${titleStr} ${s.title || ''}`, majStr);
+            if (!eMap[eid]) {
+              eMap[eid] = {
+                exam_id: eid,
+                title: titleStr,
+                sub_title: subStr,
+                major_grade: majStr,
+                standard_code: stdCode,
+              };
+            } else if (!eMap[eid].standard_code && stdCode) {
+              eMap[eid].standard_code = stdCode;
+            }
           }
         });
 
@@ -230,10 +306,13 @@ export default function AdmissionAnalyticsPage() {
           assignById.set(String(a.assignment_id), a);
           const em = Array.isArray(a.exam_master) ? a.exam_master[0] : a.exam_master;
           if (a.exam_id && em && !eMap[String(a.exam_id)]) {
+            const stdCode = resolveAdmissionCourseCode(em.sub_title, em.title, em.major_grade);
             eMap[String(a.exam_id)] = {
               exam_id: String(a.exam_id),
               title: em.title || '제목 없음',
-              sub_title: em.sub_title || ''
+              sub_title: em.sub_title || '',
+              major_grade: em.major_grade || '',
+              standard_code: stdCode,
             };
           }
         });
@@ -323,12 +402,28 @@ export default function AdmissionAnalyticsPage() {
     return Array.from(set).sort((a, b) => GRADE_ORDER.indexOf(a) - GRADE_ORDER.indexOf(b));
   }, [preGradeAssigns]);
 
-  // 🌟 3-2. 선택된 시험지의 학년별 성적 분포 (학년 필터와 무관하게 전체 학년 비교)
+  // 🌟 선택된 시험지와 동일 과정(예: 중등 7-1 <-> 중등 1-1, 5-1 <-> 5-1)으로 묶이는 시험지 ID 집합
+  const matchedExamIdSet = useMemo(() => {
+    if (!selectedExamId) return new Set<string>();
+    if (!mergeByStandard) return new Set<string>([String(selectedExamId)]);
+    const targetMeta = examMetaMap[String(selectedExamId)];
+    const targetStd = targetMeta?.standard_code;
+    if (!targetStd) return new Set<string>([String(selectedExamId)]);
+    const ids = new Set<string>([String(selectedExamId)]);
+    Object.values(examMetaMap).forEach((m) => {
+      if (m.standard_code && m.standard_code === targetStd) {
+        ids.add(String(m.exam_id));
+      }
+    });
+    return ids;
+  }, [selectedExamId, mergeByStandard, examMetaMap]);
+
+  // 🌟 3-2. 선택된 시험지(합산 필터 켜짐 시 동일 과정 전체)의 학년별 성적 분포
   const gradeBreakdown = useMemo(() => {
-    if (!selectedExamId) return [];
+    if (!selectedExamId || matchedExamIdSet.size === 0) return [];
     const map = new Map<string, number[]>();
     preGradeAssigns.forEach((a: any) => {
-      if (String(a.exam_id) !== String(selectedExamId)) return;
+      if (!matchedExamIdSet.has(String(a.exam_id))) return;
       if (selectedDate !== "all" && a._dStr !== selectedDate) return;
       if (selectedTime !== "all" && a._tStr !== selectedTime) return;
       const st = Array.isArray(a.student) ? a.student[0] : a.student;
@@ -344,12 +439,15 @@ export default function AdmissionAnalyticsPage() {
         highest: Math.max(...scores),
       }))
       .sort((a, b) => GRADE_ORDER.indexOf(a.grade) - GRADE_ORDER.indexOf(b.grade));
-  }, [preGradeAssigns, selectedExamId, selectedDate, selectedTime]);
+  }, [preGradeAssigns, selectedExamId, matchedExamIdSet, selectedDate, selectedTime]);
 
-  // 🌟 3-3. 시험지와 무관한 나이(학년) × 과정 성적표 (지점·날짜·테스트계정 필터만 적용)
+  // 🌟 3-3. 시험지와 무관한 나이(학년) × 과정 성적표 (입학테스트 중등 7-1과 진단평가 중등 1-1을 '7-1'로 자동 통합)
   const semOf = (a: any) => {
     const meta = examMetaMap[String(a.exam_id)];
+    if (meta?.standard_code) return meta.standard_code;
     const em = Array.isArray(a.exam_master) ? a.exam_master[0] : a.exam_master;
+    const resolved = resolveAdmissionCourseCode(meta?.sub_title || em?.sub_title, meta?.title || em?.title, em?.major_grade);
+    if (resolved) return resolved;
     const sub = meta?.sub_title || em?.sub_title || '';
     return sub.match(/\d+-\d+/)?.[0] || sub || '기타';
   };
@@ -377,13 +475,18 @@ export default function AdmissionAnalyticsPage() {
     };
   }, [preGradeAssigns, examMetaMap, selectedDate, selectedTime]);
 
-  // 행렬 셀 클릭 → 해당 학년 + 해당 과정 시험지로 이동
+  // 행렬 셀 클릭 → 해당 학년 + 해당 과정 시험지로 이동 (현 진단평가 시험지 우선 선택)
   const jumpTo = (grade: string, sem: string | null) => {
     setSelectedGrade(grade);
     if (!sem) return;
-    const exam = (Object.values(examMetaMap) as { exam_id: string; title: string; sub_title: string }[]).find(m => (m.sub_title.match(/\d+-\d+/)?.[0] || m.sub_title) === sem
-      && preGradeAssigns.some((a: any) => String(a.exam_id) === m.exam_id));
-    if (exam) setSelectedExamId(exam.exam_id);
+    const candidates = Object.values(examMetaMap).filter(
+      (m) => (m.standard_code || m.sub_title.match(/\d+-\d+/)?.[0] || m.sub_title) === sem &&
+        preGradeAssigns.some((a: any) => String(a.exam_id) === m.exam_id)
+    );
+    const preferred =
+      candidates.find((m) => m.title.includes('진단')) ||
+      candidates[0];
+    if (preferred) setSelectedExamId(preferred.exam_id);
   };
 
   // 🌟 4. 모든 응시 날짜 및 시간 목록 추출 (개설된 일정 + 실제 응시 데이터 통합)
@@ -417,7 +520,7 @@ export default function AdmissionAnalyticsPage() {
     return Array.from(timeSet).filter(Boolean).sort();
   }, [baseFilteredAssigns, allSessions, selectedTenantId, selectedDate]);
 
-  // 🌟 5. 현재 날짜/시간 조건에 맞는 시험지 목록 및 응시 인원수 계산
+  // 🌟 5. 현재 날짜/시간 조건에 맞는 시험지 목록 및 응시 인원수 계산 (합산 필터 지원)
   const examList = useMemo(() => {
     const dateFiltered = baseFilteredAssigns.filter((a: any) => {
       if (selectedDate !== "all" && a._dStr !== selectedDate) return false;
@@ -432,7 +535,6 @@ export default function AdmissionAnalyticsPage() {
       }
     });
 
-    // 전체 기간에서 한 번이라도 응시된 시험지 + 현재 날짜에 응시된 시험지 표시
     const totalCountByExam: Record<string, number> = {};
     baseFilteredAssigns.forEach((a: any) => {
       if (a.exam_id) {
@@ -440,18 +542,61 @@ export default function AdmissionAnalyticsPage() {
       }
     });
 
-    const options: ExamOption[] = Object.values(examMetaMap)
-      .filter(meta => (totalCountByExam[meta.exam_id] || 0) > 0)
-      .map(meta => ({
-        ...meta,
-        count: countByExam[meta.exam_id] || 0
-      }))
-      .sort((a, b) => a.sub_title.localeCompare(b.sub_title, 'ko', { numeric: true }));
+    const activeMetas = Object.values(examMetaMap).filter(
+      (meta) => (totalCountByExam[meta.exam_id] || 0) > 0
+    );
 
-    // 만약 특정 날짜/시간을 골랐다면, 해당 일시에 응시생이 있는 시험지를 우선 보여주되 없으면 전체 표시
-    const activeOnDate = options.filter(o => (o.count || 0) > 0);
+    if (mergeByStandard) {
+      // 과정 코드(예: 2-2 ~ 6-2, 7-1[중1-1]) 기준으로 진단평가 + 구 입학테스트 합산
+      const byStd = new Map<string, typeof activeMetas>();
+      activeMetas.forEach((m) => {
+        const key = m.standard_code || `raw_${m.exam_id}`;
+        if (!byStd.has(key)) byStd.set(key, []);
+        byStd.get(key)!.push(m);
+      });
+
+      const mergedOptions: ExamOption[] = [];
+      byStd.forEach((group, stdKey) => {
+        // 대표 시험지는 '진단평가'가 포함된 시험지를 우선 선택
+        const rep =
+          group.find((g) => g.title.includes("진단") || g.sub_title.includes("진단")) ||
+          group[0];
+        const sumCount = group.reduce((acc, g) => acc + (countByExam[g.exam_id] || 0), 0);
+        const courseLabel = rep.standard_code ? formatCourseDisplayLabel(rep.standard_code) : (rep.sub_title || rep.title);
+        const displayLabel =
+          group.length > 1
+            ? `[통합 ${courseLabel}] 진단평가 + 입학테스트 (${sumCount}명)`
+            : `${rep.title} ${rep.sub_title ? `[${courseLabel}]` : ""} (${sumCount}명)`;
+
+        mergedOptions.push({
+          exam_id: rep.exam_id,
+          title: rep.title,
+          sub_title: rep.sub_title || stdKey,
+          standard_code: rep.standard_code || stdKey,
+          display_label: displayLabel,
+          count: sumCount,
+        });
+      });
+
+      mergedOptions.sort((a, b) =>
+        (a.standard_code || a.sub_title).localeCompare(b.standard_code || b.sub_title, "ko", { numeric: true })
+      );
+
+      const activeOnDate = mergedOptions.filter((o) => (o.count || 0) > 0);
+      return selectedDate !== "all" && activeOnDate.length > 0 ? activeOnDate : mergedOptions;
+    }
+
+    const options: ExamOption[] = activeMetas
+      .map((meta) => ({
+        ...meta,
+        display_label: `${meta.title} ${meta.sub_title ? `[${meta.sub_title}]` : ""} (${countByExam[meta.exam_id] || 0}명)`,
+        count: countByExam[meta.exam_id] || 0,
+      }))
+      .sort((a, b) => (a.standard_code || a.sub_title).localeCompare(b.standard_code || b.sub_title, "ko", { numeric: true }));
+
+    const activeOnDate = options.filter((o) => (o.count || 0) > 0);
     return selectedDate !== "all" && activeOnDate.length > 0 ? activeOnDate : options;
-  }, [baseFilteredAssigns, examMetaMap, selectedDate, selectedTime]);
+  }, [baseFilteredAssigns, examMetaMap, selectedDate, selectedTime, mergeByStandard]);
 
   // 선택된 시험지가 목록에 없거나 응시생이 0명일 때 자동으로 첫 번째 유효한 시험지 선택
   useEffect(() => {
@@ -465,17 +610,18 @@ export default function AdmissionAnalyticsPage() {
     }
   }, [examList, selectedExamId]);
 
-  // 🌟 6. 선택된 시험지(selectedExamId)에 대한 문항 정보 및 학생 답안 상세 로드
+  // 🌟 6. 선택된 시험지(및 합산 대상 동일 과정 시험지들)에 대한 문항 정보 및 학생 답안 상세 로드
   useEffect(() => {
     const fetchExamDetails = async () => {
-      if (!selectedExamId) {
+      if (!selectedExamId || matchedExamIdSet.size === 0) {
         setRawExamDetails(null);
         return;
       }
 
       setIsLoading(true);
       try {
-        const targetAssigns = allEnrichedAssigns.filter(a => String(a.exam_id) === String(selectedExamId));
+        const targetExamIds = Array.from(matchedExamIdSet);
+        const targetAssigns = allEnrichedAssigns.filter(a => matchedExamIdSet.has(String(a.exam_id)));
         const assignIds = targetAssigns.map(a => a.assignment_id);
 
         let allAnswers: any[] = [];
@@ -496,15 +642,15 @@ export default function AdmissionAnalyticsPage() {
 
         const { data: items, error: iErr } = await supabase
           .from('exam_item')
-          .select('question_id, sort_order, assigned_score')
-          .eq('exam_id', selectedExamId)
+          .select('exam_id, question_id, sort_order, assigned_score')
+          .in('exam_id', targetExamIds)
           .order('sort_order')
-          .limit(2000);
+          .limit(4000);
           
         if (iErr) throw iErr;
         const itemsData = items || [];
 
-        const qIds = itemsData.map(i => i.question_id);
+        const qIds = Array.from(new Set(itemsData.map(i => i.question_id).filter(Boolean)));
         const uuidIds = qIds.filter(id => typeof id === 'string' && id.includes('-'));
         const numIds = qIds.filter(id => typeof id === 'number' || (typeof id === 'string' && !id.includes('-') && !isNaN(Number(id)))).map(Number);
 
@@ -512,7 +658,7 @@ export default function AdmissionAnalyticsPage() {
         if (uuidIds.length > 0) {
           const { data: qDbData } = await supabase.from('question_db')
             .select('question_id, parent_question_id, question_number, sub_num, question, question_2, image_url, image_2_url, answer')
-            .in('question_id', uuidIds).limit(2000);
+            .in('question_id', uuidIds).limit(4000);
           if (qDbData) fetchedQuestions.push(...qDbData);
         }
         
@@ -522,14 +668,14 @@ export default function AdmissionAnalyticsPage() {
         if (missingUuids.length > 0) {
           const { data: tqUuidData } = await supabase.from('textbook_question')
             .select('question_id, parent_tq_id, question_number, question, answer')
-            .in('question_id', missingUuids).limit(2000);
+            .in('question_id', missingUuids).limit(4000);
           if (tqUuidData) fetchedQuestions.push(...tqUuidData);
         }
         
         if (numIds.length > 0) {
           const { data: numData } = await supabase.from('textbook_question')
             .select('tq_id, parent_tq_id, question_number, question, answer')
-            .in('tq_id', numIds).limit(2000);
+            .in('tq_id', numIds).limit(4000);
           if (numData) fetchedQuestions.push(...numData);
         }
 
@@ -540,7 +686,7 @@ export default function AdmissionAnalyticsPage() {
         });
 
         setRawExamDetails({
-          examId: selectedExamId,
+          examId: `${selectedExamId}_${targetExamIds.sort().join(',')}`,
           answers: allAnswers,
           itemsData,
           qMap
@@ -553,18 +699,19 @@ export default function AdmissionAnalyticsPage() {
     };
 
     fetchExamDetails();
-  }, [selectedExamId, allEnrichedAssigns]);
+  }, [selectedExamId, matchedExamIdSet, allEnrichedAssigns]);
 
-  // 🌟 7. 화면에 표시할 최종 통계 계산
+  // 🌟 7. 화면에 표시할 최종 통계 계산 (합산 필터 켜짐 시 동일 과정의 구 입학테스트 + 현 진단평가 통합)
   const reportStats = useMemo(() => {
-    if (!rawExamDetails || rawExamDetails.examId !== selectedExamId) {
+    const expectedKey = `${selectedExamId}_${Array.from(matchedExamIdSet).sort().join(',')}`;
+    if (!rawExamDetails || rawExamDetails.examId !== expectedKey) {
       return { summary: null, questionStats: [], studentList: [] };
     }
 
     const { answers, itemsData, qMap } = rawExamDetails;
 
     let filteredAssigns = baseFilteredAssigns.filter(
-      (a: any) => String(a.exam_id) === String(selectedExamId)
+      (a: any) => matchedExamIdSet.has(String(a.exam_id))
     );
 
     if (selectedDate !== "all") {
@@ -576,49 +723,74 @@ export default function AdmissionAnalyticsPage() {
 
     const activeAssignIds = new Set(filteredAssigns.map((a: any) => a.assignment_id));
 
-    const groupMap = new Map();
-    const groups: any[] = [];
+    // 각 시험지별로 문항 그룹(1~30번)을 빌드하는 헬퍼
+    const buildGroupsForExam = (examItems: any[]) => {
+      const groupMap = new Map();
+      const groups: any[] = [];
 
-    itemsData.forEach((item: any) => {
-      const q = qMap[String(item.question_id)] || {};
-      const baseNum = String(q.question_number || '').match(/\d+/) ? String(q.question_number).match(/\d+/)?.[0] : item.question_id;
-      const parentId = q.parent_question_id || q.parent_tq_id;
+      examItems.forEach((item: any) => {
+        const q = qMap[String(item.question_id)] || {};
+        const baseNum = String(q.question_number || '').match(/\d+/) ? String(q.question_number).match(/\d+/)?.[0] : item.question_id;
+        const parentId = q.parent_question_id || q.parent_tq_id;
 
-      let gId = `q_${baseNum}`;
-      if (parentId && String(parentId) !== 'null' && String(parentId).trim() !== '') {
-        gId = `parent_${parentId}`;
-      }
+        let gId = `q_${baseNum}`;
+        if (parentId && String(parentId) !== 'null' && String(parentId).trim() !== '') {
+          gId = `parent_${parentId}`;
+        }
 
-      if (!groupMap.has(gId)) {
-        const newG = { id: gId, sort_order: item.sort_order, items: [] };
-        groupMap.set(gId, newG);
-        groups.push(newG);
-      }
-      groupMap.get(gId).items.push({
-        ...item,
-        parentId: parentId,
-        question_number: q.question_number,
-        sub_num: q.sub_num || 0,
-        questionContent: q.question,
-        questionContent2: q.question_2,
-        imageUrl: q.image_url,
-        image2Url: q.image_2_url,
-        answerContent: q.answer
+        if (!groupMap.has(gId)) {
+          const newG = { id: gId, sort_order: item.sort_order, items: [] };
+          groupMap.set(gId, newG);
+          groups.push(newG);
+        }
+        groupMap.get(gId).items.push({
+          ...item,
+          parentId: parentId,
+          question_number: q.question_number,
+          sub_num: q.sub_num || 0,
+          questionContent: q.question,
+          questionContent2: q.question_2,
+          imageUrl: q.image_url,
+          image2Url: q.image_2_url,
+          answerContent: q.answer
+        });
+      });
+
+      groups.forEach(g => {
+        g.sort_order = Math.min(...g.items.map((i:any) => i.sort_order));
+        g.items.sort((a: any, b: any) => {
+          if (a.question_id && b.parentId && String(a.question_id) === String(b.parentId) && a.question_id !== b.question_id) return -1;
+          if (b.question_id && a.parentId && String(b.question_id) === String(a.parentId) && a.question_id !== b.question_id) return 1;
+          const subA = parseInt(String(a.sub_num || 0), 10) || 0;
+          const subB = parseInt(String(b.sub_num || 0), 10) || 0;
+          if (subA > 0 && subB > 0 && subA !== subB) return subA - subB;
+          return String(a.question_number || "").localeCompare(String(b.question_number || ""), "ko", { numeric: true });
+        });
+      });
+      groups.sort((a, b) => a.sort_order - b.sort_order);
+      return groups;
+    };
+
+    const primaryItems = itemsData.filter((i: any) => String(i.exam_id || selectedExamId) === String(selectedExamId));
+    const groups = buildGroupsForExam(primaryItems.length > 0 ? primaryItems : itemsData);
+
+    // 합산된 다른 시험지의 논리 문항번호(예: "1", "2" ...) <-> question_id 매핑
+    const equivQuestionIdsByLogicalNum = new Map<string, Set<string>>();
+    Array.from(matchedExamIdSet).forEach((eid) => {
+      const eItems = itemsData.filter((i: any) => String(i.exam_id || selectedExamId) === String(eid));
+      const eGroups = buildGroupsForExam(eItems);
+      eGroups.forEach((g, gIdx) => {
+        const logicalMainNum = gIdx + 1;
+        const isMulti = g.items.length > 1;
+        g.items.forEach((it: any, subIdx: number) => {
+          const lNum = isMulti ? `${logicalMainNum}-${subIdx + 1}` : `${logicalMainNum}`;
+          if (!equivQuestionIdsByLogicalNum.has(lNum)) {
+            equivQuestionIdsByLogicalNum.set(lNum, new Set());
+          }
+          equivQuestionIdsByLogicalNum.get(lNum)!.add(String(it.question_id));
+        });
       });
     });
-
-    groups.forEach(g => {
-      g.sort_order = Math.min(...g.items.map((i:any) => i.sort_order));
-      g.items.sort((a: any, b: any) => {
-        if (a.question_id && b.parentId && String(a.question_id) === String(b.parentId) && a.question_id !== b.question_id) return -1;
-        if (b.question_id && a.parentId && String(b.question_id) === String(a.parentId) && a.question_id !== b.question_id) return 1;
-        const subA = parseInt(String(a.sub_num || 0), 10) || 0;
-        const subB = parseInt(String(b.sub_num || 0), 10) || 0;
-        if (subA > 0 && subB > 0 && subA !== subB) return subA - subB;
-        return String(a.question_number || "").localeCompare(String(b.question_number || ""), "ko", { numeric: true });
-      });
-    });
-    groups.sort((a, b) => a.sort_order - b.sort_order);
 
     const totalStudents = filteredAssigns.length;
     const totalScoreSum = filteredAssigns.reduce((acc: number, cur: any) => acc + (Number(cur.total_score) || 0), 0);
@@ -636,10 +808,11 @@ export default function AdmissionAnalyticsPage() {
 
       g.items.forEach((item: any, subIdx: number) => {
         const logicalNumber = isMulti ? `${logicalMainNum}-${subIdx + 1}` : `${logicalMainNum}`;
+        const matchingQIds = equivQuestionIdsByLogicalNum.get(logicalNumber) || new Set([String(item.question_id)]);
         const correctAssignIds = new Set<number>();
 
         answers.forEach((ans: any) => {
-          if (activeAssignIds.has(ans.exam_assignment_id) && String(ans.question_id) === String(item.question_id)) {
+          if (activeAssignIds.has(ans.exam_assignment_id) && matchingQIds.has(String(ans.question_id))) {
             const isCor = ans.is_correct === true || String(ans.is_correct).toLowerCase() === 'true';
             const earned = parseFloat(ans.earned_score) || 0;
             if (isCor || earned >= (subScore - 0.01)) {
@@ -688,7 +861,7 @@ export default function AdmissionAnalyticsPage() {
       questionStats: questionStatsArray,
       studentList: studentStatsList
     };
-  }, [rawExamDetails, selectedExamId, baseFilteredAssigns, selectedDate, selectedTime]);
+  }, [rawExamDetails, selectedExamId, matchedExamIdSet, baseFilteredAssigns, selectedDate, selectedTime]);
 
   const semesterStats = useMemo(() => {
     const map = new Map();
@@ -702,11 +875,7 @@ export default function AdmissionAnalyticsPage() {
     }
 
     filtered.forEach((a: any) => {
-      const meta = examMetaMap[String(a.exam_id)];
-      const em = Array.isArray(a.exam_master) ? a.exam_master[0] : a.exam_master;
-      const subTitle = meta?.sub_title || em?.sub_title || '';
-      const match = subTitle.match(/\d+-\d+/);
-      const sem = match ? match[0] : subTitle;
+      const sem = semOf(a);
       if (sem) {
         if (!map.has(sem)) map.set(sem, { sum: 0, count: 0 });
         map.get(sem).sum += Number(a.total_score || 0);
@@ -716,6 +885,7 @@ export default function AdmissionAnalyticsPage() {
 
     return Array.from(map.entries()).map(([sem, data]) => ({
       semester: sem,
+      label: formatCourseDisplayLabel(sem),
       average: data.count > 0 ? Number((data.sum / data.count).toFixed(1)) : 0
     })).sort((a, b) => a.semester.localeCompare(b.semester, 'ko', { numeric: true }));
   }, [baseFilteredAssigns, examMetaMap, selectedDate, selectedTime]);
@@ -727,16 +897,16 @@ export default function AdmissionAnalyticsPage() {
       chartInstance.current.destroy();
     }
 
-    const currentExamSub = examMetaMap[selectedExamId]?.sub_title || '';
+    const currentExamStd = examMetaMap[selectedExamId]?.standard_code || examMetaMap[selectedExamId]?.sub_title || '';
 
     chartInstance.current = new Chart(chartRef.current, {
       type: 'bar',
       data: {
-        labels: semesterStats.map(s => s.semester),
+        labels: semesterStats.map(s => (s as any).label || s.semester),
         datasets: [{
           label: '학기 평균(점)',
           data: semesterStats.map(s => s.average),
-          backgroundColor: semesterStats.map(s => currentExamSub.includes(s.semester) ? '#10b981' : '#cbd5e1'),
+          backgroundColor: semesterStats.map(s => currentExamStd === s.semester || currentExamStd.includes(s.semester) ? '#10b981' : '#cbd5e1'),
           hoverBackgroundColor: '#059669',
           borderRadius: 6,
           barThickness: 24,
@@ -790,6 +960,19 @@ export default function AdmissionAnalyticsPage() {
                   className="w-4 h-4 accent-emerald-500 rounded cursor-pointer"
                 />
                 <span className="text-sm font-bold text-blue-100">테스트 계정 제외</span>
+              </label>
+
+              <label
+                className="flex items-center space-x-2 cursor-pointer bg-emerald-900/60 px-3 py-2.5 rounded-lg border border-emerald-600/80 transition-colors hover:bg-emerald-800/80 shadow-inner"
+                title="체크 시 구 입학테스트(예: 중등 7-1, 5-1)와 현 진단평가(예: 중등 1-1, 5-1)를 동일 과정끼리 합산하여 평균·인원·문항 정답률·랭킹을 계산합니다."
+              >
+                <input
+                  type="checkbox"
+                  checked={mergeByStandard}
+                  onChange={(e) => setMergeByStandard(e.target.checked)}
+                  className="w-4 h-4 accent-emerald-400 rounded cursor-pointer"
+                />
+                <span className="text-sm font-bold text-emerald-100">🔗 입학테스트+진단평가 합산</span>
               </label>
 
               {/* 조회 지점 필터 */}
@@ -862,7 +1045,7 @@ export default function AdmissionAnalyticsPage() {
                   {examList.length === 0 ? <option value="">조건에 맞는 시험지가 없습니다.</option> : null}
                   {examList.map(exam => (
                     <option key={exam.exam_id} value={exam.exam_id}>
-                      {exam.title} {exam.sub_title ? `[${exam.sub_title}]` : ''} ({exam.count || 0}명)
+                      {exam.display_label || `${exam.title} ${exam.sub_title ? `[${exam.sub_title}]` : ''} (${exam.count || 0}명)`}
                     </option>
                   ))}
                 </select>
@@ -913,7 +1096,7 @@ export default function AdmissionAnalyticsPage() {
                         <tr>
                           <th className="py-2 px-3 text-left font-bold text-xs sticky left-0 bg-slate-50">학년(나이)</th>
                           {gradeMatrix.sems.map(sem => (
-                            <th key={sem} className="py-2 px-3 font-bold text-xs whitespace-nowrap">{sem}</th>
+                            <th key={sem} className="py-2 px-3 font-bold text-xs whitespace-nowrap">{formatCourseDisplayLabel(sem)}</th>
                           ))}
                           <th className="py-2 px-3 font-bold text-xs whitespace-nowrap bg-slate-100 border-l border-slate-200">전체 시험</th>
                         </tr>

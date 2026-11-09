@@ -194,30 +194,129 @@ function computeItemEarnedByStandard(
 }
 
 function resolveAdmissionStandardName(subTitle?: string, title?: string, majorGrade?: string): string {
-  const combined = [subTitle, title, majorGrade].filter(Boolean).join(" ");
+  // 날짜 문자열(예: 2026-11-09)이 학기(6-1 등)로 오인되지 않도록 먼저 제거
+  const rawCombined = [subTitle, title, majorGrade].filter(Boolean).join(" ");
+  const combined = rawCombined.replace(/20\d{2}\s*[-./]\s*\d{1,2}(?:\s*[-./]\s*\d{1,2})?/g, " ");
+  if (!combined.trim()) return "";
+
+  // 1. 구 입학테스트 중등 표기(7-1 ~ 9-2)가 명시된 경우 (예: "입학테스트 중등 7-1", "입학테스트 7-1")
+  const sevenToNineMatch = combined.match(/(?:^|[^0-9])([7-9])\s*[-_]\s*([1-2])(?:$|[^0-9])/);
+  if (sevenToNineMatch) {
+    return `${sevenToNineMatch[1]}-${sevenToNineMatch[2]}`;
+  }
+
+  // 2. 현 진단평가 중등 표기("중등 1-1", "중1-1", "중학교 1-1", "M1-1" 등) -> 7-1 ~ 9-2로 통일 (+6)
   const midMatch =
-    combined.match(/중(?:등|학교)?\s*([1-3])\s*[-_]\s*([1-2])/) ||
+    combined.match(/중(?:등|학교|학)?\s*([1-3])\s*[-_]\s*([1-2])/) ||
     combined.match(/\bM\s*([1-3])\s*[-_]\s*([1-2])/i);
   if (midMatch) {
     return `${parseInt(midMatch[1], 10) + 6}-${midMatch[2]}`;
   }
-  if (/중(?:등|학교|[1-3])/.test(combined)) {
+
+  // 3. 텍스트 내에 "중등/중학교/중1~3" 키워드가 있으면서 "1-1" ~ "3-2"가 있는 경우 -> 7-1 ~ 9-2로 통일
+  if (/중(?:등|학교|학|[1-3])/.test(combined)) {
+    const cleanSub = String(subTitle || "").replace(/20\d{2}\s*[-./]\s*\d{1,2}(?:\s*[-./]\s*\d{1,2})?/g, " ");
+    const cleanTitle = String(title || "").replace(/20\d{2}\s*[-./]\s*\d{1,2}(?:\s*[-./]\s*\d{1,2})?/g, " ");
     const tag =
-      (subTitle || "").match(/([1-3])\s*[-_]\s*([1-2])/) ||
-      (title || "").match(/([1-3])\s*[-_]\s*([1-2])/);
+      cleanSub.match(/(?:^|[^0-9])([1-3])\s*[-_]\s*([1-2])(?:$|[^0-9])/) ||
+      cleanTitle.match(/(?:^|[^0-9])([1-3])\s*[-_]\s*([1-2])(?:$|[^0-9])/) ||
+      combined.match(/(?:^|[^0-9])([1-3])\s*[-_]\s*([1-2])(?:$|[^0-9])/);
     if (tag) {
       return `${parseInt(tag[1], 10) + 6}-${tag[2]}`;
     }
   }
-  const matchTag = (subTitle || "").match(/\d+-\d+/) || (title || "").match(/\d+-\d+/);
+
+  // 4. 일반 학기 태그 추출 (초등 2-2 ~ 6-2, 또는 중등 1-1/1-2)
+  const cleanSub = String(subTitle || "").replace(/20\d{2}\s*[-./]\s*\d{1,2}(?:\s*[-./]\s*\d{1,2})?/g, " ");
+  const cleanTitle = String(title || "").replace(/20\d{2}\s*[-./]\s*\d{1,2}(?:\s*[-./]\s*\d{1,2})?/g, " ");
+  const matchTag =
+    cleanSub.match(/(?:^|[^0-9])([1-9])\s*[-_]\s*([1-2])(?:$|[^0-9])/) ||
+    cleanTitle.match(/(?:^|[^0-9])([1-9])\s*[-_]\s*([1-2])(?:$|[^0-9])/) ||
+    combined.match(/(?:^|[^0-9])([1-9])\s*[-_]\s*([1-2])(?:$|[^0-9])/);
   if (matchTag) {
-    const rawTag = matchTag[0];
-    if (rawTag === "1-1" && !/초(?:등|학교)?\s*1/.test(combined)) {
-      return "7-1";
+    const g = parseInt(matchTag[1], 10);
+    const s = matchTag[2];
+    // 초등 진단평가/입학테스트는 2-2부터 시작하므로 1-1, 1-2는 중등 1-1(7-1), 중등 1-2(7-2)로 매핑
+    if (g === 1 && !/초(?:등|학교)?\s*1/.test(combined)) {
+      return `7-${s}`;
     }
-    return rawTag;
+    return `${g}-${s}`;
   }
   return "";
+}
+
+function isAdmissionOrDiagnosticExamMeta(em: any, sessionExamIds?: Set<string>): boolean {
+  if (!em) return false;
+  if (sessionExamIds && em.exam_id && sessionExamIds.has(String(em.exam_id))) return true;
+  const t = String(em.exam_type || "").trim();
+  const title = String(em.title || "").trim();
+  const sub = String(em.sub_title || "").trim();
+  return (
+    t.includes("입학") ||
+    t.includes("진단") ||
+    title.includes("입학") ||
+    title.includes("진단") ||
+    sub.includes("입학") ||
+    sub.includes("진단")
+  );
+}
+
+function buildExamQuestionGroupsForCohort(
+  items: any[],
+  qMap: Record<string, any>,
+  layoutSettingsRaw?: any
+): any[] {
+  let layoutSettings = layoutSettingsRaw;
+  if (typeof layoutSettings === "string") {
+    try {
+      layoutSettings = JSON.parse(layoutSettings);
+    } catch {}
+  }
+  const customGroupMap = new Map<string, string>();
+  if (Array.isArray(layoutSettings?.userMergedTextQuestions)) {
+    layoutSettings.userMergedTextQuestions.forEach((arr: any, idx: number) => {
+      if (Array.isArray(arr)) {
+        arr.forEach((qid: any) => customGroupMap.set(String(qid), `custom_group_${idx}`));
+      }
+    });
+  }
+
+  const groupMap = new Map<string, any>();
+  const groups: any[] = [];
+  (items || []).forEach((item: any) => {
+    const q = qMap[String(item.question_id)] || {};
+    let gId = customGroupMap.get(String(item.question_id)) || "";
+    if (!gId) {
+      const src = String(q.pdf_source || "UNKNOWN");
+      const page = String(q.detected_page_num || q.final_printed_page || "U");
+      const baseNum = String(q.question_number || "").match(/\d+/)
+        ? String(q.question_number).match(/\d+/)?.[0]
+        : item.question_id;
+      gId = `${src}_${page}_${baseNum}`;
+      const parentId = q.parent_question_id || q.parent_tq_id;
+      if (parentId && String(parentId) !== "null" && String(parentId).trim() !== "") {
+        gId = `${src}_${page}_${parentId}`;
+      }
+    }
+
+    if (!groupMap.has(gId)) {
+      const newG = { id: gId, sort_order: item.sort_order, items: [] };
+      groupMap.set(gId, newG);
+      groups.push(newG);
+    }
+    groupMap.get(gId).items.push({
+      sort_order: item.sort_order,
+      assigned_score: item.assigned_score,
+      question: q,
+      question_id: item.question_id,
+    });
+  });
+
+  groups.forEach((g: any) => {
+    g.sort_order = Math.min(...g.items.map((i: any) => Number(i.sort_order) || 0));
+  });
+  groups.sort((a, b) => a.sort_order - b.sort_order);
+  return groups;
 }
 
 function buildStandardCandidateList(standardName: string): string[] {
@@ -252,13 +351,25 @@ function buildStandardCandidateList(standardName: string): string[] {
     pushUnique("1-1");
     pushUnique("중1-1");
     pushUnique("중등 1-1");
-  } else if (coreTag === "1-2") {
+  } else if (coreTag === "1-2" || coreTag === "7-2") {
     pushUnique("7-2");
+    pushUnique("1-2");
+    pushUnique("중1-2");
+    pushUnique("중등 1-2");
     pushUnique("7-1");
-    pushUnique("2-2");
-  } else if (coreTag === "2-1") {
+  } else if (coreTag === "2-1" || coreTag === "8-1") {
     pushUnique("8-1");
-    pushUnique("2-2");
+    pushUnique("2-1");
+    pushUnique("중2-1");
+    pushUnique("중등 2-1");
+    pushUnique("7-1");
+  } else if (coreTag === "8-2") {
+    pushUnique("8-2");
+    pushUnique("중2-2");
+    pushUnique("7-1");
+  } else if (coreTag === "9-1" || coreTag === "9-2") {
+    pushUnique(coreTag);
+    pushUnique("7-1");
   }
 
   return list;
@@ -298,6 +409,30 @@ function pickSingleByStandardCandidates(rows: any[], candidates: string[]): any 
   return null;
 }
 
+function _buildMetaMapAndBaseline(rawRows: any[], rawBaseRow: any) {
+  const normalizedMeta = (rawRows || [])
+    .map((r: any, idx: number) => _normalizeMetaRowStd(r, idx + 1))
+    .sort((a: any, b: any) => a.question_number - b.question_number);
+
+  const defaultScorePerQ = normalizedMeta.length > 0 ? 100 / normalizedMeta.length : 100 / 30;
+  normalizedMeta.forEach((m: any) => {
+    if (!m.assigned_score || m.assigned_score <= 0) {
+      m.assigned_score = defaultScorePerQ;
+    }
+  });
+
+  const mData: { [qNum: number]: any } = {};
+  const metaScores: { [qNum: number]: number } = {};
+  normalizedMeta.forEach((m: any, idx: number) => {
+    const qn = m.question_number || idx + 1;
+    mData[qn] = m;
+    metaScores[qn] = m.assigned_score;
+  });
+
+  const rBase = _buildBaselineStd(normalizedMeta, rawBaseRow);
+  return { normalizedMeta, mData, metaScores, rBase };
+}
+
 async function loadAdmissionStandardData(supabaseClient: any, standardName: string) {
   const rawStd = String(standardName || "").trim();
   const candidates = buildStandardCandidateList(rawStd);
@@ -305,48 +440,76 @@ async function loadAdmissionStandardData(supabaseClient: any, standardName: stri
 
   let rawMetaRows: any[] = [];
   let rawBaselineRow: any = null;
+  let rawLegacyMetaRows: any[] = [];
+  let rawLegacyBaselineRow: any = null;
 
   // 1. 서버 액션(Service Role Key) 우선 시도 (RLS 우회)
   try {
     const admMod: any = await import("@/app/actions/admission").catch(() => null);
     if (admMod && typeof admMod.fetchAdmissionStandardDataAction === "function") {
       const serverRes = await admMod.fetchAdmissionStandardDataAction(rawStd);
-      if (serverRes && serverRes.success && Array.isArray(serverRes.metaRows) && serverRes.metaRows.length > 0) {
-        rawMetaRows = serverRes.metaRows;
-        rawBaselineRow = serverRes.baselineRow || null;
+      if (serverRes && serverRes.success) {
+        if (Array.isArray(serverRes.metaRows) && serverRes.metaRows.length > 0) {
+          rawMetaRows = serverRes.metaRows;
+          rawBaselineRow = serverRes.baselineRow || null;
+        }
+        if (Array.isArray(serverRes.legacyMetaRows) && serverRes.legacyMetaRows.length > 0) {
+          rawLegacyMetaRows = serverRes.legacyMetaRows;
+          rawLegacyBaselineRow = serverRes.legacyBaselineRow || null;
+        }
       }
     }
   } catch (e) {}
 
-  // 2. 클라이언트 쿼리 (admission_standard_meta_2610 -> admission_standard_meta)
-  if ((!rawMetaRows || rawMetaRows.length === 0) && supabaseClient) {
-    try {
-      const { data: mAll2610 } = await supabaseClient
-        .from("admission_standard_meta_2610")
-        .select("*");
-      if (Array.isArray(mAll2610) && mAll2610.length > 0) {
-        rawMetaRows = pickRowsByStandardCandidates(mAll2610, candidates);
-      }
-      if (!rawMetaRows || rawMetaRows.length === 0) {
+  // 2. 클라이언트 쿼리 (admission_standard_meta_2610 & admission_standard_meta)
+  if (supabaseClient) {
+    if (!rawMetaRows || rawMetaRows.length === 0) {
+      try {
+        const { data: mAll2610 } = await supabaseClient
+          .from("admission_standard_meta_2610")
+          .select("*");
+        if (Array.isArray(mAll2610) && mAll2610.length > 0) {
+          rawMetaRows = pickRowsByStandardCandidates(mAll2610, candidates);
+        }
+      } catch (e) {}
+    }
+
+    if (!rawLegacyMetaRows || rawLegacyMetaRows.length === 0) {
+      try {
         const { data: mLegacy } = await supabaseClient
           .from("admission_standard_meta")
           .select("*");
         if (Array.isArray(mLegacy) && mLegacy.length > 0) {
-          rawMetaRows = pickRowsByStandardCandidates(mLegacy, candidates);
+          rawLegacyMetaRows = pickRowsByStandardCandidates(mLegacy, candidates);
         }
-      }
-    } catch (e) {}
+      } catch (e) {}
+    }
 
-    try {
-      if (!rawBaselineRow) {
+    if (!rawMetaRows || rawMetaRows.length === 0) {
+      rawMetaRows = rawLegacyMetaRows;
+    }
+
+    if (!rawBaselineRow) {
+      try {
         const { data: bAll2610 } = await supabaseClient
           .from("admission_standard_baseline_2610")
           .select("*");
         if (Array.isArray(bAll2610) && bAll2610.length > 0) {
           rawBaselineRow = pickSingleByStandardCandidates(bAll2610, candidates);
         }
-      }
-    } catch (e) {}
+      } catch (e) {}
+    }
+
+    if (!rawLegacyBaselineRow) {
+      try {
+        const { data: bLegacy } = await supabaseClient
+          .from("admission_standard_baseline")
+          .select("*");
+        if (Array.isArray(bLegacy) && bLegacy.length > 0) {
+          rawLegacyBaselineRow = pickSingleByStandardCandidates(bLegacy, candidates);
+        }
+      } catch (e) {}
+    }
   }
 
   // 3. 내장 2610 기준표 폴백 (RLS 차단 또는 중1-1 -> 7-1 매핑 보장)
@@ -366,33 +529,20 @@ async function loadAdmissionStandardData(supabaseClient: any, standardName: stri
       null;
   }
 
-  const normalizedMeta = (rawMetaRows || [])
-    .map((r: any, idx: number) => _normalizeMetaRowStd(r, idx + 1))
-    .sort((a: any, b: any) => a.question_number - b.question_number);
-
-  const defaultScorePerQ = normalizedMeta.length > 0 ? 100 / normalizedMeta.length : 100 / 30;
-  normalizedMeta.forEach((m: any) => {
-    if (!m.assigned_score || m.assigned_score <= 0) {
-      m.assigned_score = defaultScorePerQ;
-    }
-  });
-
-  const mData: { [qNum: number]: any } = {};
-  const metaScores: { [qNum: number]: number } = {};
-  normalizedMeta.forEach((m: any, idx: number) => {
-    const qn = m.question_number || idx + 1;
-    mData[qn] = m;
-    metaScores[qn] = m.assigned_score;
-  });
-
-  const rBase = _buildBaselineStd(normalizedMeta, rawBaselineRow);
+  const mainBuilt = _buildMetaMapAndBaseline(rawMetaRows, rawBaselineRow);
+  const legacyBuilt =
+    rawLegacyMetaRows && rawLegacyMetaRows.length > 0
+      ? _buildMetaMapAndBaseline(rawLegacyMetaRows, rawLegacyBaselineRow)
+      : mainBuilt;
 
   return {
-    meta: normalizedMeta,
-    mData,
-    metaScores,
+    meta: mainBuilt.normalizedMeta,
+    mData: mainBuilt.mData,
+    metaScores: mainBuilt.metaScores,
     baselineRow: rawBaselineRow,
-    rBase,
+    rBase: mainBuilt.rBase,
+    legacyMData: legacyBuilt.mData,
+    legacyRBase: legacyBuilt.rBase,
     resolvedStandardName: primaryTag,
   };
 }
@@ -491,16 +641,18 @@ function PrintReportContent() {
 
       const studentObj = Array.isArray(assign.student) ? assign.student[0] : assign.student;
       
-      // admission_session에 저장된 tenant_id까지 확인하여 지점 ID 누락 방지
+      // admission_session에 저장된 tenant_id 및 title까지 확인하여 지점 ID 및 학년 매핑 누락 방지
       let sessionTenantId = null;
+      let sessionTitle = '';
       if (assign.admission_session_id) {
         const { data: sessData } = await supabase
           .from('admission_session')
-          .select('tenant_id')
+          .select('tenant_id, title')
           .eq('admission_session_id', assign.admission_session_id)
           .limit(1);
         if (sessData && sessData.length > 0) {
           sessionTenantId = sessData[0].tenant_id;
+          sessionTitle = sessData[0].title || '';
         }
       }
 
@@ -556,7 +708,7 @@ function PrintReportContent() {
       const exMasterTop = Array.isArray(assign.exam_master) ? assign.exam_master[0] : assign.exam_master;
       const rawTitle = exMasterTop?.title || '';
       const rawSub = exMasterTop?.sub_title || '';
-      const standardName = resolveAdmissionStandardName(rawSub, rawTitle, exMasterTop?.major_grade) || '7-1';
+      const standardName = resolveAdmissionStandardName(rawSub, `${rawTitle} ${sessionTitle}`, exMasterTop?.major_grade) || '7-1';
       
       const examPaperId = assign.exam_id || assign.exam_paper_id;
       if (!examPaperId) throw new Error("시험지 ID를 찾을 수 없습니다.");
@@ -564,7 +716,7 @@ function PrintReportContent() {
       const studentName = studentObj?.name || '알수없음';
       const reportDate = new Date(assign.created_at).toLocaleDateString('ko-KR');
 
-      const { meta, mData, rBase } = await loadAdmissionStandardData(supabase, standardName);
+      const { meta, mData, rBase, legacyMData, legacyRBase } = await loadAdmissionStandardData(supabase, standardName);
 
       const { data: gcData } = await supabase.from('master_grading_code').select('code, score_ratio, admission_ratio, is_correct');
       const gcMap: Record<string, any> = {};
@@ -720,15 +872,58 @@ function PrintReportContent() {
         correct_cnt 
       };
 
-      // 🌟 통계 페이지(admission/analytics/page.tsx)와 동일한 조건으로 평균 계산
+      // 🌟 [핵심 동기화] 현 '진단평가'(예: 중등 1-1, 5-1)와 과거 '입학테스트'(예: 중등 7-1, 5-1)를 동일 과정(standardName)으로 묶어 평균 산출
       let avgStats = { geo: 0, mea: 0, stat: 0, rule: 0, calc: 0, sense: 0, space: 0, logic: 0, know: 0, think: 0, persist: 0, d1: 0, d2: 0, d3: 0, d4: 0, d5: 0, total: 0 };
       let validSampleCount = 0;
-      
+
+      // 1) 동일 과정(standardName, 예: '7-1' = 중등 1-1 & 중등 7-1, '5-1' = 진단평가 5-1 & 입학테스트 5-1)에 해당하는 모든 시험지 ID 탐색
+      const siblingExamIdSet = new Set<string>([String(examPaperId)]);
+      const examMasterById = new Map<string, any>();
+      if (exMasterObj) {
+        examMasterById.set(String(examPaperId), exMasterObj);
+      }
+
+      try {
+        const [{ data: allMasterRows }, { data: allSessionRows }] = await Promise.all([
+          supabase.from('exam_master').select('exam_id, title, sub_title, major_grade, exam_type, layout_settings'),
+          supabase.from('admission_session').select('exam_id, title').not('exam_id', 'is', null),
+        ]);
+
+        const sessionExamIds = new Set<string>();
+        const sessionTitleByExamId = new Map<string, string>();
+        (allSessionRows || []).forEach((s: any) => {
+          if (s.exam_id) {
+            const eid = String(s.exam_id);
+            sessionExamIds.add(eid);
+            if (s.title && !sessionTitleByExamId.has(eid)) {
+              sessionTitleByExamId.set(eid, String(s.title));
+            }
+          }
+        });
+
+        (allMasterRows || []).forEach((em: any) => {
+          if (!em || !em.exam_id) return;
+          const eid = String(em.exam_id);
+          examMasterById.set(eid, em);
+          if (!isAdmissionOrDiagnosticExamMeta(em, sessionExamIds)) return;
+          const sessTitle = sessionTitleByExamId.get(eid) || '';
+          const resolved = resolveAdmissionStandardName(em.sub_title, `${em.title || ''} ${sessTitle}`, em.major_grade);
+          if (resolved && resolved === standardName) {
+            siblingExamIdSet.add(eid);
+          }
+        });
+      } catch (e) {
+        console.warn('동일 과정 시험지 탐색 중 경미한 오류(단일 시험지로 폴백):', e);
+      }
+
+      const siblingExamIds = Array.from(siblingExamIdSet);
+
+      // 2) 매칭된 모든 시험지(진단평가 + 구 입학테스트)의 채점완료 응시 기록 통합 로드
       let rawAllAssignments = await fetchAllRows((from, to) =>
         supabase
           .from('exam_assignment')
-          .select('assignment_id, total_score, status, student(name)')
-          .eq('exam_id', examPaperId)
+          .select('assignment_id, exam_id, total_score, status, student(name)')
+          .in('exam_id', siblingExamIds)
           .in('status', ['채점완료', '완료'])
           .range(from, to)
       );
@@ -737,8 +932,8 @@ function PrintReportContent() {
         rawAllAssignments = await fetchAllRows((from, to) =>
           supabase
             .from('exam_assignment')
-            .select('assignment_id, total_score, status, student(name)')
-            .eq('exam_paper_id', examPaperId)
+            .select('assignment_id, exam_paper_id, total_score, status, student(name)')
+            .in('exam_paper_id', siblingExamIds)
             .in('status', ['채점완료', '완료'])
             .range(from, to)
         );
@@ -761,53 +956,163 @@ function PrintReportContent() {
       if (validAssignments.length > 0) {
         validSampleCount = validAssignments.length;
         const assignIds = validAssignments.map((a: any) => a.assignment_id);
+        const assignByIdMap = new Map<string, any>();
+        validAssignments.forEach((a: any) => assignByIdMap.set(String(a.assignment_id), a));
 
         const totalScoreSum = validAssignments.reduce((acc: number, cur: any) => acc + (Number(cur.total_score) || 0), 0);
         const analyticsMatchedAvgTotal = parseFloat((totalScoreSum / validSampleCount).toFixed(1));
 
+        // 3) 타 시험지(구 입학테스트 등)의 문항 그룹(1~30번) 구성
+        const groupsByExamId = new Map<string, any[]>();
+        groupsByExamId.set(String(examPaperId), groups);
+
+        const otherExamIds = Array.from(
+          new Set(
+            validAssignments
+              .map((a: any) => String(a.exam_id || a.exam_paper_id || examPaperId))
+              .filter((eid: string) => eid && eid !== String(examPaperId))
+          )
+        );
+
+        if (otherExamIds.length > 0) {
+          try {
+            const { data: otherItems } = await supabase
+              .from('exam_item')
+              .select('*')
+              .in('exam_id', otherExamIds)
+              .order('sort_order');
+
+            const oQIds = Array.from(new Set((otherItems || []).map((i: any) => i.question_id).filter(Boolean)));
+            const oUuidIds = oQIds.filter((id: any) => typeof id === 'string' && id.includes('-'));
+            const oNumIds = oQIds
+              .filter((id: any) => typeof id === 'number' || (typeof id === 'string' && !id.includes('-') && !isNaN(Number(id))))
+              .map(Number);
+
+            const otherFetchedQs: any[] = [];
+            if (oUuidIds.length > 0) {
+              const { data: oQDb } = await supabase
+                .from('question_db')
+                .select('question_id, parent_question_id, pdf_source, detected_page_num, final_printed_page, question_number')
+                .in('question_id', oUuidIds);
+              if (oQDb) otherFetchedQs.push(...oQDb);
+            }
+            const foundOUuids = new Set(otherFetchedQs.map((q: any) => String(q.question_id)));
+            const missingOUuids = oUuidIds.filter((id: any) => !foundOUuids.has(String(id)));
+            if (missingOUuids.length > 0) {
+              const { data: oTqUuid } = await supabase
+                .from('textbook_question')
+                .select('question_id, parent_tq_id, pdf_source, detected_page_num, final_printed_page, question_number')
+                .in('question_id', missingOUuids);
+              if (oTqUuid) otherFetchedQs.push(...oTqUuid);
+            }
+            if (oNumIds.length > 0) {
+              const { data: oTqNum } = await supabase
+                .from('textbook_question')
+                .select('tq_id, parent_tq_id, pdf_source, detected_page_num, final_printed_page, question_number')
+                .in('tq_id', oNumIds);
+              if (oTqNum) otherFetchedQs.push(...oTqNum);
+            }
+
+            const otherQMap: Record<string, any> = { ...qMap };
+            otherFetchedQs.forEach((q: any) => {
+              if (q.question_id) otherQMap[String(q.question_id)] = q;
+              if (q.tq_id) otherQMap[String(q.tq_id)] = q;
+            });
+
+            otherExamIds.forEach((eid: string) => {
+              const eItems = (otherItems || []).filter((it: any) => String(it.exam_id) === eid);
+              const emMeta = examMasterById.get(eid);
+              const builtGroups = buildExamQuestionGroupsForCohort(eItems, otherQMap, emMeta?.layout_settings);
+              if (builtGroups.length > 0) {
+                groupsByExamId.set(eid, builtGroups);
+              }
+            });
+          } catch (e) {
+            console.warn('타 시험지 문항 그룹 로드 중 경미한 오류:', e);
+          }
+        }
+
+        // 4) 학생 답안 및 리포트 스냅샷(폴백용) 일괄 조회
         let allAnswers: any[] = [];
+        let allReportSnaps: any[] = [];
         const chunkSize = 100;
         for (let i = 0; i < assignIds.length; i += chunkSize) {
           const chunk = assignIds.slice(i, i + chunkSize);
-          const ansChunk = await fetchAllRows((from, to) =>
+          const [ansChunk, repChunkRes] = await Promise.all([
+            fetchAllRows((from, to) =>
+              supabase
+                .from('student_answer')
+                .select('exam_assignment_id, question_id, earned_score, grading_code, is_correct')
+                .in('exam_assignment_id', chunk)
+                .range(from, to)
+            ),
             supabase
-              .from('student_answer')
-              .select('exam_assignment_id, question_id, earned_score, grading_code, is_correct')
-              .in('exam_assignment_id', chunk)
-              .range(from, to)
-          );
+              .from('admission_test_report')
+              .select('assignment_id, total_score, score_geometry, score_measure, score_stat, score_rule, score_calc, score_calc_sense, score_spatial_percep, score_logical_reason, score_knowledge, score_thinking, score_persistence, score_diff_1, score_diff_2, score_diff_3, score_diff_4, score_diff_5')
+              .in('assignment_id', chunk),
+          ]);
           allAnswers = allAnswers.concat(ansChunk);
+          if (repChunkRes?.data) allReportSnaps = allReportSnaps.concat(repChunkRes.data);
         }
 
-        if (allAnswers.length > 0) {
-          const ansByAssign = new Map<string, Map<string, any>>();
-          allAnswers.forEach((ans: any) => {
-            const aKey = String(ans.exam_assignment_id);
-            const qKey = String(ans.question_id);
-            if (!ansByAssign.has(aKey)) ansByAssign.set(aKey, new Map());
-            ansByAssign.get(aKey)!.set(qKey, ans);
-          });
+        const ansByAssign = new Map<string, Map<string, any>>();
+        allAnswers.forEach((ans: any) => {
+          const aKey = String(ans.exam_assignment_id);
+          const qKey = String(ans.question_id);
+          if (!ansByAssign.has(aKey)) ansByAssign.set(aKey, new Map());
+          ansByAssign.get(aKey)!.set(qKey, ans);
+        });
 
-          const activeAssignIds = assignIds.filter(aId => ansByAssign.has(String(aId)));
-          const activeCnt = activeAssignIds.length;
+        const repByAssign = new Map<string, any>();
+        allReportSnaps.forEach((rep: any) => {
+          if (rep && rep.assignment_id) repByAssign.set(String(rep.assignment_id), rep);
+        });
 
-          activeAssignIds.forEach(aId => {
-            const studentMap = ansByAssign.get(String(aId))!;
-            let sStat = { geo:0, mea:0, stat:0, rule:0, calc:0, sense:0, space:0, logic:0, know:0, think:0, persist:0, d1:0, d2:0, d3:0, d4:0, d5:0, total:0 };
-            
-            groups.forEach((g: any, index: number) => {
+        // 구 입학테스트와 현 진단평가 간 영역/난이도 만점 배점이 다를 경우 현재 리포트 기준(rBase) 스케일로 정규화
+        const scaleToCurrentBase = (val: number, srcMax: number, dstMax: number) => {
+          if (!val || val <= 0) return 0;
+          if (srcMax > 0 && dstMax > 0 && Math.abs(srcMax - dstMax) > 0.05) {
+            return Math.min(dstMax, val * (dstMax / srcMax));
+          }
+          return dstMax > 0 ? Math.min(dstMax, val) : val;
+        };
+
+        let activeCnt = 0;
+
+        assignIds.forEach((aId: any) => {
+          const aKey = String(aId);
+          const assignRow = assignByIdMap.get(aKey);
+          const eid = String(assignRow?.exam_id || assignRow?.exam_paper_id || examPaperId);
+          const emMeta = examMasterById.get(eid);
+          const emTitleCombined = `${emMeta?.title || ''} ${emMeta?.sub_title || ''}`;
+          const isLegacyExam =
+            eid !== String(examPaperId) &&
+            emTitleCombined.includes('입학') &&
+            !emTitleCombined.includes('진단') &&
+            !emTitleCombined.includes('2610');
+
+          const activeMData = isLegacyExam ? (legacyMData || mData) : mData;
+          const activeRBase = isLegacyExam ? (legacyRBase || rBase) : rBase;
+          const targetGroups = groupsByExamId.get(eid) || groups;
+
+          const studentMap = ansByAssign.get(aKey);
+          const savedRep = repByAssign.get(aKey);
+          if (!studentMap && !savedRep) return;
+
+          let sStat = { geo:0, mea:0, stat:0, rule:0, calc:0, sense:0, space:0, logic:0, know:0, think:0, persist:0, d1:0, d2:0, d3:0, d4:0, d5:0, total:0 };
+
+          if (studentMap && targetGroups && targetGroups.length > 0) {
+            targetGroups.forEach((g: any, index: number) => {
               const logicalQNum = index + 1;
-              const qNumMatch = String(g.items[0]?.question?.question_number || '').match(/\d+/);
-              const parsedQNum = qNumMatch ? parseInt(qNumMatch[0], 10) : logicalQNum;
-              const m = mData[logicalQNum];
+              const m = activeMData[logicalQNum];
               let maxScore = m ? parseFloat(String(m.assigned_score)) : Math.max(...g.items.map((i: any) => parseFloat(i.assigned_score) || 0));
-              if (!maxScore || maxScore === 0) maxScore = 100 / (groups.length || 30);
+              if (!maxScore || maxScore === 0) maxScore = 100 / (targetGroups.length || 30);
               const subScore = maxScore / (g.items.length || 1);
-              
+
               let groupEarned = 0;
               g.items.forEach((i: any) => {
                 const ansObj = studentMap.get(String(i.question_id));
-                const oldItemScore = parseFloat(i.assigned_score) || ((100 / (groups.length || 30)) / (g.items.length || 1));
+                const oldItemScore = parseFloat(i.assigned_score) || ((100 / (targetGroups.length || 30)) / (g.items.length || 1));
                 const { earned } = computeItemEarnedByStandard(ansObj, subScore, oldItemScore, gcMap, true);
                 groupEarned = Math.min(maxScore, groupEarned + earned);
               });
@@ -828,19 +1133,70 @@ function PrintReportContent() {
                 if (m.is_task_persistence) sStat.persist += groupEarned;
 
                 const d = m.difficulty_level;
-                if(d===1) sStat.d1 += groupEarned; else if(d===2) sStat.d2 += groupEarned; else if(d===3) sStat.d3 += groupEarned; else if(d===4) sStat.d4 += groupEarned; else if(d===5) sStat.d5 += groupEarned;
+                if (d === 1) sStat.d1 += groupEarned;
+                else if (d === 2) sStat.d2 += groupEarned;
+                else if (d === 3) sStat.d3 += groupEarned;
+                else if (d === 4) sStat.d4 += groupEarned;
+                else if (d === 5) sStat.d5 += groupEarned;
               }
             });
-            
-            for (let k in avgStats) (avgStats as any)[k] += (sStat as any)[k];
-          });
-          
-          if (activeCnt > 0) {
-            for (let k in avgStats) (avgStats as any)[k] = parseFloat(((avgStats as any)[k] / activeCnt).toFixed(1));
           }
+
+          // 문항 매칭 점수가 0점인데 저장된 리포트 스냅샷이 있는 경우(과거 입학테스트 등) 스냅샷 사용
+          if (sStat.total === 0 && savedRep) {
+            sStat = {
+              geo: Number(savedRep.score_geometry) || 0,
+              mea: Number(savedRep.score_measure) || 0,
+              stat: Number(savedRep.score_stat) || 0,
+              rule: Number(savedRep.score_rule) || 0,
+              calc: Number(savedRep.score_calc) || 0,
+              sense: Number(savedRep.score_calc_sense) || 0,
+              space: Number(savedRep.score_spatial_percep) || 0,
+              logic: Number(savedRep.score_logical_reason) || 0,
+              know: Number(savedRep.score_knowledge) || 0,
+              think: Number(savedRep.score_thinking) || 0,
+              persist: Number(savedRep.score_persistence) || 0,
+              d1: Number(savedRep.score_diff_1) || 0,
+              d2: Number(savedRep.score_diff_2) || 0,
+              d3: Number(savedRep.score_diff_3) || 0,
+              d4: Number(savedRep.score_diff_4) || 0,
+              d5: Number(savedRep.score_diff_5) || 0,
+              total: Number(savedRep.total_score) || Number(assignRow?.total_score) || 0,
+            };
+          }
+
+          if (sStat.total === 0 && Number(assignRow?.total_score) > 0) {
+            sStat.total = Number(assignRow.total_score);
+          }
+
+          if (isLegacyExam && activeRBase && rBase) {
+            sStat.geo = scaleToCurrentBase(sStat.geo, activeRBase.max_geometry, rBase.max_geometry);
+            sStat.mea = scaleToCurrentBase(sStat.mea, activeRBase.max_measure, rBase.max_measure);
+            sStat.stat = scaleToCurrentBase(sStat.stat, activeRBase.max_stat, rBase.max_stat);
+            sStat.rule = scaleToCurrentBase(sStat.rule, activeRBase.max_rule, rBase.max_rule);
+            sStat.calc = scaleToCurrentBase(sStat.calc, activeRBase.max_calc, rBase.max_calc);
+            sStat.sense = scaleToCurrentBase(sStat.sense, activeRBase.max_calc_sense, rBase.max_calc_sense);
+            sStat.space = scaleToCurrentBase(sStat.space, activeRBase.max_spatial, rBase.max_spatial);
+            sStat.logic = scaleToCurrentBase(sStat.logic, activeRBase.max_logic, rBase.max_logic);
+            sStat.know = scaleToCurrentBase(sStat.know, activeRBase.max_knowledge, rBase.max_knowledge);
+            sStat.think = scaleToCurrentBase(sStat.think, activeRBase.max_thinking, rBase.max_thinking);
+            sStat.persist = scaleToCurrentBase(sStat.persist, activeRBase.max_persistence, rBase.max_persistence);
+            sStat.d1 = scaleToCurrentBase(sStat.d1, activeRBase.max_diff_1, rBase.max_diff_1);
+            sStat.d2 = scaleToCurrentBase(sStat.d2, activeRBase.max_diff_2, rBase.max_diff_2);
+            sStat.d3 = scaleToCurrentBase(sStat.d3, activeRBase.max_diff_3, rBase.max_diff_3);
+            sStat.d4 = scaleToCurrentBase(sStat.d4, activeRBase.max_diff_4, rBase.max_diff_4);
+            sStat.d5 = scaleToCurrentBase(sStat.d5, activeRBase.max_diff_5, rBase.max_diff_5);
+          }
+
+          activeCnt++;
+          for (let k in avgStats) (avgStats as any)[k] += (sStat as any)[k];
+        });
+
+        if (activeCnt > 0) {
+          for (let k in avgStats) (avgStats as any)[k] = parseFloat(((avgStats as any)[k] / activeCnt).toFixed(1));
         }
 
-        if (avgStats.total === 0 && analyticsMatchedAvgTotal > 0) {
+        if (analyticsMatchedAvgTotal > 0) {
           avgStats.total = analyticsMatchedAvgTotal;
         }
       }
