@@ -1392,6 +1392,7 @@ export function useTaxonomy() {
           thk_taxonomy_name: selectedQuestion.thk_taxonomy_name || null,
           difficulty: selectedQuestion.difficulty || '중', 
           is_human_verified: true,
+          problem_type: selectedQuestion.problem_type || null,
           derivation_type: twin.question_type === '유사' ? '유사' : 'TWIN',
           
           // 🌟 새로 렌더링된 이미지 URL(또는 기존 이미지 URL) 및 배율 박스 속성 저장

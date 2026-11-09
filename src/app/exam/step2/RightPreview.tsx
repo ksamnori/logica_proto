@@ -662,7 +662,7 @@ export default function RightPreview({ examData }: { examData: any }) {
           is_new_trend: targetQ.is_new_trend || false,
           ai_gradable: targetQ.ai_gradable,
           is_human_verified: true,
-          problem_type: twin.question_type || "쌍둥이",
+          problem_type: targetQ.problem_type || null,
           derivation_type: twin.question_type === "유사" ? "유사" : "TWIN",
           image_url: finalImg1Url,
           image_2_url: finalImg2Url,
