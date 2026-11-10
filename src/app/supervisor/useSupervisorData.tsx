@@ -449,7 +449,21 @@ export function useSupervisorData() {
                 }
                 
                 if (updates.length > 0) {
-                    await supabaseClient.from('student_answer').upsert(updates);
+                    // 🌟 [23502 에러 방지] .upsert() 대신 .update().eq('answer_id', ...) 사용
+                    const updateResults = await Promise.all(
+                        updates.map((u: any) =>
+                            supabaseClient
+                                .from('student_answer')
+                                .update({
+                                    is_correct: u.is_correct,
+                                    grading_code: u.grading_code,
+                                    earned_score: u.earned_score,
+                                })
+                                .eq('answer_id', u.answer_id)
+                        )
+                    );
+                    const firstErr = updateResults.find((r) => r.error)?.error;
+                    if (firstErr) console.error('검수 답안 개별 수정 에러:', firstErr);
                 }
 
                 await supabaseClient

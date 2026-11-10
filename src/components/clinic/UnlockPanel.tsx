@@ -622,7 +622,24 @@ export default function UnlockPanel({
           }
 
           if (updates.length > 0) {
-            await supabase.from("student_answer").upsert(updates);
+            // 🌟 [23502 에러 방지] 기존 답안의 일부 컬럼만 수정할 때 .upsert()를 쓰면
+            // PostgreSQL이 ON CONFLICT 확인 전에 exam_assignment_id NOT NULL 검사를 먼저 수행하여 거부합니다.
+            // 반드시 .update().eq("answer_id", ...)로 기존 행만 수정해야 합니다.
+            const updateResults = await Promise.all(
+              updates.map((u) =>
+                supabase
+                  .from("student_answer")
+                  .update({
+                    is_correct: u.is_correct,
+                    grading_code: u.grading_code,
+                    earned_score: u.earned_score,
+                    grading_status: u.grading_status,
+                  })
+                  .eq("answer_id", u.answer_id)
+              )
+            );
+            const firstUpdateErr = updateResults.find((r) => r.error)?.error;
+            if (firstUpdateErr) throw firstUpdateErr;
           }
 
           if (toDeleteIncorrectRecords.length > 0 && studentId) {
