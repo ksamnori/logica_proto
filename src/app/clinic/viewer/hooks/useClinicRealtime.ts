@@ -43,6 +43,14 @@ interface UseClinicRealtimeProps {
   awayCooldown: any;
 }
 
+// 🌟 동시 재접속 폭주(Thundering Herd) 방지용 지수 백오프 + 랜덤 지터 계산기
+// 1회차: 3.0~6.5초, 2회차: 4.5~8.0초, 3회차: 6.75~10.25초 ... 최대 12.0~15.5초 범위로 기기별 분산
+function getJitteredReconnectDelay(attempt: number): number {
+  const baseExp = Math.min(12000, Math.round(3000 * Math.pow(1.5, Math.min(attempt, 4))));
+  const jitter = Math.floor(Math.random() * 3500);
+  return baseExp + jitter;
+}
+
 export function useClinicRealtime({
   supabaseClient, studentInfo, params, questions, currentQIndex, isTimedRound,
   mySeatRef, seatKeysRef, clinicSessionStateRef, callState, recheckState, taHintState, qBoxStatus,
@@ -54,11 +62,18 @@ export function useClinicRealtime({
   const clinicChannelRef = useRef<any>(null);
   const clinicChannelDisposedRef = useRef(false);
   const clinicReconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const clinicRetryAttemptRef = useRef<number>(0);
+
   const gradingChannelRef = useRef<any>(null);
   const handleTaActionRef = useRef<any>(null);
   const trackPresenceRef = useRef<any>(null);
   const lastTrackAtRef = useRef<number>(0);
   const lastTrackKeyRef = useRef<string>('');
+
+  // 🌟 questions 배열 참조가 바뀔 때마다 실시간 채널이 해체·재구독되지 않도록 최신 참조를 Ref로 유지
+  const questionsRef = useRef<any[]>(questions);
+  questionsRef.current = questions;
+  const hasQuestions = questions.length > 0;
 
   const callbacksRef = useRef({ 
       processCorrectAnswer, handleTimeUp, forceUpdate, setRecheckToast, 
@@ -76,7 +91,7 @@ export function useClinicRealtime({
   const checkoutHandledRef = useRef(false);
 
   useEffect(() => {
-    if (!studentInfo.id || questions.length === 0) return;
+    if (!studentInfo.id || !hasQuestions) return;
     let cancelled = false;
 
     const runSelfCorrection = async () => {
@@ -91,6 +106,7 @@ export function useClinicRealtime({
 
       if (error || !data || cancelled) return;
 
+      const currentQuestions = questionsRef.current;
       let hasChanges = false;
       const { processCorrectAnswer, handleTimeUp, forceUpdate, setRecheckToast, setCanvasClearTrigger, setMyAwayActive, setPendingRecheckReview } = callbacksRef.current;
 
@@ -133,7 +149,9 @@ export function useClinicRealtime({
                   hasChanges = true;
                   if (callRec.mark === 'hint') {
                       taHintState.current[qIdx] = true;
-                      if (questions[qIdx]?.record_id) supabaseClient.from('student_incorrect_record').update({ status: 'T' }).eq('record_id', questions[qIdx].record_id).then();
+                      if (currentQuestions[qIdx]?.record_id) {
+                        supabaseClient.from('student_incorrect_record').update({ status: 'T' }).eq('record_id', currentQuestions[qIdx].record_id).then();
+                      }
                   }
               }
           }
@@ -164,7 +182,7 @@ export function useClinicRealtime({
       Object.keys(dbRechecks).forEach((uid) => {
         const rec = dbRechecks[uid];
         if (rec && rec.verdict) {
-           const qIdx = rec.qNum ? Number(rec.qNum) - 1 : questions.findIndex((q:any) => q.uid === uid);
+           const qIdx = rec.qNum ? Number(rec.qNum) - 1 : currentQuestions.findIndex((q: any) => q.uid === uid);
            
            setPendingRecheckReview((prev: any[]) => {
                const exists = prev.some(r => r.uid === uid || (rec.qNum && r.qNum === rec.qNum));
@@ -174,13 +192,13 @@ export function useClinicRealtime({
                return prev;
            });
 
-           if (qIdx >= 0 && questions[qIdx]) {
+           if (qIdx >= 0 && currentQuestions[qIdx]) {
                recheckState.current[qIdx] = null; 
                const currentStatus = qBoxStatus.current[qIdx];
                
                if (rec.verdict === 'correct' && currentStatus !== 'correct_blue') {
                    setRecheckToast(`🎉 조교님이 ${qIdx + 1}번을 정답 처리했어요!`);
-                   processCorrectAnswer(questions[qIdx], qIdx, true);
+                   processCorrectAnswer(currentQuestions[qIdx], qIdx, true);
                } else if (rec.verdict === 'incorrect' && currentStatus !== 'wrong_red') {
                    qBoxStatus.current[qIdx] = 'wrong_red';
                    delete studentDrawings.current[qIdx]; delete keypadAnswers.current[qIdx]; delete keypadCursor.current[qIdx]; studentAnswers.current[qIdx] = null;
@@ -195,7 +213,7 @@ export function useClinicRealtime({
            }
            rechecksToDelete.push(uid); 
         } else {
-           const qIdx = rec.qNum ? Number(rec.qNum) - 1 : questions.findIndex((q:any) => q.uid === uid);
+           const qIdx = rec.qNum ? Number(rec.qNum) - 1 : currentQuestions.findIndex((q: any) => q.uid === uid);
            if (qIdx >= 0 && recheckState.current[qIdx] !== 'pending') {
                recheckState.current[qIdx] = 'pending';
                hasChanges = true;
@@ -237,16 +255,22 @@ export function useClinicRealtime({
         window.removeEventListener('focus', handleFocus);
         document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [studentInfo.id, questions]); 
+  }, [studentInfo.id, hasQuestions]); 
 
   useEffect(() => {
-    if (!studentInfo.id || questions.length === 0) return;
+    if (!studentInfo.id || !hasQuestions) return;
 
     let isDisposed = false;
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+    let gradingRetryAttempt = 0;
+    let hasConnectedOnce = false;
+    let isSyncingReconnect = false;
 
     const handleTaRealtimeUpdate = async (payload: any, type: 'exam' | 'hw') => {
+      if (isDisposed) return;
       let newData = payload.new;
+      if (!newData) return;
+
       if (!newData.student_id || (!newData.question_id && !newData.tq_id)) {
         if (type === 'exam' && newData.answer_id) {
           const { data } = await supabaseClient.from('student_answer').select('*').eq('answer_id', newData.answer_id).single();
@@ -257,9 +281,10 @@ export function useClinicRealtime({
         }
       }
 
-      if (!newData || String(newData.student_id) !== String(studentInfo.id) || !newData.grading_code) return;
+      if (isDisposed || !newData || String(newData.student_id) !== String(studentInfo.id) || !newData.grading_code) return;
 
-      const idx = questions.findIndex(qItem =>
+      const currentQuestions = questionsRef.current;
+      const idx = currentQuestions.findIndex(qItem =>
         type === 'exam'
           ? ((!qItem.examAssignmentId || !newData.exam_assignment_id || String(qItem.examAssignmentId) === String(newData.exam_assignment_id)) && String(qItem.question_id) === String(newData.question_id))
           : (String(qItem.homework_id) === String(newData.homework_id) && String(qItem.tq_id) === String(newData.tq_id))
@@ -278,7 +303,7 @@ export function useClinicRealtime({
         setRecheckToast(`🎉 조교님이 ${idx + 1}번을 정답(${newCode}) 처리했어요!`);
         setTimeout(() => setRecheckToast(""), 4000);
         if (recheckState.current[idx] === 'pending') recheckState.current[idx] = null;
-        processCorrectAnswer(questions[idx], idx, true);
+        processCorrectAnswer(currentQuestions[idx], idx, true);
       } else if (!isCorrect && wasCorrect) {
         qBoxStatus.current[idx] = 'wrong_red';
         correctSolvedCountRef.current = Math.max(0, correctSolvedCountRef.current - 1);
@@ -300,6 +325,85 @@ export function useClinicRealtime({
            setTimeout(() => setRecheckToast(""), 4000);
         }
         forceUpdate();
+      }
+    };
+
+    // 🌟 웹소켓이 잠깐 끊겼다가 재연결(SUBSCRIBED)된 경우, 끊겨 있던 몇 초 사이에 조교가 변경한 정·오답만 안전하게 동기화
+    // (학생이 현재 필기 중인 오답 재풀이 캔버스는 건드리지 않도록 정↔오 상태가 역전된 항목만 반영)
+    const syncMissedGradingOnReconnect = async () => {
+      if (isDisposed || isSyncingReconnect) return;
+      isSyncingReconnect = true;
+      try {
+        if (runSelfCorrectionRef.current) {
+          await runSelfCorrectionRef.current();
+        }
+
+        const currentQuestions = questionsRef.current;
+        if (!currentQuestions.length || isDisposed) return;
+
+        const examAssignIds = Array.from(
+          new Set(currentQuestions.map((q: any) => q.examAssignmentId).filter(Boolean))
+        );
+        const hwIds = Array.from(
+          new Set(currentQuestions.map((q: any) => q.homework_id).filter(Boolean))
+        );
+
+        const [examRes, hwRes] = await Promise.all([
+          examAssignIds.length > 0
+            ? supabaseClient
+                .from('student_answer')
+                .select('answer_id, student_id, exam_assignment_id, question_id, grading_code')
+                .eq('student_id', studentInfo.id)
+                .in('exam_assignment_id', examAssignIds)
+                .not('grading_code', 'is', null)
+            : Promise.resolve({ data: [] as any[] }),
+          hwIds.length > 0
+            ? supabaseClient
+                .from('student_homework_answer')
+                .select('hw_answer_id, student_id, homework_id, tq_id, grading_code')
+                .eq('student_id', studentInfo.id)
+                .in('homework_id', hwIds)
+                .not('grading_code', 'is', null)
+            : Promise.resolve({ data: [] as any[] }),
+        ]);
+
+        if (isDisposed) return;
+
+        for (const row of examRes.data || []) {
+          const idx = currentQuestions.findIndex(
+            (q: any) =>
+              (!q.examAssignmentId || String(q.examAssignmentId) === String(row.exam_assignment_id)) &&
+              String(q.question_id) === String(row.question_id)
+          );
+          if (idx === -1) continue;
+          const isCorrect = ['O', 'TO', 'RO'].includes(row.grading_code);
+          const wasCorrect = ['correct_blue', 'correct_yellow', 'retry_yellow', 'O', 'TO', 'RO'].includes(
+            qBoxStatus.current[idx] || ''
+          );
+          if ((isCorrect && !wasCorrect) || (!isCorrect && wasCorrect)) {
+            await handleTaRealtimeUpdate({ new: row }, 'exam');
+          }
+        }
+
+        for (const row of hwRes.data || []) {
+          const idx = currentQuestions.findIndex(
+            (q: any) =>
+              String(q.homework_id) === String(row.homework_id) &&
+              String(q.tq_id) === String(row.tq_id)
+          );
+          if (idx === -1) continue;
+          const isCorrect = ['O', 'TO', 'RO'].includes(row.grading_code);
+          const wasCorrect = ['correct_blue', 'correct_yellow', 'retry_yellow', 'O', 'TO', 'RO'].includes(
+            qBoxStatus.current[idx] || ''
+          );
+          if ((isCorrect && !wasCorrect) || (!isCorrect && wasCorrect)) {
+            await handleTaRealtimeUpdate({ new: row }, 'hw');
+          }
+        }
+      } catch (err) {
+        console.warn('재연결 후 채점 상태 동기화 경고(무시 가능):', err);
+      } finally {
+        isSyncingReconnect = false;
       }
     };
 
@@ -326,22 +430,32 @@ export function useClinicRealtime({
         
         // 🌟 clinic_session_state 테이블은 모든 학생의 하트비트(last_seen_at) UPDATE가 집중되므로
         // postgres_changes 구독에서 제외하여 IncreaseSubscriptionConnectionPool 타임아웃을 방지합니다.
-        // (클리닉 세션 상태 동기화는 기존 ta_action 브로드캐스트와 5초 주기 runSelfCorrection 폴링으로 즉시 처리됨)
         const channel = supabaseClient.channel(channelName)
           .on('postgres_changes', { event: '*', schema: 'public', table: 'student_answer', filter: `student_id=eq.${studentInfo.id}` }, (payload: any) => handleTaRealtimeUpdate(payload, 'exam'))
           .on('postgres_changes', { event: '*', schema: 'public', table: 'student_homework_answer', filter: `student_id=eq.${studentInfo.id}` }, (payload: any) => handleTaRealtimeUpdate(payload, 'hw'));
           
         gradingChannelRef.current = channel;
         channel.subscribe((status) => {
-            // 의도적인 CLOSED 상태에서는 재연결하지 않고, 실제 오류/타임아웃 시에만 언마운트 여부를 확인 후 재연결
+            if (status === 'SUBSCRIBED') {
+                gradingRetryAttempt = 0;
+                if (hasConnectedOnce) {
+                    // 재연결된 경우에만 끊겨 있던 찰나의 채점 변경분을 1회 보정
+                    syncMissedGradingOnReconnect();
+                } else {
+                    hasConnectedOnce = true;
+                }
+                return;
+            }
+            // 의도적인 CLOSED 상태에서는 재연결하지 않고, 실제 오류/타임아웃 시에만 지수 백오프 + 랜덤 지터 후 재연결
             if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
                 if (isDisposed || gradingChannelRef.current !== channel) return;
                 if (reconnectTimer) clearTimeout(reconnectTimer);
+                const delayMs = getJitteredReconnectDelay(gradingRetryAttempt++);
                 reconnectTimer = setTimeout(() => {
                     if (!isDisposed && gradingChannelRef.current === channel) {
                         connectGradingChannel();
                     }
-                }, 3000);
+                }, delayMs);
             }
         });
     };
@@ -360,11 +474,13 @@ export function useClinicRealtime({
             supabaseClient.removeChannel(ch).catch(() => {});
         }
     };
-  }, [studentInfo.id, questions]);
+  }, [studentInfo.id, hasQuestions]);
 
   handleTaActionRef.current = (payload: any, sId: string, sessionState: any) => {
     const currentSeat = mySeatRef.current;
     if (payload.seat !== currentSeat && payload.studentId !== sId) return;
+
+    const currentQuestions = questionsRef.current;
 
     if (payload.action === 'force_cancel_call') {
       if (runSelfCorrectionRef.current) runSelfCorrectionRef.current();
@@ -372,7 +488,7 @@ export function useClinicRealtime({
       callbacksRef.current.setMyAwayActive(false);
     } else if (payload.action === 'relocated_away') {
       const sid = clinicSessionStateRef.current?.id;
-      const qItem = questions[currentQIndex];
+      const qItem = currentQuestions[currentQIndex];
       if (sid && qItem) {
         const isObjective = isObjectiveQuestion(qItem);
         const mode = isObjective ? null : getAnswerMode(currentQIndex, qItem);
@@ -406,7 +522,7 @@ export function useClinicRealtime({
       const { setPendingRecheckReview, setRecheckToast, processCorrectAnswer, setCanvasClearTrigger, forceUpdate } = callbacksRef.current;
       
       const qNum = payload.qNum;
-      const idx = qNum ? Number(qNum) - 1 : questions.findIndex((item:any) => item.uid === payload.uid);
+      const idx = qNum ? Number(qNum) - 1 : currentQuestions.findIndex((item: any) => item.uid === payload.uid);
       
       setPendingRecheckReview((prev: any[]) => {
         const isReviewItem = prev.some(r => r.uid === payload.uid || (qNum && r.qNum === qNum));
@@ -419,8 +535,8 @@ export function useClinicRealtime({
         return prev;
       });
 
-      if (idx >= 0 && questions[idx]) {
-          const qItem = questions[idx];
+      if (idx >= 0 && currentQuestions[idx]) {
+          const qItem = currentQuestions[idx];
           recheckState.current[idx] = null;
     
           if (payload.verdict === 'correct') {
@@ -544,15 +660,20 @@ export function useClinicRealtime({
       })
       .on('broadcast', { event: 'ta_action' }, ({ payload }: any) => handleTaActionRef.current(payload, sId, clinicSessionStateRef.current || sessionState))
       .subscribe((status) => {
-          // 의도적 CLOSED 이벤트에서는 재연결하지 않고, 실제 오류/타임아웃이며 종료되지 않은 상태에서만 재연결
+          if (status === 'SUBSCRIBED') {
+              clinicRetryAttemptRef.current = 0;
+              return;
+          }
+          // 의도적 CLOSED 이벤트에서는 재연결하지 않고, 실제 오류/타임아웃이며 종료되지 않은 상태에서만 지터 분산 재연결
           if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
               if (clinicChannelDisposedRef.current || clinicChannelRef.current !== channel) return;
               if (clinicReconnectTimerRef.current) clearTimeout(clinicReconnectTimerRef.current);
+              const delayMs = getJitteredReconnectDelay(clinicRetryAttemptRef.current++);
               clinicReconnectTimerRef.current = setTimeout(() => {
                   if (!clinicChannelDisposedRef.current && clinicChannelRef.current === channel) {
                       connectChannel(sId, clinicSessionStateRef.current || sessionState);
                   }
-              }, 3000);
+              }, delayMs);
           }
       });
   };
@@ -577,6 +698,7 @@ export function useClinicRealtime({
 
   const initSession = async (sId: string, round: number, cls: string) => {
     clinicChannelDisposedRef.current = false;
+    clinicRetryAttemptRef.current = 0;
     const today = getKSTDateString();
     const kioskSeat = localStorage.getItem('logica_kiosk_seat') || undefined;
     const sessionData = await resolveTodaySession(supabaseClient, sId, today, kioskSeat);
@@ -654,7 +776,7 @@ export function useClinicRealtime({
             
             let safeQNum = extra.qNum;
             if (!safeQNum && extra.uid) {
-                const fIdx = questions.findIndex(q => q.uid === extra.uid);
+                const fIdx = questionsRef.current.findIndex(q => q.uid === extra.uid);
                 if (fIdx !== -1) safeQNum = fIdx + 1;
             }
 
