@@ -132,23 +132,54 @@ export default function SupplyBoardPage() {
     setDragOverCol(null);
   };
 
+  const notifyCommBoardUpdated = (detail: { id?: string; status?: string } = {}) => {
+    if (typeof window === "undefined") return;
+    const payload = { board: "supply", ...detail };
+    window.dispatchEvent(new CustomEvent("logica:comm-board-updated", { detail: payload }));
+    if ("BroadcastChannel" in window) {
+      try {
+        const bc = new BroadcastChannel("logica_comm_board_sync");
+        bc.postMessage(payload);
+        bc.close();
+      } catch {}
+    }
+  };
+
   const handleDrop = async (e: React.DragEvent, newStatus: string) => {
     e.preventDefault();
     setDragOverCol(null);
     const reqId = e.dataTransfer.getData("reqId");
     if (!reqId) return;
 
-    setRequests(prev => prev.map(r => r.request_id?.toString() === reqId || r.id?.toString() === reqId ? { ...r, status: newStatus } : r));
+    const nowIso = new Date().toISOString();
+
+    setRequests(prev =>
+      prev.map(r =>
+        r.request_id?.toString() === reqId || r.id?.toString() === reqId
+          ? { ...r, status: newStatus, updated_at: nowIso, last_updater_name: currentUser.name }
+          : r
+      )
+    );
+
+    // 탑헤더 배지 및 팝오버 즉시(0ms) 낙관적 반영
+    notifyCommBoardUpdated({ id: reqId, status: newStatus });
 
     try {
-      await supabase.from("supply_request").update({ 
-        status: newStatus,
-        updated_at: new Date().toISOString(),
-        last_updater_name: currentUser.name 
-      }).eq("request_id", reqId);
+      const { error } = await supabase
+        .from("supply_request")
+        .update({
+          status: newStatus,
+          updated_at: nowIso,
+          last_updater_name: currentUser.name,
+        })
+        .eq("request_id", reqId);
+
+      if (error) throw error;
+      notifyCommBoardUpdated({ id: reqId, status: newStatus });
     } catch (err) {
       alert("상태 변경 실패");
-      fetchRequests(); 
+      fetchRequests();
+      notifyCommBoardUpdated();
     }
   };
 
@@ -387,7 +418,10 @@ export default function SupplyBoardPage() {
         reqData={selectedReq} 
         currentUser={currentUser} 
         onClose={closeModal} 
-        onSuccess={fetchRequests} 
+        onSuccess={() => {
+          fetchRequests();
+          notifyCommBoardUpdated();
+        }} 
       />
     </div>
   );

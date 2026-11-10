@@ -100,6 +100,8 @@ export default function TopHeader({
 
   const hoverCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reloadDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const fetchSeqRef = useRef(0);
+  const lastFetchedAtRef = useRef(0);
 
   const [currentUid, setCurrentUid] = useState(instId);
   useEffect(() => {
@@ -215,6 +217,9 @@ export default function TopHeader({
     const clearedStr = localStorage.getItem(`noti_cleared_at_${currentUid}`);
     const clearedTime = clearedStr ? new Date(clearedStr).getTime() : 0;
 
+    const reqSeq = ++fetchSeqRef.current;
+    lastFetchedAtRef.current = Date.now();
+
     try {
       // 1. 업무 공유 (/task) - instructor_memo
       let taskQuery = supabase
@@ -295,6 +300,13 @@ export default function TopHeader({
         csQuery.order("created_at", { ascending: false }).limit(500),
       ]);
 
+      // 더 최신 조회 요청이 이미 시작되었다면 이전 응답은 무시 (레이스 컨디션 방지)
+      if (reqSeq !== fetchSeqRef.current) return;
+
+      const normStatus = (st: any) => String(st ?? "").trim();
+      const isDoneStatus = (st: string) =>
+        ["완료", "지급완료", "처리완료", "done", "DONE", "completed"].includes(st);
+
       const sortPreview = (arr: BoardPreviewItem[]) =>
         [...arr].sort((a, b) => {
           if (a.isUrgentOrAssigned !== b.isUrgentOrAssigned) {
@@ -304,11 +316,13 @@ export default function TopHeader({
         });
 
       // --- (1) 업무 공유 (/task) To-Do & In Progress 집계 ---
-      const allTasks = taskRes.data || [];
-      const todoTasks = allTasks.filter(
-        (t: any) => !t.status || t.status === "할일" || t.status === "대기"
-      );
-      const inProgTasks = allTasks.filter((t: any) => t.status === "진행중");
+      const allTasks = !taskRes.error && Array.isArray(taskRes.data) ? taskRes.data : [];
+      const todoTasks = allTasks.filter((t: any) => {
+        const st = normStatus(t.status);
+        if (isDoneStatus(st)) return false;
+        return !st || st === "할일" || st === "대기";
+      });
+      const inProgTasks = allTasks.filter((t: any) => normStatus(t.status) === "진행중");
       const urgentActiveTasks = [...todoTasks, ...inProgTasks].filter(
         (t: any) => t.memo_type === "긴급공지"
       );
@@ -334,18 +348,24 @@ export default function TopHeader({
         };
       };
 
-      setTaskTodoCount(todoTasks.length);
-      setTaskInProgressCount(inProgTasks.length);
-      setUrgentTaskActiveCount(urgentActiveTasks.length);
-      setTaskTodoItems(sortPreview(todoTasks.map((t: any) => mapTaskItem(t, "todo"))).slice(0, 15));
-      setTaskInProgressItems(
-        sortPreview(inProgTasks.map((t: any) => mapTaskItem(t, "in_progress"))).slice(0, 15)
-      );
+      if (!taskRes.error) {
+        setTaskTodoCount(todoTasks.length);
+        setTaskInProgressCount(inProgTasks.length);
+        setUrgentTaskActiveCount(urgentActiveTasks.length);
+        setTaskTodoItems(sortPreview(todoTasks.map((t: any) => mapTaskItem(t, "todo"))).slice(0, 15));
+        setTaskInProgressItems(
+          sortPreview(inProgTasks.map((t: any) => mapTaskItem(t, "in_progress"))).slice(0, 15)
+        );
+      }
 
       // --- (2) 비품 신청 (/supply) To-Do & In Progress 집계 ---
-      const allSupplies = supplyRes.data || [];
-      const todoSupplies = allSupplies.filter((r: any) => !r.status || r.status === "대기");
-      const inProgSupplies = allSupplies.filter((r: any) => r.status === "진행중");
+      const allSupplies = !supplyRes.error && Array.isArray(supplyRes.data) ? supplyRes.data : [];
+      const todoSupplies = allSupplies.filter((r: any) => {
+        const st = normStatus(r.status);
+        if (isDoneStatus(st)) return false;
+        return !st || st === "대기";
+      });
+      const inProgSupplies = allSupplies.filter((r: any) => normStatus(r.status) === "진행중");
 
       const mapSupplyItem = (r: any, stage: "todo" | "in_progress"): BoardPreviewItem => {
         const itemTime = new Date(r.updated_at || r.created_at);
@@ -367,15 +387,17 @@ export default function TopHeader({
         };
       };
 
-      setSupplyTodoCount(todoSupplies.length);
-      setSupplyInProgressCount(inProgSupplies.length);
-      setSupplyTodoItems(todoSupplies.map((r: any) => mapSupplyItem(r, "todo")).slice(0, 15));
-      setSupplyInProgressItems(
-        inProgSupplies.map((r: any) => mapSupplyItem(r, "in_progress")).slice(0, 15)
-      );
+      if (!supplyRes.error) {
+        setSupplyTodoCount(todoSupplies.length);
+        setSupplyInProgressCount(inProgSupplies.length);
+        setSupplyTodoItems(todoSupplies.map((r: any) => mapSupplyItem(r, "todo")).slice(0, 15));
+        setSupplyInProgressItems(
+          inProgSupplies.map((r: any) => mapSupplyItem(r, "in_progress")).slice(0, 15)
+        );
+      }
 
       // --- (3) 학부모 요청/CS (/cs) To-Do & In Progress 집계 ---
-      const rawCs = (csRes.data || []).filter((req: any) => {
+      const rawCs = (!csRes.error && Array.isArray(csRes.data) ? csRes.data : []).filter((req: any) => {
         if (req.is_private) {
           if (hasViewAllCs) return true;
           if (String(req.author_id) === String(currentUid)) return true;
@@ -384,10 +406,15 @@ export default function TopHeader({
         }
         return true;
       });
-      const todoCs = rawCs.filter((r: any) => !r.status || r.status === "대기");
-      const inProgCs = rawCs.filter(
-        (r: any) => r.status === "처리중" || r.status === "진행중"
-      );
+      const todoCs = rawCs.filter((r: any) => {
+        const st = normStatus(r.status);
+        if (isDoneStatus(st)) return false;
+        return !st || st === "대기";
+      });
+      const inProgCs = rawCs.filter((r: any) => {
+        const st = normStatus(r.status);
+        return st === "처리중" || st === "진행중";
+      });
       const myAssignedActiveCs = [...todoCs, ...inProgCs].filter(
         (r: any) => String(r.processed_instructor_id) === String(currentUid)
       );
@@ -414,34 +441,27 @@ export default function TopHeader({
         };
       };
 
-      setCsTodoCount(todoCs.length);
-      setCsInProgressCount(inProgCs.length);
-      setAssignedCsActiveCount(myAssignedActiveCs.length);
-      setCsTodoItems(sortPreview(todoCs.map((c: any) => mapCsItem(c, "todo"))).slice(0, 15));
-      setCsInProgressItems(
-        sortPreview(inProgCs.map((c: any) => mapCsItem(c, "in_progress"))).slice(0, 15)
-      );
+      if (!csRes.error) {
+        setCsTodoCount(todoCs.length);
+        setCsInProgressCount(inProgCs.length);
+        setAssignedCsActiveCount(myAssignedActiveCs.length);
+        setCsTodoItems(sortPreview(todoCs.map((c: any) => mapCsItem(c, "todo"))).slice(0, 15));
+        setCsInProgressItems(
+          sortPreview(inProgCs.map((c: any) => mapCsItem(c, "in_progress"))).slice(0, 15)
+        );
+      }
 
-      // To-Do가 0건이고 In Progress만 있는 보드는 호버 시 자동으로 In Progress 탭을 기본 선택
+      // To-Do가 0건이고 In Progress만 있는 보드는 In Progress 탭 자동 선택, 둘 다 0건이면 기본 To-Do 탭으로 복귀
+      const resolveTab = (todoLen: number, inProgLen: number, prevTab: "todo" | "in_progress") => {
+        if (todoLen === 0 && inProgLen > 0) return "in_progress";
+        if (inProgLen === 0) return "todo";
+        return prevTab;
+      };
+
       setActivePopoverTab((prev) => ({
-        task:
-          todoTasks.length === 0 && inProgTasks.length > 0
-            ? "in_progress"
-            : todoTasks.length > 0 && inProgTasks.length === 0
-            ? "todo"
-            : prev.task,
-        supply:
-          todoSupplies.length === 0 && inProgSupplies.length > 0
-            ? "in_progress"
-            : todoSupplies.length > 0 && inProgSupplies.length === 0
-            ? "todo"
-            : prev.supply,
-        cs:
-          todoCs.length === 0 && inProgCs.length > 0
-            ? "in_progress"
-            : todoCs.length > 0 && inProgCs.length === 0
-            ? "todo"
-            : prev.cs,
+        task: !taskRes.error ? resolveTab(todoTasks.length, inProgTasks.length, prev.task) : prev.task,
+        supply: !supplyRes.error ? resolveTab(todoSupplies.length, inProgSupplies.length, prev.supply) : prev.supply,
+        cs: !csRes.error ? resolveTab(todoCs.length, inProgCs.length, prev.cs) : prev.cs,
       }));
     } catch (err) {
       console.error("[헤더] 소통/업무 미완료 카운트 로드 오류:", err);
@@ -453,38 +473,143 @@ export default function TopHeader({
 
     loadBoardTodoCounts();
 
-    const triggerDebouncedReload = () => {
+    const triggerDebouncedReload = (delayMs = 200) => {
       if (reloadDebounceRef.current) clearTimeout(reloadDebounceRef.current);
       reloadDebounceRef.current = setTimeout(() => {
         loadBoardTodoCounts();
-      }, 300);
+      }, delayMs);
     };
 
+    // 🌟 [핵심 버그 수정]
+    // 단일 채널에 3개 테이블(instructor_memo, supply_request, parent_request_log)을 한꺼번에 묶으면,
+    // 그중 하나라도 Supabase Realtime Publication에서 빠져 있을 때 phx_join 전체가 거절되어
+    // supply_request 실시간 알림까지 통째로 죽어버립니다.
+    // 테이블별 독립 토픽으로 분리하여 어느 한 테이블의 설정과 무관하게 즉시 동기화되도록 보장합니다.
     const suffix = `${currentUid}_${Math.random().toString(36).slice(2, 8)}`;
-    const commChannel = supabase
-      .channel(`hdr_comm_boards_${suffix}`)
+    const taskChannel = supabase
+      .channel(`hdr_task_sync_${suffix}`)
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "instructor_memo" },
-        triggerDebouncedReload
-      )
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "supply_request" },
-        triggerDebouncedReload
-      )
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "parent_request_log" },
-        triggerDebouncedReload
+        () => triggerDebouncedReload(200)
       )
       .subscribe();
 
+    const supplyChannel = supabase
+      .channel(`hdr_supply_sync_${suffix}`)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "supply_request" },
+        () => triggerDebouncedReload(200)
+      )
+      .subscribe();
+
+    const csChannel = supabase
+      .channel(`hdr_cs_sync_${suffix}`)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "parent_request_log" },
+        () => triggerDebouncedReload(200)
+      )
+      .subscribe();
+
+    // 🌟 같은 브라우저 내 칸반 보드(/supply, /task, /cs) 조작 시 0ms 즉시 낙관적 반영 + DB 재검증
+    const applyOptimisticBoardUpdate = (detail: any) => {
+      if (detail?.board === "supply" && detail?.id && detail?.status) {
+        const targetItemId = `supply_${detail.id}`;
+        const st = String(detail.status).trim();
+        if (st === "완료") {
+          setSupplyTodoItems((prev) => {
+            const next = prev.filter((item) => item.id !== targetItemId);
+            if (next.length !== prev.length) {
+              setSupplyTodoCount((c) => Math.max(0, c - (prev.length - next.length)));
+            }
+            return next;
+          });
+          setSupplyInProgressItems((prev) => {
+            const next = prev.filter((item) => item.id !== targetItemId);
+            if (next.length !== prev.length) {
+              setSupplyInProgressCount((c) => Math.max(0, c - (prev.length - next.length)));
+            }
+            return next;
+          });
+        }
+      }
+      triggerDebouncedReload(150);
+    };
+
+    const handleCustomBoardEvent = (ev: Event) => {
+      const detail = (ev as CustomEvent)?.detail;
+      applyOptimisticBoardUpdate(detail);
+    };
+
+    // 다른 탭에서 보드 변경 시에도 동기화 (BroadcastChannel 지원 브라우저)
+    let bc: BroadcastChannel | null = null;
+    if (typeof window !== "undefined" && "BroadcastChannel" in window) {
+      try {
+        bc = new BroadcastChannel("logica_comm_board_sync");
+        bc.onmessage = (msg) => applyOptimisticBoardUpdate(msg?.data);
+      } catch {}
+    }
+
+    // 🌟 보드 페이지(/supply, /task, /cs)에서 카드 드래그&드롭이나 모달 저장 버튼 클릭 시 자동 재동기화 안전장치
+    let dropFollowUpTimer: ReturnType<typeof setTimeout> | null = null;
+    const handleGlobalDrop = () => {
+      if (typeof window === "undefined") return;
+      const p = window.location.pathname;
+      if (p.startsWith("/supply") || p.startsWith("/task") || p.startsWith("/cs")) {
+        triggerDebouncedReload(350);
+        if (dropFollowUpTimer) clearTimeout(dropFollowUpTimer);
+        dropFollowUpTimer = setTimeout(() => {
+          loadBoardTodoCounts();
+        }, 1200);
+      }
+    };
+
+    const handleVisibilityOrFocus = () => {
+      if (typeof document !== "undefined" && document.visibilityState !== "visible") return;
+      if (Date.now() - lastFetchedAtRef.current > 3000) {
+        triggerDebouncedReload(150);
+      }
+    };
+
+    // Realtime 누락 대비 가벼운 백그라운드 동기화 (화면이 활성 상태일 때만 45초 간격)
+    const fallbackPollTimer = setInterval(() => {
+      if (typeof document !== "undefined" && document.visibilityState !== "visible") return;
+      loadBoardTodoCounts();
+    }, 45000);
+
+    window.addEventListener("logica:comm-board-updated", handleCustomBoardEvent);
+    window.addEventListener("drop", handleGlobalDrop, true);
+    window.addEventListener("focus", handleVisibilityOrFocus);
+    document.addEventListener("visibilitychange", handleVisibilityOrFocus);
+
     return () => {
       if (reloadDebounceRef.current) clearTimeout(reloadDebounceRef.current);
-      supabase.removeChannel(commChannel);
+      if (dropFollowUpTimer) clearTimeout(dropFollowUpTimer);
+      clearInterval(fallbackPollTimer);
+      window.removeEventListener("logica:comm-board-updated", handleCustomBoardEvent);
+      window.removeEventListener("drop", handleGlobalDrop, true);
+      window.removeEventListener("focus", handleVisibilityOrFocus);
+      document.removeEventListener("visibilitychange", handleVisibilityOrFocus);
+      if (bc) {
+        try {
+          bc.close();
+        } catch {}
+      }
+      supabase.removeChannel(taskChannel);
+      supabase.removeChannel(supplyChannel);
+      supabase.removeChannel(csChannel);
     };
   }, [currentUid, loadBoardTodoCounts]);
+
+  // 페이지 이동 시에도 최근 조회로부터 2초 이상 지났다면 최신 카운트 동기화
+  useEffect(() => {
+    if (!currentUid) return;
+    if (Date.now() - lastFetchedAtRef.current > 2000) {
+      loadBoardTodoCounts();
+    }
+  }, [pathname, currentUid, loadBoardTodoCounts]);
 
   const markNotificationsRead = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -498,6 +623,10 @@ export default function TopHeader({
       hoverCloseTimerRef.current = null;
     }
     setOpenMenuKey(key);
+    // 아이콘에 마우스를 올릴 때 마지막 조회 후 1.5초 이상 경과했다면 즉시 최신 DB 상태 재검증
+    if (currentUid && Date.now() - lastFetchedAtRef.current > 1500) {
+      loadBoardTodoCounts();
+    }
   };
 
   const scheduleCloseHoverMenu = () => {
