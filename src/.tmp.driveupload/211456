@@ -1,4 +1,4 @@
-// src/app/actions/progressActions.ts
+// src/app/actions/auth.ts
 "use server";
 
 import { createClient, SupabaseClient } from "@supabase/supabase-js";

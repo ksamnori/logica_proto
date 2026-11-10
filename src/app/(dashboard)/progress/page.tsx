@@ -10,7 +10,7 @@ import {
   applyProgressBatchAction,
   getProgressStatusMapAction,
   saveStudentStartPageAction,
-} from "@/app/actions/progressActions";
+} from "@/app/actions/auth";
 
 interface TextbookInfo {
   title: string;
