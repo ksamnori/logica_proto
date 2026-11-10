@@ -6,6 +6,11 @@ import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import QuestionModal from "@/components/progress/QuestionModal";
 import ProgressDetailModal from "@/components/progress/ProgressDetailModal";
+import {
+  applyProgressBatchAction,
+  getProgressStatusMapAction,
+  saveStudentStartPageAction,
+} from "@/app/actions/progressActions";
 
 interface TextbookInfo {
   title: string;
@@ -259,7 +264,6 @@ export default function ProgressPage() {
       setEnrolledStudentIds(sList.map(s => s.id));
       setSelectedStudentId("all");
       
-      await loadStartPages(classId);
       await loadStatusMapDB(classId, sList.map(s => s.id));
     } catch (e) { console.error("클래스 데이터 페칭 에러:", e); }
   };
@@ -308,7 +312,7 @@ export default function ProgressPage() {
     } catch (e) { console.error("fetchQuestions 에러:", e); } finally { setIsLoading(false); }
   };
 
-  const getStatusKey = (tq_id: number, sId: string) => `${selectedClassId}_${tq_id}_${sId}`;
+  const getStatusKey = (tq_id: number, sId: string, cId: string = selectedClassId) => `${cId}_${tq_id}_${sId}`;
 
   // 🌟 [수정 1] 반 전체('all') 상태 판정 규칙. DB 로딩과 버튼 즉시반영이 반드시 같은 규칙을 쓰도록 한 곳에 모음.
   //  - 재원생 전원 done                    → 'done'
@@ -329,31 +333,6 @@ export default function ProgressPage() {
     return undefined;
   };
 
-  // 🌟 [수정 3] 진도 취소 기록(progress_exclusion).
-  // 시험·정답 기록처럼 과제 테이블 밖에서 들어오는 진도는 취소해도 지울 수 없으므로,
-  // "이 학생의 이 문항은 선생님이 취소했다"를 따로 기록해 두고 집계 시 그 출처들을 무시한다.
-  // 이후 같은 문항을 다시 완료/과제 처리하면 기록이 삭제되어 정상 집계로 돌아간다.
-  const addProgressExclusions = async (tqIds: number[], studentIds: string[]) => {
-    if (!tqIds.length || !studentIds.length || !selectedClassId) return;
-    const rows = studentIds.flatMap(sId => tqIds.map(tq_id => ({ class_id: selectedClassId, student_id: sId, tq_id })));
-    for (let i = 0; i < rows.length; i += 500) {
-      const { error } = await supabase.from('progress_exclusion')
-        .upsert(rows.slice(i, i + 500), { onConflict: 'class_id,student_id,tq_id', ignoreDuplicates: true });
-      if (error) { console.error("진도 취소 기록 저장 에러:", error.message); return; }
-    }
-  };
-
-  const removeProgressExclusions = async (tqIds: number[], studentIds: string[]) => {
-    if (!tqIds.length || !studentIds.length || !selectedClassId) return;
-    for (let i = 0; i < tqIds.length; i += 200) {
-      const { error } = await supabase.from('progress_exclusion')
-        .delete()
-        .eq('class_id', selectedClassId)
-        .in('student_id', studentIds)
-        .in('tq_id', tqIds.slice(i, i + 200));
-      if (error) { console.error("진도 취소 기록 삭제 에러:", error.message); return; }
-    }
-  };
 
   // ==========================================================
   // 🌟 [중간 합류] 학생별 교재 시작 페이지 (student_textbook_start)
@@ -361,17 +340,7 @@ export default function ProgressPage() {
   const getStartPage = (sId: string, bookId: string): number | undefined =>
     bookId ? startPages[`${sId}_${bookId}`] : undefined;
 
-  const loadStartPages = async (classId: string) => {
-    const { data, error } = await supabase.from('student_textbook_start')
-      .select('student_id, book_id, start_page')
-      .eq('class_id', classId);
-    if (error) { console.warn("시작 페이지 조회 실패(무시하고 진행):", error.message); setStartPages({}); return; }
-    const map: Record<string, number> = {};
-    (data || []).forEach((r: any) => { map[`${r.student_id}_${r.book_id}`] = Number(r.start_page); });
-    setStartPages(map);
-  };
-
-  // page가 null이면 "처음부터"로 되돌림(기록 삭제)
+  // page가 null이면 "처음부터"로 되돌림(기록 삭제) - Server Action 경유로 RLS 42501 원천 방지
   const saveStartPage = async (sId: string, bookId: string, page: number | null) => {
     if (!selectedClassId || !sId || sId === 'all' || !bookId) return;
     const key = `${sId}_${bookId}`;
@@ -380,17 +349,18 @@ export default function ProgressPage() {
     if (page === null) delete next[key]; else next[key] = page;
     setStartPages(next);
 
-    const { error } = page === null
-      ? await supabase.from('student_textbook_start').delete()
-          .eq('class_id', selectedClassId).eq('student_id', sId).eq('book_id', bookId)
-      : await supabase.from('student_textbook_start').upsert(
-          { class_id: selectedClassId, student_id: sId, book_id: bookId, start_page: page, updated_at: new Date().toISOString() },
-          { onConflict: 'class_id,student_id,book_id' }
-        );
+    const clientTenantId = typeof window !== "undefined" ? (localStorage.getItem("logica_tenant_id") || "") : "";
+    const res = await saveStudentStartPageAction({
+      classId: selectedClassId,
+      studentId: sId,
+      bookId,
+      page,
+      clientTenantId,
+    });
 
-    if (error) {
+    if (!res.success) {
       setStartPages(prev);
-      alert("시작 페이지 저장 실패: " + error.message);
+      alert("시작 페이지 저장 실패: " + (res.message || "알 수 없는 오류"));
       return;
     }
     showToast(page === null ? "처음부터 진도율을 계산합니다." : `${page}p부터 진도율을 계산합니다.`);
@@ -477,11 +447,26 @@ export default function ProgressPage() {
 
   const loadStatusMapDB = async (classId: string, studentIds: string[]) => {
     try {
+      const clientTenantId = typeof window !== "undefined" ? (localStorage.getItem("logica_tenant_id") || "") : "";
+      const res = await getProgressStatusMapAction({
+        classId,
+        studentIds,
+        clientTenantId,
+      });
+
+      if (res.success) {
+        setStartPages(res.startPages || {});
+        setStatusMap(res.statusMap || {});
+        return;
+      }
+      console.warn("서버 액션 진도 조회 실패, 클라이언트 폴백 실행:", res.message);
+
+      // 폴백: 서버 액션 응답 실패 시 기존 클라이언트 조회 수행
       const { data: assignments, error } = await supabase
         .from('homework_assignment')
         .select('homework_id, target_questions, target_student_id, student_homework_result(student_id, completed_tq_ids, status)')
         .eq('class_id', classId);
-        
+
       const { data: examAssignments } = await supabase
         .from('exam_assignment')
         .select(`
@@ -496,7 +481,6 @@ export default function ProgressPage() {
 
       if (error) throw error;
 
-      // 🌟 [수정 3] 진도 취소 기록 로딩 (테이블이 아직 없으면 빈 목록으로 동작)
       const excludedSet = new Set<string>();
       if (studentIds.length > 0) {
         let fromEx = 0;
@@ -506,8 +490,7 @@ export default function ProgressPage() {
             .eq('class_id', classId)
             .in('student_id', studentIds)
             .range(fromEx, fromEx + 999);
-          if (exErr) { console.warn("진도 취소 기록 조회 실패(무시하고 진행):", exErr.message); break; }
-          if (!exRows || exRows.length === 0) break;
+          if (exErr || !exRows || exRows.length === 0) break;
           exRows.forEach((r: any) => excludedSet.add(`${r.tq_id}_${r.student_id}`));
           if (exRows.length < 1000) break;
           fromEx += 1000;
@@ -519,7 +502,6 @@ export default function ProgressPage() {
 
       assignments?.forEach((hw: any) => {
         const targetQs = safeParseIds(hw.target_questions);
-        
         if (hw.target_student_id) {
           targetQs.forEach((tqId: number) => {
             if (!tqStudentStatus[tqId]) tqStudentStatus[tqId] = {};
@@ -528,28 +510,26 @@ export default function ProgressPage() {
             }
           });
         } else {
-           studentIds.forEach(sId => {
-              targetQs.forEach((tqId: number) => {
-                if (!tqStudentStatus[tqId]) tqStudentStatus[tqId] = {};
-                if (tqStudentStatus[tqId][sId] !== 'done') {
-                  tqStudentStatus[tqId][sId] = 'homework';
-                }
-              });
-           });
+          studentIds.forEach(sId => {
+            targetQs.forEach((tqId: number) => {
+              if (!tqStudentStatus[tqId]) tqStudentStatus[tqId] = {};
+              if (tqStudentStatus[tqId][sId] !== 'done') {
+                tqStudentStatus[tqId][sId] = 'homework';
+              }
+            });
+          });
         }
 
-        hw.student_homework_result?.forEach((res: any) => {
-          const sId = res.student_id;
-          const isFullyDone = ['채점완료', '제출완료', '완료', '최종완료'].includes(res.status);
-
+        hw.student_homework_result?.forEach((resItem: any) => {
+          const sId = resItem.student_id;
+          const isFullyDone = ['채점완료', '제출완료', '완료', '최종완료'].includes(resItem.status);
           if (isFullyDone) {
             targetQs.forEach((tqId: number) => {
               if (!tqStudentStatus[tqId]) tqStudentStatus[tqId] = {};
               tqStudentStatus[tqId][sId] = 'done';
             });
           }
-
-          const completedQs = safeParseIds(res.completed_tq_ids);
+          const completedQs = safeParseIds(resItem.completed_tq_ids);
           completedQs.forEach((tqId: number) => {
             if (!tqStudentStatus[tqId]) tqStudentStatus[tqId] = {};
             tqStudentStatus[tqId][sId] = 'done';
@@ -559,308 +539,121 @@ export default function ProgressPage() {
 
       const examQuestionIds = new Set<number>();
       examAssignments?.forEach((ea: any) => {
-         const m = Array.isArray(ea.exam_master) ? ea.exam_master[0] : ea.exam_master;
-         const items = m?.exam_item || [];
-         items.forEach((item: any) => {
-             if (item.question_id) examQuestionIds.add(item.question_id);
-         });
+        const m = Array.isArray(ea.exam_master) ? ea.exam_master[0] : ea.exam_master;
+        (m?.exam_item || []).forEach((item: any) => {
+          if (item.question_id) examQuestionIds.add(item.question_id);
+        });
       });
 
       const qIdToTqId = new Map<number, number>();
       if (examQuestionIds.size > 0) {
-          const { data: tqMapping } = await supabase
-              .from('textbook_question')
-              .select('tq_id, question_id')
-              .in('question_id', Array.from(examQuestionIds));
-          
-          tqMapping?.forEach(t => {
-              if (t.question_id) qIdToTqId.set(t.question_id, t.tq_id);
-          });
+        const { data: tqMapping } = await supabase
+          .from('textbook_question')
+          .select('tq_id, question_id')
+          .in('question_id', Array.from(examQuestionIds));
+        tqMapping?.forEach(t => {
+          if (t.question_id) qIdToTqId.set(t.question_id, t.tq_id);
+        });
       }
 
       examAssignments?.forEach((ea: any) => {
-         const sId = ea.student_id;
-         const isDone = ['채점완료', '제출완료', '완료', '최종완료'].includes(ea.status);
-         const m = Array.isArray(ea.exam_master) ? ea.exam_master[0] : ea.exam_master;
-         const items = m?.exam_item || [];
-
-         items.forEach((item: any) => {
-             const tqId = qIdToTqId.get(item.question_id);
-             if (tqId) {
-                 // 🌟 [수정 3] 선생님이 취소한 문항은 시험 기록으로 되살리지 않음
-                 if (excludedSet.has(`${tqId}_${sId}`)) return;
-                 if (!tqStudentStatus[tqId]) tqStudentStatus[tqId] = {};
-                 const currentSt = tqStudentStatus[tqId][sId];
-                 if (currentSt !== 'done') {
-                     tqStudentStatus[tqId][sId] = isDone ? 'done' : 'homework';
-                 }
-             }
-         });
+        const sId = ea.student_id;
+        const isDone = ['채점완료', '제출완료', '완료', '최종완료'].includes(ea.status);
+        const m = Array.isArray(ea.exam_master) ? ea.exam_master[0] : ea.exam_master;
+        (m?.exam_item || []).forEach((item: any) => {
+          const tqId = qIdToTqId.get(item.question_id);
+          if (tqId) {
+            if (excludedSet.has(`${tqId}_${sId}`)) return;
+            if (!tqStudentStatus[tqId]) tqStudentStatus[tqId] = {};
+            if (tqStudentStatus[tqId][sId] !== 'done') {
+              tqStudentStatus[tqId][sId] = isDone ? 'done' : 'homework';
+            }
+          }
+        });
       });
 
-      // 학생별 상태만 저장한다. 반 전체('all') 상태는 학생별 시작 페이지를 반영해야 하므로
-      // 저장하지 않고 allStatusMap(useMemo)에서 매번 계산한다.
       Object.keys(tqStudentStatus).forEach(tqIdStr => {
         const tqId = Number(tqIdStr);
         studentIds.forEach(sId => {
           const st = tqStudentStatus[tqId]?.[sId];
-          if (st) newMap[getStatusKey(tqId, sId)] = st;
+          if (st) newMap[getStatusKey(tqId, sId, classId)] = st;
         });
       });
 
       setStatusMap(newMap);
-    } catch (e: any) { 
-      console.error("loadStatusMapDB 에러:", e.message || e); 
+    } catch (e: any) {
+      console.error("loadStatusMapDB 에러:", e.message || e);
     }
   };
 
-  const saveHomeworkToDB = async (bookId: string, tq_ids: number[], isWorkbook: boolean) => {
-    if (!tq_ids.length || !bookId) return;
+  // 🌟 [핵심 해결] 브라우저 직접 INSERT 시 발생하던 homework_assignment RLS(42501) 오류 원천 차단:
+  // 클릭 시점의 반/교재/대상 학생 스냅샷을 고정하고 Server Action(supabaseAdmin + 지점 검증)으로 일괄 저장합니다.
+  const applyActionToIds = async (actionType: string, mainIds: number[], wbIds: number[]) => {
+    const targetClassId = selectedClassId;
+    const targetMainBookId = selectedBookId;
+    const targetWbBookId = selectedWbId;
+    const targetSelectedStudent = selectedStudentId;
+    const enrolledSnapshot = [...enrolledStudentIds];
+    const targets = targetSelectedStudent === 'all' ? enrolledSnapshot : [targetSelectedStudent];
+    const scheduleSnapshot = {
+      days: [...classScheduleInfo.days],
+      holidays: [...classScheduleInfo.holidays],
+      extras: [...classScheduleInfo.extras],
+    };
+    const clientTenantId = typeof window !== "undefined" ? (localStorage.getItem("logica_tenant_id") || "") : "";
 
-    const kstNowMs = Date.now() + 9 * 3600000;
-    const kstNowDate = new Date(kstNowMs);
-    const y = kstNowDate.getUTCFullYear();
-    const m = String(kstNowDate.getUTCMonth() + 1).padStart(2, '0');
-    const d = String(kstNowDate.getUTCDate()).padStart(2, '0');
-    const dateStr = `${y}-${m}-${d}`;
-    const expectedTitle = `[시스템] ${isWorkbook ? '워크북 과제' : '본교재 과제'} (${dateStr})`;
+    if (!targetClassId || targets.length === 0) return;
 
-    const getNextSessionDueDate = () => {
-      const { days, holidays, extras } = classScheduleInfo;
-      
-      const getFallback = () => {
-        const fbDate = new Date(kstNowMs + 7 * 24 * 3600000);
-        return `${fbDate.getUTCFullYear()}-${String(fbDate.getUTCMonth()+1).padStart(2,'0')}-${String(fbDate.getUTCDate()).padStart(2,'0')}T22:00:00+09:00`;
+    // 1) 화면 즉시 반영 (함수형 업데이트로 연속 클릭 시 상태 유실 방지)
+    setStatusMap(prev => {
+      const nextMap = { ...prev };
+      const updateMap = (id: number, status: string | null) => {
+        if (targetSelectedStudent === 'all') {
+          if (status) targets.forEach(sId => { nextMap[getStatusKey(id, sId, targetClassId)] = status; });
+          else targets.forEach(sId => { delete nextMap[getStatusKey(id, sId, targetClassId)]; });
+        } else {
+          if (status) nextMap[getStatusKey(id, targetSelectedStudent, targetClassId)] = status;
+          else delete nextMap[getStatusKey(id, targetSelectedStudent, targetClassId)];
+        }
       };
 
-      if (days.length === 0 && extras.length === 0) return getFallback();
-
-      const DAY_LABELS = ["일", "월", "화", "수", "목", "금", "토"];
-      let cursorMs = kstNowMs;
-      
-      for (let i = 1; i <= 30; i++) {
-        cursorMs += 24 * 3600000;
-        const targetDate = new Date(cursorMs);
-        const ty = targetDate.getUTCFullYear();
-        const tm = String(targetDate.getUTCMonth() + 1).padStart(2, '0');
-        const td = String(targetDate.getUTCDate()).padStart(2, '0');
-        const ymd = `${ty}-${tm}-${td}`;
-        const dayLabel = DAY_LABELS[targetDate.getUTCDay()];
-
-        if (extras.includes(ymd) || (days.includes(dayLabel) && !holidays.includes(ymd))) {
-          return `${ymd}T22:00:00+09:00`;
-        }
-      }
-      return getFallback();
-    };
-
-    const nextSessionStr = getNextSessionDueDate();
-
-    const { data: todayHws } = await supabase.from('homework_assignment')
-      .select('homework_id, target_questions, target_student_id, homework_title, due_date')
-      .eq('class_id', selectedClassId)
-      .eq('book_id', bookId)
-      .not('homework_title', 'eq', '[시스템] 수업 진도 완료 기록')
-      .gte('created_at', `${dateStr}T00:00:00+09:00`)
-      .lte('created_at', `${dateStr}T23:59:59.999+09:00`);
-
-    const individualHws = todayHws?.filter(hw => hw.target_student_id !== null) || [];
-    let baseDueDate = individualHws.length > 0 ? individualHws[0].due_date : nextSessionStr;
-
-    const targetStudentIds = selectedStudentId === 'all' ? enrolledStudentIds : [selectedStudentId];
-
-    for (const stuId of targetStudentIds) {
-      const indHwsForStudent = individualHws.filter(hw => hw.target_student_id === stuId);
-      let targetHwToMerge = null;
-
-      for (const hw of indHwsForStudent) {
-        const { data: resData } = await supabase.from('student_homework_result')
-          .select('status')
-          .eq('homework_id', hw.homework_id)
-          .eq('student_id', stuId)
-          .maybeSingle();
-          
-        if (resData && !['채점완료', '제출완료', '완료', '최종완료'].includes(resData.status)) {
-          targetHwToMerge = hw;
-          break; 
-        }
-      }
-      
-      if (targetHwToMerge) {
-        const existingInd = safeParseIds(targetHwToMerge.target_questions);
-        const combinedTqs = Array.from(new Set([...existingInd, ...tq_ids]));
-        
-        await supabase.from('homework_assignment')
-          .update({ target_questions: combinedTqs, due_date: baseDueDate })
-          .eq('homework_id', targetHwToMerge.homework_id);
-          
-      } else {
-        const { data: insData, error: insErr } = await supabase.from('homework_assignment').insert({
-          book_id: bookId, 
-          target_questions: tq_ids, 
-          class_id: selectedClassId, 
-          target_student_id: stuId,
-          due_date: baseDueDate, 
-          homework_title: expectedTitle
-        }).select('homework_id').single();
-        
-        if (insErr) throw insErr;
-
-        await supabase.from('student_homework_result').insert({ 
-          homework_id: insData.homework_id, 
-          student_id: stuId, 
-          status: '미제출', 
-          completed_tq_ids: [] 
-        });
-      }
-    }
-  };
-
-  const markProgressAsCompleteInDB = async (tq_ids: number[], targetStudentIds: string[], bookId: string) => {
-    try {
-      if (!tq_ids.length || !bookId || !targetStudentIds.length) return;
-
-      await Promise.all(targetStudentIds.map(async (sId) => {
-        let { data: existing, error: existingErr } = await supabase.from('homework_assignment')
-          .select('homework_id')
-          .eq('class_id', selectedClassId)
-          .eq('book_id', bookId)
-          .eq('target_student_id', sId)
-          .eq('homework_title', '[시스템] 수업 진도 완료 기록')
-          .limit(1);
-          
-        if (existingErr) throw existingErr;
-
-        let hwId: number;
-        if (existing && existing.length > 0) {
-          hwId = existing[0].homework_id;
-        } else {
-          const { data: ins, error: insErr } = await supabase.from('homework_assignment').insert({
-            book_id: bookId, target_questions: [], due_date: '2099-12-31T22:00:00+09:00', homework_title: '[시스템] 수업 진도 완료 기록', class_id: selectedClassId, target_student_id: sId
-          }).select('homework_id').single();
-          
-          if (insErr) throw insErr;
-          hwId = ins.homework_id;
-        }
-
-        const { data: res } = await supabase.from('student_homework_result').select('hw_result_id, completed_tq_ids').eq('homework_id', hwId).eq('student_id', sId).maybeSingle();
-        const nowIso = new Date().toISOString();
-        if (res) {
-          const comp = safeParseIds(res.completed_tq_ids);
-          const newComp = Array.from(new Set([...comp, ...tq_ids]));
-          await supabase.from('student_homework_result').update({ completed_tq_ids: newComp, status: '채점완료', checked_at: nowIso }).eq('hw_result_id', res.hw_result_id);
-        } else {
-          await supabase.from('student_homework_result').insert({ homework_id: hwId, student_id: sId, status: '채점완료', completed_tq_ids: tq_ids, checked_at: nowIso });
-        }
-      }));
-    } catch (e: any) {
-      console.error("markProgressAsCompleteInDB 에러:", e.message || e);
-    }
-  };
-
-  const cancelProgressForIds = async (tqIds: number[], targetStudentIds: string[]) => {
-    try {
-      if (!tqIds.length || !selectedClassId || !targetStudentIds.length) return;
-      
-      const { data: assignments, error: getErr } = await supabase.from('homework_assignment')
-        .select('homework_id, target_questions, homework_title, target_student_id')
-        .eq('class_id', selectedClassId);
-      if (getErr) return;
-      
-      for (const hw of (assignments || [])) {
-        if (hw.target_student_id && !targetStudentIds.includes(hw.target_student_id)) continue;
-
-        const { data: results } = await supabase.from('student_homework_result')
-          .select('student_id, completed_tq_ids')
-          .eq('homework_id', hw.homework_id)
-          .in('student_id', targetStudentIds);
-          
-        if (results) {
-          for (const r of results) {
-            const comp = safeParseIds(r.completed_tq_ids);
-            const newComp = comp.filter((id: number) => !tqIds.includes(id));
-            if (newComp.length !== comp.length) {
-              await supabase.from('student_homework_result').update({ completed_tq_ids: newComp }).eq('homework_id', hw.homework_id).eq('student_id', r.student_id);
-            }
-          }
-        }
-
-        if (hw.target_student_id !== null && targetStudentIds.includes(hw.target_student_id)) {
-            const tqArr = safeParseIds(hw.target_questions);
-            const remaining = tqArr.filter((id: number) => !tqIds.includes(id));
-            const targetChanged = remaining.length !== tqArr.length;
-
-            const { data: allResultsCheck } = await supabase.from('student_homework_result').select('completed_tq_ids').eq('homework_id', hw.homework_id);
-            let allResultsEmpty = true;
-            allResultsCheck?.forEach(r => {
-                if (safeParseIds(r.completed_tq_ids).length > 0) allResultsEmpty = false;
-            });
-
-            if (remaining.length === 0 && allResultsEmpty && hw.homework_title !== '[시스템] 수업 진도 완료 기록') {
-              await supabase.from('student_homework_result').delete().eq('homework_id', hw.homework_id);
-              await supabase.from('homework_assignment').delete().eq('homework_id', hw.homework_id);
-            } else if (targetChanged) {
-              await supabase.from('homework_assignment').update({ target_questions: remaining }).eq('homework_id', hw.homework_id);
-            }
-        }
-      }
-    } catch (e: any) {
-      console.error("cancelProgressForIds 에러:", e.message || e);
-    }
-  };
-
-  const applyActionToIds = async (actionType: string, mainIds: number[], wbIds: number[]) => {
-    const newMap = { ...statusMap };
-    const targets = selectedStudentId === 'all' ? enrolledStudentIds : [selectedStudentId];
-
-    const updateMap = (id: number, status: string | null) => {
-      if (selectedStudentId === 'all') {
-        if (status) targets.forEach(sId => newMap[getStatusKey(id, sId)] = status);
-        else targets.forEach(sId => delete newMap[getStatusKey(id, sId)]);
-      } else {
-        if (status) newMap[getStatusKey(id, selectedStudentId)] = status;
-        else delete newMap[getStatusKey(id, selectedStudentId)];
-      }
-    };
-
-    if (actionType === 'DONE_AND_WB_HW') {
-      mainIds.forEach(id => updateMap(id, 'done'));
-      wbIds.forEach(id => updateMap(id, 'homework'));
-    } else if (actionType === 'MAIN_HW_AND_WB_HW') {
-      mainIds.forEach(id => updateMap(id, 'homework'));
-      wbIds.forEach(id => updateMap(id, 'homework'));
-    } else if (actionType === 'DONE_ONLY') {
-      mainIds.forEach(id => updateMap(id, 'done'));
-      wbIds.forEach(id => updateMap(id, 'done'));
-    } else if (actionType === 'CANCEL') {
-      mainIds.forEach(id => updateMap(id, null));
-      wbIds.forEach(id => updateMap(id, null));
-    }
-
-    // 반 전체('all') 표시는 allStatusMap이 statusMap 변화에 맞춰 자동 재계산함
-
-    setStatusMap(newMap);
-
-    actionQueue.current = actionQueue.current.then(async () => {
-      const allIds = [...mainIds, ...wbIds];
-      await cancelProgressForIds(allIds, targets);
-
-      // 🌟 [수정 3] 취소면 취소 기록을 남기고, 완료/과제 처리면 기존 취소 기록을 지워 정상 집계로 복귀
-      if (actionType === 'CANCEL') await addProgressExclusions(allIds, targets);
-      else await removeProgressExclusions(allIds, targets);
-      
       if (actionType === 'DONE_AND_WB_HW') {
-        if (mainIds.length > 0 && selectedBookId) await markProgressAsCompleteInDB(mainIds, targets, selectedBookId);
-        if (wbIds.length > 0 && selectedWbId) await saveHomeworkToDB(selectedWbId, wbIds, true);
+        mainIds.forEach(id => updateMap(id, 'done'));
+        wbIds.forEach(id => updateMap(id, 'homework'));
       } else if (actionType === 'MAIN_HW_AND_WB_HW') {
-        if (mainIds.length > 0 && selectedBookId) await saveHomeworkToDB(selectedBookId, mainIds, false);
-        if (wbIds.length > 0 && selectedWbId) await saveHomeworkToDB(selectedWbId, wbIds, true);
+        mainIds.forEach(id => updateMap(id, 'homework'));
+        wbIds.forEach(id => updateMap(id, 'homework'));
       } else if (actionType === 'DONE_ONLY') {
-        if (mainIds.length > 0 && selectedBookId) await markProgressAsCompleteInDB(mainIds, targets, selectedBookId);
-        if (wbIds.length > 0 && selectedWbId) await markProgressAsCompleteInDB(wbIds, targets, selectedWbId);
+        mainIds.forEach(id => updateMap(id, 'done'));
+        wbIds.forEach(id => updateMap(id, 'done'));
+      } else if (actionType === 'CANCEL') {
+        mainIds.forEach(id => updateMap(id, null));
+        wbIds.forEach(id => updateMap(id, null));
       }
-    }).catch(err => {
+      return nextMap;
+    });
+
+    // 2) 직렬 큐를 통해 서버 액션으로 안전 저장 (실패 시 알림 및 실제 DB 상태로 즉시 복원)
+    actionQueue.current = actionQueue.current.then(async () => {
+      const res = await applyProgressBatchAction({
+        actionType,
+        classId: targetClassId,
+        mainBookId: targetMainBookId || undefined,
+        wbBookId: targetWbBookId || undefined,
+        mainIds,
+        wbIds,
+        targetStudentIds: targets,
+        scheduleInfo: scheduleSnapshot,
+        clientTenantId,
+      });
+
+      if (!res.success) {
+        throw new Error(res.message || "DB 저장 실패");
+      }
+    }).catch(async (err: any) => {
       console.error("큐(Queue) DB 처리 중 오류 발생:", err);
+      alert(`⚠️ 진도/과제 저장에 실패하여 화면을 실제 저장 상태로 되돌립니다.\n사유: ${err?.message || err}`);
+      await loadStatusMapDB(targetClassId, enrolledSnapshot);
     });
   };
 
