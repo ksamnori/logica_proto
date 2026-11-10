@@ -497,7 +497,7 @@ async function saveHomeworkOnServer(
   );
 }
 
-export interface ApplyProgressBatchParams {
+interface ApplyProgressBatchParams {
   actionType: string;
   classId: string;
   mainBookId?: string;
