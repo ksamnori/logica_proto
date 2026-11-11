@@ -716,8 +716,8 @@ export default function GradingBoard({ mode, assignmentId, homeworkId, studentId
     const pgConfig: any = { event: '*', schema: 'public', table: tableName };
     if (singleFilter) pgConfig.filter = singleFilter;
 
-    const channel = supabase.channel(channelId)
-      .on('postgres_changes', pgConfig, (payload) => {
+    const channel = (supabase.channel(channelId) as any)
+      .on('postgres_changes', pgConfig, (payload: any) => {
         const newData = payload.new as any;
         if (!newData) return;
 
@@ -1410,7 +1410,7 @@ export default function GradingBoard({ mode, assignmentId, homeworkId, studentId
               const key = `${stId}_${r.id}`;
               const cell = matrixData.cellMap.get(key);
               if (cell && !cell.isBlocked && String(cell.homeworkId) === String(hwId)) {
-                if (r.id != null) resolvedCodeByTqId.set(Number(r.id), cell.currentCode || null);
+                if (r.id != null) resolvedCodeByTqId.set(Number(r.id), String(cell.currentCode || ''));
               }
             });
             const allTqIds = Array.from(resolvedCodeByTqId.keys());

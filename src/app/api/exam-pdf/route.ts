@@ -15,8 +15,10 @@ export const maxDuration = 60;
 const isServerless = !!(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME);
 
 function findExistingChrome(): string | null {
-  if (process.env.CHROME_EXECUTABLE_PATH && fs.existsSync(process.env.CHROME_EXECUTABLE_PATH)) {
-    return process.env.CHROME_EXECUTABLE_PATH;
+  if (isServerless) return null;
+  const envChrome = process.env.CHROME_EXECUTABLE_PATH;
+  if (envChrome && fs.existsSync(/*turbopackIgnore: true*/ envChrome)) {
+    return envChrome;
   }
   const home = os.homedir();
   const candidates = [
@@ -31,7 +33,7 @@ function findExistingChrome(): string | null {
     "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
   ];
   for (const p of candidates) {
-    if (fs.existsSync(p)) return p;
+    if (fs.existsSync(/*turbopackIgnore: true*/ p)) return p;
   }
   return null;
 }

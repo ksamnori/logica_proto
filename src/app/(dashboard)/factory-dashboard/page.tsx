@@ -76,7 +76,7 @@ const fetchAllRowsParallel = async (
         .select(selectQuery)
         .order(orderCol, { ascending: true })
         .range(start, start + step - 1)
-        .then(({ data, error }) => {
+        .then(({ data, error }: { data: any[] | null; error: any }) => {
           const rows = !error && data ? data : [];
           pageChunks[pageIndex] = rows;
           loadedCount += rows.length;
@@ -209,14 +209,14 @@ export default function FactoryDashboardPage() {
           recent++;
         }
 
-        const diff = (q.difficulty || "").trim();
+        const diff: string = String(q.difficulty ?? "").trim();
         if (diff === "최상" || diff === "상" || diff === "중" || diff === "하" || diff === "최하") {
           diffCount[diff]++;
         } else {
           diffCount["미지정"]++;
         }
 
-        const taxId = q.taxonomy_id;
+        const taxId: string = q.taxonomy_id ? String(q.taxonomy_id) : "";
         const depth1Str = (taxId && catMap.get(taxId)) || "";
 
         if (depth1Str.includes("초등") || (taxId && taxId.startsWith("E"))) schoolCount["초등"]++;

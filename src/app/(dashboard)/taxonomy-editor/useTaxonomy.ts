@@ -609,13 +609,13 @@ export function useTaxonomy() {
       // textbook_question 에만 연결되어 아직 로드되지 않은 추가 문항 ID만 조회
       const extraTbIds = Array.from(new Set(tbLinkedIds)).filter(id => id && !currentQids.has(id.toLowerCase()));
       if (extraTbIds.length > 0) {
-        const extraPromises = [];
+        const extraPromises: PromiseLike<any>[] = [];
         for (let i = 0; i < extraTbIds.length; i += 500) {
           const chunk = extraTbIds.slice(i, i + 500);
           extraPromises.push(supabase.from("question_db").select("*").in("question_id", chunk));
         }
         const extraResults = await Promise.all(extraPromises);
-        extraResults.forEach(({ data }) => {
+        extraResults.forEach(({ data }: any) => {
           (data || []).forEach((q: any) => {
             const k = String(q.question_id).trim().toLowerCase();
             if (!currentQids.has(k)) {
@@ -636,13 +636,13 @@ export function useTaxonomy() {
         if (missingPids.length === 0) break; 
         missingPids.forEach(pid => currentQids.add(pid.toLowerCase()));
         
-        const parentPromises = [];
+        const parentPromises: PromiseLike<any>[] = [];
         for (let i = 0; i < missingPids.length; i += 500) {
           const chunk = missingPids.slice(i, i + 500);
           parentPromises.push(supabase.from("question_db").select("*").in("question_id", chunk));
         }
         const parentResults = await Promise.all(parentPromises);
-        parentResults.forEach(({ data }) => {
+        parentResults.forEach(({ data }: any) => {
           if (data && data.length > 0) fetchedQuestions.push(...data);
         });
       }
@@ -653,14 +653,14 @@ export function useTaxonomy() {
         if (qidsToSearch.length === 0) break;
         qidsToSearch.forEach(id => searchedParentIds.add(id.toLowerCase()));
         
-        const childPromises = [];
+        const childPromises: PromiseLike<any>[] = [];
         for (let i = 0; i < qidsToSearch.length; i += 500) {
           const chunk = qidsToSearch.slice(i, i + 500);
           childPromises.push(supabase.from("question_db").select("*").in("parent_question_id", chunk));
         }
         const childResults = await Promise.all(childPromises);
         let addedAny = false;
-        childResults.forEach(({ data }) => {
+        childResults.forEach(({ data }: any) => {
           (data || []).forEach((c: any) => {
             const k = String(c.question_id).trim().toLowerCase();
             if (!currentQids.has(k)) {
