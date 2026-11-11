@@ -11,6 +11,131 @@ import PublishModal from "@/components/exam/PublishModal";
 import GradingModal from "@/components/exam/GradingModal";
 import { compareSubQuestions, buildMergedQuestionGroups, getCleanUrl } from "@/app/exam/step2/examUtils";
 
+type MainTabType = 'ALL' | 'EXAM' | 'WEEKLY' | 'HOMEWORK' | 'OVERDUE' | 'INCORRECT' | 'SIMILAR';
+type ExamBucket = 'EXAM' | 'WEEKLY' | 'HOMEWORK' | 'OVERDUE' | 'INCORRECT' | 'SIMILAR' | 'OTHER';
+
+const VALID_MAIN_TABS: MainTabType[] = [
+  'ALL',
+  'WEEKLY',
+  'INCORRECT',
+  'OVERDUE',
+  'HOMEWORK',
+  'SIMILAR',
+  'EXAM',
+];
+
+function classifyExamItem(exam: any): {
+  bucket: ExamBucket;
+  badgeLabel: string;
+  badgeColorClass: string;
+  searchKeywords: string;
+} {
+  const rawType = String(exam?.exam_type || '').normalize('NFC').trim();
+  const typeStr = rawType || '평가';
+  const titleStr = String(exam?.title || '').normalize('NFC').trim();
+  const subTitleStr = String(exam?.sub_title || '').normalize('NFC').trim();
+  const tagsStr = String(exam?.exam_tags || '').normalize('NFC').trim();
+
+  // 1. 미완료과제 (클리닉실·회차 이관 등으로 생성된 미완료 과제/프린트 최우선 분리)
+  if (
+    typeStr === '미완료과제' ||
+    /^\[미완료\s*과제\]/.test(titleStr) ||
+    /미완료\s*프린트/.test(titleStr)
+  ) {
+    return {
+      bucket: 'OVERDUE',
+      badgeLabel: '미완료과제',
+      badgeColorClass: 'bg-rose-50 text-rose-600 border-rose-200',
+      searchKeywords: '미완료과제 미완료 프린트',
+    };
+  }
+
+  // 2. 쌍둥이/유사 프린트
+  if (['오답유사', '과제오답유사'].includes(typeStr)) {
+    return {
+      bucket: 'SIMILAR',
+      badgeLabel: typeStr,
+      badgeColorClass: 'bg-violet-50 text-violet-600 border-violet-200',
+      searchKeywords: `${typeStr} 쌍둥이 유사`,
+    };
+  }
+
+  // 3. 오답 복습 프린트 (주차 오답 프린트가 주간테스트 탭에 섞이지 않도록 선분류)
+  const isWeeklyWrongTitle =
+    /([0-9xX]+\s*주차|주차)/.test(titleStr) && /오답\s*(프린트)?/.test(titleStr);
+  if (['오답프린트', '오답'].includes(typeStr) || isWeeklyWrongTitle) {
+    const label = ['오답프린트', '오답'].includes(typeStr) ? typeStr : '오답프린트';
+    return {
+      bucket: 'INCORRECT',
+      badgeLabel: label,
+      badgeColorClass: 'bg-emerald-50 text-emerald-600 border-emerald-200',
+      searchKeywords: `${label} 오답 복습`,
+    };
+  }
+
+  // 4. 정규 시험: 입학테스트 · 진단평가 전용
+  const isDiagnosticByType =
+    typeStr === '입학테스트' ||
+    typeStr === '진단평가' ||
+    typeStr.includes('입학테스트') ||
+    typeStr.includes('진단평가');
+  const isDiagnosticByMeta =
+    !['과제', '과제프린트', '주간테스트'].includes(typeStr) &&
+    (titleStr.includes('입학테스트') ||
+      titleStr.includes('진단평가') ||
+      tagsStr.includes('입학테스트') ||
+      tagsStr.includes('진단평가'));
+
+  if (isDiagnosticByType || isDiagnosticByMeta) {
+    return {
+      bucket: 'EXAM',
+      badgeLabel: typeStr === '입학테스트' ? '진단평가' : (isDiagnosticByType ? typeStr : '진단평가'),
+      badgeColorClass: 'bg-blue-50 text-blue-700 border-blue-200',
+      searchKeywords: '진단평가 입학테스트 정규시험',
+    };
+  }
+
+  // 5. 주간테스트: '주간테스트' 유형속성 또는 'xx주차 평가' 제목 패턴 시험지
+  const isWeeklyTitle =
+    /[0-9xX]+\s*주차\s*평가/.test(titleStr) ||
+    /[0-9xX]+\s*주차\s*평가/.test(subTitleStr);
+  if (typeStr === '주간테스트' || isWeeklyTitle) {
+    return {
+      bucket: 'WEEKLY',
+      badgeLabel: '주간테스트',
+      badgeColorClass: 'bg-cyan-50 text-cyan-700 border-cyan-300',
+      searchKeywords: `${typeStr} 주간테스트 주차 평가`,
+    };
+  }
+
+  // 6. 문제지 과제
+  if (['과제', '과제프린트'].includes(typeStr)) {
+    return {
+      bucket: 'HOMEWORK',
+      badgeLabel: typeStr,
+      badgeColorClass: 'bg-amber-50 text-amber-700 border-amber-200',
+      searchKeywords: `${typeStr} 문제지 과제`,
+    };
+  }
+
+  // 7. 그 외 기타 평가 (분기평가, 중간평가, 단원평가, 선택없음 등)
+  if (['분기평가', '분기테스트'].includes(typeStr)) {
+    return {
+      bucket: 'OTHER',
+      badgeLabel: typeStr,
+      badgeColorClass: 'bg-fuchsia-50 text-fuchsia-700 border-fuchsia-200',
+      searchKeywords: typeStr,
+    };
+  }
+
+  return {
+    bucket: 'OTHER',
+    badgeLabel: typeStr,
+    badgeColorClass: 'bg-slate-100 text-slate-600 border-slate-300',
+    searchKeywords: typeStr,
+  };
+}
+
 export default function ExamListPage() {
   const router = useRouter();
 
@@ -23,11 +148,11 @@ export default function ExamListPage() {
   const EXAM_LIST_SCROLL_STORAGE_KEY = "logica_exam_list_scroll_top";
   const EXAM_LIST_GRADING_MODAL_STORAGE_KEY = "logica_exam_list_grading_modal";
 
-  const [mainTab, setMainTab] = useState<'ALL' | 'EXAM' | 'HOMEWORK' | 'INCORRECT' | 'SIMILAR'>(() => {
+  const [mainTab, setMainTab] = useState<MainTabType>(() => {
     if (typeof window !== "undefined") {
       try {
         const saved = JSON.parse(sessionStorage.getItem("logica_exam_list_filter_state") || "{}");
-        if (['ALL', 'EXAM', 'HOMEWORK', 'INCORRECT', 'SIMILAR'].includes(saved.mainTab)) return saved.mainTab;
+        if (VALID_MAIN_TABS.includes(saved.mainTab)) return saved.mainTab;
       } catch (e) {}
     }
     return 'ALL';
@@ -607,17 +732,11 @@ export default function ExamListPage() {
 
   const filteredExams = useMemo(() => {
     return exams.filter(exam => {
-      const typeStr = exam.exam_type || '평가';
-      
+      const classified = classifyExamItem(exam);
+
       let matchMainTab = true;
-      if (mainTab === 'EXAM') {
-        matchMainTab = !['과제', '과제프린트', '오답프린트', '오답', '오답유사', '과제오답유사'].includes(typeStr);
-      } else if (mainTab === 'HOMEWORK') {
-        matchMainTab = ['과제', '과제프린트'].includes(typeStr);
-      } else if (mainTab === 'INCORRECT') {
-        matchMainTab = ['오답프린트', '오답'].includes(typeStr);
-      } else if (mainTab === 'SIMILAR') {
-        matchMainTab = ['오답유사', '과제오답유사'].includes(typeStr);
+      if (mainTab !== 'ALL') {
+        matchMainTab = classified.bucket === mainTab;
       }
 
       const matchLevel = matchesLevelFilter(exam, filterLevel);
@@ -627,17 +746,16 @@ export default function ExamListPage() {
       const creatorName = instructor?.name || '시스템 선생님';
       const matchCreator = filterCreator === 'ALL' || creatorName === filterCreator;
 
-      const q = searchQuery.trim().toLowerCase();
+      const q = searchQuery.trim().normalize('NFC').toLowerCase();
       let matchSearch = true;
       if (q) {
-        const titleStr = String(exam.title || '').toLowerCase();
-        const subTitleStr = String(exam.sub_title || '').toLowerCase();
-        const scopeStartStr = String(exam.scope_start || '').toLowerCase();
-        const scopeEndStr = String(exam.scope_end || '').toLowerCase();
-        const gradeStr = String(exam.major_grade || '').toLowerCase();
-        const displayTypeForSearch = typeStr === '입학테스트' ? '진단평가 입학테스트' : typeStr;
-        const typeLower = String(displayTypeForSearch).toLowerCase();
-        const creatorLower = String(creatorName).toLowerCase();
+        const titleStr = String(exam.title || '').normalize('NFC').toLowerCase();
+        const subTitleStr = String(exam.sub_title || '').normalize('NFC').toLowerCase();
+        const scopeStartStr = String(exam.scope_start || '').normalize('NFC').toLowerCase();
+        const scopeEndStr = String(exam.scope_end || '').normalize('NFC').toLowerCase();
+        const gradeStr = String(exam.major_grade || '').normalize('NFC').toLowerCase();
+        const typeLower = classified.searchKeywords.toLowerCase();
+        const creatorLower = String(creatorName).normalize('NFC').toLowerCase();
         matchSearch =
           titleStr.includes(q) ||
           subTitleStr.includes(q) ||
@@ -684,7 +802,7 @@ export default function ExamListPage() {
 
     if (!confirm("⚠️ 이 문제지를 정말 삭제하시겠습니까?\n(삭제하면 복구할 수 없습니다.)")) return;
     
-    if (['오답프린트', '오답', '오답유사', '과제오답유사'].includes(examType)) {
+    if (['오답프린트', '오답', '오답유사', '과제오답유사', '미완료과제'].includes(examType)) {
       if (assignCount >= 2) {
         alert("🚨 2명 이상의 학생에게 배부된 개인 맞춤 프린트는 직접 삭제할 수 없습니다!\n(다른 학생의 채점 기록이 함께 증발하는 것을 방지합니다.)\n\n해당 학생의 타임라인에서 개별적으로 배부 취소(삭제)를 진행해 주세요.");
         return;
@@ -768,43 +886,58 @@ export default function ExamListPage() {
       <div className="flex justify-between items-end shrink-0">
         <div>
           <h2 className="text-xl font-bold text-slate-800">📝 문제지 보관함</h2>
-          <p className="text-sm font-bold text-slate-400 mt-1">출제된 모든 시험지, 과제, 맞춤형 오답/유사 프린트를 분류별로 조회하고 관리합니다.</p>
+          <p className="text-sm font-bold text-slate-400 mt-1">주간테스트, 오답프린트, 미완료과제, 문제지 과제, 쌍둥이/유사, 정규 시험(진단평가)을 분류별로 조회하고 관리합니다.</p>
         </div>
       </div>
 
-      <div className="bg-white px-4 py-3 rounded-xl border border-slate-200 shadow-sm flex items-center justify-between shrink-0 flex-wrap gap-4">
+      <div className="bg-white px-4 py-3 rounded-xl border border-slate-200 shadow-sm flex items-center justify-between shrink-0 flex-wrap gap-3">
         
-        <div className="flex items-center gap-1.5 bg-slate-100 p-1.5 rounded-xl shadow-inner">
+        <div className="flex items-center gap-1 bg-slate-100 p-1.5 rounded-xl shadow-inner flex-wrap">
           <button 
             onClick={() => { setMainTab('ALL'); setCurrentPage(1); }} 
-            className={`px-5 py-2 rounded-lg font-bold text-[13px] transition-all whitespace-nowrap ${mainTab === 'ALL' ? 'bg-white text-slate-800 shadow-md' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-200'}`}
+            className={`px-3.5 py-2 rounded-lg font-bold text-[13px] transition-all whitespace-nowrap ${mainTab === 'ALL' ? 'bg-white text-slate-800 shadow-md' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-200'}`}
           >
-            전체 보기
+            전체보기
           </button>
-          <div className="w-px h-5 bg-slate-300 mx-0.5"></div>
+          <div className="w-px h-5 bg-slate-300 mx-0.5 hidden sm:block"></div>
           <button 
-            onClick={() => { setMainTab('EXAM'); setCurrentPage(1); }} 
-            className={`px-5 py-2 rounded-lg font-bold text-[13px] transition-all whitespace-nowrap ${mainTab === 'EXAM' ? 'bg-blue-500 text-white shadow-md' : 'text-slate-500 hover:text-blue-600 hover:bg-blue-50'}`}
+            onClick={() => { setMainTab('WEEKLY'); setCurrentPage(1); }} 
+            className={`px-3.5 py-2 rounded-lg font-bold text-[13px] transition-all whitespace-nowrap ${mainTab === 'WEEKLY' ? 'bg-cyan-600 text-white shadow-md' : 'text-slate-500 hover:text-cyan-700 hover:bg-cyan-50'}`}
+            title="주간테스트 유형 및 xx주차 평가 시험지"
           >
-            💯 정규 시험
-          </button>
-          <button 
-            onClick={() => { setMainTab('HOMEWORK'); setCurrentPage(1); }} 
-            className={`px-5 py-2 rounded-lg font-bold text-[13px] transition-all whitespace-nowrap ${mainTab === 'HOMEWORK' ? 'bg-amber-500 text-white shadow-md' : 'text-slate-500 hover:text-amber-600 hover:bg-amber-50'}`}
-          >
-            📝 문제지 과제
+            📅 주간테스트
           </button>
           <button 
             onClick={() => { setMainTab('INCORRECT'); setCurrentPage(1); }} 
-            className={`px-5 py-2 rounded-lg font-bold text-[13px] transition-all whitespace-nowrap ${mainTab === 'INCORRECT' ? 'bg-emerald-500 text-white shadow-md' : 'text-slate-500 hover:text-emerald-600 hover:bg-emerald-50'}`}
+            className={`px-3.5 py-2 rounded-lg font-bold text-[13px] transition-all whitespace-nowrap ${mainTab === 'INCORRECT' ? 'bg-emerald-500 text-white shadow-md' : 'text-slate-500 hover:text-emerald-600 hover:bg-emerald-50'}`}
           >
-            ❌ 오답 복습
+            ❌ 오답프린트
+          </button>
+          <button 
+            onClick={() => { setMainTab('OVERDUE'); setCurrentPage(1); }} 
+            className={`px-3.5 py-2 rounded-lg font-bold text-[13px] transition-all whitespace-nowrap ${mainTab === 'OVERDUE' ? 'bg-rose-500 text-white shadow-md' : 'text-slate-500 hover:text-rose-600 hover:bg-rose-50'}`}
+            title="클리닉실 및 회차 이관 미완료 과제 프린트"
+          >
+            ⏰ 미완료과제
+          </button>
+          <button 
+            onClick={() => { setMainTab('HOMEWORK'); setCurrentPage(1); }} 
+            className={`px-3.5 py-2 rounded-lg font-bold text-[13px] transition-all whitespace-nowrap ${mainTab === 'HOMEWORK' ? 'bg-amber-500 text-white shadow-md' : 'text-slate-500 hover:text-amber-600 hover:bg-amber-50'}`}
+          >
+            📝 문제지과제
           </button>
           <button 
             onClick={() => { setMainTab('SIMILAR'); setCurrentPage(1); }} 
-            className={`px-5 py-2 rounded-lg font-bold text-[13px] transition-all whitespace-nowrap ${mainTab === 'SIMILAR' ? 'bg-violet-500 text-white shadow-md' : 'text-slate-500 hover:text-violet-600 hover:bg-violet-50'}`}
+            className={`px-3.5 py-2 rounded-lg font-bold text-[13px] transition-all whitespace-nowrap ${mainTab === 'SIMILAR' ? 'bg-violet-500 text-white shadow-md' : 'text-slate-500 hover:text-violet-600 hover:bg-violet-50'}`}
           >
             🔄 쌍둥이/유사
+          </button>
+          <button 
+            onClick={() => { setMainTab('EXAM'); setCurrentPage(1); }} 
+            className={`px-3.5 py-2 rounded-lg font-bold text-[13px] transition-all whitespace-nowrap ${mainTab === 'EXAM' ? 'bg-blue-600 text-white shadow-md' : 'text-slate-500 hover:text-blue-600 hover:bg-blue-50'}`}
+            title="입학테스트 · 진단평가 전용"
+          >
+            💯 정규 시험
           </button>
         </div>
 
@@ -915,19 +1048,9 @@ export default function ExamListPage() {
                   const createdTime = new Date(exam.created_at).getTime();
                   const isNew = !isNaN(createdTime) && ((Date.now() - createdTime) / (1000 * 3600 * 24)) <= 2;
 
-                  let typeColorClass = "bg-slate-100 text-slate-600 border-slate-200";
-                  const typeStr = exam.exam_type || '평가';
-                  const displayTypeStr = typeStr === '입학테스트' ? '진단평가' : typeStr;
-                  
-                  if (!['과제', '과제프린트', '오답프린트', '오답', '오답유사', '과제오답유사'].includes(typeStr)) {
-                    typeColorClass = "bg-blue-50 text-blue-600 border-blue-200";
-                  } else if (['과제', '과제프린트'].includes(typeStr)) {
-                    typeColorClass = "bg-amber-50 text-amber-600 border-amber-200";
-                  } else if (['오답프린트', '오답'].includes(typeStr)) {
-                    typeColorClass = "bg-emerald-50 text-emerald-600 border-emerald-200";
-                  } else if (['오답유사', '과제오답유사'].includes(typeStr)) {
-                    typeColorClass = "bg-violet-50 text-violet-600 border-violet-200";
-                  }
+                  const classified = classifyExamItem(exam);
+                  const typeColorClass = classified.badgeColorClass;
+                  const displayTypeStr = classified.badgeLabel;
 
                   return (
                     <tr key={exam.exam_id} className="hover:bg-slate-50 transition-colors border-b border-slate-100">
@@ -1018,7 +1141,7 @@ export default function ExamListPage() {
                           </button>
                           
                           {canDeleteExam && (
-                            <button onClick={() => deleteExam(exam.exam_id, exam.exam_type, assignCount)} className="w-[42px] h-[27px] flex items-center justify-center shrink-0 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded text-[11px] font-bold shadow-sm transition-colors border border-rose-200">
+                            <button onClick={() => deleteExam(exam.exam_id, classified.bucket === 'OVERDUE' ? '미완료과제' : exam.exam_type, assignCount)} className="w-[42px] h-[27px] flex items-center justify-center shrink-0 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded text-[11px] font-bold shadow-sm transition-colors border border-rose-200">
                               삭제
                             </button>
                           )}

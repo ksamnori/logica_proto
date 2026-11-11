@@ -105,8 +105,8 @@ export default function BookUploadPage() {
     setFileName(file.name);
     setUploadLogs([]);
     
-    let cleanName = file.name.replace(/\.json$/i, '');
-    cleanName = cleanName.split('_Problems')[0]; 
+    let cleanName = file.name.normalize("NFC").replace(/\.json$/i, '');
+    cleanName = cleanName.split('_Problems')[0].normalize("NFC").trim(); 
     
     setBookTitle(cleanName);
 
@@ -172,7 +172,13 @@ export default function BookUploadPage() {
 
   const processUpload = async () => {
     if (!fileData || fileData.length === 0) return alert("업로드할 데이터가 없습니다.");
-    if (!bookTitle.trim()) return alert("교재 이름을 입력해주세요.");
+    const normalizedBookTitle = bookTitle.normalize("NFC").trim();
+    if (!normalizedBookTitle) return alert("교재 이름을 입력해주세요.");
+    const normStr = (v: any): string | null => {
+      if (v === null || v === undefined) return null;
+      const s = String(v).normalize("NFC").trim();
+      return s ? s : null;
+    };
 
     setIsUploading(true);
     setUploadProgress(0);
@@ -265,7 +271,7 @@ export default function BookUploadPage() {
         const masterDbData = newMasterToUpsert.map((q) => ({
           question_id: q.question_id,
           item_id: q.item_id || null,
-          pdf_source: q.pdf_source || null,
+          pdf_source: normStr(q.pdf_source),
           detected_page_num: typeof q.detected_page_num === 'number' ? q.detected_page_num : null,
           final_printed_page: q.final_printed_page ? String(q.final_printed_page) : null,
           question_number: q.question_number ? String(q.question_number) : null,
@@ -295,7 +301,8 @@ export default function BookUploadPage() {
           is_human_verified: q.human_verified === true || q.is_human_verified === true,
           thk_taxonomy_id: q.thk_taxonomy_id || null,
           thk_taxonomy_name: q.thk_taxonomy_name || null,
-          source_book_name: q.source_book_name || q.book_name || bookTitle,
+          book_name: normStr(q.book_name) || normalizedBookTitle,
+          source_book_name: normStr(q.source_book_name) || normStr(q.book_name) || normalizedBookTitle,
           updated_at: new Date().toISOString()
         }));
 
@@ -312,7 +319,7 @@ export default function BookUploadPage() {
       addLog(`🚀 [Step 2] 교재 골격(textbook) 확인 중...`);
       let currentBookId: string; 
       
-      const { data: existingBook, error: checkErr } = await supabase.from('textbook').select('book_id').eq('title', bookTitle).eq('book_type', bookType).maybeSingle();
+      const { data: existingBook, error: checkErr } = await supabase.from('textbook').select('book_id').eq('title', normalizedBookTitle).eq('book_type', bookType).maybeSingle();
       if (checkErr) throw new Error("교재 중복 확인 오류");
 
       const existingTqMap: Record<string, number> = {};
@@ -332,7 +339,7 @@ export default function BookUploadPage() {
         addLog(`✅ 기존 교재 감지됨. 기존 문항 ${Object.keys(existingTqMap).length}개 로드 완료.`);
       } else {
         const { data: newBook, error: insertBookErr } = await supabase.from('textbook').insert({
-            title: bookTitle, 
+            title: normalizedBookTitle, 
             book_type: bookType, 
             target_sessions: targetSessions, 
             tenant_id: null 
@@ -456,6 +463,13 @@ export default function BookUploadPage() {
           setUploadProgress(50 + Math.round((processedCount / totalCount) * 50));
         }
       }
+
+      try {
+        const prevPending = JSON.parse(sessionStorage.getItem("logica_pending_new_workbooks") || "[]");
+        const nextPending = Array.from(new Set([...(Array.isArray(prevPending) ? prevPending : []), normalizedBookTitle]));
+        sessionStorage.setItem("logica_pending_new_workbooks", JSON.stringify(nextPending));
+        sessionStorage.removeItem("logica_factory_stats_cache_v1");
+      } catch {}
 
       addLog(`🎉 모든 업로드 과정이 완벽하게 종료되었습니다!`);
       alert(`✅ 성공적으로 공용 교재 처리가 완료되었습니다!\n교재명: ${bookTitle}\n새로 추가됨: ${toInsert.length}개\n기존 업데이트됨: ${toUpdate.length}개${onlyUpdateTaxonomyForExisting && toUpdate.length > 0 ? ' (분류/난이도 항목만 부분 업데이트)' : ''}`);

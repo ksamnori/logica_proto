@@ -66,8 +66,8 @@ export default function QuestionDBUploadPage() {
     setFileName(file.name);
     setUploadLogs([]);
 
-    let cleanName = file.name.replace(/\.json$/i, ''); 
-    cleanName = cleanName.split('_Problems')[0]; 
+    let cleanName = file.name.normalize("NFC").replace(/\.json$/i, ''); 
+    cleanName = cleanName.split('_Problems')[0].normalize("NFC").trim(); 
     setBookTitle(cleanName); 
 
     const reader = new FileReader();
@@ -134,7 +134,12 @@ export default function QuestionDBUploadPage() {
   const processUpload = async () => {
     if (!fileData || fileData.length === 0) return alert("업로드할 JSON 데이터가 없습니다.");
     
-    const finalBookName = bookTitle.trim();
+    const normalizeNfc = (v: any): string | null => {
+      if (v === null || v === undefined) return null;
+      const s = String(v).normalize("NFC").trim();
+      return s ? s : null;
+    };
+    const finalBookName = bookTitle.normalize("NFC").trim();
     if (!finalBookName) return alert("교재 이름을 입력해주세요.");
 
     setIsUploading(true);
@@ -379,7 +384,7 @@ export default function QuestionDBUploadPage() {
           question_id: q.question_id,
           item_id: q.item_id || null,
           parent_question_id: q.parent_question_id || null,
-          pdf_source: q.pdf_source || null,
+          pdf_source: normalizeNfc(q.pdf_source),
           detected_page_num: safeInteger(q.detected_page_num),
           final_printed_page: clampVarchar(q.final_printed_page, 20, null),
           question_number: clampVarchar(q.question_number, 20, null),
@@ -431,8 +436,8 @@ export default function QuestionDBUploadPage() {
           answer_image_2_url: q.answer_image_2_url || null,
           ai_gradable: safeBoolean(q.ai_gradable, true),
           
-          book_name: finalBookName || q.book_name || null,
-          source_book_name: finalBookName || q.source_book_name || q.book_name || null,
+          book_name: finalBookName || normalizeNfc(q.book_name),
+          source_book_name: finalBookName || normalizeNfc(q.source_book_name) || normalizeNfc(q.book_name),
           
           updated_at: new Date().toISOString()
         };
@@ -470,6 +475,13 @@ export default function QuestionDBUploadPage() {
         setUploadProgress(Math.round((processedCount / questionsToUpsert.length) * 100));
         addLog(`⏳ DB ${processedCount} / ${questionsToUpsert.length} 문항 안전하게 Upsert 처리 완료...`);
       }
+
+      try {
+        const prevPending = JSON.parse(sessionStorage.getItem("logica_pending_new_workbooks") || "[]");
+        const nextPending = Array.from(new Set([...(Array.isArray(prevPending) ? prevPending : []), finalBookName]));
+        sessionStorage.setItem("logica_pending_new_workbooks", JSON.stringify(nextPending));
+        sessionStorage.removeItem("logica_factory_stats_cache_v1");
+      } catch {}
 
       const totalProcessed = (onlyUpdateTaxonomyForExisting ? existingItemsToPatch.length : 0) + processedCount;
       addLog(`🎉 모든 동기화 작업 최종 완료!`);

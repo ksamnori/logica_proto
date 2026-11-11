@@ -318,20 +318,22 @@ export function useTaxonomy() {
       const [catData, itemData] = await Promise.all([
         fetchAllRows(
           'master_category',
-          'category_id, depth1, depth2, depth3, depth4, depth5, depth6, depth7'
+          'category_id, curriculum_version, depth1, depth2, depth3, depth4, depth5, depth6, depth7, full_path'
         ),
         fetchAllRows(
           'master_item',
-          'item_id, category_id, depth6, depth7, depth8'
+          'item_id, category_id, depth6, depth8, type'
         ),
       ]);
       const safeCats = catData || [];
       const safeItems = itemData || [];
-      cachedMasterTaxonomy = {
-        categories: safeCats,
-        items: safeItems,
-        updatedAt: Date.now(),
-      };
+      if (safeCats.length > 0 && safeItems.length > 0) {
+        cachedMasterTaxonomy = {
+          categories: safeCats,
+          items: safeItems,
+          updatedAt: Date.now(),
+        };
+      }
       setCategories(safeCats);
       setItems(safeItems);
     } catch (e) {
@@ -362,6 +364,31 @@ export function useTaxonomy() {
 
   const loadWorkbooks = async (forceRefresh: boolean = false) => {
     try {
+      // 업로드 페이지(/qdb-upload, /book-upload)에서 방금 추가된 교재명이 있으면 캐시에 즉시 병합
+      let pendingUploadedBooks: string[] = [];
+      try {
+        const pendingRaw = sessionStorage.getItem("logica_pending_new_workbooks");
+        if (pendingRaw) {
+          const parsedPending = JSON.parse(pendingRaw);
+          if (Array.isArray(parsedPending)) {
+            pendingUploadedBooks = parsedPending
+              .map((b: any) => String(b || "").normalize("NFC").trim())
+              .filter((b: string) => b && !isExcludedDiagnosticBookName(b));
+          }
+          sessionStorage.removeItem("logica_pending_new_workbooks");
+        }
+      } catch {}
+
+      if (pendingUploadedBooks.length > 0 && cachedWorkbooksMemory) {
+        const mergedImmediate = Array.from(new Set([...cachedWorkbooksMemory.list, ...pendingUploadedBooks]))
+          .filter((b) => b && !isExcludedDiagnosticBookName(b))
+          .sort(taxSort);
+        cachedWorkbooksMemory = { list: mergedImmediate, updatedAt: cachedWorkbooksMemory.updatedAt };
+        try {
+          sessionStorage.setItem(WORKBOOKS_CACHE_KEY, JSON.stringify(cachedWorkbooksMemory));
+        } catch {}
+      }
+
       // 🌟 0단계: 유효 캐시(15분)가 있으면 수만 건의 question_db 풀스캔을 생략해 즉시 오픈 & 네트워크 대역폭 보존!
       if (!forceRefresh) {
         if (cachedWorkbooksMemory && Date.now() - cachedWorkbooksMemory.updatedAt < WORKBOOKS_TTL_MS) {
@@ -374,7 +401,8 @@ export function useTaxonomy() {
           if (cachedRaw) {
             const parsed = JSON.parse(cachedRaw);
             if (parsed?.list && Array.isArray(parsed.list) && parsed.list.length > 0) {
-              const filtered = parsed.list.filter((b: string) => b && !isExcludedDiagnosticBookName(b));
+              const combined = pendingUploadedBooks.length > 0 ? Array.from(new Set([...parsed.list, ...pendingUploadedBooks])).sort(taxSort) : parsed.list;
+              const filtered = combined.filter((b: string) => b && !isExcludedDiagnosticBookName(b));
               cachedWorkbooksMemory = { list: filtered, updatedAt: parsed.updatedAt || Date.now() };
               setWorkbooks(filtered);
               if (parsed.updatedAt && Date.now() - parsed.updatedAt < WORKBOOKS_TTL_MS) {
