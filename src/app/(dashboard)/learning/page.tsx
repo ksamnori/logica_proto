@@ -7,6 +7,8 @@ import { ViewState } from "./types";
 import { useLearningFetch, LEVEL_ORDER } from "./hooks/useLearningFetch";
 import { useLearningActions } from "./hooks/useLearningActions";
 import { createClinicExamBundleAction, updateExamMasterFieldsAction } from "@/app/actions/clinicActions";
+import { renameHomeworkAssignmentAction } from "@/app/actions/auth";
+import { isConfidentialExamText, isConfidentialIncorrectRecord, isConfidentialQuestionObj } from "@/lib/confidentialExamGuard";
 import {
   fetchMainTextbookExclusionSet,
   isMainTextbookQuestion,
@@ -296,12 +298,12 @@ export default function LearningPage() {
   const openRawIncManageModal = async (studentId: string, studentName: string, month: string) => {
     setIsLoading(true);
     const { data } = await supabase.from('student_incorrect_record')
-      .select('record_id, source_type, created_at, question_id, tq_id')
+      .select('record_id, source_type, created_at, question_id, tq_id, question_db(source_book_name, book_name, pdf_source)')
       .eq('student_id', studentId)
       .is('resolved_at', null);
 
     const records = (data || [])
-      .filter(d => d.created_at && d.created_at.startsWith(month))
+      .filter(d => !isConfidentialIncorrectRecord(d) && d.created_at && d.created_at.startsWith(month))
       .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
 
     setRawIncManageModal({ isOpen: true, studentId, studentName, month, records });
@@ -366,7 +368,7 @@ export default function LearningPage() {
     if (studentsInClass.length === 0) return alert('선택하신 반에 등록된 학생이 없습니다.');
 
     const allowedSourceTypes = [];
-    if (bulkFilters.exam) allowedSourceTypes.push('주간테스트', '중간평가', '중간테스트', '입학테스트', '진단평가', '분기평가', '분기테스트', '시험지');
+    if (bulkFilters.exam) allowedSourceTypes.push('주간테스트', '중간평가', '중간테스트', '분기평가', '분기테스트', '시험지');
     if (bulkFilters.homework) allowedSourceTypes.push('과제', '과제프린트', '교재과제');
     if (bulkFilters.overdue) allowedSourceTypes.push('미완료과제');
     if (bulkFilters.print) allowedSourceTypes.push('오답프린트', '오답');
@@ -387,77 +389,113 @@ export default function LearningPage() {
     const instId = localStorage.getItem('logica_instructor_id') || 'system';
     const exclusion = (bulkExcludeMain || bulkExcludeWorkbook) ? await fetchMainTextbookExclusionSet(supabase) : null;
 
+    // 🌟 [N+1 일괄 프리페치 최적화] 반 전체 학생의 시험/과제 오답 데이터를 루프 진입 전 단 1회 병렬 조회
+    const classStudentIds = studentsInClass.map(s => s.id);
+    const prefetchedQidsByStudent = new Map<string, Set<string>>();
+    classStudentIds.forEach(id => prefetchedQidsByStudent.set(id, new Set<string>()));
+
+    const [allExamsRes, allHwRes] = await Promise.all([
+      supabase
+        .from('exam_assignment')
+        .select('assignment_id, student_id, created_at, exam_master(exam_type)')
+        .in('student_id', classStudentIds),
+      bulkFilters.homework
+        ? supabase
+            .from('student_homework_result')
+            .select('homework_id, student_id, homework_assignment(created_at)')
+            .in('student_id', classStudentIds)
+        : Promise.resolve({ data: [] as any[], error: null })
+    ]);
+
+    const assignToStudent = new Map<number, string>();
+    const validAssignIdsAll: number[] = [];
+    (allExamsRes.data || []).forEach((ex: any) => {
+      if (!ex?.created_at) return;
+      const kst = new Date(new Date(ex.created_at).getTime() + 9 * 60 * 60 * 1000).toISOString().split('T')[0];
+      if (kst < bulkStartDate || kst > bulkEndDate) return;
+      const m = ex.exam_master;
+      const t = (m ? (Array.isArray(m) ? m[0]?.exam_type : m.exam_type) : '') || '';
+      if (isConfidentialExamText(t)) return;
+      const matched =
+        (bulkFilters.print && ['오답프린트', '오답'].includes(t)) ||
+        (bulkFilters.similar && ['오답유사', '과제오답유사'].includes(t)) ||
+        (bulkFilters.homework && ['과제', '과제프린트'].includes(t)) ||
+        (bulkFilters.overdue && t === '미완료과제') ||
+        (bulkFilters.exam && !['과제', '과제프린트', '미완료과제', '오답프린트', '오답', '오답유사', '과제오답유사'].includes(t));
+      if (matched && ex.assignment_id) {
+        validAssignIdsAll.push(ex.assignment_id);
+        assignToStudent.set(Number(ex.assignment_id), String(ex.student_id));
+      }
+    });
+
+    if (validAssignIdsAll.length > 0) {
+      for (let c = 0; c < validAssignIdsAll.length; c += 300) {
+        const chunk = validAssignIdsAll.slice(c, c + 300);
+        const { data: ansRows } = await supabase
+          .from('student_answer')
+          .select('exam_assignment_id, question_id')
+          .in('exam_assignment_id', chunk)
+          .in('grading_code', ['X', 'TX', '☆', 'B']);
+        (ansRows || []).forEach((a: any) => {
+          const sId = assignToStudent.get(Number(a.exam_assignment_id));
+          if (sId && a.question_id) prefetchedQidsByStudent.get(sId)?.add(String(a.question_id));
+        });
+      }
+    }
+
+    if (bulkFilters.homework && allHwRes.data && allHwRes.data.length > 0) {
+      const validStudentHwPairs = new Set<string>();
+      const validHwIdsSet = new Set<number>();
+      (allHwRes.data as any[]).forEach(r => {
+        const hwObj = r.homework_assignment;
+        const hw = hwObj ? (Array.isArray(hwObj) ? hwObj[0] : hwObj) : null;
+        if (!hw?.created_at) return;
+        const kst = new Date(new Date(hw.created_at).getTime() + 9 * 60 * 60 * 1000).toISOString().split('T')[0];
+        if (kst >= bulkStartDate && kst <= bulkEndDate) {
+          validHwIdsSet.add(Number(r.homework_id));
+          validStudentHwPairs.add(`${r.student_id}_${r.homework_id}`);
+        }
+      });
+
+      const validHwIdsArr = Array.from(validHwIdsSet);
+      if (validHwIdsArr.length > 0) {
+        const hwAnsAll: any[] = [];
+        for (let c = 0; c < validHwIdsArr.length; c += 300) {
+          const chunk = validHwIdsArr.slice(c, c + 300);
+          const { data: hwAns } = await supabase
+            .from('student_homework_answer')
+            .select('student_id, homework_id, tq_id')
+            .in('student_id', classStudentIds)
+            .in('homework_id', chunk)
+            .in('grading_code', ['X', 'TX', '☆', 'B']);
+          if (hwAns) hwAnsAll.push(...hwAns);
+        }
+
+        const filteredHwAns = hwAnsAll.filter(a => a.tq_id && validStudentHwPairs.has(`${a.student_id}_${a.homework_id}`));
+        const uniqueTqIds = Array.from(new Set(filteredHwAns.map(a => Number(a.tq_id)).filter(n => !isNaN(n) && n > 0)));
+        if (uniqueTqIds.length > 0) {
+          const tqToQid = new Map<number, string>();
+          for (let c = 0; c < uniqueTqIds.length; c += 500) {
+            const chunk = uniqueTqIds.slice(c, c + 500);
+            const { data: tqs } = await supabase.from('textbook_question').select('tq_id, question_id').in('tq_id', chunk);
+            (tqs || []).forEach((t: any) => {
+              if (t.tq_id && t.question_id) tqToQid.set(Number(t.tq_id), String(t.question_id));
+            });
+          }
+          filteredHwAns.forEach(a => {
+            const qid = tqToQid.get(Number(a.tq_id));
+            if (qid) prefetchedQidsByStudent.get(String(a.student_id))?.add(qid);
+          });
+        }
+      }
+    }
+
     for (let i = 0; i < studentsInClass.length; i++) {
       const st = studentsInClass[i];
       setBulkStatus({ isRunning: true, current: i + 1, total: studentsInClass.length, studentName: st.name });
 
       try {
-        const targetQids = new Set<string>();
-
-        const { data: exams, error: exErr } = await supabase.from('exam_assignment')
-          .select('assignment_id, created_at, exam_master(exam_type)')
-          .eq('student_id', st.id);
-
-        if (!exErr && exams) {
-          const validAssignIds = (exams as any[]).filter(ex => {
-            const kst = new Date(new Date(ex.created_at).getTime() + 9 * 60 * 60 * 1000).toISOString().split('T')[0];
-            if (kst < bulkStartDate || kst > bulkEndDate) return false;
-            
-            const m = ex.exam_master;
-            const type = m ? (Array.isArray(m) ? m[0]?.exam_type : m.exam_type) : '';
-            const t = type || '';
-            
-            if (bulkFilters.print && ['오답프린트', '오답'].includes(t)) return true;
-            if (bulkFilters.similar && ['오답유사', '과제오답유사'].includes(t)) return true;
-            if (bulkFilters.homework && ['과제', '과제프린트'].includes(t)) return true;
-            if (bulkFilters.overdue && t === '미완료과제') return true;
-            if (bulkFilters.exam && !['과제', '과제프린트', '미완료과제', '오답프린트', '오답', '오답유사', '과제오답유사'].includes(t)) return true;
-            
-            return false;
-          }).map(ex => ex.assignment_id);
-
-          if (validAssignIds.length > 0) {
-            const { data: ans } = await supabase.from('student_answer')
-              .select('question_id')
-              .in('exam_assignment_id', validAssignIds)
-              .in('grading_code', ['X', 'TX', '☆', 'B']);
-              
-            ans?.forEach(a => { if (a.question_id) targetQids.add(a.question_id); });
-          }
-        }
-
-        if (bulkFilters.homework) {
-          const { data: hwRes, error: hwErr } = await supabase.from('student_homework_result')
-            .select('homework_id, homework_assignment(created_at)')
-            .eq('student_id', st.id);
-            
-          if (!hwErr && hwRes) {
-            const validHwIds = (hwRes as any[]).filter(r => {
-              const hwObj = r.homework_assignment;
-              const hw = hwObj ? (Array.isArray(hwObj) ? hwObj[0] : hwObj) : null;
-              if (!hw || !hw.created_at) return false;
-              
-              const kst = new Date(new Date(hw.created_at).getTime() + 9 * 60 * 60 * 1000).toISOString().split('T')[0];
-              return kst >= bulkStartDate && kst <= bulkEndDate;
-            }).map(r => r.homework_id);
-
-            if (validHwIds.length > 0) {
-              const { data: hwAns } = await supabase.from('student_homework_answer')
-                .select('tq_id')
-                .eq('student_id', st.id)
-                .in('homework_id', validHwIds)
-                .in('grading_code', ['X', 'TX', '☆', 'B']);
-                
-              if (hwAns && hwAns.length > 0) {
-                const tqIds = hwAns.map((a: any) => a.tq_id).filter(Boolean);
-                if (tqIds.length > 0) {
-                  const { data: tqs } = await supabase.from('textbook_question').select('question_id').in('tq_id', tqIds);
-                  tqs?.forEach((t: any) => { if(t.question_id) targetQids.add(t.question_id); });
-                }
-              }
-            }
-          }
-        }
+        const targetQids = prefetchedQidsByStudent.get(st.id) || new Set<string>();
 
         const uniqueQids = Array.from(targetQids);
         
@@ -522,6 +560,7 @@ export default function LearningPage() {
             if (!qid) continue;
             const realQid = qid.replace(/_added_\d+$/, '');
             const q = qMap.get(qid) || qMap.get(realQid) || { question_id: realQid };
+            if (isConfidentialQuestionObj(q)) continue;
             if (bulkExcludeMain && isMainTextbookQuestion(q, exclusion)) continue;
             if (bulkExcludeWorkbook && isWorkbookQuestion(q, exclusion)) continue;
             if (bulkLimitActive && bulkLimit > 0) {
@@ -589,10 +628,12 @@ export default function LearningPage() {
       const isHwType = type === 'hw' || (type.includes('hw') && type !== 'hw_exam');
 
       if (isHwType) {
-        const { error } = await supabase.from('homework_assignment')
-          .update({ homework_title: newTitle.trim() })
-          .eq('homework_id', realId);
-        if (error) throw error;
+        const renRes = await renameHomeworkAssignmentAction({
+          homeworkId: realId,
+          newTitle: newTitle.trim(),
+          clientTenantId: localStorage.getItem("logica_tenant_id") || undefined,
+        });
+        if (!renRes.success) throw new Error(renRes.message || "과제 이름 변경 실패");
       } else if (isExamType) {
         if (!masterId) throw new Error("마스터 ID를 찾을 수 없습니다.");
         const updRes = await updateExamMasterFieldsAction(masterId, { title: newTitle.trim() });

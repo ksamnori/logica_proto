@@ -10,6 +10,7 @@ import { useToggleCooldown, TOGGLE_COOLDOWN_MS } from '@/hooks/useToggleCooldown
 import { getPointBalance } from '@/app/actions/shopPoints';
 import { getActiveSeatLayout } from '@/app/actions/clinicSeatLayout';
 import { processIncompleteHomeworks, generateIncorrectClinic, healStudentIncorrectRecordsAction } from '@/app/actions/clinicActions';
+import { isConfidentialExamText, isConfidentialIncorrectRecord } from '@/lib/confidentialExamGuard';
 
 const ENDED_ENROLLMENT_STATUSES = ["수강종료", "종료", "퇴원", "취소"];
 const isEndedEnrollment = (e: any): boolean => {
@@ -462,7 +463,10 @@ export default function StudentPortal() {
             if (cancelled) return;
             timer = setTimeout(async () => {
                 if (cancelled) return;
-                if (isSyncingSessionRef.current) { scheduleNext(); return; }
+                if (isSyncingSessionRef.current || (typeof document !== 'undefined' && document.visibilityState !== 'visible')) {
+                    scheduleNext();
+                    return;
+                }
                 isSyncingSessionRef.current = true;
                 try {
                     await runDbSyncRef.current();
@@ -474,7 +478,7 @@ export default function StudentPortal() {
                     isSyncingSessionRef.current = false;
                     scheduleNext();
                 }
-            }, 5000);
+            }, 8000);
         };
         scheduleNext();
 
@@ -572,11 +576,12 @@ export default function StudentPortal() {
         const nameToId: any = {};
         cData?.forEach((c: any) => { nameToId[c.name] = c.class_id; });
 
-        const { data: incData } = await supabaseClient.from('student_incorrect_record')
-            .select('record_id, question_id, tq_id, status')
+        const { data: rawIncData } = await supabaseClient.from('student_incorrect_record')
+            .select('record_id, question_id, tq_id, status, source_type, question_db(source_book_name, book_name, pdf_source)')
             .eq('student_id', sid)
             .in('status', ['X', 'TX', 'TO', 'B'])
             .is('resolved_at', null);
+        const incData = (rawIncData || []).filter((r: any) => !isConfidentialIncorrectRecord(r));
 
         const rawTqIds = (incData || []).map((r: any) => r.tq_id).filter(Boolean);
         const tqToQidMap = new Map();
@@ -655,6 +660,20 @@ export default function StudentPortal() {
                 .select('question_id')
                 .in('exam_assignment_id', fixingExamIds);
             fixingAnswers?.forEach((a: any) => fixingQids.add(a.question_id));
+        }
+
+        // 진단평가·입학테스트 배정 시험지에 속한 문항도 추가 방어
+        const confidentialExamIds = (examsData || [])
+            .filter((ex: any) => {
+                const m = Array.isArray(ex.exam_master) ? ex.exam_master[0] : ex.exam_master;
+                return isConfidentialExamText(m?.exam_type) || isConfidentialExamText(m?.title);
+            })
+            .map((ex: any) => ex.assignment_id);
+        if (confidentialExamIds.length > 0 && uniqueIncIds.length > 0) {
+            const { data: confAns } = await supabaseClient.from('student_answer')
+                .select('question_id')
+                .in('exam_assignment_id', confidentialExamIds);
+            confAns?.forEach((a: any) => { if (a.question_id) fixingQids.add(a.question_id); });
         }
 
         uniqueIncIds = uniqueIncIds.filter(id => !fixingQids.has(id));
@@ -950,11 +969,12 @@ export default function StudentPortal() {
                 const targetClassId = classData?.class_id || null;
                 const targetInstructorId = classData?.instructor_id || null;
 
-                const { data: incData } = await supabaseClient.from('student_incorrect_record')
-                    .select('question_id, tq_id, status')
+                const { data: rawIncData } = await supabaseClient.from('student_incorrect_record')
+                    .select('question_id, tq_id, status, source_type, question_db(source_book_name, book_name, pdf_source)')
                     .eq('student_id', studentInfo.id)
                     .in('status', ['X', 'TX', 'TO', 'B'])
                     .is('resolved_at', null);
+                const incData = (rawIncData || []).filter((r: any) => !isConfidentialIncorrectRecord(r));
 
                 const rawTqIds = (incData || []).map((r: any) => r.tq_id).filter(Boolean);
                 const tqToQidMap = new Map();

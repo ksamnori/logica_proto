@@ -6,6 +6,7 @@ import LearningRow, { statusToneOf } from "./LearningRow";
 import { supabase as supabaseClient } from '@/lib/supabase';
 import { useRouter } from 'next/navigation';
 import { createClinicExamBundleAction } from '@/app/actions/clinicActions';
+import { isConfidentialExamText, isConfidentialIncorrectRecord, isConfidentialQuestionObj } from '@/lib/confidentialExamGuard';
 import {
   fetchMainTextbookExclusionSet,
   isMainTextbookQuestion,
@@ -260,11 +261,11 @@ export default function StudentTimeline({
       }
 
       const { data: incData } = await supabaseClient.from('student_incorrect_record')
-        .select('record_id, question_id, created_at')
+        .select('record_id, question_id, created_at, source_type, question_db(source_book_name, book_name, pdf_source)')
         .eq('student_id', currentView.studentId)
         .is('resolved_at', null);
 
-      setAllIncorrectRecords(incData || []);
+      setAllIncorrectRecords((incData || []).filter((r: any) => !isConfidentialIncorrectRecord(r)));
     } catch (e) {
       console.error("분류 체계 로딩 오류:", e);
     } finally {
@@ -339,9 +340,8 @@ export default function StudentTimeline({
   // 🌟 주교재 제외 / 워크북 제외 및 유형별 최대 문제 수 제한 후처리 헬퍼
   const filterClinicMatchedQuestions = async (rawIds: string[]): Promise<string[]> => {
     if (!Array.isArray(rawIds) || rawIds.length === 0) return [];
-    if (!excludeMain && !excludeWorkbook) return rawIds;
 
-    const exclusion = await fetchMainTextbookExclusionSet(supabaseClient);
+    const exclusion = (excludeMain || excludeWorkbook) ? await fetchMainTextbookExclusionSet(supabaseClient) : null;
     const qMap = new Map<string, any>();
     const cleanIds = Array.from(
       new Set(
@@ -371,6 +371,7 @@ export default function StudentTimeline({
       const realQid = qid.replace(/_added_\d+$/, '');
       const q = qMap.get(qid) || qMap.get(realQid) || { question_id: realQid };
 
+      if (isConfidentialQuestionObj(q)) continue;
       if (excludeMain && isMainTextbookQuestion(q, exclusion)) continue;
       if (excludeWorkbook && isWorkbookQuestion(q, exclusion)) continue;
 
@@ -396,11 +397,20 @@ export default function StudentTimeline({
       if (modalTab === 'TAXONOMY') {
           const selArr = Array.from(selectedTaxonomyIds);
           const { data: taxData } = await supabaseClient.from('student_answer')
-            .select('question_id')
+            .select('question_id, exam_assignment(exam_master(exam_type, title)), question_db(source_book_name, book_name, pdf_source)')
             .eq('student_id', currentView.studentId)
             .in('grading_code', ['X', 'TX', '☆', 'B']);
           
-          if (taxData) uniqueQids = Array.from(new Set(taxData.map(r => r.question_id).filter(Boolean)));
+          if (taxData) {
+            const safeTaxRows = (taxData as any[]).filter((r: any) => {
+              if (isConfidentialQuestionObj(r.question_db)) return false;
+              const ea = Array.isArray(r.exam_assignment) ? r.exam_assignment[0] : r.exam_assignment;
+              const em = Array.isArray(ea?.exam_master) ? ea.exam_master[0] : ea?.exam_master;
+              if (isConfidentialExamText(em?.exam_type) || isConfidentialExamText(em?.title)) return false;
+              return true;
+            });
+            uniqueQids = Array.from(new Set(safeTaxRows.map(r => r.question_id).filter(Boolean)));
+          }
 
       } else if (modalTab === 'PERIOD') {
           const targetWQs = allIncorrectRecords.filter(r => {

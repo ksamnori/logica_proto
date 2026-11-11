@@ -357,21 +357,27 @@ export function useTAClinic() {
         return;
     }
     const supabaseClient = sharedSupabase;
-    clinicChannel.current = supabaseClient.channel(CLINIC_ROOM);
+    const myTenantId = (typeof window !== 'undefined' && localStorage.getItem('logica_tenant_id')) || 'hq';
+    const channelName = `${CLINIC_ROOM}_${myTenantId}`;
+    const ch = supabaseClient.channel(channelName);
+    clinicChannel.current = ch;
 
-    clinicChannel.current
+    ch
       .on('presence', { event: 'sync' }, syncActiveStudentsFromPresence)
       .on('broadcast', { event: 'student_action' }, ({ payload }: any) => handleStudentAction(payload))
       .on('broadcast', { event: 'ta_action' }, ({ payload }: any) => handleTaActionFromOtherScreen(payload))
       .subscribe((status: string) => setIsConnected(status === 'SUBSCRIBED'));
 
     const interval = setInterval(() => {
-      if (clinicChannel.current && Date.now() % 2000 < 1000) syncActiveStudentsFromPresence();
-    }, 1000);
+      if (clinicChannel.current) syncActiveStudentsFromPresence();
+    }, 2500);
 
     return () => {
       clearInterval(interval);
-      if (clinicChannel.current) clinicChannel.current.unsubscribe();
+      if (clinicChannel.current) {
+        supabaseClient.removeChannel(clinicChannel.current).catch(() => {});
+        clinicChannel.current = null;
+      }
     };
   }, [handleStudentAction, handleTaActionFromOtherScreen, syncActiveStudentsFromPresence]);
 

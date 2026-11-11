@@ -39,26 +39,38 @@ export async function resolvePendingHomeworkQuestions(
 
   const { data: assignments } = await supabaseClient
     .from('homework_assignment')
-    .select('homework_id, homework_title, target_questions, student_homework_result(status, completed_tq_ids)')
+    .select('homework_id, homework_title, target_questions, student_homework_result(student_id, status, completed_tq_ids)')
     .in('homework_id', hwIds);
     
   if (!assignments || assignments.length === 0) return { rows: [], booksSummary: [] };
 
+  const COMPLETED_STATUSES = new Set(['채점완료', '제출완료', '완료', '최종완료']);
   let allTqIds: any[] = [];
   const metaMap: Record<string, { homework_id: number; homework_title: string }> = {};
   
   assignments.forEach((hw: any) => {
-    let tqIds = typeof hw.target_questions === 'string' ? JSON.parse(hw.target_questions) : hw.target_questions;
-    const res = hw.student_homework_result?.find((r: any) => r.student_id === studentId) || {};
-    let compIds = typeof res.completed_tq_ids === 'string' ? JSON.parse(res.completed_tq_ids) : res.completed_tq_ids;
+    let tqIds: any = hw.target_questions;
+    if (typeof tqIds === 'string') {
+      try { tqIds = JSON.parse(tqIds); } catch { tqIds = []; }
+    }
+    const results = Array.isArray(hw.student_homework_result) ? hw.student_homework_result : [];
+    const res = results.find((r: any) => String(r.student_id) === String(studentId)) || {};
+    if (res.status && COMPLETED_STATUSES.has(String(res.status))) return;
+
+    let compIds: any = res.completed_tq_ids;
+    if (typeof compIds === 'string') {
+      try { compIds = JSON.parse(compIds); } catch { compIds = []; }
+    }
     
     if (!Array.isArray(tqIds)) tqIds = [];
     if (!Array.isArray(compIds)) compIds = [];
+    const compSet = new Set(compIds.map((v: any) => String(v)));
 
     tqIds.forEach((idVal: any) => {
-      if (!compIds.includes(idVal)) {
+      const key = String(idVal);
+      if (!compSet.has(key)) {
         allTqIds.push(idVal);
-        metaMap[String(idVal)] = { homework_id: hw.homework_id, homework_title: hw.homework_title };
+        metaMap[key] = { homework_id: hw.homework_id, homework_title: hw.homework_title };
       }
     });
   });

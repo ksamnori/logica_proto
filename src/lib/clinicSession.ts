@@ -181,11 +181,48 @@ export async function setActiveRecheck(supabaseClient: any, sessionId: string, u
     await supabaseClient.from('clinic_session_state').update({ active_rechecks: activeRechecks }).eq('id', sessionId);
 }
 
-// 재확인 요청을 해제한다(조교가 정답/오답 판정을 마쳤을 때).
+// 재확인 요청을 해제한다(학생이 수거 완료했거나 강제 초기화할 때).
 export async function clearActiveRecheck(supabaseClient: any, sessionId: string, uid: string) {
     const { data: row } = await supabaseClient.from('clinic_session_state').select('active_rechecks').eq('id', sessionId).maybeSingle();
     const activeRechecks = { ...(row?.active_rechecks || {}) };
     delete activeRechecks[uid];
+    await supabaseClient.from('clinic_session_state').update({ active_rechecks: activeRechecks }).eq('id', sessionId);
+}
+
+// 🌟 [표준 프로토콜 통합] 조교/수퍼바이저가 호출을 처리 완료할 때 즉시 삭제하지 않고 verdict='resolved'와 mark('hint'|'skip')를 남겨
+// 브로드캐스트가 일시 유실되더라도 학생 패드의 runSelfCorrection이 힌트 제공 여부(T/TO/TX)를 100% 회수한 뒤 정리하게 한다.
+export async function resolveActiveCall(
+    supabaseClient: any,
+    sessionId: string,
+    qNum: string | number,
+    mark: 'hint' | 'skip' | string = 'skip'
+) {
+    const key = String(qNum);
+    const { data: row } = await supabaseClient.from('clinic_session_state').select('active_calls').eq('id', sessionId).maybeSingle();
+    if (!row?.active_calls || !row.active_calls[key]) return;
+    const activeCalls = { ...row.active_calls, [key]: { ...row.active_calls[key], verdict: 'resolved', mark } };
+    await supabaseClient.from('clinic_session_state').update({ active_calls: activeCalls }).eq('id', sessionId);
+}
+
+// 🌟 [표준 프로토콜 통합] 조교/수퍼바이저가 재확인을 판정할 때 즉시 삭제하지 않고 verdict('correct'|'incorrect')와 qNum을 남겨
+// 웹소켓이 잠깐 끊겼던 학생 패드도 판정 결과를 100% 회수하고 무한 pending 잠금에 빠지지 않게 보장한다.
+export async function resolveActiveRecheck(
+    supabaseClient: any,
+    sessionId: string,
+    uid: string,
+    verdict: 'correct' | 'incorrect',
+    qNum?: number
+) {
+    const { data: row } = await supabaseClient.from('clinic_session_state').select('active_rechecks').eq('id', sessionId).maybeSingle();
+    if (!row?.active_rechecks || !row.active_rechecks[uid]) return;
+    const activeRechecks = {
+        ...row.active_rechecks,
+        [uid]: {
+            ...row.active_rechecks[uid],
+            verdict,
+            ...(qNum !== undefined ? { qNum } : {}),
+        },
+    };
     await supabaseClient.from('clinic_session_state').update({ active_rechecks: activeRechecks }).eq('id', sessionId);
 }
 

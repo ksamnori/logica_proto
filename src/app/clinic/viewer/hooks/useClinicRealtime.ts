@@ -93,10 +93,13 @@ export function useClinicRealtime({
   useEffect(() => {
     if (!studentInfo.id || !hasQuestions) return;
     let cancelled = false;
+    let isRunningCorrection = false;
 
     const runSelfCorrection = async () => {
       const sid = clinicSessionStateRef.current?.id;
-      if (!sid || cancelled || checkoutHandledRef.current) return;
+      if (!sid || cancelled || checkoutHandledRef.current || isRunningCorrection) return;
+      isRunningCorrection = true;
+      try {
 
       const { data, error } = await supabaseClient
         .from('clinic_session_state')
@@ -237,10 +240,16 @@ export function useClinicRealtime({
       }
 
       if (hasChanges) forceUpdate();
+      } finally {
+        isRunningCorrection = false;
+      }
     };
 
     runSelfCorrectionRef.current = runSelfCorrection;
-    const interval = setInterval(runSelfCorrection, 5000);
+    const interval = setInterval(() => {
+      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
+      runSelfCorrection();
+    }, 8000);
     const handleFocus = () => runSelfCorrection();
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible') runSelfCorrection();
@@ -483,6 +492,19 @@ export function useClinicRealtime({
     const currentQuestions = questionsRef.current;
 
     if (payload.action === 'force_cancel_call') {
+      if (payload.qNum !== undefined && payload.qNum !== 'general') {
+        const qIdx = Number(payload.qNum) - 1;
+        if (qIdx >= 0 && !isNaN(qIdx)) {
+          callState.current[qIdx] = false;
+          if (payload.mark === 'hint') {
+            taHintState.current[qIdx] = true;
+            if (currentQuestions[qIdx]?.record_id) {
+              supabaseClient.from('student_incorrect_record').update({ status: 'T' }).eq('record_id', currentQuestions[qIdx].record_id).then();
+            }
+          }
+          callbacksRef.current.forceUpdate();
+        }
+      }
       if (runSelfCorrectionRef.current) runSelfCorrectionRef.current();
     } else if (payload.action === 'force_return_to_seat') {
       callbacksRef.current.setMyAwayActive(false);

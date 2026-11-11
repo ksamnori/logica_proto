@@ -81,34 +81,94 @@ export const sortQuestionsList = (data: any[]) => {
   });
 };
 
-export const fetchAllRows = async (tableName: string, selectQuery: string = '*', filterCol?: string, filterVal?: string) => {
-  let allData: any[] = [];
-  let start = 0;
+// 🌟 [초고속 병렬 로더] HEAD 카운트 후 8개 동시 range 요청으로 직렬 루프 병목 제거 + push() 메모리 최적화
+export const fetchAllRows = async (
+  tableName: string,
+  selectQuery: string = '*',
+  filterCol?: string,
+  filterVal?: string,
+  onProgress?: (loaded: number, total: number) => void
+) => {
   const step = 1000;
-  let hasMore = true;
+  const concurrency = 8;
 
-  while (hasMore) {
-    let query = supabase.from(tableName).select(selectQuery);
-    
-    if (filterCol && filterVal !== undefined) {
-      query = query.eq(filterCol, filterVal);
-    }
-    
+  const applyOrder = (q: any) => {
     if (tableName === 'question_db' || tableName === 'textbook_question') {
-      query = query.order('question_id', { ascending: true });
-    } else if (tableName === 'master_category') {
-      query = query.order('category_id', { ascending: true });
-    } else if (tableName === 'master_item') {
-      query = query.order('item_id', { ascending: true });
+      return q.order('question_id', { ascending: true });
+    }
+    if (tableName === 'master_category') {
+      return q.order('category_id', { ascending: true });
+    }
+    if (tableName === 'master_item') {
+      return q.order('item_id', { ascending: true });
+    }
+    return q;
+  };
+
+  let countQuery = supabase.from(tableName).select('*', { count: 'exact', head: true });
+  if (filterCol && filterVal !== undefined) {
+    countQuery = countQuery.eq(filterCol, filterVal);
+  }
+  const { count, error: countErr } = await countQuery;
+
+  const allData: any[] = [];
+
+  if (!countErr && count !== null) {
+    if (count === 0) {
+      onProgress?.(0, 0);
+      return [];
+    }
+    const totalPages = Math.ceil(count / step);
+    const chunks: any[][] = new Array(totalPages);
+    let loaded = 0;
+
+    for (let p = 0; p < totalPages; p += concurrency) {
+      const wave = Math.min(concurrency, totalPages - p);
+      await Promise.all(
+        Array.from({ length: wave }, (_, idx) => {
+          const pageIndex = p + idx;
+          const start = pageIndex * step;
+          let q = supabase.from(tableName).select(selectQuery);
+          if (filterCol && filterVal !== undefined) {
+            q = q.eq(filterCol, filterVal);
+          }
+          q = applyOrder(q).range(start, start + step - 1);
+          return q.then(({ data, error }: any) => {
+            if (error) console.error(`${tableName} 로드 실패:`, error);
+            const rows = !error && data ? data : [];
+            chunks[pageIndex] = rows;
+            loaded += rows.length;
+            onProgress?.(Math.min(loaded, count), count);
+          });
+        })
+      );
     }
 
-    query = query.range(start, start + step - 1);
-    
-    const { data, error } = await query;
-    if (error) { console.error(`${tableName} 로드 실패:`, error); break; }
-    if (data && data.length > 0) { allData = [...allData, ...data]; start += step; }
-    if (!data || data.length < step) hasMore = false; 
+    for (const c of chunks) {
+      if (c && c.length > 0) allData.push(...c);
+    }
+  } else {
+    let start = 0;
+    let hasMore = true;
+    while (hasMore) {
+      let query = supabase.from(tableName).select(selectQuery);
+      if (filterCol && filterVal !== undefined) {
+        query = query.eq(filterCol, filterVal);
+      }
+      query = applyOrder(query).range(start, start + step - 1);
+      const { data, error } = await query;
+      if (error) {
+        console.error(`${tableName} 로드 실패:`, error);
+        break;
+      }
+      if (data && data.length > 0) {
+        allData.push(...data);
+        start += step;
+      }
+      if (!data || data.length < step) hasMore = false;
+    }
   }
+
   if (tableName === 'master_category') {
     return normalizeMasterCategories(allData);
   }

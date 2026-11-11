@@ -1,7 +1,12 @@
 // src/app/(dashboard)/learning/hooks/useLearningActions.ts
 import { supabase } from "@/lib/supabase";
 import { StudentInfo, ViewState, TabType } from "../types";
-import { toast } from "react-toastify"; 
+import { toast } from "react-toastify";
+import {
+  renameHomeworkAssignmentAction,
+  deleteHomeworkAssignmentAction,
+  forceCompleteHomeworkBatchAction,
+} from "@/app/actions/auth"; 
 
 interface ActionProps {
   currentView: ViewState;
@@ -166,18 +171,11 @@ export function useLearningActions({
         } else if (block.startsWith('hw_')) {
           const hwId = Number(block.split('_')[1]);
           const stId = block.split('_')[2];
-          const { data: existing, error: findErr } = await supabase.from('student_homework_result').select('hw_result_id').eq('homework_id', hwId).eq('student_id', stId).maybeSingle();
-          if (findErr) throw findErr;
-
-          if (existing) {
-            const { error } = await supabase.from('student_homework_result').update({ status: '채점완료', checked_at: new Date().toISOString() }).eq('hw_result_id', existing.hw_result_id);
-            if (error) throw error;
-          } else {
-            const { error } = await supabase.from('student_homework_result').insert({
-              homework_id: hwId, student_id: stId, status: '채점완료', checked_at: new Date().toISOString(), completed_tq_ids: [] 
-            });
-            if (error) throw error;
-          }
+          const fcRes = await forceCompleteHomeworkBatchAction({
+            items: [{ homeworkId: hwId, studentId: stId }],
+            clientTenantId: localStorage.getItem('logica_tenant_id') || undefined,
+          });
+          if (!fcRes.success) throw new Error(fcRes.message || '과제 완료 처리 실패');
         }
       }
       toast.success("✅ 선택 항목이 일괄 완료처리 되었습니다.");
@@ -238,10 +236,12 @@ export function useLearningActions({
         } else if (block.startsWith('hw_')) {
           const hwId = block.split('_')[1];
           const studentId = block.split('_')[2];
-          await supabase.from('student_homework_answer').delete().eq('homework_id', hwId).eq('student_id', studentId);
-          await supabase.from('student_homework_result').delete().eq('homework_id', hwId).eq('student_id', studentId);
-          const { count } = await supabase.from('student_homework_result').select('*', { count: 'exact', head: true }).eq('homework_id', hwId);
-          if (count === 0) await supabase.from('homework_assignment').delete().eq('homework_id', hwId);
+          const delRes = await deleteHomeworkAssignmentAction({
+            homeworkId: hwId,
+            studentId,
+            clientTenantId: localStorage.getItem('logica_tenant_id') || undefined,
+          });
+          if (!delRes.success) throw new Error(delRes.message || '과제 삭제 실패');
         }
       }
       toast.success("🗑️ 선택 항목이 삭제되었습니다.");
@@ -274,18 +274,11 @@ export function useLearningActions({
           if (error) throw error;
         } else if (block.startsWith('hw_')) {
           const hwId = Number(block.split('_')[1]);
-          const { data: existing, error: findErr } = await supabase.from('student_homework_result').select('hw_result_id').eq('homework_id', hwId).eq('student_id', currentView.studentId).maybeSingle();
-          if (findErr) throw findErr;
-
-          if (existing) {
-            const { error } = await supabase.from('student_homework_result').update({ status: '채점완료', checked_at: new Date().toISOString() }).eq('hw_result_id', existing.hw_result_id);
-            if (error) throw error;
-          } else {
-            const { error } = await supabase.from('student_homework_result').insert({
-              homework_id: hwId, student_id: currentView.studentId, status: '채점완료', checked_at: new Date().toISOString(), completed_tq_ids: [] 
-            });
-            if (error) throw error;
-          }
+          const fcRes = await forceCompleteHomeworkBatchAction({
+            items: [{ homeworkId: hwId, studentId: currentView.studentId }],
+            clientTenantId: localStorage.getItem('logica_tenant_id') || undefined,
+          });
+          if (!fcRes.success) throw new Error(fcRes.message || '과제 완료 처리 실패');
         }
       }
       toast.success("✅ 선택 항목이 일괄 완료처리 되었습니다.");
@@ -341,10 +334,12 @@ export function useLearningActions({
           }
         } else if (block.startsWith('hw_')) {
           const hwId = block.split('_')[1];
-          await supabase.from('student_homework_answer').delete().eq('homework_id', hwId).eq('student_id', currentView.studentId);
-          await supabase.from('student_homework_result').delete().eq('homework_id', hwId).eq('student_id', currentView.studentId);
-          const { count } = await supabase.from('student_homework_result').select('*', { count: 'exact', head: true }).eq('homework_id', hwId);
-          if (count === 0) await supabase.from('homework_assignment').delete().eq('homework_id', hwId);
+          const delRes = await deleteHomeworkAssignmentAction({
+            homeworkId: hwId,
+            studentId: currentView.studentId,
+            clientTenantId: localStorage.getItem('logica_tenant_id') || undefined,
+          });
+          if (!delRes.success) throw new Error(delRes.message || '과제 삭제 실패');
         }
       }
       toast.success("🗑️ 선택 항목이 삭제되었습니다.");
@@ -406,18 +401,11 @@ export function useLearningActions({
         const { error } = await supabase.from('exam_assignment').update({ status: '채점완료' }).eq('assignment_id', Number(id));
         if (error) throw error;
       } else if (type === 'hw') {
-        const { data: existing, error: findErr } = await supabase.from('student_homework_result').select('hw_result_id').eq('homework_id', id).eq('student_id', targetStudentId).maybeSingle();
-        if (findErr) throw findErr;
-
-        if (existing) {
-          const { error } = await supabase.from('student_homework_result').update({ status: '채점완료', checked_at: new Date().toISOString() }).eq('hw_result_id', existing.hw_result_id);
-          if (error) throw error;
-        } else {
-          const { error } = await supabase.from('student_homework_result').insert({
-            homework_id: Number(id), student_id: targetStudentId, status: '채점완료', checked_at: new Date().toISOString(), completed_tq_ids: [] 
-          });
-          if (error) throw error;
-        }
+        const fcRes = await forceCompleteHomeworkBatchAction({
+          items: [{ homeworkId: Number(id), studentId: targetStudentId }],
+          clientTenantId: localStorage.getItem('logica_tenant_id') || undefined,
+        });
+        if (!fcRes.success) throw new Error(fcRes.message || '과제 완료 처리 실패');
       }
       
       toast.success("✅ 채점 완료 처리되었습니다.");
@@ -449,7 +437,12 @@ export function useLearningActions({
     const newTitle = window.prompt("수정할 과제 제목을 입력하세요:", oldTitle);
     if (!newTitle || newTitle.trim() === '' || newTitle === oldTitle) return;
     try {
-      await supabase.from('homework_assignment').update({ homework_title: newTitle.trim() }).eq('homework_id', hwId);
+      const renRes = await renameHomeworkAssignmentAction({
+        homeworkId: hwId,
+        newTitle: newTitle.trim(),
+        clientTenantId: localStorage.getItem('logica_tenant_id') || undefined,
+      });
+      if (!renRes.success) throw new Error(renRes.message || "수정 실패");
       toast.success("제목이 수정되었습니다.");
       if (currentView.type === 'STUDENT') fetchStudentTimeline(currentView.studentId, currentView.classId, allStudentsList);
       else fetchGlobalListForTab('HOMEWORK', allStudentsList);
@@ -459,9 +452,12 @@ export function useLearningActions({
   const handleDeleteHomework = async (hwId: string, studentId: string) => {
     if (!confirm("이 교재 과제를 완전히 삭제하시겠습니까?\n(주의: 반 전체에 부여된 과제인 경우 모든 학생의 기록이 함께 삭제됩니다.)")) return;
     try {
-      await supabase.from('student_homework_answer').delete().eq('homework_id', hwId);
-      await supabase.from('student_homework_result').delete().eq('homework_id', hwId);
-      await supabase.from('homework_assignment').delete().eq('homework_id', hwId);
+      const delRes = await deleteHomeworkAssignmentAction({
+        homeworkId: hwId,
+        deleteAllStudents: true,
+        clientTenantId: localStorage.getItem('logica_tenant_id') || undefined,
+      });
+      if (!delRes.success) throw new Error(delRes.message || "삭제 실패");
       
       toast.success("🗑️ 삭제되었습니다.");
       if (currentView.type === 'STUDENT') fetchStudentTimeline(studentId, currentView.classId, allStudentsList);

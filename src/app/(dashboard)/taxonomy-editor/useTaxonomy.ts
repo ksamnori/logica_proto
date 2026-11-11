@@ -159,21 +159,35 @@ export const isExcludedDiagnosticQuestionRow = (q: any): boolean => {
   );
 };
 
+// 🌟 탭 내 페이지 이동 시 재다운로드(수만 건 풀스캔) 방지를 위한 인메모리 캐시
+const MASTER_TAXONOMY_TTL_MS = 30 * 60 * 1000;
+const WORKBOOKS_CACHE_KEY = "logica_taxonomy_workbooks_v3";
+const WORKBOOKS_TTL_MS = 15 * 60 * 1000;
+
+let cachedMasterTaxonomy: { categories: any[]; items: any[]; updatedAt: number } | null = null;
+let cachedWorkbooksMemory: { list: string[]; updatedAt: number } | null = null;
+let cachedPermsMemory: { key: string; perms: { add: boolean; delete: boolean; edit: boolean; twin: boolean } } | null = null;
+
 export function useTaxonomy() {
   const router = useRouter();
 
   const [isAuthorized, setIsAuthorized] = useState<boolean | null>(null);
   const [perms, setPerms] = useState({ add: false, delete: false, edit: false, twin: false });
 
-  const [categories, setCategories] = useState<any[]>([]);
-  const [items, setItems] = useState<any[]>([]);
-  const [isTaxonomyLoading, setIsTaxonomyLoading] = useState(true);
+  const [categories, setCategories] = useState<any[]>(() => cachedMasterTaxonomy?.categories || []);
+  const [items, setItems] = useState<any[]>(() => cachedMasterTaxonomy?.items || []);
+  const [isTaxonomyLoading, setIsTaxonomyLoading] = useState<boolean>(() => !cachedMasterTaxonomy);
 
-  const [workbooks, setWorkbooks] = useState<string[]>([]);
+  const [workbooks, setWorkbooks] = useState<string[]>(() => cachedWorkbooksMemory?.list || []);
+  const [isWorkbooksLoading, setIsWorkbooksLoading] = useState<boolean>(() => !cachedWorkbooksMemory);
+  const [workbookScanProgress, setWorkbookScanProgress] = useState<number>(0);
+
   const [selectedBook, setSelectedBook] = useState<string>("");
   const [questions, setQuestions] = useState<any[]>([]);
   const [selectedQuestion, setSelectedQuestion] = useState<any | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [isFetchingQuestions, setIsFetchingQuestions] = useState(false);
+  const [fetchStepMessage, setFetchStepMessage] = useState<string>("");
 
   const [isEditingContent, setIsEditingContent] = useState(false);
   
@@ -234,17 +248,27 @@ export function useTaxonomy() {
         setPerms({ add: true, delete: true, edit: true, twin: true });
         return; 
       }
+
+      const permKey = `${tId}::${role}`;
+      if (cachedPermsMemory && cachedPermsMemory.key === permKey) {
+        setPerms(cachedPermsMemory.perms);
+        setIsAuthorized(true);
+        return;
+      }
       
       const { data, error } = await supabase.from('tenant_role_permissions').select('allowed_menus').eq('tenant_id', tId).eq('role_name', role).single();
       
-      if (!error && data && data.allowed_menus.includes("/taxonomy-editor")) {
+      if (!error && data && (data.allowed_menus.includes("ALL") || data.allowed_menus.includes("/taxonomy-editor"))) {
+        const hasAll = data.allowed_menus.includes("ALL");
+        const resolvedPerms = {
+          add: hasAll || data.allowed_menus.includes("action_add_question"),
+          delete: hasAll || data.allowed_menus.includes("action_delete_question"),
+          edit: hasAll || data.allowed_menus.includes("action_edit_question"),
+          twin: hasAll || data.allowed_menus.includes("action_generate_twins"),
+        };
+        cachedPermsMemory = { key: permKey, perms: resolvedPerms };
+        setPerms(resolvedPerms);
         setIsAuthorized(true);
-        setPerms({
-          add: data.allowed_menus.includes("action_add_question"),
-          delete: data.allowed_menus.includes("action_delete_question"),
-          edit: data.allowed_menus.includes("action_edit_question"),
-          twin: data.allowed_menus.includes("action_generate_twins"),
-        });
       } else { 
         alert("⛔ 권한이 없습니다."); 
         router.replace("/home"); 
@@ -276,88 +300,161 @@ export function useTaxonomy() {
     }
   };
 
-  const loadMasterTaxonomy = async () => {
+  const loadMasterTaxonomy = async (forceRefresh: boolean = false) => {
+    if (
+      !forceRefresh &&
+      cachedMasterTaxonomy &&
+      Date.now() - cachedMasterTaxonomy.updatedAt < MASTER_TAXONOMY_TTL_MS
+    ) {
+      setCategories(cachedMasterTaxonomy.categories);
+      setItems(cachedMasterTaxonomy.items);
+      setIsTaxonomyLoading(false);
+      return;
+    }
+
     setIsTaxonomyLoading(true);
     try {
-      const catData = await fetchAllRows('master_category');
-      const itemData = await fetchAllRows('master_item');
-      setCategories(catData || []); setItems(itemData || []);
-    } catch (e) { console.error("Taxonomy 로드 실패", e); } 
-    finally { setIsTaxonomyLoading(false); }
+      // 🌟 직렬 로드 제거: master_category와 master_item을 필요한 컬럼만 지정하여 동시에 병렬 로드!
+      const [catData, itemData] = await Promise.all([
+        fetchAllRows(
+          'master_category',
+          'category_id, depth1, depth2, depth3, depth4, depth5, depth6, depth7'
+        ),
+        fetchAllRows(
+          'master_item',
+          'item_id, category_id, depth6, depth7, depth8'
+        ),
+      ]);
+      const safeCats = catData || [];
+      const safeItems = itemData || [];
+      cachedMasterTaxonomy = {
+        categories: safeCats,
+        items: safeItems,
+        updatedAt: Date.now(),
+      };
+      setCategories(safeCats);
+      setItems(safeItems);
+    } catch (e) {
+      console.error("Taxonomy 로드 실패", e);
+    } finally {
+      setIsTaxonomyLoading(false);
+    }
   };
 
-  const loadWorkbooks = async () => {
-    try {
-      const CACHE_KEY = "logica_taxonomy_workbooks_v2";
+  const appendWorkbooksToCache = (newNames: string[]) => {
+    const cleanNew = (newNames || [])
+      .map((b) => String(b || "").trim())
+      .filter((b) => b && !isExcludedDiagnosticBookName(b));
+    if (cleanNew.length === 0) return;
+
+    setWorkbooks((prev) => {
+      const merged = Array.from(new Set([...prev, ...cleanNew]))
+        .filter((b) => b && !isExcludedDiagnosticBookName(b))
+        .sort(taxSort);
+      const payload = { list: merged, updatedAt: Date.now() };
+      cachedWorkbooksMemory = payload;
       try {
-        const cached = sessionStorage.getItem(CACHE_KEY);
-        if (cached) {
-          const parsed = JSON.parse(cached);
-          if (Array.isArray(parsed) && parsed.length > 0) {
-            setWorkbooks(parsed.filter((b: string) => b && !isExcludedDiagnosticBookName(b)));
-          }
+        sessionStorage.setItem(WORKBOOKS_CACHE_KEY, JSON.stringify(payload));
+      } catch {}
+      return merged;
+    });
+  };
+
+  const loadWorkbooks = async (forceRefresh: boolean = false) => {
+    try {
+      // 🌟 0단계: 유효 캐시(15분)가 있으면 수만 건의 question_db 풀스캔을 생략해 즉시 오픈 & 네트워크 대역폭 보존!
+      if (!forceRefresh) {
+        if (cachedWorkbooksMemory && Date.now() - cachedWorkbooksMemory.updatedAt < WORKBOOKS_TTL_MS) {
+          setWorkbooks(cachedWorkbooksMemory.list);
+          setIsWorkbooksLoading(false);
+          return;
         }
-      } catch (e) {}
-
-      // 1단계: 가벼운 textbook 테이블 먼저 즉시 로드하여 드롭다운 대기시간 제거
-      const tbData = await fetchAllRows('textbook', 'title');
-      const titles = (tbData || [])
-        .map((t: any) => t.title)
-        .filter((t: any) => t && !isExcludedDiagnosticBookName(t));
-
-      if (titles.length > 0) {
-        setWorkbooks((prev) => {
-          const merged = Array.from(new Set([...prev, ...titles])).filter((b) => b && !isExcludedDiagnosticBookName(b)).sort(taxSort);
-          return merged as string[];
-        });
+        try {
+          const cachedRaw = sessionStorage.getItem(WORKBOOKS_CACHE_KEY);
+          if (cachedRaw) {
+            const parsed = JSON.parse(cachedRaw);
+            if (parsed?.list && Array.isArray(parsed.list) && parsed.list.length > 0) {
+              const filtered = parsed.list.filter((b: string) => b && !isExcludedDiagnosticBookName(b));
+              cachedWorkbooksMemory = { list: filtered, updatedAt: parsed.updatedAt || Date.now() };
+              setWorkbooks(filtered);
+              if (parsed.updatedAt && Date.now() - parsed.updatedAt < WORKBOOKS_TTL_MS) {
+                setIsWorkbooksLoading(false);
+                return;
+              }
+            }
+          } else {
+            // 구버전 캐시 키(v2)가 남아 있으면 초기 표시용으로 즉시 활용
+            const legacyRaw = sessionStorage.getItem("logica_taxonomy_workbooks_v2");
+            if (legacyRaw) {
+              const legacyParsed = JSON.parse(legacyRaw);
+              if (Array.isArray(legacyParsed) && legacyParsed.length > 0) {
+                setWorkbooks(legacyParsed.filter((b: string) => b && !isExcludedDiagnosticBookName(b)));
+              }
+            }
+          }
+        } catch {}
       }
 
-      // 2단계: question_db에서 입학테스트/진단평가 제외하고 병렬 배치로 빠르게 source_book_name, book_name 수집
-      const qbNames = new Set<string>();
-      const step = 1000;
-      const batchPages = 5;
-      let pageIdx = 0;
-      let keepGoing = true;
+      setIsWorkbooksLoading(true);
+      setWorkbookScanProgress(5);
 
-      while (keepGoing) {
-        const promises = [];
-        for (let b = 0; b < batchPages; b++) {
-          const start = (pageIdx + b) * step;
-          promises.push(
-            supabase
-              .from("question_db")
-              .select("source_book_name, book_name")
-              .order("question_id", { ascending: true })
-              .range(start, start + step - 1)
-          );
-        }
-        const results = await Promise.all(promises);
-        for (const res of results) {
-          const rows = res.data || [];
-          rows.forEach((q: any) => {
-            if (isExcludedDiagnosticQuestionRow(q)) return;
-            if (q.source_book_name && !isExcludedDiagnosticBookName(q.source_book_name)) {
-              qbNames.add(String(q.source_book_name).trim());
-            }
-            if (q.book_name && !isExcludedDiagnosticBookName(q.book_name)) {
-              qbNames.add(String(q.book_name).trim());
-            }
-          });
-          if (rows.length < step) {
-            keepGoing = false;
+      // 1단계: 가벼운 textbook 테이블 먼저 즉시 로드하여 기본 교재 드롭다운 대기시간 제거
+      const tbData = await fetchAllRows('textbook', 'title');
+      const titles = (tbData || [])
+        .map((t: any) => String(t.title || "").trim())
+        .filter((t: string) => t && !isExcludedDiagnosticBookName(t));
+
+      if (titles.length > 0) {
+        setWorkbooks((prev) =>
+          Array.from(new Set([...prev, ...titles]))
+            .filter((b) => b && !isExcludedDiagnosticBookName(b))
+            .sort(taxSort)
+        );
+      }
+      setWorkbookScanProgress(15);
+
+      // 2단계: HEAD 카운트 기반 8-way 병렬 로더로 question_db 교재명을 고속 수집 + 진행률 표시
+      const qbRows = await fetchAllRows(
+        'question_db',
+        'source_book_name, book_name',
+        undefined,
+        undefined,
+        (loaded, total) => {
+          if (total > 0) {
+            setWorkbookScanProgress(Math.min(99, 15 + Math.round((loaded / total) * 84)));
           }
         }
-        pageIdx += batchPages;
+      );
+
+      const qbNames = new Set<string>();
+      for (let i = 0; i < qbRows.length; i++) {
+        const q = qbRows[i];
+        if (isExcludedDiagnosticQuestionRow(q)) continue;
+        if (q.source_book_name && !isExcludedDiagnosticBookName(q.source_book_name)) {
+          qbNames.add(String(q.source_book_name).trim());
+        }
+        if (q.book_name && !isExcludedDiagnosticBookName(q.book_name)) {
+          qbNames.add(String(q.book_name).trim());
+        }
       }
 
       const uniqueList = Array.from(new Set([...titles, ...Array.from(qbNames)]))
         .filter((b) => b && !isExcludedDiagnosticBookName(b))
         .sort(taxSort);
-      setWorkbooks(uniqueList as string[]);
+
+      setWorkbooks(uniqueList);
+      setWorkbookScanProgress(100);
+      const cachePayload = { list: uniqueList, updatedAt: Date.now() };
+      cachedWorkbooksMemory = cachePayload;
       try {
-        sessionStorage.setItem(CACHE_KEY, JSON.stringify(uniqueList));
-      } catch (e) {}
-    } catch (e) { console.error(e); }
+        sessionStorage.setItem(WORKBOOKS_CACHE_KEY, JSON.stringify(cachePayload));
+        sessionStorage.removeItem("logica_taxonomy_workbooks_v2");
+      } catch {}
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setIsWorkbooksLoading(false);
+    }
   };
 
   const handleRenameBook = async () => {
@@ -403,14 +500,17 @@ export function useTaxonomy() {
         }
       }
 
-      // 3) 세션 캐시 및 최근 선택 교재 목록에서 예전 이름을 제거하고 새 이름으로 즉시 갱신
-      try {
-        sessionStorage.removeItem("logica_taxonomy_workbooks_v2");
-      } catch (e) {}
-
+      // 3) 메모리·세션 캐시 및 최근 선택 교재 목록에서 예전 이름을 제거하고 새 이름으로 즉시 갱신 (불필요한 5만 건 재스캔 방지)
       setWorkbooks((prev) => {
         const next = prev.map((b) => (b === oldName ? trimmedNew : b));
-        return Array.from(new Set(next)).filter((b) => b && !isExcludedDiagnosticBookName(b)).sort(taxSort);
+        if (!next.includes(trimmedNew)) next.push(trimmedNew);
+        const deduped = Array.from(new Set(next)).filter((b) => b && !isExcludedDiagnosticBookName(b)).sort(taxSort);
+        const payload = { list: deduped, updatedAt: Date.now() };
+        cachedWorkbooksMemory = payload;
+        try {
+          sessionStorage.setItem(WORKBOOKS_CACHE_KEY, JSON.stringify(payload));
+        } catch {}
+        return deduped;
       });
 
       try {
@@ -431,7 +531,6 @@ export function useTaxonomy() {
       );
 
       alert(`✅ '${trimmedNew}'(으)로 교재 이름(source_book_name 및 book_name)이 통째로 변경되었습니다!`);
-      await loadWorkbooks();
       await fetchQuestions(trimmedNew);
     } catch (err: any) {
       alert("이름 변경 실패: " + err.message);
@@ -452,47 +551,82 @@ export function useTaxonomy() {
       setSelectedBook(bookOverride);
     }
     setIsLoading(true);
+    setIsFetchingQuestions(true);
+    setFetchStepMessage(`'${targetBook}' 교재 문항을 조회하고 있습니다...`);
     try {
-      const qidSet = new Set<string>();
+      // 🌟 1단계: question_db 본문 직접 조회와 textbook 매핑 조회를 동시에 병렬 실행 (중복 SELECT * 왕복 제거!)
+      const fetchDirectQuestions = async () => {
+        const rows: any[] = [];
+        let from1 = 0;
+        while (true) {
+          const { data } = await supabase
+            .from("question_db")
+            .select("*")
+            .or(`source_book_name.eq."${targetBook}",book_name.eq."${targetBook}"`)
+            .range(from1, from1 + 999);
+          if (data && data.length > 0) {
+            for (const d of data) {
+              if (!isExcludedDiagnosticQuestionRow(d)) rows.push(d);
+            }
+          }
+          if (!data || data.length < 1000) break;
+          from1 += 1000;
+        }
+        return rows;
+      };
 
-      let from1 = 0;
-      while(true) {
-         const {data} = await supabase
-           .from("question_db")
-           .select("question_id, source_book_name, book_name")
-           .or(`source_book_name.eq."${targetBook}",book_name.eq."${targetBook}"`)
-           .range(from1, from1+999);
-         if (data) {
-           data.forEach((d: any) => {
-             if (!isExcludedDiagnosticQuestionRow(d)) {
-               qidSet.add(String(d.question_id).trim());
-             }
-           });
-         }
-         if (!data || data.length < 1000) break;
-         from1 += 1000;
+      const fetchTextbookLinkedIds = async () => {
+        const ids: string[] = [];
+        const { data: tb } = await supabase.from('textbook').select('book_id').eq('title', targetBook).maybeSingle();
+        if (tb?.book_id) {
+          let from2 = 0;
+          while (true) {
+            const { data } = await supabase
+              .from('textbook_question')
+              .select('question_id')
+              .eq('book_id', tb.book_id)
+              .range(from2, from2 + 999);
+            if (data) {
+              for (const d of data) {
+                if (d.question_id) ids.push(String(d.question_id).trim());
+              }
+            }
+            if (!data || data.length < 1000) break;
+            from2 += 1000;
+          }
+        }
+        return ids;
+      };
+
+      const [directRows, tbLinkedIds] = await Promise.all([
+        fetchDirectQuestions(),
+        fetchTextbookLinkedIds(),
+      ]);
+
+      let fetchedQuestions: any[] = [...directRows];
+      const currentQids = new Set(fetchedQuestions.map(q => String(q.question_id).trim().toLowerCase()));
+
+      // textbook_question 에만 연결되어 아직 로드되지 않은 추가 문항 ID만 조회
+      const extraTbIds = Array.from(new Set(tbLinkedIds)).filter(id => id && !currentQids.has(id.toLowerCase()));
+      if (extraTbIds.length > 0) {
+        const extraPromises = [];
+        for (let i = 0; i < extraTbIds.length; i += 500) {
+          const chunk = extraTbIds.slice(i, i + 500);
+          extraPromises.push(supabase.from("question_db").select("*").in("question_id", chunk));
+        }
+        const extraResults = await Promise.all(extraPromises);
+        extraResults.forEach(({ data }) => {
+          (data || []).forEach((q: any) => {
+            const k = String(q.question_id).trim().toLowerCase();
+            if (!currentQids.has(k)) {
+              currentQids.add(k);
+              fetchedQuestions.push(q);
+            }
+          });
+        });
       }
 
-      const { data: tb } = await supabase.from('textbook').select('book_id').eq('title', targetBook).maybeSingle();
-      if (tb) {
-         let from2 = 0;
-         while(true) {
-           const {data} = await supabase.from('textbook_question').select('question_id').eq('book_id', tb.book_id).range(from2, from2+999);
-           if (data) data.forEach(d => qidSet.add(String(d.question_id).trim()));
-           if (!data || data.length < 1000) break;
-           from2 += 1000;
-         }
-      }
-
-      let fetchedQuestions: any[] = [];
-      const qidArray = Array.from(qidSet);
-      for (let i = 0; i < qidArray.length; i += 500) {
-         const chunk = qidArray.slice(i, i + 500);
-         const {data} = await supabase.from("question_db").select("*").in("question_id", chunk);
-         if (data) fetchedQuestions.push(...data);
-      }
-
-      let currentQids = new Set(fetchedQuestions.map(q => String(q.question_id).trim().toLowerCase()));
+      setFetchStepMessage("연결된 부모·쌍둥이/유사 문항 트리를 구성하고 있습니다...");
 
       while (true) {
         const pids = fetchedQuestions.map(q => q.parent_question_id).filter(id => id && String(id).trim().toLowerCase() !== 'null');
@@ -502,32 +636,41 @@ export function useTaxonomy() {
         if (missingPids.length === 0) break; 
         missingPids.forEach(pid => currentQids.add(pid.toLowerCase()));
         
-        let newlyFetchedParents: any[] = [];
+        const parentPromises = [];
         for (let i = 0; i < missingPids.length; i += 500) {
           const chunk = missingPids.slice(i, i + 500);
-          const { data: chunkData } = await supabase.from("question_db").select("*").in("question_id", chunk);
-          if (chunkData) newlyFetchedParents.push(...chunkData);
+          parentPromises.push(supabase.from("question_db").select("*").in("question_id", chunk));
         }
-        fetchedQuestions = [...fetchedQuestions, ...newlyFetchedParents];
+        const parentResults = await Promise.all(parentPromises);
+        parentResults.forEach(({ data }) => {
+          if (data && data.length > 0) fetchedQuestions.push(...data);
+        });
       }
 
-      let searchedParentIds = new Set<string>();
+      const searchedParentIds = new Set<string>();
       while (true) {
         const qidsToSearch = fetchedQuestions.map(q => String(q.question_id).trim()).filter(id => !searchedParentIds.has(id.toLowerCase()));
         if (qidsToSearch.length === 0) break;
         qidsToSearch.forEach(id => searchedParentIds.add(id.toLowerCase()));
         
-        let newlyFetchedChildren: any[] = [];
+        const childPromises = [];
         for (let i = 0; i < qidsToSearch.length; i += 500) {
           const chunk = qidsToSearch.slice(i, i + 500);
-          const { data: chunkData } = await supabase.from("question_db").select("*").in("parent_question_id", chunk);
-          if (chunkData) {
-            const freshChildren = chunkData.filter(c => !currentQids.has(String(c.question_id).trim().toLowerCase()));
-            newlyFetchedChildren.push(...freshChildren);
-          }
+          childPromises.push(supabase.from("question_db").select("*").in("parent_question_id", chunk));
         }
-        newlyFetchedChildren.forEach(q => currentQids.add(String(q.question_id).trim().toLowerCase()));
-        fetchedQuestions = [...fetchedQuestions, ...newlyFetchedChildren];
+        const childResults = await Promise.all(childPromises);
+        let addedAny = false;
+        childResults.forEach(({ data }) => {
+          (data || []).forEach((c: any) => {
+            const k = String(c.question_id).trim().toLowerCase();
+            if (!currentQids.has(k)) {
+              currentQids.add(k);
+              fetchedQuestions.push(c);
+              addedAny = true;
+            }
+          });
+        });
+        if (!addedAny) break;
       }
 
       const finalMap = new Map();
@@ -537,35 +680,61 @@ export function useTaxonomy() {
         }
       });
       const finalQuestions = Array.from(finalMap.values());
+      setFetchStepMessage("문항 이미지 및 수식 렌더링을 마무리하고 있습니다...");
       await hydrateMissingQuestionImages(supabase, finalQuestions);
 
       setQuestions(sortQuestionsList(finalQuestions));
       setSelectedQuestion(null); 
       setIsEditingContent(false);
-    } catch (e) { console.error(e); } finally { setIsLoading(false); }
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setIsFetchingQuestions(false);
+      setFetchStepMessage("");
+      setIsLoading(false);
+    }
   };
+
+  // 🌟 O(1) 해시맵 인덱싱: 수만 개 master_item / master_category 배열 선형 탐색(.find) 제거
+  const categoryByIdMap = useMemo(() => {
+    const map = new Map<string, any>();
+    for (let i = 0; i < categories.length; i++) {
+      const c = categories[i];
+      if (c?.category_id) map.set(c.category_id, c);
+    }
+    return map;
+  }, [categories]);
+
+  const itemByIdMap = useMemo(() => {
+    const map = new Map<string, any>();
+    for (let i = 0; i < items.length; i++) {
+      const it = items[i];
+      if (it?.item_id) map.set(it.item_id, it);
+    }
+    return map;
+  }, [items]);
 
   const getKoreanPath = (taxId: string, fallbackName?: string) => {
     if (!taxId || taxId === '미분류') return '분류 정보 없음';
-    const matchedItem = items.find(i => i.item_id === taxId);
+    const matchedItem = itemByIdMap.get(taxId);
     if (matchedItem) {
-      const cat = categories.find(c => c.category_id === matchedItem.category_id);
+      const cat = categoryByIdMap.get(matchedItem.category_id);
       const leafName = matchedItem.depth8 || matchedItem.depth7 || matchedItem.depth6 || '기본 유형';
       if (cat) return [cat.depth1, cat.depth2, cat.depth3, cat.depth4, cat.depth5, cat.depth6, cat.depth7, leafName].filter(Boolean).join(' > ');
       return leafName;
     }
-    const cat = categories.find(c => c.category_id === taxId);
+    const cat = categoryByIdMap.get(taxId);
     if (cat) return [cat.depth1, cat.depth2, cat.depth3, cat.depth4, cat.depth5, cat.depth6, cat.depth7].filter(Boolean).join(' > ');
     if (fallbackName) return fallbackName;
-    return '알 수 없는 분류 (DB에 없음)';
+    return isTaxonomyLoading ? '분류 데이터 로딩 중...' : '알 수 없는 분류 (DB에 없음)';
   };
 
   const handleAutoFillTaxonomy = (overrideTaxId?: string) => {
     const taxId = typeof overrideTaxId === 'string' && overrideTaxId ? overrideTaxId : selectedQuestion?.taxonomy_id;
     if (!taxId || taxId === '미분류') return;
-    const matchedItem = items.find(i => i.item_id === taxId);
+    const matchedItem = itemByIdMap.get(taxId);
     const catId = matchedItem ? matchedItem.category_id : taxId;
-    const cat = categories.find(c => c.category_id === catId);
+    const cat = categoryByIdMap.get(catId);
     if (cat) {
       setSelD1(cat.depth1 || ""); setSelD2(cat.depth2 || ""); setSelD3(cat.depth3 || ""); setSelD4(cat.depth4 || "");
       setSelD5(cat.depth5 || ""); setSelD6(cat.depth6 || ""); setSelD7(cat.depth7 || ""); setSelD8(matchedItem ? matchedItem.item_id : "");
@@ -726,7 +895,7 @@ export function useTaxonomy() {
       setIsCloneModalOpen(false);
       
       if (cloneForm.targetBookName.trim() === selectedBook) fetchQuestions(); 
-      else loadWorkbooks(); 
+      else appendWorkbooksToCache([cloneForm.targetBookName.trim()]); 
     } catch (e: any) { alert("복제 실패: " + e.message); } finally { setIsLoading(false); }
   };
 
@@ -1448,7 +1617,7 @@ export function useTaxonomy() {
       setIsTwinModalOpen(false);
       setTwinAiModel('gemini-3.8-flash');
       
-      loadWorkbooks(); 
+      appendWorkbooksToCache(uniqueBooks); 
 
     } catch (e: any) { alert("쌍둥이 저장 실패: " + e.message); } finally { setIsLoading(false); }
   };
@@ -1518,7 +1687,9 @@ export function useTaxonomy() {
   };
 
   return {
-    isAuthorized, perms, isTaxonomyLoading, workbooks, selectedBook, questions, selectedQuestion, isLoading,
+    isAuthorized, perms, isTaxonomyLoading, isWorkbooksLoading, workbookScanProgress,
+    isFetchingQuestions, fetchStepMessage, loadWorkbooks,
+    workbooks, selectedBook, questions, selectedQuestion, isLoading,
     isEditingContent, editForm, cropImageSrc, cropTargetField, hasCropArea, imgRef, selectionBoxRef,
     selD1, selD2, selD3, selD4, selD5, selD6, selD7, selD8,
     isGeneratingTwins, generatedTwins, isTwinModalOpen, isCloneModalOpen, cloneForm,

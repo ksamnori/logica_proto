@@ -25,7 +25,9 @@ const getBoxWidth = (box: any) => {
 
 export default function TaxonomyEditorPage() {
   const {
-    isAuthorized, perms, isTaxonomyLoading, workbooks, selectedBook, questions, selectedQuestion, isLoading,
+    isAuthorized, perms, isTaxonomyLoading, isWorkbooksLoading, workbookScanProgress,
+    isFetchingQuestions, fetchStepMessage, loadWorkbooks,
+    workbooks, selectedBook, questions, selectedQuestion, isLoading,
     isEditingContent, editForm, cropImageSrc, cropTargetField, hasCropArea, imgRef, selectionBoxRef,
     selD1, selD2, selD3, selD4, selD5, selD6, selD7, selD8,
     isGeneratingTwins, generatedTwins, isTwinModalOpen, isCloneModalOpen, cloneForm, twinTargetBook, similarTargetBook,
@@ -126,7 +128,13 @@ export default function TaxonomyEditorPage() {
   };
 
   const renderGroups = React.useMemo(() => {
-    if (!selectedBook) return [];
+    if (!selectedBook || questions.length === 0) return [];
+
+    // 🌟 O(N^2) questions.indexOf 호출을 O(1) Map 조회로 최적화
+    const qIndexMap = new Map<any, number>();
+    for (let i = 0; i < questions.length; i++) {
+      qIndexMap.set(questions[i], i);
+    }
 
     const groups: any[] = [];
     const allRoots = [...normalRoots, ...trueOrphans];
@@ -139,13 +147,13 @@ export default function TaxonomyEditorPage() {
 
       if (currentBookItems.length > 0) {
         const sortedCurrent = [...currentBookItems].sort((a, b) => {
-           return questions.indexOf(a) - questions.indexOf(b);
+           return (qIndexMap.get(a) ?? 999999) - (qIndexMap.get(b) ?? 999999);
         });
 
         groups.push({
           root,
           descendants,
-          repIndex: questions.indexOf(sortedCurrent[0])
+          repIndex: qIndexMap.get(sortedCurrent[0]) ?? 999999
         });
       }
     }
@@ -256,7 +264,35 @@ export default function TaxonomyEditorPage() {
     }
   }, [cropImageSrc, handleCropMouseMove, handleCropMouseUp]);
 
-  if (isAuthorized === null) return <div className="p-10 text-center font-bold text-slate-400">권한 확인 중...</div>;
+  if (isAuthorized === null) {
+    return (
+      <div className="flex flex-col h-full bg-slate-50 font-pretendard p-6 overflow-hidden">
+        <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm flex justify-between items-center mb-4 shrink-0">
+          <div>
+            <h1 className="text-2xl font-bold text-brand flex items-center gap-2">
+              <span>⚙️</span> 문제 교정 및 쌍둥이/유사 문제 생성
+            </h1>
+            <p className="text-sm font-bold text-slate-400 mt-1">
+              사용 권한 확인 및 에디터 워크스페이스를 준비하고 있습니다...
+            </p>
+          </div>
+          <div className="flex items-center gap-2 px-3.5 py-2 bg-blue-50 text-brand rounded-xl border border-blue-200 text-xs font-bold">
+            <span className="w-3.5 h-3.5 border-2 border-brand border-t-transparent rounded-full animate-spin" />
+            <span>초기화 중...</span>
+          </div>
+        </div>
+        <div className="flex-1 bg-white rounded-2xl border border-slate-200 shadow-sm flex flex-col items-center justify-center gap-4 p-10">
+          <div className="w-12 h-12 border-4 border-brand border-t-transparent rounded-full animate-spin" />
+          <p className="text-base font-bold text-slate-700">
+            문제 교정 및 쌍둥이/유사 생성 페이지를 불러오는 중입니다...
+          </p>
+          <p className="text-xs font-bold text-slate-400">
+            잠시만 기다려주세요. 권한 확인 직후 분류 데이터와 교재 목록이 열립니다.
+          </p>
+        </div>
+      </div>
+    );
+  }
   if (isAuthorized === false) return null;
 
   return (
@@ -650,12 +686,37 @@ export default function TaxonomyEditorPage() {
       )}
 
       {/* 메인 UI */}
-      <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm flex flex-col md:flex-row justify-between items-center mb-4 shrink-0 gap-4">
+      <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm flex flex-col md:flex-row justify-between items-center mb-4 shrink-0 gap-4 relative overflow-hidden">
+        {(isTaxonomyLoading || isWorkbooksLoading || isFetchingQuestions) && (
+          <div className="absolute top-0 left-0 right-0 h-1 bg-slate-100 overflow-hidden">
+            <div className="h-full bg-gradient-to-r from-brand via-indigo-500 to-fuchsia-500 animate-pulse w-full" />
+          </div>
+        )}
         <div>
           <h1 className="text-2xl font-bold text-brand flex items-center gap-2">
             <span>⚙️</span> 문제 교정 및 쌍둥이/유사 문제 생성
           </h1>
           <p className="text-sm font-bold text-slate-500 mt-1">AI 자동 분류가 미흡한 문제를 확인하고, 정확한 8단계 뎁스로 업데이트 하거나 문항을 직접 수정합니다.</p>
+        </div>
+        <div className="flex items-center gap-2 shrink-0 flex-wrap">
+          {isTaxonomyLoading && (
+            <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">
+              <span className="w-3 h-3 border-2 border-indigo-600 border-t-transparent rounded-full animate-spin" />
+              8단계 분류 체계 로딩 중...
+            </span>
+          )}
+          {isWorkbooksLoading && (
+            <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-amber-50 text-amber-700 border border-amber-200">
+              <span className="w-3 h-3 border-2 border-amber-600 border-t-transparent rounded-full animate-spin" />
+              교재 목록 스캔 중{workbookScanProgress > 0 ? ` (${workbookScanProgress}%)` : "..."}
+            </span>
+          )}
+          {isFetchingQuestions && (
+            <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-blue-50 text-brand border border-blue-200">
+              <span className="w-3 h-3 border-2 border-brand border-t-transparent rounded-full animate-spin" />
+              {fetchStepMessage || "문항 로딩 중..."}
+            </span>
+          )}
         </div>
       </div>
 
@@ -765,9 +826,15 @@ export default function TaxonomyEditorPage() {
               className="w-full px-3.5 py-2 border border-slate-300 rounded-lg font-bold text-left bg-slate-50 hover:bg-white text-sm shadow-sm outline-none focus:ring-2 focus:ring-brand flex items-center justify-between gap-2 transition-colors"
             >
               <span className={`truncate ${selectedBook ? "text-brand" : "text-slate-500"}`}>
-                {selectedBook || `교재를 선택하세요... (조건 일치: ${filteredWorkbooks.length}건)`}
+                {selectedBook ||
+                  (isWorkbooksLoading && workbooks.length === 0
+                    ? `교재 목록을 불러오는 중입니다... (${workbookScanProgress}%)`
+                    : `교재를 선택하세요... (조건 일치: ${filteredWorkbooks.length}건)`)}
               </span>
               <span className="flex items-center gap-1.5 shrink-0">
+                {isWorkbooksLoading && (
+                  <span className="w-3 h-3 border-2 border-brand border-t-transparent rounded-full animate-spin" />
+                )}
                 <span className="text-[11px] bg-blue-50 text-brand border border-blue-200 px-1.5 py-0.5 rounded font-bold">
                   {filteredWorkbooks.length}건
                 </span>
@@ -863,6 +930,16 @@ export default function TaxonomyEditorPage() {
             )}
           </div>
 
+          <button
+            type="button"
+            onClick={() => loadWorkbooks(true)}
+            disabled={isWorkbooksLoading}
+            className="whitespace-nowrap shrink-0 px-3 py-2 bg-white hover:bg-slate-100 text-slate-600 font-bold rounded-lg shadow-sm border border-slate-300 transition-colors disabled:opacity-50 text-xs"
+            title="외부에서 새 교재를 업로드한 경우 전체 문제은행 교재 목록을 새로 스캔합니다."
+          >
+            {isWorkbooksLoading ? `🔄 스캔중(${workbookScanProgress}%)` : "🔄 목록 갱신"}
+          </button>
+
           <button onClick={handleRenameBook} disabled={!selectedBook || isLoading} className="whitespace-nowrap shrink-0 px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-lg shadow-sm border border-slate-300 transition-colors disabled:opacity-50" title="선택한 문제지 덩어리의 이름을 통째로 변경합니다.">
             ✏️ 이름 일괄 변경
           </button>
@@ -872,10 +949,17 @@ export default function TaxonomyEditorPage() {
               if (selectedBook) recordRecentBook(selectedBook);
               fetchQuestions();
             }}
-            disabled={!selectedBook || isLoading}
-            className="px-6 py-2 bg-brand hover:bg-blue-900 text-white font-bold rounded-lg shadow-sm disabled:opacity-50 transition-colors whitespace-nowrap shrink-0"
+            disabled={!selectedBook || isLoading || isFetchingQuestions}
+            className="px-6 py-2 bg-brand hover:bg-blue-900 text-white font-bold rounded-lg shadow-sm disabled:opacity-50 transition-colors whitespace-nowrap shrink-0 flex items-center gap-1.5"
           >
-            조회하기
+            {isFetchingQuestions ? (
+              <>
+                <span className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                <span>로딩 중...</span>
+              </>
+            ) : (
+              "조회하기"
+            )}
           </button>
         </div>
       </div>
@@ -912,9 +996,52 @@ export default function TaxonomyEditorPage() {
               )}
             </div>
           </div>
-          <div className="flex-1 overflow-y-auto p-3 custom-scroll bg-slate-50/50">
-            {questions.length === 0 ? (
-              <div className="h-full flex items-center justify-center text-slate-400 font-bold text-sm">교재를 조회해주세요.</div>
+          <div className="flex-1 overflow-y-auto p-3 custom-scroll bg-slate-50/50 relative">
+            {isFetchingQuestions && questions.length > 0 && (
+              <div className="sticky top-0 left-0 right-0 z-30 mb-3 p-3 rounded-xl bg-white/95 backdrop-blur-sm border border-blue-200 shadow-md flex items-center gap-2.5 text-xs font-bold text-brand">
+                <span className="w-4 h-4 border-2 border-brand border-t-transparent rounded-full animate-spin shrink-0" />
+                <span className="truncate">{fetchStepMessage || "교재 문항을 불러오는 중입니다..."}</span>
+              </div>
+            )}
+            {isFetchingQuestions && questions.length === 0 ? (
+              <div className="h-full flex flex-col items-center justify-center gap-3 p-6 text-center">
+                <div className="w-10 h-10 border-4 border-brand border-t-transparent rounded-full animate-spin" />
+                <p className="font-bold text-slate-700 text-sm">
+                  {fetchStepMessage || "선택하신 교재의 문항을 불러오고 있습니다..."}
+                </p>
+                <div className="w-full space-y-2.5 mt-2">
+                  {[1, 2, 3, 4].map((idx) => (
+                    <div key={idx} className="h-16 bg-white rounded-xl border border-slate-200 p-3 animate-pulse flex flex-col justify-between">
+                      <div className="h-3 bg-slate-200 rounded w-1/3" />
+                      <div className="h-2.5 bg-slate-100 rounded w-4/5" />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : questions.length === 0 ? (
+              <div className="h-full flex flex-col items-center justify-center text-center gap-2.5 p-6">
+                {isWorkbooksLoading || isTaxonomyLoading ? (
+                  <>
+                    <div className="w-8 h-8 border-3 border-indigo-500 border-t-transparent rounded-full animate-spin" />
+                    <p className="text-slate-600 font-bold text-sm">
+                      초기 교재 목록 및 분류 체계를 불러오는 중입니다...
+                    </p>
+                    {isWorkbooksLoading && workbookScanProgress > 0 && (
+                      <div className="w-48 bg-slate-200 h-2 rounded-full overflow-hidden mt-1">
+                        <div
+                          className="h-full bg-indigo-600 transition-all duration-200"
+                          style={{ width: `${workbookScanProgress}%` }}
+                        />
+                      </div>
+                    )}
+                    <p className="text-xs text-slate-400 font-medium">
+                      상단에 이미 로드된 교재는 지금 바로 선택하여 조회하실 수 있습니다.
+                    </p>
+                  </>
+                ) : (
+                  <p className="text-slate-400 font-bold text-sm">상단에서 교재를 선택해 조회해주세요.</p>
+                )}
+              </div>
             ) : (
               <div className="flex flex-col gap-3">
                 {renderGroups.map((group: any, gIdx: number) => {
@@ -1178,10 +1305,30 @@ export default function TaxonomyEditorPage() {
         {/* 우측: 뷰어 & 수정 에디터 */}
         <div className="flex-1 bg-white border border-slate-200 rounded-2xl shadow-sm flex flex-col overflow-hidden relative">
           
-          {!selectedQuestion ? (
-            <div className="h-full flex flex-col items-center justify-center text-slate-400 font-bold opacity-60">
-              <span className="text-5xl mb-4">👈</span>
-              <p>좌측에서 수정할 문제를 선택해주세요.</p>
+          {isFetchingQuestions && !selectedQuestion ? (
+            <div className="h-full flex flex-col items-center justify-center text-slate-600 font-bold gap-3 p-8">
+              <div className="w-12 h-12 border-4 border-brand border-t-transparent rounded-full animate-spin" />
+              <p className="text-base">{fetchStepMessage || "선택하신 교재의 문항 데이터를 불러오고 있습니다..."}</p>
+              <p className="text-xs text-slate-400 font-medium">문항 로드가 완료되면 좌측 리스트에서 바로 선택하실 수 있습니다.</p>
+            </div>
+          ) : !selectedQuestion ? (
+            <div className="h-full flex flex-col items-center justify-center text-slate-400 font-bold opacity-75 gap-2 p-8 text-center">
+              {isTaxonomyLoading || isWorkbooksLoading ? (
+                <>
+                  <div className="w-10 h-10 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin mb-2" />
+                  <p className="text-slate-600 text-base">
+                    에디터 분류 체계 및 교재 인덱스를 준비하고 있습니다...
+                  </p>
+                  <p className="text-xs text-slate-400 font-medium">
+                    첫 로드 이후에는 캐시되어 대기 시간 없이 즉시 열립니다.
+                  </p>
+                </>
+              ) : (
+                <>
+                  <span className="text-5xl mb-2">👈</span>
+                  <p>{questions.length > 0 ? "좌측에서 수정할 문제를 선택해주세요." : "상단에서 작업할 교재를 먼저 선택해주세요."}</p>
+                </>
+              )}
             </div>
           ) : (
             <>

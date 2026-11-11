@@ -63,6 +63,8 @@ export default function AttendanceControlPanel({ classStats, todayIso, onQueueMe
 
   const fetchTimeoutRef = useRef<any>(null);
   const isBulkProcessing = useRef<boolean>(false);
+  const selectedAttClassIdRef = useRef<string>(selectedAttClassId);
+  selectedAttClassIdRef.current = selectedAttClassId;
 
   useEffect(() => {
     const closeMenu = (e: MouseEvent) => {
@@ -209,20 +211,33 @@ export default function AttendanceControlPanel({ classStats, todayIso, onQueueMe
   useEffect(() => {
     if (selectedAttClassId) {
       requestFetch(selectedAttClassId);
-      const syncInterval = setInterval(() => { if (!isBulkProcessing.current) fetchAttendance(selectedAttClassId); }, 5000);
-      return () => clearInterval(syncInterval);
+      const syncInterval = setInterval(() => {
+        if (typeof document !== "undefined" && document.visibilityState !== "visible") return;
+        if (!isBulkProcessing.current) fetchAttendance(selectedAttClassId);
+      }, 15000);
+      const handleVisible = () => {
+        if (document.visibilityState === "visible" && !isBulkProcessing.current) {
+          requestFetch(selectedAttClassId);
+        }
+      };
+      document.addEventListener("visibilitychange", handleVisible);
+      return () => {
+        clearInterval(syncInterval);
+        document.removeEventListener("visibilitychange", handleVisible);
+      };
     } else {
       setAttStudents([]);
     }
   }, [selectedAttClassId]);
 
-  // 🌟 [핵심 수정] 실시간 화면 새로고침 센서에서 대기열을 덮어쓰는 불필요한 알림톡 전송 코드를 완전히 제거했습니다.
+  // 🌟 [핵심 수정] selectedAttClassIdRef 참조로 반 필터 전환 시 채널 재구독 폭주(IncreaseSubscriptionConnectionPool) 원천 차단
   useEffect(() => {
     const attChannel = supabase
       .channel('global_attendance_realtime')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'attendance' }, () => {
           if (isBulkProcessing.current) return; 
-          if (selectedAttClassId) requestFetch(selectedAttClassId);
+          const curId = selectedAttClassIdRef.current;
+          if (curId) requestFetch(curId);
       }).subscribe();
 
     // 🌟 clinic_session_state의 UPDATE(학생 하트비트 last_seen_at)를 구독하면
@@ -231,18 +246,20 @@ export default function AttendanceControlPanel({ classStats, todayIso, onQueueMe
       .channel('global_clinic_realtime_radar')
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'clinic_session_state' }, () => {
           if (isBulkProcessing.current) return;
-          if (selectedAttClassId) requestFetch(selectedAttClassId);
+          const curId = selectedAttClassIdRef.current;
+          if (curId) requestFetch(curId);
       })
       .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'clinic_session_state' }, () => {
           if (isBulkProcessing.current) return;
-          if (selectedAttClassId) requestFetch(selectedAttClassId);
+          const curId = selectedAttClassIdRef.current;
+          if (curId) requestFetch(curId);
       }).subscribe();
 
     return () => { 
       supabase.removeChannel(attChannel); 
       supabase.removeChannel(clinicChannel); 
     };
-  }, [selectedAttClassId]);
+  }, []);
 
   const baseStudents = useMemo(() => {
     let filtered = attStudents;

@@ -2,6 +2,7 @@
 "use server";
 
 import { createClient } from '@supabase/supabase-js';
+import { filterNonConfidentialQids, isConfidentialExamText } from '@/lib/confidentialExamGuard';
 
 // RLS를 우회하여 강제로 처리하기 위해 Service Role Key 사용
 const getAdminClient = () => {
@@ -176,9 +177,14 @@ export async function generateIncorrectClinic(params: {
     tenantId: string;
 }) {
     const supabaseAdmin = getAdminClient();
-    const { studentId, studentName, targetClassId, targetInstructorId, uniqueQids, tenantId } = params;
+    const { studentId, studentName, targetClassId, targetInstructorId, uniqueQids: rawUniqueQids, tenantId } = params;
 
     try {
+        // 🛡️ [대외비 2차 방어막] 누적 오답 모음 생성 시 입학테스트·진단평가 문항을 서버에서 강제 필터링
+        const uniqueQids = await filterNonConfidentialQids(supabaseAdmin, rawUniqueQids || []);
+        if (uniqueQids.length === 0) {
+            return { success: false, error: "정정할 일반 오답 문항이 없습니다. (진단평가 문항은 대외비로 제외됩니다)" };
+        }
         const { data: rawOldPrints } = await supabaseAdmin.from('exam_assignment')
             .select('assignment_id, exam_id, exam_master!inner(exam_type, title)')
             .eq('student_id', studentId)
@@ -314,10 +320,13 @@ export async function generateIncorrectPrintServerAction(params: {
 }) {
     const supabaseAdmin = getAdminClient();
     const { studentId, studentName, incQIds, sourceTitle, syncIncorrectRecord = true, statusMap } = params;
-    const uIds = Array.from(new Set((incQIds || []).filter(Boolean).map(String)));
-    if (uIds.length === 0) return { success: true };
+    if (isConfidentialExamText(sourceTitle)) return { success: true };
+    const rawUIds = Array.from(new Set((incQIds || []).filter(Boolean).map(String)));
+    if (rawUIds.length === 0) return { success: true };
 
     try {
+        const uIds = await filterNonConfidentialQids(supabaseAdmin, rawUIds);
+        if (uIds.length === 0) return { success: true };
         if (syncIncorrectRecord) {
             const incUpserts = uIds.map(qid => ({
                 student_id: studentId,
@@ -565,6 +574,8 @@ export async function appendToExistingIncorrectPrintAction(studentId: string, qu
     const supabaseAdmin = getAdminClient();
 
     try {
+        const safeQids = await filterNonConfidentialQids(supabaseAdmin, [questionId]);
+        if (safeQids.length === 0) return { success: true };
         const { data: assignments } = await supabaseAdmin.from('exam_assignment')
             .select('assignment_id, exam_id, status, exam_master!inner(exam_type, total_questions)')
             .eq('student_id', studentId)

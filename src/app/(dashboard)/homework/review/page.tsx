@@ -716,7 +716,7 @@ function HomeworkReviewContent() {
               const pageNum = tq.page_number || q.page_number || q.final_printed_page || q.detected_page_num || '';
               const qNumStr = tq.question_number || q.question_number;
               const parsed = parseQNum(qNumStr);
-              const item = { ...q, tq_id: tq.tq_id, question: tq.question || q.question, answer: tq.answer || q.answer, page_number: pageNum, question_number: qNumStr };
+              const item = { ...q, tq_id: tq.tq_id, question_id: tq.question_id || q.question_id || null, question: tq.question || q.question, answer: tq.answer || q.answer, page_number: pageNum, question_number: qNumStr };
 
               let gId = '';
               let isMerged = false;
@@ -786,6 +786,7 @@ function HomeworkReviewContent() {
     let gradedCount = 0;
     let totalScoreSum = 0;
     const incorrectIds: any[] = [];
+    const completedTqIds: number[] = [];
     const flatQuestions = groups.reduce((acc, g) => acc.concat(g.items), []);
     const totalGroups = groups.length || 1;
     const defaultScore = 100 / (flatQuestions.length || 1);
@@ -795,6 +796,8 @@ function HomeworkReviewContent() {
       const m = newMap[q.tq_id];
       if (m) {
         gradedCount++;
+        const numTq = Number(q.tq_id);
+        if (!isNaN(numTq) && numTq > 0) completedTqIds.push(numTq);
         const assignedScore = q.assigned_score ?? (100 / totalGroups);
         const { newEarned, isCorrectEq } = calcScoreRatio(m, assignedScore || defaultScore, gradingCodeMetaRef.current, isAdm);
         totalScoreSum += newEarned;
@@ -824,13 +827,24 @@ function HomeworkReviewContent() {
       if (existing) currentResultId = existing.hw_result_id;
     }
 
+    const uniqueCompletedTqIds = Array.from(new Set(completedTqIds));
     if (currentResultId) {
       await supabase.from('student_homework_result').update({
-        status: newStatus, correct_count: correctCount, incorrect_questions: incorrectIds, checked_at: new Date().toISOString()
+        status: newStatus,
+        correct_count: correctCount,
+        incorrect_questions: incorrectIds,
+        completed_tq_ids: uniqueCompletedTqIds,
+        checked_at: new Date().toISOString()
       }).eq('hw_result_id', currentResultId);
     } else {
       const { data } = await supabase.from('student_homework_result').insert({
-        homework_id: Number(homeworkId), student_id: studentId, status: newStatus, correct_count: correctCount, incorrect_questions: incorrectIds, checked_at: new Date().toISOString()
+        homework_id: Number(homeworkId),
+        student_id: studentId,
+        status: newStatus,
+        correct_count: correctCount,
+        incorrect_questions: incorrectIds,
+        completed_tq_ids: uniqueCompletedTqIds,
+        checked_at: new Date().toISOString()
       }).select('hw_result_id').single();
       if (data) hwResultIdRef.current = data.hw_result_id;
     }
@@ -869,19 +883,25 @@ function HomeworkReviewContent() {
           await supabase.from('student_answer').insert({ exam_assignment_id: assignmentId, student_id: studentId, question_id: tqId, grading_code: nextMark, is_correct: isCorrect, earned_score: earnedScore });
         }
 
-        if (isIncorrect) {
-          if (existingI) await supabase.from('student_incorrect_record').update({ status: nextMark, resolved_at: null, source_type: dynamicSourceType }).eq('record_id', existingI.record_id);
-          else await supabase.from('student_incorrect_record').insert({ student_id: studentId, question_id: tqId, source_type: dynamicSourceType, status: nextMark });
-        } else if (isCorrect && existingI) {
-          await supabase.from('student_incorrect_record').update({ status: nextMark, resolved_at: new Date().toISOString(), source_type: dynamicSourceType }).eq('record_id', existingI.record_id);
-        } else if (isCanceling && existingI) {
-          await supabase.from('student_incorrect_record').delete().eq('record_id', existingI.record_id);
+        if (!isAdm) {
+          if (isIncorrect) {
+            if (existingI) await supabase.from('student_incorrect_record').update({ status: nextMark, resolved_at: null, source_type: dynamicSourceType }).eq('record_id', existingI.record_id);
+            else await supabase.from('student_incorrect_record').insert({ student_id: studentId, question_id: tqId, source_type: dynamicSourceType, status: nextMark });
+          } else if (isCorrect && existingI) {
+            await supabase.from('student_incorrect_record').update({ status: nextMark, resolved_at: new Date().toISOString(), source_type: dynamicSourceType }).eq('record_id', existingI.record_id);
+          } else if (isCanceling && existingI) {
+            await supabase.from('student_incorrect_record').delete().eq('record_id', existingI.record_id);
+          }
         }
       } else {
-        const [ { data: existingA }, { data: existingI } ] = await Promise.all([
+        const resolvedQuestionId = targetQ?.question_id || null;
+        const [ { data: existingA }, { data: incList } ] = await Promise.all([
           supabase.from('student_homework_answer').select('hw_answer_id').eq('homework_id', homeworkId).eq('student_id', studentId).eq('tq_id', tqId).maybeSingle(),
-          supabase.from('student_incorrect_record').select('record_id').eq('student_id', studentId).eq('tq_id', tqId).maybeSingle()
+          supabase.from('student_incorrect_record').select('record_id, tq_id, question_id').eq('student_id', studentId)
         ]);
+        const existingI = (incList || []).find((r: any) =>
+          String(r.tq_id) === String(tqId) || (resolvedQuestionId && r.question_id && String(r.question_id) === String(resolvedQuestionId))
+        );
 
         if (existingA) {
           await supabase.from('student_homework_answer').update({ grading_code: nextMark, is_correct: isCorrect, earned_score: earnedScore }).eq('hw_answer_id', existingA.hw_answer_id);
@@ -890,8 +910,8 @@ function HomeworkReviewContent() {
         }
 
         if (isIncorrect) {
-          if (existingI) await supabase.from('student_incorrect_record').update({ status: nextMark, resolved_at: null, source_type: dynamicSourceType }).eq('record_id', existingI.record_id);
-          else await supabase.from('student_incorrect_record').insert({ student_id: studentId, tq_id: tqId, source_type: dynamicSourceType, status: nextMark });
+          if (existingI) await supabase.from('student_incorrect_record').update({ status: nextMark, resolved_at: null, source_type: dynamicSourceType, tq_id: tqId, question_id: resolvedQuestionId }).eq('record_id', existingI.record_id);
+          else await supabase.from('student_incorrect_record').insert({ student_id: studentId, tq_id: tqId, question_id: resolvedQuestionId, source_type: dynamicSourceType, status: nextMark });
         } else if (isCorrect && existingI) {
           await supabase.from('student_incorrect_record').update({ status: nextMark, resolved_at: new Date().toISOString(), source_type: dynamicSourceType }).eq('record_id', existingI.record_id);
         } else if (isCanceling && existingI) {
@@ -948,53 +968,67 @@ function HomeworkReviewContent() {
           if (exA) ansUpdates.push({ answer_id: exA.answer_id, grading_code: mark, is_correct: itemCorrect, earned_score: earnedScore });
           else ansInserts.push({ exam_assignment_id: assignmentId, student_id: studentId, question_id: q.tq_id, grading_code: mark, is_correct: itemCorrect, earned_score: earnedScore });
 
-          const exI = existingInc?.find(i => String(i.question_id) === String(q.tq_id));
-          if (isIncorrect) {
-            if (exI) incUpdates.push({ record_id: exI.record_id, status: mark, resolved_at: null, source_type: dynamicSourceType });
-            else incInserts.push({ student_id: studentId, question_id: q.tq_id, source_type: dynamicSourceType, status: mark });
-          } else if (itemCorrect && exI) {
-            incUpdates.push({ record_id: exI.record_id, status: mark, resolved_at: new Date().toISOString(), source_type: dynamicSourceType });
+          if (!isAdm) {
+            const exI = existingInc?.find(i => String(i.question_id) === String(q.tq_id));
+            if (isIncorrect) {
+              if (exI) incUpdates.push({ record_id: exI.record_id, status: mark, resolved_at: null, source_type: dynamicSourceType });
+              else incInserts.push({ student_id: studentId, question_id: q.tq_id, source_type: dynamicSourceType, status: mark });
+            } else if (itemCorrect && exI) {
+              incUpdates.push({ record_id: exI.record_id, status: mark, resolved_at: new Date().toISOString(), source_type: dynamicSourceType });
+            }
           }
         });
 
-        if (ansInserts.length > 0) await supabase.from('student_answer').insert(ansInserts);
-        for(const u of ansUpdates) await supabase.from('student_answer').update({ grading_code: u.grading_code, is_correct: u.is_correct, earned_score: u.earned_score }).eq('answer_id', u.answer_id);
-        
-        if (incInserts.length > 0) await supabase.from('student_incorrect_record').insert(incInserts);
-        for(const u of incUpdates) await supabase.from('student_incorrect_record').update({ status: u.status, resolved_at: u.resolved_at, source_type: u.source_type }).eq('record_id', u.record_id);
+        await Promise.all([
+          ansInserts.length > 0 ? supabase.from('student_answer').insert(ansInserts) : Promise.resolve(),
+          ...ansUpdates.map(u => supabase.from('student_answer').update({ grading_code: u.grading_code, is_correct: u.is_correct, earned_score: u.earned_score }).eq('answer_id', u.answer_id)),
+          incInserts.length > 0 ? supabase.from('student_incorrect_record').insert(incInserts) : Promise.resolve(),
+          ...incUpdates.map(u => supabase.from('student_incorrect_record').update({ status: u.status, resolved_at: u.resolved_at, source_type: u.source_type }).eq('record_id', u.record_id)),
+        ]);
 
       } else {
         const [ { data: existingAns }, { data: existingInc } ] = await Promise.all([
           supabase.from('student_homework_answer').select('hw_answer_id, tq_id').eq('homework_id', homeworkId).eq('student_id', studentId),
-          supabase.from('student_incorrect_record').select('record_id, tq_id').eq('student_id', studentId)
+          supabase.from('student_incorrect_record').select('record_id, tq_id, question_id').eq('student_id', studentId)
         ]);
 
         const ansInserts: any[] = []; const ansUpdates: any[] = [];
         const incInserts: any[] = []; const incUpdates: any[] = [];
+        const insertedIncKeys = new Set<string>();
 
         targets.forEach((q: any) => {
           const qAssigned = q.assigned_score ?? (100 / totalQ);
           const { newEarned: earnedScore, isCorrectEq } = calcScoreRatio(mark, qAssigned, gradingCodeMetaRef.current, false);
           const itemCorrect = isCorrect || isCorrectEq;
+          const resolvedQid = q.question_id || null;
 
           const exA = existingAns?.find(a => String(a.tq_id) === String(q.tq_id));
           if (exA) ansUpdates.push({ hw_answer_id: exA.hw_answer_id, grading_code: mark, is_correct: itemCorrect, earned_score: earnedScore });
           else ansInserts.push({ homework_id: Number(homeworkId), student_id: studentId, tq_id: q.tq_id, grading_code: mark, is_correct: itemCorrect, earned_score: earnedScore });
 
-          const exI = existingInc?.find(i => String(i.tq_id) === String(q.tq_id));
+          const exI = existingInc?.find(i =>
+            String(i.tq_id) === String(q.tq_id) || (resolvedQid && i.question_id && String(i.question_id) === String(resolvedQid))
+          );
           if (isIncorrect) {
-            if (exI) incUpdates.push({ record_id: exI.record_id, status: mark, resolved_at: null, source_type: dynamicSourceType });
-            else incInserts.push({ student_id: studentId, tq_id: q.tq_id, source_type: dynamicSourceType, status: mark });
+            if (exI) incUpdates.push({ record_id: exI.record_id, status: mark, resolved_at: null, source_type: dynamicSourceType, tq_id: q.tq_id, question_id: resolvedQid });
+            else {
+              const dedupKey = `${q.tq_id}_${resolvedQid || ''}`;
+              if (!insertedIncKeys.has(dedupKey)) {
+                insertedIncKeys.add(dedupKey);
+                incInserts.push({ student_id: studentId, tq_id: q.tq_id, question_id: resolvedQid, source_type: dynamicSourceType, status: mark });
+              }
+            }
           } else if (itemCorrect && exI) {
             incUpdates.push({ record_id: exI.record_id, status: mark, resolved_at: new Date().toISOString(), source_type: dynamicSourceType });
           }
         });
 
-        if (ansInserts.length > 0) await supabase.from('student_homework_answer').insert(ansInserts);
-        for(const u of ansUpdates) await supabase.from('student_homework_answer').update({ grading_code: u.grading_code, is_correct: u.is_correct, earned_score: u.earned_score }).eq('hw_answer_id', u.hw_answer_id);
-        
-        if (incInserts.length > 0) await supabase.from('student_incorrect_record').insert(incInserts);
-        for(const u of incUpdates) await supabase.from('student_incorrect_record').update({ status: u.status, resolved_at: u.resolved_at, source_type: u.source_type }).eq('record_id', u.record_id);
+        await Promise.all([
+          ansInserts.length > 0 ? supabase.from('student_homework_answer').insert(ansInserts) : Promise.resolve(),
+          ...ansUpdates.map(u => supabase.from('student_homework_answer').update({ grading_code: u.grading_code, is_correct: u.is_correct, earned_score: u.earned_score }).eq('hw_answer_id', u.hw_answer_id)),
+          incInserts.length > 0 ? supabase.from('student_incorrect_record').insert(incInserts) : Promise.resolve(),
+          ...incUpdates.map(u => supabase.from('student_incorrect_record').update({ status: u.status, resolved_at: u.resolved_at, source_type: u.source_type, ...(u.tq_id !== undefined ? { tq_id: u.tq_id, question_id: u.question_id } : {}) }).eq('record_id', u.record_id)),
+        ]);
       }
 
       await updateHomeworkResult(newMap);

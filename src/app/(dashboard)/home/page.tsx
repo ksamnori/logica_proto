@@ -92,6 +92,8 @@ export default function TeacherDashboardPage() {
   const [allowedMenus, setAllowedMenus] = useState<string[]>([]);
   const isBulkProcessing = useRef<boolean>(false);
   const fetchTimeoutRef = useRef<any>(null);
+  const selectedClassIdRef = useRef<string>(selectedClassId);
+  selectedClassIdRef.current = selectedClassId;
 
   const requestFetch = (classId: string) => {
     if (isBulkProcessing.current) return;
@@ -178,10 +180,21 @@ export default function TeacherDashboardPage() {
       requestFetch(selectedClassId);
 
       const syncInterval = setInterval(() => {
+        if (typeof document !== "undefined" && document.visibilityState !== "visible") return;
         if (!isBulkProcessing.current) fetchAttendance(selectedClassId);
-      }, 5000);
+      }, 20000);
 
-      return () => clearInterval(syncInterval);
+      const handleVisible = () => {
+        if (document.visibilityState === "visible" && !isBulkProcessing.current) {
+          requestFetch(selectedClassId);
+        }
+      };
+      document.addEventListener("visibilitychange", handleVisible);
+
+      return () => {
+        clearInterval(syncInterval);
+        document.removeEventListener("visibilitychange", handleVisible);
+      };
     }
   }, [selectedClassId, myClasses.length]);
 
@@ -221,18 +234,22 @@ export default function TeacherDashboardPage() {
         fetchMyQueue();
       }).subscribe();
 
-    const attendanceChannel = supabase.channel('teacher_attendance_realtime')
+    const attendanceChannel = supabase.channel(`teacher_attendance_realtime_${tenantId}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'attendance' }, () => {
-          if (selectedClassId !== 'all') requestFetch(selectedClassId);
+          const curId = selectedClassIdRef.current;
+          if (curId && curId !== 'all') requestFetch(curId);
       }).subscribe();
 
     // 🌟 clinic_session_state의 UPDATE(하트비트) 구독으로 인한 IncreaseSubscriptionConnectionPool 에러 방지 (INSERT/DELETE만 구독)
-    const clinicChannel = supabase.channel('teacher_clinic_realtime')
+    // 🌟 selectedClassIdRef 참조로 반 탭 전환 시 채널 재구독(unsubscribe/subscribe 폭주) 원천 차단
+    const clinicChannel = supabase.channel(`teacher_clinic_realtime_${tenantId}`)
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'clinic_session_state' }, () => {
-          if (selectedClassId !== 'all') requestFetch(selectedClassId);
+          const curId = selectedClassIdRef.current;
+          if (curId && curId !== 'all') requestFetch(curId);
       })
       .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'clinic_session_state' }, () => {
-          if (selectedClassId !== 'all') requestFetch(selectedClassId);
+          const curId = selectedClassIdRef.current;
+          if (curId && curId !== 'all') requestFetch(curId);
       }).subscribe();
 
     return () => {
@@ -240,7 +257,7 @@ export default function TeacherDashboardPage() {
       supabase.removeChannel(attendanceChannel);
       supabase.removeChannel(clinicChannel);
     };
-  }, [tenantId, myClasses.length, selectedClassId]);
+  }, [tenantId, myClasses.length]);
 
   const loadPermissions = async (role: string, tId: string, isGodMode: boolean) => {
     let fetchedMenus: string[] = [];
@@ -458,48 +475,57 @@ export default function TeacherDashboardPage() {
     if (activeWorkbooks.length > 0 && activeStudentIds.length > 0) {
       let totalAssignedPages = 0;
       let totalCompletedPages = 0;
+      const wbIds = activeWorkbooks.map((w: any) => w.book_id);
+
+      const [{ data: allWbQs }, { data: allWbHws }] = await Promise.all([
+        supabase.from("textbook_question").select("book_id, tq_id, page_number").in("book_id", wbIds),
+        supabase.from("homework_assignment")
+          .select("book_id, target_questions, student_homework_result(student_id, status, completed_tq_ids)")
+          .eq("class_id", classId)
+          .in("book_id", wbIds)
+      ]);
+
+      const DONE_HW_STATUSES = new Set(["채점완료", "제출완료", "완료", "최종완료"]);
 
       for (const wb of activeWorkbooks) {
         const wbId = wb.book_id;
-        
-        const { data: qData } = await supabase.from("textbook_question").select("tq_id, page_number").eq("book_id", wbId);
-        if (!qData || qData.length === 0) continue;
-        
+        const qData = (allWbQs || []).filter((q: any) => String(q.book_id) === String(wbId));
+        if (qData.length === 0) continue;
+
         const pageTqMap: Record<number, number[]> = {};
-        qData.forEach(q => {
+        qData.forEach((q: any) => {
           if (!pageTqMap[q.page_number]) pageTqMap[q.page_number] = [];
           pageTqMap[q.page_number].push(q.tq_id);
         });
         const totalPages = Object.keys(pageTqMap).map(Number);
-        
-        const { data: hwsForProg } = await supabase.from("homework_assignment")
-          .select("student_homework_result(student_id, completed_tq_ids)")
-          .eq("class_id", classId)
-          .eq("book_id", wbId);
-        
+
+        const hwsForProg = (allWbHws || []).filter((h: any) => String(h.book_id) === String(wbId));
         const studentDoneTqs: Record<string, Set<number>> = {};
         activeStudentIds.forEach((id: string) => studentDoneTqs[id] = new Set());
 
-        hwsForProg?.forEach(hw => {
-           hw.student_homework_result?.forEach((res: any) => {
-              const sId = res.student_id;
-              if (studentDoneTqs[sId]) {
-                 const completedQs = safeParseIds(res.completed_tq_ids);
-                 completedQs.forEach(tqId => studentDoneTqs[sId].add(tqId));
+        hwsForProg.forEach((hw: any) => {
+          const targetQs = safeParseIds(hw.target_questions);
+          hw.student_homework_result?.forEach((res: any) => {
+            const sId = res.student_id;
+            if (studentDoneTqs[sId]) {
+              const completedQs = safeParseIds(res.completed_tq_ids);
+              completedQs.forEach(tqId => studentDoneTqs[sId].add(tqId));
+              if (res.status && DONE_HW_STATUSES.has(String(res.status))) {
+                targetQs.forEach(tqId => studentDoneTqs[sId].add(tqId));
               }
-           });
+            }
+          });
         });
 
         totalPages.forEach(p => {
-           const tqsOnPage = pageTqMap[p];
-           if(tqsOnPage.length === 0) return;
-           
-           activeStudentIds.forEach((sId: string) => {
-              totalAssignedPages++; 
-              
-              const isPageDone = tqsOnPage.every(tqId => studentDoneTqs[sId].has(tqId));
-              if (isPageDone) totalCompletedPages++; 
-           });
+          const tqsOnPage = pageTqMap[p];
+          if (tqsOnPage.length === 0) return;
+
+          activeStudentIds.forEach((sId: string) => {
+            totalAssignedPages++;
+            const isPageDone = tqsOnPage.every(tqId => studentDoneTqs[sId].has(tqId));
+            if (isPageDone) totalCompletedPages++;
+          });
         });
       }
 
@@ -539,18 +565,23 @@ export default function TeacherDashboardPage() {
 
         const hwsForProg: any[] = [];
         for (let from = 0; ; from += 1000) {
-          const { data } = await supabase.from("homework_assignment").select("student_homework_result(student_id, completed_tq_ids)").eq("class_id", classId).eq("book_id", bookId).range(from, from + 999);
+          const { data } = await supabase.from("homework_assignment").select("target_questions, student_homework_result(student_id, status, completed_tq_ids)").eq("class_id", classId).eq("book_id", bookId).range(from, from + 999);
           if (!data || data.length === 0) break;
           hwsForProg.push(...data);
           if (data.length < 1000) break;
         }
 
+        const DONE_BOOK_STATUSES = new Set(["채점완료", "제출완료", "완료", "최종완료"]);
         const studentDoneTqs: Record<string, Set<number>> = {};
         activeStudentIds.forEach((id: string) => studentDoneTqs[id] = new Set());
         hwsForProg.forEach(hw => {
+          const targetQs = safeParseIds(hw.target_questions);
           hw.student_homework_result?.forEach((res: any) => {
             if (studentDoneTqs[res.student_id]) {
               safeParseIds(res.completed_tq_ids).forEach(tqId => studentDoneTqs[res.student_id].add(tqId));
+              if (res.status && DONE_BOOK_STATUSES.has(String(res.status))) {
+                targetQs.forEach(tqId => studentDoneTqs[res.student_id].add(tqId));
+              }
             }
           });
         });
@@ -586,10 +617,10 @@ export default function TeacherDashboardPage() {
     const today = getKSTDateStr();
     const yesterday = getKSTDateStr(-1);
 
-    const [ { data: enrollData }, { data: clinicData } ] = await Promise.all([
-      supabase.from("enrollment").select("student_id, status, end_date").eq("class_id", classId),
-      supabase.from("clinic_session_state").select("student_id, ended_at, started_at, last_seen_at, session_date").in("session_date", [today, yesterday])
-    ]);
+    const { data: enrollData } = await supabase
+      .from("enrollment")
+      .select("student_id, status, end_date")
+      .eq("class_id", classId);
 
     const allTargetIds = Array.from(new Set(
       (enrollData || []).filter((e: any) => !isEndedEnrollment(e)).map((e: any) => e.student_id)
@@ -600,19 +631,40 @@ export default function TeacherDashboardPage() {
       return;
     }
 
-    const { data: classStudents } = await supabase
-      .from("student")
-      .select(`
-        student_id, name, parent(name, phone),
-        attendance(attendance_id, status, check_in_time, check_out_time, attendance_date)
-      `)
-      .eq("status", "재원")
-      .in("student_id", allTargetIds);
+    // 🌟 [Egress 대폭 절감] 과거 전체 출결 이력(attendance(*)) 및 학원 전체 클리닉 행 대신
+    // 해당 반 학생(allTargetIds)의 오늘 출결·클리닉 세션만 병렬 조회!
+    const [
+      { data: classStudents },
+      { data: todayAttRows },
+      { data: clinicData }
+    ] = await Promise.all([
+      supabase
+        .from("student")
+        .select("student_id, name, parent(name, phone)")
+        .eq("status", "재원")
+        .in("student_id", allTargetIds),
+      supabase
+        .from("attendance")
+        .select("attendance_id, student_id, status, check_in_time, check_out_time, attendance_date")
+        .in("student_id", allTargetIds)
+        .eq("attendance_date", today),
+      supabase
+        .from("clinic_session_state")
+        .select("student_id, ended_at, started_at, last_seen_at, session_date")
+        .in("student_id", allTargetIds)
+        .in("session_date", [today, yesterday])
+    ]);
     
     const todayClinics = clinicData || [];
+    const attByStudent = new Map<string, any[]>();
+    (todayAttRows || []).forEach((a: any) => {
+      const key = String(a.student_id);
+      if (!attByStudent.has(key)) attByStudent.set(key, []);
+      attByStudent.get(key)!.push(a);
+    });
 
     const mappedAtt = (classStudents || []).map((st: any) => {
-      const todayAttList = (st.attendance || []).filter((a: any) => a.attendance_date === today);
+      const todayAttList = attByStudent.get(String(st.student_id)) || [];
       const todayAtt = todayAttList.sort((a: any, b: any) => (b.attendance_id || 0) - (a.attendance_id || 0))[0];
       const parentInfo = Array.isArray(st.parent) ? st.parent[0] : st.parent; 
 

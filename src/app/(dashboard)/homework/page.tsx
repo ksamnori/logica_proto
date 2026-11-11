@@ -4,6 +4,7 @@
 import { useEffect, useState, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
+import { renameHomeworkAssignmentAction, deleteHomeworkAssignmentAction } from "@/app/actions/auth";
 
 const ENDED_ENROLLMENT_STATUSES = ["수강종료", "종료", "퇴원", "취소"];
 const isEndedEnrollment = (e: any): boolean => {
@@ -240,7 +241,12 @@ export default function HomeworkPage() {
     const newTitle = window.prompt("수정할 과제 제목을 입력하세요:", oldTitle);
     if (!newTitle || newTitle.trim() === '' || newTitle === oldTitle) return;
     try {
-      await supabase.from('homework_assignment').update({ homework_title: newTitle.trim() }).eq('homework_id', hwId);
+      const renRes = await renameHomeworkAssignmentAction({
+        homeworkId: hwId,
+        newTitle: newTitle.trim(),
+        clientTenantId: localStorage.getItem('logica_tenant_id') || undefined,
+      });
+      if (!renRes.success) throw new Error(renRes.message || "수정 실패");
       alert("과제 이름이 성공적으로 수정되었습니다.");
       fetchSpecificStudentHomework(currentView.studentId);
     } catch (e) { alert("수정 실패"); }
@@ -249,9 +255,12 @@ export default function HomeworkPage() {
   const handleDeleteHomework = async (hwId: string, studentId: string) => {
     if (!confirm("해당 학생의 과제만 삭제하시겠습니까?\n(선택한 학생의 기록만 삭제되며, 같은 반 다른 학생들의 과제는 유지됩니다.)")) return;
     try {
-      await supabase.from('student_homework_result').delete().eq('homework_id', hwId).eq('student_id', studentId);
-      const { count } = await supabase.from('student_homework_result').select('*', { count: 'exact', head: true }).eq('homework_id', hwId);
-      if (count === 0) await supabase.from('homework_assignment').delete().eq('homework_id', hwId);
+      const delRes = await deleteHomeworkAssignmentAction({
+        homeworkId: hwId,
+        studentId,
+        clientTenantId: localStorage.getItem('logica_tenant_id') || undefined,
+      });
+      if (!delRes.success) throw new Error(delRes.message || "삭제 실패");
       
       alert("해당 학생의 과제가 안전하게 삭제되었습니다.");
       fetchSpecificStudentHomework(studentId);

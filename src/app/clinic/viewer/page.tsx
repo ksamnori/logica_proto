@@ -13,6 +13,7 @@ import PointBadge from "@/components/clinic/PointBadge";
 
 import { generateIncorrectPrint, finalizeSessionData } from '@/lib/clinicPrintActions';
 import { appendToExistingIncorrectPrintAction } from '@/app/actions/clinicActions';
+import { isConfidentialExamText, isConfidentialQuestionObj } from '@/lib/confidentialExamGuard';
 import { useClinicTimer } from "./hooks/useClinicTimer";
 import { useClinicDataFetch } from "./hooks/useClinicDataFetch";
 import { useClinicRealtime } from "./hooks/useClinicRealtime";
@@ -763,7 +764,8 @@ export default function ClinicViewer() {
       if (validAssignId) {
         inserts.push({ exam_assignment_id: validAssignId, student_id: studentInfo.id, question_id: qItem.question_id, student_input: ans, is_correct: isCorrect, earned_score: score, grading_code: isCorrect ? 'O' : 'X', grading_status: '대기' });
       }
-      if (!isCorrect && qItem.question_id) { incUpserts.push({ student_id: studentInfo.id, question_id: qItem.question_id, source_type: sourceTypeRef.current, status: ans === '미입력' ? 'B' : 'X', resolved_at: null }); }
+      const isConfDiag = isConfidentialExamText(sourceTypeRef.current) || isConfidentialExamText(globalExamTitle) || isConfidentialQuestionObj(qItem);
+      if (!isCorrect && qItem.question_id && !isConfDiag) { incUpserts.push({ student_id: studentInfo.id, question_id: qItem.question_id, source_type: sourceTypeRef.current, status: ans === '미입력' ? 'B' : 'X', resolved_at: null }); }
     }
 
     if (validAssignId && inserts.length > 0) await supabaseClient.from('student_answer').insert(inserts);
@@ -899,6 +901,7 @@ export default function ClinicViewer() {
   const appendToExistingIncorrectPrint = async (qItem: any) => {
     if (!qItem.question_id || !studentInfo.id) return;
     if (sourceTypeRef.current === '오답프린트' || sourceTypeRef.current === '오답') return;
+    if (isConfidentialExamText(sourceTypeRef.current) || isConfidentialExamText(globalExamTitle) || isConfidentialQuestionObj(qItem)) return;
 
     try {
       await appendToExistingIncorrectPrintAction(studentInfo.id, qItem.question_id);
@@ -1211,6 +1214,7 @@ export default function ClinicViewer() {
   };
 
   const upsertIncorrectRecord = async (qData: any, status: string): Promise<number | undefined> => {
+    if (isConfidentialExamText(sourceTypeRef.current) || isConfidentialExamText(globalExamTitle) || isConfidentialQuestionObj(qData)) return undefined;
     const filterCol = qData.tq_id ? 'tq_id' : 'question_id'; const filterVal = qData.tq_id ?? qData.question_id;
     if (!filterVal) return undefined;
     const { data: existingRows } = await supabaseClient.from('student_incorrect_record').select('record_id').eq('student_id', studentInfo.id).eq(filterCol, filterVal).limit(1);

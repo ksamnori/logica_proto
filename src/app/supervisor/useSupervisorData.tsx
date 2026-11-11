@@ -585,29 +585,43 @@ export function useSupervisorData() {
             }
         };
 
+        const CLINIC_SESSION_SYNC_COLS = 'id, student_id, seat, manual_seat, session_date, session_no, started_at, ended_at, duration_ms, last_seen_at, away_since, end_request_status, end_request_cooldown_until, active_calls, active_rechecks';
+
         const loadInitialSeatsFromDB = async () => {
             const todayStr = getKSTDateString();
-            const { data: rawSessionData } = await supabaseClient.from('clinic_session_state').select('*').eq('session_date', todayStr);
-            const sessionData = rawSessionData && rawSessionData.length > 0 ? pickLatestSessionPerStudent(rawSessionData) : [];
+            const { data: rawSessionData } = await supabaseClient.from('clinic_session_state').select(CLINIC_SESSION_SYNC_COLS).eq('session_date', todayStr);
+            const sessionData = rawSessionData && rawSessionData.length > 0 ? pickLatestSessionPerStudent(rawSessionData as any[]) : [];
 
-            const newStudents = { ...studentsRef.current };
+            const seatSyncPromises: PromiseLike<any>[] = [];
+            const seatedSessions: { sess: any; effectiveSeat: string }[] = [];
             for (const sess of sessionData) {
                 let effectiveSeat = sess.manual_seat;
                 if (!effectiveSeat && sess.seat) {
                     effectiveSeat = sess.seat;
-                    await supabaseClient.from('clinic_session_state').update({ manual_seat: effectiveSeat }).eq('id', sess.id);
+                    seatSyncPromises.push(supabaseClient.from('clinic_session_state').update({ manual_seat: effectiveSeat }).eq('id', sess.id));
                 }
-                if (!effectiveSeat) continue;
+                if (effectiveSeat) seatedSessions.push({ sess, effectiveSeat });
+            }
+            if (seatSyncPromises.length > 0) await Promise.all(seatSyncPromises);
 
-                const { data: sData } = await supabaseClient.from('student').select('name, enrollment(status, end_date, class(name))').eq('student_id', sess.student_id).single();
-                const metaName = sData?.name || '학생';
-                const activeEnrolls = (sData?.enrollment || []).filter((e: any) => !isEndedEnrollment(e));
-                const metaClasses = activeEnrolls.map((e: any) => e.class?.name).filter(Boolean);
-                if (metaClasses.length === 0) metaClasses.push('반 미배정');
+            const targetStudentIds = Array.from(new Set(seatedSessions.map(x => x.sess.student_id).filter(Boolean)));
+            const studentMetaMap = new Map<string, { name: string; classes: string[] }>();
+            if (targetStudentIds.length > 0) {
+                const { data: sRows } = await supabaseClient.from('student').select('student_id, name, enrollment(status, end_date, class(name))').in('student_id', targetStudentIds);
+                (sRows || []).forEach((sData: any) => {
+                    const activeEnrolls = (sData?.enrollment || []).filter((e: any) => !isEndedEnrollment(e));
+                    const metaClasses = activeEnrolls.map((e: any) => (Array.isArray(e.class) ? e.class[0]?.name : e.class?.name)).filter(Boolean);
+                    if (metaClasses.length === 0) metaClasses.push('반 미배정');
+                    studentMetaMap.set(sData.student_id, { name: sData?.name || '학생', classes: metaClasses });
+                });
+            }
 
+            const newStudents = { ...studentsRef.current };
+            for (const { sess, effectiveSeat } of seatedSessions) {
+                const meta = studentMetaMap.get(sess.student_id) || { name: '학생', classes: ['반 미배정'] };
                 if (!newStudents[effectiveSeat]) {
                     newStudents[effectiveSeat] = {
-                        name: metaName, classes: metaClasses, status: 'idle', studentId: sess.student_id, sessionId: sess.id,
+                        name: meta.name, classes: meta.classes, status: 'idle', studentId: sess.student_id, sessionId: sess.id,
                         firstSeenAt: new Date(sess.started_at).getTime() || Date.now(),
                         clinicDurationMs: sess.duration_ms || DEFAULT_CLINIC_DURATION_MS,
                         sessionNo: sess.session_no || 1,
@@ -687,11 +701,18 @@ export function useSupervisorData() {
 
     useEffect(() => {
         if (!isAuthorized || !isMounted) return;
-        const dbCrossValidationInterval = setInterval(async () => {
+        const CLINIC_SESSION_SYNC_COLS = 'id, student_id, seat, manual_seat, session_date, session_no, started_at, ended_at, duration_ms, last_seen_at, away_since, end_request_status, end_request_cooldown_until, active_calls, active_rechecks';
+        let isCrossValidating = false;
+
+        const runCrossValidation = async () => {
+            if (isCrossValidating) return;
+            if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
+            isCrossValidating = true;
+            try {
             const todayStr = getKSTDateString();
-            const { data: rawSessionData, error } = await supabaseClient.from('clinic_session_state').select('*').eq('session_date', todayStr);
+            const { data: rawSessionData, error } = await supabaseClient.from('clinic_session_state').select(CLINIC_SESSION_SYNC_COLS).eq('session_date', todayStr);
             if (error || !rawSessionData) return;
-            const sessionData = pickLatestSessionPerStudent(rawSessionData);
+            const sessionData = pickLatestSessionPerStudent(rawSessionData as any[]);
 
             const dbSeats = new Map();
             for (const s of sessionData) {
@@ -927,8 +948,20 @@ export function useSupervisorData() {
             }
 
             if (isModified) updateStudents(current);
-        }, 5000);
-        return () => clearInterval(dbCrossValidationInterval);
+            } finally {
+                isCrossValidating = false;
+            }
+        };
+
+        const dbCrossValidationInterval = setInterval(runCrossValidation, 8000);
+        const handleVisible = () => {
+            if (document.visibilityState === 'visible') runCrossValidation();
+        };
+        document.addEventListener('visibilitychange', handleVisible);
+        return () => {
+            clearInterval(dbCrossValidationInterval);
+            document.removeEventListener('visibilitychange', handleVisible);
+        };
     }, [isAuthorized, isMounted, updateStudents, appendLog, removeLogsByTypeAndSeat]);
 
     const recordTaStat = (key: string, mark: string) => {
@@ -1115,11 +1148,12 @@ export function useSupervisorData() {
                 setConnectionStatus(status === 'SUBSCRIBED' ? 'connected' : status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' ? 'error' : 'connecting');
                 if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
                     if (reconnectTimer) clearTimeout(reconnectTimer);
+                    const jitterMs = 3000 + Math.floor(Math.random() * 3500);
                     reconnectTimer = setTimeout(() => {
                         if (!isDisposed && channelRef.current === channel) {
                             setReconnectTrigger(p => p + 1);
                         }
-                    }, 3000);
+                    }, jitterMs);
                 }
             });
 
@@ -1377,7 +1411,11 @@ export function useSupervisorData() {
         updateStudents(currentStudents);
         pendingTimeAdjustRef.current[seat] = { value: newDuration, expiresAt: Date.now() + 3000 };
         
-        if (st.studentId) await supabaseClient.from('clinic_session_state').update({ duration_ms: newDuration }).eq('student_id', st.studentId);
+        if (st.sessionId) {
+            await supabaseClient.from('clinic_session_state').update({ duration_ms: newDuration }).eq('id', st.sessionId);
+        } else if (st.studentId) {
+            await supabaseClient.from('clinic_session_state').update({ duration_ms: newDuration }).eq('student_id', st.studentId).eq('session_date', getKSTDateString()).is('ended_at', null);
+        }
         sendToStudent(seat, 'adjust_clinic_time', { deltaMs: deltaMinutes * 60 * 1000, newDuration, studentId: st.studentId || null });
     };
 

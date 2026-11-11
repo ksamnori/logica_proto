@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { StudentInfo, ClassInfo, TabType } from "../types";
 import { getPointBalance } from "@/app/actions/shopPoints";
+import { isConfidentialExamText, isConfidentialIncorrectRecord } from "@/lib/confidentialExamGuard";
 
 const ENDED_ENROLLMENT_STATUSES = ["수강종료", "종료", "퇴원", "취소"];
 const isEndedEnrollment = (e: any): boolean => {
@@ -383,12 +384,13 @@ export function useLearningFetch() {
         });
       });
 
-      const { data: archives } = await supabase.from('student_incorrect_record')
-        .select('record_id, source_type, status, resolved_at, created_at, question_id, tq_id')
+      const { data: rawArchives } = await supabase.from('student_incorrect_record')
+        .select('record_id, source_type, status, resolved_at, created_at, question_id, tq_id, question_db(source_book_name, book_name, pdf_source)')
         .eq('student_id', studentId)
         .not('resolved_at', 'is', null);
+      const archives = (rawArchives || []).filter((r: any) => !isConfidentialIncorrectRecord(r));
 
-      if (archives) {
+      if (archives.length > 0) {
         const groupedArchive = archives.reduce((acc: any, curr: any) => {
           const month = curr.resolved_at ? curr.resolved_at.substring(0, 7) : 'Unknown';
           if (!acc[month]) acc[month] = [];
@@ -412,12 +414,13 @@ export function useLearningFetch() {
         });
       }
 
-      const { data: rawIncs } = await supabase.from('student_incorrect_record')
-        .select('record_id, source_type, status, created_at, question_id, tq_id')
+      const { data: rawIncsUnfiltered } = await supabase.from('student_incorrect_record')
+        .select('record_id, source_type, status, created_at, question_id, tq_id, question_db(source_book_name, book_name, pdf_source)')
         .eq('student_id', studentId)
         .is('resolved_at', null);
+      const rawIncs = (rawIncsUnfiltered || []).filter((r: any) => !isConfidentialIncorrectRecord(r));
 
-      if (rawIncs) {
+      if (rawIncs.length > 0) {
         const groupedRaw = rawIncs.reduce((acc: any, curr: any) => {
           const month = curr.created_at ? curr.created_at.substring(0, 7) : 'Unknown';
           if (!acc[month]) acc[month] = [];
@@ -486,13 +489,14 @@ export function useLearningFetch() {
           const chunk = studentIds.slice(i, i + chunkSize);
           
           let query = supabase.from('student_incorrect_record')
-             .select('record_id, source_type, status, resolved_at, created_at, student_id, question_id, tq_id')
+             .select('record_id, source_type, status, resolved_at, created_at, student_id, question_id, tq_id, question_db(source_book_name, book_name, pdf_source)')
              .in('student_id', chunk);
              
           if (isArchive) query = query.not('resolved_at', 'is', null).order('resolved_at', { ascending: false });
           else query = query.is('resolved_at', null).order('created_at', { ascending: false });
 
-          const { data: records } = await query;
+          const { data: rawRecords } = await query;
+          const records = (rawRecords || []).filter((r: any) => !isConfidentialIncorrectRecord(r));
 
           if (records) {
              const grouped = records.reduce((acc: any, curr: any) => {
@@ -868,7 +872,7 @@ export function useLearningFetch() {
           .eq('student_id', studentId),
         supabase
           .from('student_incorrect_record')
-          .select('record_id, question_id, tq_id, status')
+          .select('record_id, question_id, tq_id, status, source_type, question_db(source_book_name, book_name, pdf_source)')
           .eq('student_id', studentId)
           .in('status', ['X', 'TX', 'TO', 'B'])
           .is('resolved_at', null),
@@ -895,7 +899,8 @@ export function useLearningFetch() {
         roundResults[`${r.class_name}::${r.round}`] = r;
       });
 
-      const rawTqIds = (incData || []).map((r: any) => r.tq_id).filter(Boolean);
+      const safeIncData = (incData || []).filter((r: any) => !isConfidentialIncorrectRecord(r));
+      const rawTqIds = safeIncData.map((r: any) => r.tq_id).filter(Boolean);
       const tqToQidMap = new Map();
       if (rawTqIds.length > 0) {
         const safeTqIds = rawTqIds.filter((id: any) => !isNaN(Number(id)));
@@ -910,7 +915,7 @@ export function useLearningFetch() {
         }
       }
 
-      const recordsToHealMissingQid = (incData || []).filter(
+      const recordsToHealMissingQid = safeIncData.filter(
         (r: any) => !r.question_id && r.tq_id && tqToQidMap.has(r.tq_id)
       );
       if (recordsToHealMissingQid.length > 0) {
@@ -925,7 +930,7 @@ export function useLearningFetch() {
         healStudentIncorrectRecordsAction(studentId, healPayload).catch(() => {});
       }
 
-      const resolvedQids = (incData || [])
+      const resolvedQids = safeIncData
         .map((r: any) => r.question_id || tqToQidMap.get(r.tq_id))
         .filter(Boolean);
       let uniqueIncIds = Array.from(new Set(resolvedQids)) as any[];
@@ -974,6 +979,20 @@ export function useLearningFetch() {
           .select('question_id')
           .in('exam_assignment_id', fixingExamIds);
         fixingAnswers?.forEach((a: any) => fixingQids.add(a.question_id));
+      }
+
+      const confidentialPreviewExamIds = (examsData || [])
+        .filter((ex: any) => {
+          const m = unwrap(ex.exam_master);
+          return isConfidentialExamText(m?.exam_type) || isConfidentialExamText(m?.title);
+        })
+        .map((ex: any) => ex.assignment_id);
+      if (confidentialPreviewExamIds.length > 0 && uniqueIncIds.length > 0) {
+        const { data: confAns } = await supabase
+          .from('student_answer')
+          .select('question_id')
+          .in('exam_assignment_id', confidentialPreviewExamIds);
+        confAns?.forEach((a: any) => { if (a.question_id) fixingQids.add(a.question_id); });
       }
 
       uniqueIncIds = uniqueIncIds.filter((id) => !fixingQids.has(id));

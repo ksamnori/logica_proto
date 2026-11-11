@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { normalizeMasterCategoryRow } from "@/lib/normalize";
 import { supabase } from "@/lib/supabase";
 import { saveExamViewerMasterAction } from "@/app/actions/clinicActions";
+import { processExamViewerHomeworkAndAssignAction } from "@/app/actions/auth";
 import { getISOWeekKST, getKSTDateString } from "@/lib/classRound";
 
 import ViewerHeader from "@/components/exam/ViewerHeader";
@@ -1986,28 +1987,9 @@ export default function ExamViewerPage() {
       let targetStudentId = editExamId ? null : (sessionStorage.getItem('clinicTargetStudentId') || sessionStorage.getItem('editStudentId'));
       let targetClassId = editExamId ? null : (sessionStorage.getItem('clinicTargetClassId') || sessionStorage.getItem('editClassId'));
 
-      if (editOriginalType === 'hw' && editOriginalId) {
-          const hwNum = Number(editOriginalId);
-          const { data: origHw } = await supabase.from('homework_assignment').select('*').eq('homework_id', hwNum).single();
-          if (origHw) {
-              if (!targetStudentId) targetStudentId = origHw.target_student_id;
-              if (!targetClassId) targetClassId = origHw.class_id;
-
-              if (origHw.target_student_id) {
-                 await supabase.from('student_homework_answer').delete().eq('homework_id', hwNum);
-                 await supabase.from('student_homework_result').delete().eq('homework_id', hwNum);
-                 await supabase.from('homework_assignment').delete().eq('homework_id', hwNum);
-              } else {
-                 await supabase.from('student_homework_answer').delete().eq('homework_id', hwNum).eq('student_id', targetStudentId);
-                 await supabase.from('student_homework_result').delete().eq('homework_id', hwNum).eq('student_id', targetStudentId);
-              }
-          }
-      }
-
       let examId = currentExamIdRef.current;
 
       const splitHwIdsStr = sessionStorage.getItem('splitHomeworkIds');
-      
       const targetExamIdToRebuild = rebuildExamIdRef.current || editExamId;
 
       if (isNewExamRef.current || editOriginalId || splitHwIdsStr || targetExamIdToRebuild) {
@@ -2050,49 +2032,28 @@ export default function ExamViewerPage() {
       }
 
       const splitCommonTqIdsStr = sessionStorage.getItem('splitCommonTqIds');
-      if (splitHwIdsStr && splitCommonTqIdsStr) {
-          const splitHwIds = JSON.parse(splitHwIdsStr);
-          const splitCommonTqIds = JSON.parse(splitCommonTqIdsStr);
-          
-          const { data: hwData } = await supabase.from('homework_assignment').select('*').in('homework_id', splitHwIds);
-          if (hwData) {
-              for (const hw of hwData) {
-                  const originalTqs = safeParseIds(hw.target_questions);
-                  const remainderTqs = originalTqs.filter((id: number) => !splitCommonTqIds.includes(id));
-
-                  if (remainderTqs.length === 0) {
-                      await supabase.from('student_homework_answer').delete().eq('homework_id', hw.homework_id);
-                      await supabase.from('student_homework_result').delete().eq('homework_id', hw.homework_id);
-                      await supabase.from('homework_assignment').delete().eq('homework_id', hw.homework_id);
-                  } else {
-                      await supabase.from('homework_assignment').update({ target_questions: remainderTqs }).eq('homework_id', hw.homework_id);
-                  }
-              }
-          }
-      }
-
+      const splitHwIds = splitHwIdsStr ? JSON.parse(splitHwIdsStr) : undefined;
+      const splitCommonTqIds = splitCommonTqIdsStr ? JSON.parse(splitCommonTqIdsStr) : undefined;
       const multiStudentsStr = sessionStorage.getItem('clinicTargetStudentIds');
-      const targetStudents = (multiStudentsStr && !editExamId) ? JSON.parse(multiStudentsStr) : (targetStudentId ? [targetStudentId] : []);
-      
-      if (targetStudents.length > 0 && examId) {
-          for (const stuId of targetStudents) {
-              const { data: existAssign } = await supabase.from('exam_assignment').select('assignment_id').eq('exam_id', examId).eq('student_id', stuId).maybeSingle();
-              if (!existAssign) {
-                  await supabase.from('exam_assignment').insert({
-                      exam_id: examId,
-                      student_id: stuId,
-                      class_id: targetClassId || null,
-                      status: '미응시'
-                  });
-              }
-              const tasks: any[] = [];
-              
-              flatQIds.forEach((qId: string) => {
-                  tasks.push({ student_id: stuId, task_type: '유형오답클리닉', question_id: qId, status: '대기' });
-              });
-              if (tasks.length > 0) await supabase.from('clinic_task').insert(tasks);
-          }
+      const parsedMultiStudents: string[] = (multiStudentsStr && !editExamId) ? JSON.parse(multiStudentsStr) : [];
+
+      const postRes = await processExamViewerHomeworkAndAssignAction({
+        editOriginalHwId: (editOriginalType === 'hw' && editOriginalId) ? Number(editOriginalId) : null,
+        splitHwIds,
+        splitCommonTqIds,
+        examId,
+        targetStudents: parsedMultiStudents.length > 0 ? parsedMultiStudents : undefined,
+        targetStudentId,
+        targetClassId,
+        flatQIds,
+        clientTenantId: myTenantId || undefined,
+      });
+      if (!postRes.success) {
+        throw new Error(postRes.message || "과제 분리 및 시험지 배정 처리 실패");
       }
+      if (postRes.targetStudentId) targetStudentId = postRes.targetStudentId;
+      if (postRes.targetClassId) targetClassId = postRes.targetClassId;
+      const targetStudents = parsedMultiStudents.length > 0 ? parsedMultiStudents : (targetStudentId ? [targetStudentId] : []);
 
       hasUnsavedChangesRef.current = false;
       isNewExamRef.current = false; 

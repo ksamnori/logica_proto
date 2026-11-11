@@ -1,7 +1,7 @@
 // src/app/clinic/ta/pad/useTaHandheld.ts
 import { useEffect, useState, useRef, useCallback } from "react";
 import { supabase as sharedSupabaseClient } from "@/lib/supabase";
-import { clearActiveCall, clearActiveRecheck } from "@/lib/clinicSession";
+import { resolveActiveCall, resolveActiveRecheck } from "@/lib/clinicSession";
 import { seedTaTenantId, getInstructorName } from "../taAccess";
 import { getActiveSeatLayout } from "@/app/actions/clinicSeatLayout";
 import { SEAT_LAYOUT_UPDATED_EVENT, formatSeatLabel, Seat, DEFAULT_CANVAS_W, DEFAULT_CANVAS_H, DEFAULT_SEAT_CARD_W, DEFAULT_SEAT_CARD_H } from "@/lib/clinicSeatLayout";
@@ -80,7 +80,12 @@ export function useTaHandheld() {
   const connectChainRef = useRef<Promise<void>>(Promise.resolve());
   const isFetchingSeatsRef = useRef(false);
   const fetchingSeatsStartedAtRef = useRef(0);
-  const allSeatObjsRef = useRef<Seat[]>([]); // 🌟 이 핵심 기준표가 아까 빠져있었습니다!
+  const allSeatObjsRef = useRef<Seat[]>([]);
+  // 🌟 재실 학생 이름·수강반 5분 캐시: 3초 폴링마다 student/enrollment 테이블을 중복 조회하던 부하 제거
+  const studentMetaCacheRef = useRef<Map<string, { name: string; classes: string[]; cachedAt: number }>>(new Map());
+  const taReconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const taRetryAttemptRef = useRef<number>(0);
+  const taDisposedRef = useRef<boolean>(false);
 
   useEffect(() => {
     let savedName = localStorage.getItem(TA_NAME_STORAGE_KEY) || "";
@@ -112,8 +117,14 @@ export function useTaHandheld() {
   }, []);
 
   useEffect(() => {
+    taDisposedRef.current = false;
     if (taName && taClientId && SUPABASE_URL && SUPABASE_ANON_KEY) connectClinicChannel();
     return () => {
+      taDisposedRef.current = true;
+      if (taReconnectTimerRef.current) {
+        clearTimeout(taReconnectTimerRef.current);
+        taReconnectTimerRef.current = null;
+      }
       if (clinicChannelRef.current) {
         supabaseClient.removeChannel(clinicChannelRef.current);
         clinicChannelRef.current = null;
@@ -132,16 +143,30 @@ export function useTaHandheld() {
       if (cancelled) return;
       seatTimer = setTimeout(async () => {
         if (cancelled) return;
-        try { await fetchSeatsFromDBRef.current(); } finally { scheduleNextSeatFetch(); }
+        try {
+          if (typeof document === "undefined" || document.visibilityState === "visible") {
+            await fetchSeatsFromDBRef.current();
+          }
+        } finally {
+          scheduleNextSeatFetch();
+        }
       }, SEAT_POLL_INTERVAL_MS);
     };
     fetchSeatsFromDBRef.current().finally(scheduleNextSeatFetch);
+
+    const handleVisibility = () => {
+      if (document.visibilityState === "visible" && !cancelled) {
+        fetchSeatsFromDBRef.current();
+      }
+    };
+    document.addEventListener("visibilitychange", handleVisibility);
 
     return () => {
       cancelled = true;
       clearInterval(tickInterval);
       clearInterval(presenceInterval);
       if (seatTimer) clearTimeout(seatTimer);
+      document.removeEventListener("visibilitychange", handleVisibility);
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [taName, taClientId]);
@@ -277,19 +302,40 @@ export function useTaHandheld() {
     const rows = Array.from(latestByStudent.values());
     const studentIds = Array.from(new Set(rows.map((r: any) => r.student_id)));
 
-    let nameMap: Record<string, string> = {};
-    let classMap: Record<string, string[]> = {};
-    if (studentIds.length > 0) {
+    const META_TTL_MS = 5 * 60 * 1000;
+    const nowMs = Date.now();
+    const nameMap: Record<string, string> = {};
+    const classMap: Record<string, string[]> = {};
+    const uncachedIds: string[] = [];
+
+    studentIds.forEach((sid) => {
+      const cached = studentMetaCacheRef.current.get(sid);
+      if (cached && nowMs - cached.cachedAt < META_TTL_MS) {
+        nameMap[sid] = cached.name;
+        classMap[sid] = cached.classes;
+      } else {
+        uncachedIds.push(sid);
+      }
+    });
+
+    if (uncachedIds.length > 0) {
       const [{ data: students }, { data: enrollments }] = await Promise.all([
-        supabaseClient.from('student').select('student_id, name').in('student_id', studentIds),
-        supabaseClient.from('enrollment').select('student_id, status, end_date, class(name)').in('student_id', studentIds),
+        supabaseClient.from('student').select('student_id, name').in('student_id', uncachedIds),
+        supabaseClient.from('enrollment').select('student_id, status, end_date, class(name)').in('student_id', uncachedIds),
       ]);
-      (students || []).forEach((s: any) => { nameMap[s.student_id] = s.name; });
+      const freshClasses: Record<string, string[]> = {};
       (enrollments || []).filter((e: any) => !isEndedEnrollment(e)).forEach((e: any) => {
-        const cn = e.class?.name;
+        const cn = Array.isArray(e.class) ? e.class[0]?.name : e.class?.name;
         if (!cn) return;
-        if (!classMap[e.student_id]) classMap[e.student_id] = [];
-        classMap[e.student_id].push(cn);
+        if (!freshClasses[e.student_id]) freshClasses[e.student_id] = [];
+        freshClasses[e.student_id].push(cn);
+      });
+      (students || []).forEach((s: any) => {
+        const nm = s.name || '학생';
+        const cls = freshClasses[s.student_id] || [];
+        nameMap[s.student_id] = nm;
+        classMap[s.student_id] = cls;
+        studentMetaCacheRef.current.set(s.student_id, { name: nm, classes: cls, cachedAt: nowMs });
       });
     }
 
@@ -335,6 +381,7 @@ export function useTaHandheld() {
 
       const dbRechecks = row.active_rechecks || {};
       Object.keys(dbRechecks).forEach(uid => {
+        if (dbRechecks[uid]?.verdict) return;
         const key = `${row.seat}::${uid}`;
         if (!rechecksRef.current[key]) {
           const r = dbRechecks[uid] || {};
@@ -353,7 +400,7 @@ export function useTaHandheld() {
       Object.keys(rechecksRef.current).forEach(key => {
         if (rechecksRef.current[key].seat !== row.seat) return;
         const uid = rechecksRef.current[key].uid;
-        if (dbRechecks[uid]) return;
+        if (dbRechecks[uid] && !dbRechecks[uid]?.verdict) return;
         delete rechecksRef.current[key];
         setMarkState(p => { if (p[key] === undefined) return p; const n = { ...p }; delete n[key]; return n; });
         setSelectedCallKey(p => p === key ? null : p);
@@ -539,23 +586,43 @@ export function useTaHandheld() {
 
   const connectClinicChannel = () => {
     connectChainRef.current = connectChainRef.current.then(async () => {
+      if (taDisposedRef.current) return;
+      if (taReconnectTimerRef.current) {
+        clearTimeout(taReconnectTimerRef.current);
+        taReconnectTimerRef.current = null;
+      }
       if (clinicChannelRef.current) {
-        await supabaseClient.removeChannel(clinicChannelRef.current);
+        await supabaseClient.removeChannel(clinicChannelRef.current).catch(() => {});
         clinicChannelRef.current = null;
       }
       
       const myTenantId = localStorage.getItem("logica_tenant_id") || "hq";
       const channelName = `${CLINIC_ROOM}_${myTenantId}`;
       
-      clinicChannelRef.current = supabaseClient.channel(channelName);
-      clinicChannelRef.current
+      const ch = supabaseClient.channel(channelName);
+      clinicChannelRef.current = ch;
+      ch
         .on('presence', { event: 'sync' }, () => syncFromPresenceRef.current())
         .on('broadcast', { event: 'student_action' }, ({ payload }: any) => handleStudentActionRef.current(payload))
         .on('broadcast', { event: 'ta_action' }, ({ payload }: any) => handleTaActionFromOtherScreenRef.current(payload))
         .on('broadcast', { event: SEAT_LAYOUT_UPDATED_EVENT }, () => loadAllSeats())
         .subscribe((status: string) => {
+          if (taDisposedRef.current || clinicChannelRef.current !== ch) return;
           setIsConnected(status === 'SUBSCRIBED');
-          if (status === 'SUBSCRIBED') updateHandlingPresence(selectedCallKey, true);
+          if (status === 'SUBSCRIBED') {
+            taRetryAttemptRef.current = 0;
+            updateHandlingPresence(selectedCallKey, true);
+            fetchSeatsFromDBRef.current();
+          } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+            if (taReconnectTimerRef.current) clearTimeout(taReconnectTimerRef.current);
+            const attempt = taRetryAttemptRef.current++;
+            const delayMs = Math.min(12000, Math.round(3000 * Math.pow(1.5, Math.min(attempt, 4)))) + Math.floor(Math.random() * 3000);
+            taReconnectTimerRef.current = setTimeout(() => {
+              if (!taDisposedRef.current && clinicChannelRef.current === ch) {
+                connectClinicChannel();
+              }
+            }, delayMs);
+          }
         });
     }).catch(err => console.error('클리닉 채널 연결 오류:', err));
   };
@@ -564,10 +631,11 @@ export function useTaHandheld() {
     if (!selectedCallKey || !markState[selectedCallKey]) return;
     const c = callsSnapshot[selectedCallKey];
     if (!c) return;
-    sendToStudent(c.seat, 'force_cancel_call', { qNum: c.qNum, mark: markState[selectedCallKey], taName: taName, taClientId: taClientId });
+    const chosenMark = markState[selectedCallKey] || 'skip';
+    sendToStudent(c.seat, 'force_cancel_call', { qNum: c.qNum, mark: chosenMark, taName: taName, taClientId: taClientId });
 
     const sid = activeStudentsRef.current[c.seat]?.sessionId;
-    if (sid) clearActiveCall(supabaseClient, sid, c.qNum);
+    if (sid) resolveActiveCall(supabaseClient, sid, c.qNum, chosenMark);
 
     delete callsRef.current[selectedCallKey];
     setMarkState(prev => { const n = {...prev}; delete n[selectedCallKey]; return n; });
@@ -583,10 +651,10 @@ export function useTaHandheld() {
     if (!selectedCallKey) return;
     const r = rechecksRef.current[selectedCallKey];
     if (!r) return;
-    sendToStudent(r.seat, 'resolve_recheck', { uid: r.uid, verdict, taName, taClientId });
+    sendToStudent(r.seat, 'resolve_recheck', { uid: r.uid, verdict, qNum: r.qNum, taName, taClientId });
 
     const sid = activeStudentsRef.current[r.seat]?.sessionId;
-    if (sid) clearActiveRecheck(supabaseClient, sid, r.uid);
+    if (sid) resolveActiveRecheck(supabaseClient, sid, r.uid, verdict, r.qNum);
 
     delete rechecksRef.current[selectedCallKey];
     setMarkState(prev => { const n = {...prev}; delete n[selectedCallKey]; return n; });

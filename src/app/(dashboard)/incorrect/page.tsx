@@ -4,6 +4,7 @@
 import { useEffect, useState, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
+import { isConfidentialIncorrectRecord } from "@/lib/confidentialExamGuard";
 
 const ENDED_ENROLLMENT_STATUSES = ["수강종료", "종료", "퇴원", "취소"];
 const isEndedEnrollment = (e: any): boolean => {
@@ -181,10 +182,13 @@ export default function IncorrectPage() {
       for (let i = 0; i < studentIds.length; i += chunkSize) {
         const chunk = studentIds.slice(i, i + chunkSize);
         const { data: stats } = await supabase.from('student_incorrect_record')
-          .select('student_id, resolved_at')
+          .select('student_id, resolved_at, source_type, question_db(source_book_name, book_name, pdf_source)')
           .in('student_id', chunk);
 
-        if (stats) fetchedStats = [...fetchedStats, ...stats];
+        if (stats) {
+          const cleanStats = stats.filter((r: any) => !isConfidentialIncorrectRecord(r));
+          fetchedStats = [...fetchedStats, ...cleanStats];
+        }
       }
       
       setIncorrectStats(fetchedStats);
@@ -209,11 +213,11 @@ export default function IncorrectPage() {
       setStudentPrints(prints || []);
 
       const { data: records } = await supabase.from('student_incorrect_record')
-        .select(`record_id, source_type, status, retry_count, created_at, resolved_at, tq_id, question_id, question_db(question, source_book_name)`)
+        .select(`record_id, source_type, status, retry_count, created_at, resolved_at, tq_id, question_id, question_db(question, source_book_name, book_name, pdf_source)`)
         .eq('student_id', studentId)
         .order('created_at', { ascending: false });
 
-      let enrichedRecords = records || [];
+      let enrichedRecords = (records || []).filter((r: any) => !isConfidentialIncorrectRecord(r));
 
       // 🌟 [핵심 수정] 숫자형 ID와 문자열(UUID) 형태의 ID를 철저히 분리하여 쿼리
       if (enrichedRecords.length > 0) {

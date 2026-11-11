@@ -40,6 +40,18 @@ const safeParseIds = (raw: any): number[] => {
   return [];
 };
 
+async function getCallerTenant(clientTenantId?: string): Promise<{
+  callerTenant: string;
+  cookieTenantId: string;
+  localTenantId: string;
+}> {
+  const cookieStore = await cookies();
+  const cookieTenantId = (cookieStore.get("logica_tenant_id")?.value || "").trim();
+  const localTenantId = (clientTenantId || "").trim();
+  const callerTenant = localTenantId || cookieTenantId;
+  return { callerTenant, cookieTenantId, localTenantId };
+}
+
 async function verifyClassAndResolveTenant(
   supabaseAdmin: SupabaseClient,
   classId: string,
@@ -49,11 +61,7 @@ async function verifyClassAndResolveTenant(
     return { ok: false, message: "반(class_id) 정보가 없습니다." };
   }
 
-  const cookieStore = await cookies();
-  const cookieTenantId = (cookieStore.get("logica_tenant_id")?.value || "").trim();
-  const localTenantId = (clientTenantId || "").trim();
-  const callerTenant = localTenantId || cookieTenantId;
-
+  const { callerTenant, cookieTenantId, localTenantId } = await getCallerTenant(clientTenantId);
   if (!callerTenant) {
     return { ok: false, message: "로그인 지점 정보가 없습니다. 다시 로그인해 주세요." };
   }
@@ -541,10 +549,8 @@ export async function applyProgressBatchAction(params: ApplyProgressBatchParams)
 
     const allIds = Array.from(new Set([...mainIds, ...wbIds]));
 
-    // 1) 기존 배정/완료 상태 정리
     await cancelProgressOnServer(supabaseAdmin, classId, allIds, targetStudentIds);
 
-    // 2) 진도 취소(progress_exclusion) 기록 동기화
     if (actionType === "CANCEL") {
       await syncProgressExclusionsOnServer(supabaseAdmin, classId, allIds, targetStudentIds, "ADD");
     } else {
@@ -557,7 +563,6 @@ export async function applyProgressBatchAction(params: ApplyProgressBatchParams)
       );
     }
 
-    // 3) 액션 유형별 진도 완료 / 과제 배부 저장
     if (actionType === "DONE_AND_WB_HW") {
       if (mainIds.length > 0 && mainBookId) {
         await markProgressCompleteOnServer(
@@ -857,5 +862,322 @@ export async function saveStudentStartPageAction(params: {
       success: false,
       message: err?.message || "시작 페이지 저장에 실패했습니다.",
     };
+  }
+}
+
+// ============================================================================
+// 🌟 [통합 과제 관리 서버 액션] /learning, /homework, /exam/viewer 에서 발생하는
+// homework_assignment · student_homework_result RLS(42501) 오류 및 completed_tq_ids 누락 원천 해결
+// ============================================================================
+
+export async function renameHomeworkAssignmentAction(params: {
+  homeworkId: number | string;
+  newTitle: string;
+  clientTenantId?: string;
+}) {
+  const supabaseAdmin = getAdminClient();
+  try {
+    const hwId = Number(params.homeworkId);
+    const trimmed = String(params.newTitle || "").trim();
+    if (!hwId || !trimmed) return { success: false, message: "유효하지 않은 과제 정보입니다." };
+
+    const { data: hwRow } = await supabaseAdmin
+      .from("homework_assignment")
+      .select("homework_id, class_id")
+      .eq("homework_id", hwId)
+      .maybeSingle();
+
+    if (!hwRow) return { success: false, message: "과제를 찾을 수 없습니다." };
+    if (hwRow.class_id) {
+      const authCheck = await verifyClassAndResolveTenant(supabaseAdmin, hwRow.class_id, params.clientTenantId);
+      if (!authCheck.ok) return { success: false, message: authCheck.message };
+    }
+
+    const { error } = await supabaseAdmin
+      .from("homework_assignment")
+      .update({ homework_title: trimmed })
+      .eq("homework_id", hwId);
+
+    if (error) throw error;
+    return { success: true };
+  } catch (err: any) {
+    console.error("renameHomeworkAssignmentAction 오류:", err);
+    return { success: false, message: err?.message || "과제 이름 변경 실패" };
+  }
+}
+
+export async function deleteHomeworkAssignmentAction(params: {
+  homeworkId: number | string;
+  studentId?: string;
+  deleteAllStudents?: boolean;
+  clientTenantId?: string;
+}) {
+  const supabaseAdmin = getAdminClient();
+  try {
+    const hwId = Number(params.homeworkId);
+    if (!hwId) return { success: false, message: "유효하지 않은 과제 ID입니다." };
+
+    const { data: hwRow } = await supabaseAdmin
+      .from("homework_assignment")
+      .select("homework_id, class_id")
+      .eq("homework_id", hwId)
+      .maybeSingle();
+
+    if (!hwRow) return { success: true };
+    if (hwRow.class_id) {
+      const authCheck = await verifyClassAndResolveTenant(supabaseAdmin, hwRow.class_id, params.clientTenantId);
+      if (!authCheck.ok) return { success: false, message: authCheck.message };
+    }
+
+    if (params.deleteAllStudents || !params.studentId) {
+      await supabaseAdmin.from("student_homework_answer").delete().eq("homework_id", hwId);
+      await supabaseAdmin.from("student_homework_result").delete().eq("homework_id", hwId);
+      const { error } = await supabaseAdmin.from("homework_assignment").delete().eq("homework_id", hwId);
+      if (error) throw error;
+    } else {
+      await supabaseAdmin
+        .from("student_homework_answer")
+        .delete()
+        .eq("homework_id", hwId)
+        .eq("student_id", params.studentId);
+      await supabaseAdmin
+        .from("student_homework_result")
+        .delete()
+        .eq("homework_id", hwId)
+        .eq("student_id", params.studentId);
+
+      const { count } = await supabaseAdmin
+        .from("student_homework_result")
+        .select("*", { count: "exact", head: true })
+        .eq("homework_id", hwId);
+
+      if (count === 0) {
+        await supabaseAdmin.from("homework_assignment").delete().eq("homework_id", hwId);
+      }
+    }
+
+    return { success: true };
+  } catch (err: any) {
+    console.error("deleteHomeworkAssignmentAction 오류:", err);
+    return { success: false, message: err?.message || "과제 삭제 실패" };
+  }
+}
+
+export async function forceCompleteHomeworkBatchAction(params: {
+  items: { homeworkId: number | string; studentId: string }[];
+  clientTenantId?: string;
+}) {
+  const supabaseAdmin = getAdminClient();
+  try {
+    const validItems = (params.items || [])
+      .map((it) => ({ homeworkId: Number(it.homeworkId), studentId: String(it.studentId || "") }))
+      .filter((it) => it.homeworkId > 0 && it.studentId);
+
+    if (validItems.length === 0) return { success: true };
+
+    const hwIds = Array.from(new Set(validItems.map((it) => it.homeworkId)));
+    const { data: hwRows, error: hwErr } = await supabaseAdmin
+      .from("homework_assignment")
+      .select("homework_id, class_id, target_questions")
+      .in("homework_id", hwIds);
+
+    if (hwErr) throw hwErr;
+
+    const hwMap = new Map<number, { class_id: string | null; targetQs: number[] }>();
+    let firstClassId: string | null = null;
+    (hwRows || []).forEach((h: any) => {
+      if (!firstClassId && h.class_id) firstClassId = h.class_id;
+      hwMap.set(Number(h.homework_id), {
+        class_id: h.class_id || null,
+        targetQs: safeParseIds(h.target_questions),
+      });
+    });
+
+    let resolvedTenantId: string | null = null;
+    if (firstClassId) {
+      const authCheck = await verifyClassAndResolveTenant(supabaseAdmin, firstClassId, params.clientTenantId);
+      if (!authCheck.ok) return { success: false, message: authCheck.message };
+      resolvedTenantId = authCheck.resolvedTenantId;
+    }
+
+    const nowIso = new Date().toISOString();
+    await Promise.all(
+      validItems.map(async ({ homeworkId, studentId }) => {
+        const targetQs = hwMap.get(homeworkId)?.targetQs || [];
+        const { data: existing } = await supabaseAdmin
+          .from("student_homework_result")
+          .select("hw_result_id, completed_tq_ids")
+          .eq("homework_id", homeworkId)
+          .eq("student_id", studentId)
+          .maybeSingle();
+
+        if (existing) {
+          const prevComp = safeParseIds(existing.completed_tq_ids);
+          const mergedComp = Array.from(new Set([...prevComp, ...targetQs]));
+          const { error } = await supabaseAdmin
+            .from("student_homework_result")
+            .update({
+              status: "채점완료",
+              completed_tq_ids: mergedComp,
+              checked_at: nowIso,
+            })
+            .eq("hw_result_id", existing.hw_result_id);
+          if (error) throw error;
+        } else {
+          await insertStudentHomeworkResultSafe(
+            supabaseAdmin,
+            {
+              homework_id: homeworkId,
+              student_id: studentId,
+              status: "채점완료",
+              completed_tq_ids: targetQs,
+              checked_at: nowIso,
+            },
+            resolvedTenantId
+          );
+        }
+      })
+    );
+
+    return { success: true };
+  } catch (err: any) {
+    console.error("forceCompleteHomeworkBatchAction 오류:", err);
+    return { success: false, message: err?.message || "과제 완료 처리 실패" };
+  }
+}
+
+export async function processExamViewerHomeworkAndAssignAction(params: {
+  editOriginalHwId?: number | null;
+  splitHwIds?: number[];
+  splitCommonTqIds?: number[];
+  examId?: string | null;
+  targetStudents?: string[];
+  targetStudentId?: string | null;
+  targetClassId?: string | null;
+  flatQIds?: string[];
+  clientTenantId?: string;
+}) {
+  const supabaseAdmin = getAdminClient();
+  try {
+    const { callerTenant } = await getCallerTenant(params.clientTenantId);
+    const resolvedTenant = callerTenant && callerTenant !== "hq" ? callerTenant : null;
+
+    let finalStudentId = params.targetStudentId || null;
+    let finalClassId = params.targetClassId || null;
+
+    if (params.editOriginalHwId) {
+      const hwNum = Number(params.editOriginalHwId);
+      const { data: origHw } = await supabaseAdmin
+        .from("homework_assignment")
+        .select("*")
+        .eq("homework_id", hwNum)
+        .maybeSingle();
+
+      if (origHw) {
+        if (!finalStudentId) finalStudentId = origHw.target_student_id;
+        if (!finalClassId) finalClassId = origHw.class_id;
+
+        if (origHw.target_student_id) {
+          await supabaseAdmin.from("student_homework_answer").delete().eq("homework_id", hwNum);
+          await supabaseAdmin.from("student_homework_result").delete().eq("homework_id", hwNum);
+          await supabaseAdmin.from("homework_assignment").delete().eq("homework_id", hwNum);
+        } else if (finalStudentId) {
+          await supabaseAdmin
+            .from("student_homework_answer")
+            .delete()
+            .eq("homework_id", hwNum)
+            .eq("student_id", finalStudentId);
+          await supabaseAdmin
+            .from("student_homework_result")
+            .delete()
+            .eq("homework_id", hwNum)
+            .eq("student_id", finalStudentId);
+        }
+      }
+    }
+
+    if (params.splitHwIds && params.splitHwIds.length > 0 && params.splitCommonTqIds) {
+      const splitSet = new Set(params.splitCommonTqIds.map(Number));
+      const { data: hwData } = await supabaseAdmin
+        .from("homework_assignment")
+        .select("homework_id, target_questions")
+        .in("homework_id", params.splitHwIds);
+
+      for (const hw of hwData || []) {
+        const originalTqs = safeParseIds(hw.target_questions);
+        const remainderTqs = originalTqs.filter((id: number) => !splitSet.has(id));
+        if (remainderTqs.length === 0) {
+          await supabaseAdmin.from("student_homework_answer").delete().eq("homework_id", hw.homework_id);
+          await supabaseAdmin.from("student_homework_result").delete().eq("homework_id", hw.homework_id);
+          await supabaseAdmin.from("homework_assignment").delete().eq("homework_id", hw.homework_id);
+        } else {
+          await supabaseAdmin
+            .from("homework_assignment")
+            .update({ target_questions: remainderTqs })
+            .eq("homework_id", hw.homework_id);
+        }
+      }
+    }
+
+    const students =
+      params.targetStudents && params.targetStudents.length > 0
+        ? params.targetStudents
+        : finalStudentId
+        ? [finalStudentId]
+        : [];
+
+    if (students.length > 0 && params.examId) {
+      let assignTenantId = resolvedTenant;
+      if (!assignTenantId && finalClassId) {
+        const { data: cls } = await supabaseAdmin
+          .from("class")
+          .select("tenant_id")
+          .eq("class_id", finalClassId)
+          .maybeSingle();
+        if (cls?.tenant_id) assignTenantId = cls.tenant_id;
+      }
+
+      const { data: existingAssigns } = await supabaseAdmin
+        .from("exam_assignment")
+        .select("student_id")
+        .eq("exam_id", params.examId)
+        .in("student_id", students);
+
+      const alreadySet = new Set((existingAssigns || []).map((a: any) => String(a.student_id)));
+      const newAssignRows = students
+        .filter((sId) => !alreadySet.has(String(sId)))
+        .map((sId) => ({
+          exam_id: params.examId,
+          student_id: sId,
+          class_id: finalClassId || null,
+          status: "미응시",
+          ...(assignTenantId ? { tenant_id: assignTenantId } : {}),
+        }));
+
+      if (newAssignRows.length > 0) {
+        const { error: insErr } = await supabaseAdmin.from("exam_assignment").insert(newAssignRows);
+        if (insErr) throw insErr;
+      }
+
+      const qIds = params.flatQIds || [];
+      if (qIds.length > 0) {
+        const allTasks = students.flatMap((stuId) =>
+          qIds.map((qId) => ({
+            student_id: stuId,
+            task_type: "유형오답클리닉",
+            question_id: String(qId),
+            status: "대기",
+          }))
+        );
+        for (let i = 0; i < allTasks.length; i += 200) {
+          await supabaseAdmin.from("clinic_task").insert(allTasks.slice(i, i + 200));
+        }
+      }
+    }
+
+    return { success: true, targetStudentId: finalStudentId, targetClassId: finalClassId };
+  } catch (err: any) {
+    console.error("processExamViewerHomeworkAndAssignAction 오류:", err);
+    return { success: false, message: err?.message || "과제 분할/배정 처리 실패" };
   }
 }
