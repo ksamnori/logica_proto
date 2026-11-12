@@ -14,7 +14,30 @@ interface TenantInfo {
   phone?: string;
 }
 
-const unwrap = <T,>(obj: T | T[] | undefined | null): T | undefined => {
+interface StudentLedgerRow {
+  studentId: string;
+  name: string;
+  schoolGrade: string;
+  classNames: string;
+  primaryClass: string;
+  startDate: string;
+  parentPhone: string;
+  note: string;
+}
+
+interface InstructorRosterRow {
+  instructorId: string;
+  name: string;
+  position: string;
+  department: string;
+  hireDate: string;
+  phone: string;
+  contractType: string;
+  rank: number;
+  rawCreatedAt: string;
+}
+
+const unwrap = (obj: any): any => {
   if (Array.isArray(obj)) return obj[0];
   return obj || undefined;
 };
@@ -112,7 +135,7 @@ export default function PrintCenterPage() {
   const [selectedReceiptId, setSelectedReceiptId] = useState<string>("blank");
   const [receiptSearch, setReceiptSearch] = useState<string>("");
 
-  const todayStr = useMemo(() => {
+  const todayStr = useMemo<string>(() => {
     const now = new Date();
     return `${now.getFullYear()}. ${String(now.getMonth() + 1).padStart(2, "0")}. ${String(now.getDate()).padStart(2, "0")}.`;
   }, []);
@@ -133,7 +156,7 @@ export default function PrintCenterPage() {
           .select("*")
           .eq("tenant_id", validTenantFilter)
           .maybeSingle();
-        if (tenant) setTenantInfo(tenant);
+        if (tenant) setTenantInfo(tenant as TenantInfo);
       } else {
         const { data: firstTenant } = await supabase
           .from("academy_tenant")
@@ -142,7 +165,7 @@ export default function PrintCenterPage() {
           .order("created_at", { ascending: true })
           .limit(1)
           .maybeSingle();
-        if (firstTenant) setTenantInfo(firstTenant);
+        if (firstTenant) setTenantInfo(firstTenant as TenantInfo);
       }
 
       // 1) 수강생 대장용 조회: 정식 등록('재원') 상태 + 미삭제 + '테스트' 이름 제외 + 학부모 연락처 조인
@@ -205,30 +228,21 @@ export default function PrintCenterPage() {
   // - 이름에 '테스트'가 포함된 학생 제외
   // - 반 이름에 '테스트'가 포함된 수강 이력 제외 (만약 '테스트' 반에만 등록되어 있던 계정이면 학생 행 자체도 제외)
   // - 연락처는 학부모 연락처(parent.phone -> phone_2 -> phone_3) 표시
-  const processedStudents = useMemo(() => {
-    const list: {
-      studentId: string;
-      name: string;
-      schoolGrade: string;
-      classNames: string;
-      primaryClass: string;
-      startDate: string;
-      parentPhone: string;
-      note: string;
-    }[] = [];
+  const processedStudents = useMemo<StudentLedgerRow[]>(() => {
+    const list: StudentLedgerRow[] = [];
 
     rawStudents.forEach((s: any) => {
       const name = String(s.name || "").trim();
       if (!name || name.includes("테스트")) return;
       if (String(s.status || "").trim() !== "재원" || s.deleted_at) return;
 
-      const enrollArr = Array.isArray(s.enrollment)
+      const enrollArr: any[] = Array.isArray(s.enrollment)
         ? s.enrollment
         : s.enrollment
         ? [s.enrollment]
         : [];
 
-      const activeEnrolls = enrollArr.filter((e: any) => {
+      const activeEnrolls: any[] = enrollArr.filter((e: any) => {
         if (isEndedEnrollment(e)) return false;
         const cls = unwrap(e.class);
         if (!cls || cls.deleted_at) return false;
@@ -237,7 +251,7 @@ export default function PrintCenterPage() {
         return true;
       });
 
-      const nonTestEnrolls = activeEnrolls.filter((e: any) => {
+      const nonTestEnrolls: any[] = activeEnrolls.filter((e: any) => {
         const cName = String(unwrap(e.class)?.name || "").trim();
         return cName.length > 0 && !cName.includes("테스트");
       });
@@ -246,22 +260,27 @@ export default function PrintCenterPage() {
       if (activeEnrolls.length > 0 && nonTestEnrolls.length === 0) return;
       if (onlyClassAssigned && nonTestEnrolls.length === 0) return;
 
-      const classNameList = Array.from(
-        new Set(
-          nonTestEnrolls
-            .map((e: any) => String(unwrap(e.class)?.name || "").trim())
-            .filter(Boolean)
-        )
-      );
+      const classNameList: string[] = [];
+      const seenClassNames = new Set<string>();
+      nonTestEnrolls.forEach((e: any) => {
+        const cn = String(unwrap(e.class)?.name || "").trim();
+        if (cn && !seenClassNames.has(cn)) {
+          seenClassNames.add(cn);
+          classNameList.push(cn);
+        }
+      });
 
       if (selectedClassFilter !== "all" && !classNameList.includes(selectedClassFilter)) {
         return;
       }
 
-      const earliestStart = nonTestEnrolls
-        .map((e: any) => String(e.start_date || "").trim())
-        .filter(Boolean)
-        .sort()[0];
+      const startDates: string[] = [];
+      nonTestEnrolls.forEach((e: any) => {
+        const sd = String(e.start_date || "").trim();
+        if (sd) startDates.push(sd);
+      });
+      startDates.sort();
+      const earliestStart: string | undefined = startDates[0];
 
       const parentObj = unwrap(s.parent);
       const rawParentPhone =
@@ -277,19 +296,21 @@ export default function PrintCenterPage() {
           ? `${schoolStr} (${gradeStr})`
           : schoolStr || gradeStr || "-";
 
+      const firstClassName: string = classNameList.length > 0 ? classNameList[0] : "ㅎ_미배정";
+
       list.push({
         studentId: String(s.student_id),
         name,
         schoolGrade,
         classNames: classNameList.length > 0 ? classNameList.join(", ") : "반 배정 대기",
-        primaryClass: classNameList[0] || "ㅎ_미배정",
-        startDate: earliestStart ? formatDateDot(earliestStart) : formatDateDot(s.created_at),
+        primaryClass: firstClassName,
+        startDate: earliestStart ? formatDateDot(earliestStart) : formatDateDot(String(s.created_at || "")),
         parentPhone: formattedParentPhone || "-",
         note: "",
       });
     });
 
-    list.sort((a, b) => {
+    list.sort((a: StudentLedgerRow, b: StudentLedgerRow) => {
       if (studentSort === "class") {
         const cmp = a.primaryClass.localeCompare(b.primaryClass, "ko");
         if (cmp !== 0) return cmp;
@@ -306,28 +327,32 @@ export default function PrintCenterPage() {
     return list;
   }, [rawStudents, onlyClassAssigned, selectedClassFilter, studentSort]);
 
-  const availableClassOptions = useMemo(() => {
-    const set = new Set<string>();
+  const availableClassOptions = useMemo<string[]>(() => {
+    const options: string[] = [];
+    const seen = new Set<string>();
     rawStudents.forEach((s: any) => {
       const name = String(s.name || "").trim();
       if (!name || name.includes("테스트") || String(s.status || "").trim() !== "재원" || s.deleted_at) return;
-      const enrollArr = Array.isArray(s.enrollment) ? s.enrollment : s.enrollment ? [s.enrollment] : [];
+      const enrollArr: any[] = Array.isArray(s.enrollment) ? s.enrollment : s.enrollment ? [s.enrollment] : [];
       enrollArr.forEach((e: any) => {
         if (isEndedEnrollment(e)) return;
         const cls = unwrap(e.class);
         if (!cls || cls.deleted_at || cls.status === "종료" || cls.status === "폐강") return;
         const cName = String(cls.name || "").trim();
-        if (cName && !cName.includes("테스트")) set.add(cName);
+        if (cName && !cName.includes("테스트") && !seen.has(cName)) {
+          seen.add(cName);
+          options.push(cName);
+        }
       });
     });
-    return Array.from(set).sort((a, b) => a.localeCompare(b, "ko"));
+    return options.sort((a: string, b: string) => a.localeCompare(b, "ko"));
   }, [rawStudents]);
 
   // 강사(직원) 명부 정제: 퇴사·휴직·해임·삭제·게스트·테스트 계정 모두 제외
-  const processedInstructors = useMemo(() => {
+  const processedInstructors = useMemo<InstructorRosterRow[]>(() => {
     return rawInstructors
       .filter(isActiveInstructor)
-      .map((inst: any) => {
+      .map((inst: any): InstructorRosterRow => {
         const pos = resolvePositionText(inst);
         const dept =
           String(inst.department || "").trim() ||
@@ -345,7 +370,7 @@ export default function PrintCenterPage() {
           rawCreatedAt: String(inst.created_at || ""),
         };
       })
-      .sort((a, b) => {
+      .sort((a: InstructorRosterRow, b: InstructorRosterRow) => {
         if (a.rank !== b.rank) return a.rank - b.rank;
         if (a.rawCreatedAt !== b.rawCreatedAt) return a.rawCreatedAt.localeCompare(b.rawCreatedAt);
         return a.name.localeCompare(b.name, "ko");
@@ -353,17 +378,21 @@ export default function PrintCenterPage() {
   }, [rawInstructors]);
 
   // 수납 원장 월 목록 및 필터링
-  const availableLedgerMonths = useMemo(() => {
-    const months = new Set<string>();
+  const availableLedgerMonths = useMemo<string[]>(() => {
+    const monthsList: string[] = [];
+    const seenMonths = new Set<string>();
     rawPayments.forEach((p: any) => {
       const bm = String(unwrap(p.academy_billing)?.billing_month || "").trim();
-      if (bm) months.add(bm);
-      else if (p.paid_at) months.add(String(p.paid_at).slice(0, 7));
+      const target = bm || (p.paid_at ? String(p.paid_at).slice(0, 7) : "");
+      if (target && !seenMonths.has(target)) {
+        seenMonths.add(target);
+        monthsList.push(target);
+      }
     });
-    return Array.from(months).sort().reverse();
+    return monthsList.sort().reverse();
   }, [rawPayments]);
 
-  const filteredPayments = useMemo(() => {
+  const filteredPayments = useMemo<any[]>(() => {
     if (selectedLedgerMonth === "all") return rawPayments;
     return rawPayments.filter((p: any) => {
       const bm = String(unwrap(p.academy_billing)?.billing_month || "").trim();
@@ -372,13 +401,13 @@ export default function PrintCenterPage() {
     });
   }, [rawPayments, selectedLedgerMonth]);
 
-  const totalLedgerIncome = useMemo(
-    () => filteredPayments.reduce((acc, p) => acc + (Number(p.paid_amount) || 0), 0),
+  const totalLedgerIncome = useMemo<number>(
+    () => filteredPayments.reduce((acc: number, p: any) => acc + (Number(p.paid_amount) || 0), 0),
     [filteredPayments]
   );
 
   // 영수증 대상 선택
-  const filteredReceiptCandidates = useMemo(() => {
+  const filteredReceiptCandidates = useMemo<any[]>(() => {
     const q = receiptSearch.trim();
     if (!q) return rawPayments.slice(0, 80);
     return rawPayments
@@ -392,7 +421,7 @@ export default function PrintCenterPage() {
       .slice(0, 80);
   }, [rawPayments, receiptSearch]);
 
-  const activeReceiptPayment = useMemo(() => {
+  const activeReceiptPayment = useMemo<any | null>(() => {
     if (selectedReceiptId === "blank") return null;
     return rawPayments.find((p: any) => String(p.payment_id) === selectedReceiptId) || null;
   }, [rawPayments, selectedReceiptId]);
@@ -401,18 +430,18 @@ export default function PrintCenterPage() {
     ? FIRST_PAGE_ROWS_WITH_APPROVAL
     : FIRST_PAGE_ROWS_NO_APPROVAL;
 
-  const studentPages = useMemo(
-    () => paginateRows(processedStudents, firstPageCap, CONTINUATION_PAGE_ROWS),
+  const studentPages = useMemo<StudentLedgerRow[][]>(
+    () => paginateRows<StudentLedgerRow>(processedStudents, firstPageCap, CONTINUATION_PAGE_ROWS),
     [processedStudents, firstPageCap]
   );
 
-  const instructorPages = useMemo(
-    () => paginateRows(processedInstructors, firstPageCap, CONTINUATION_PAGE_ROWS),
+  const instructorPages = useMemo<InstructorRosterRow[][]>(
+    () => paginateRows<InstructorRosterRow>(processedInstructors, firstPageCap, CONTINUATION_PAGE_ROWS),
     [processedInstructors, firstPageCap]
   );
 
-  const ledgerPages = useMemo(
-    () => paginateRows(filteredPayments, firstPageCap - 1, CONTINUATION_PAGE_ROWS - 1),
+  const ledgerPages = useMemo<any[][]>(
+    () => paginateRows<any>(filteredPayments, firstPageCap - 1, CONTINUATION_PAGE_ROWS - 1),
     [filteredPayments, firstPageCap]
   );
 
@@ -784,7 +813,9 @@ export default function PrintCenterPage() {
                     <button
                       key={tab.id}
                       type="button"
-                      onClick={() => setActiveDoc(tab.id as any)}
+                      onClick={() =>
+                        setActiveDoc(tab.id as "student" | "instructor" | "ledger" | "receipt")
+                      }
                       className={`px-3.5 py-2 rounded-xl font-bold text-xs transition-all flex items-center gap-1.5 border ${
                         isActive
                           ? "bg-slate-900 text-white border-slate-900 shadow-sm"
@@ -816,7 +847,7 @@ export default function PrintCenterPage() {
                       className="bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 font-bold text-slate-700 outline-none focus:border-blue-500"
                     >
                       <option value="all">전체 수강반 ({availableClassOptions.length}개)</option>
-                      {availableClassOptions.map((cn) => (
+                      {availableClassOptions.map((cn: string) => (
                         <option key={cn} value={cn}>
                           {cn}
                         </option>
@@ -825,7 +856,7 @@ export default function PrintCenterPage() {
 
                     <select
                       value={studentSort}
-                      onChange={(e) => setStudentSort(e.target.value as any)}
+                      onChange={(e) => setStudentSort(e.target.value as "name" | "class" | "date")}
                       className="bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 font-bold text-slate-700 outline-none focus:border-blue-500"
                     >
                       <option value="name">가나다순 정렬</option>
@@ -852,7 +883,7 @@ export default function PrintCenterPage() {
                     className="bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 font-bold text-slate-700 outline-none focus:border-blue-500"
                   >
                     <option value="all">전체 수납 월</option>
-                    {availableLedgerMonths.map((m) => (
+                    {availableLedgerMonths.map((m: string) => (
                       <option key={m} value={m}>
                         {m} 귀속/수납분
                       </option>
@@ -877,8 +908,8 @@ export default function PrintCenterPage() {
                       <option value="blank">[빈 양식] 수기 입력용 영수증</option>
                       {filteredReceiptCandidates.map((p: any) => {
                         const bill = unwrap(p.academy_billing);
-                        const sName = unwrap(bill?.student)?.name || "학생";
-                        const cName = unwrap(bill?.class)?.name || "-";
+                        const sName = String(unwrap(bill?.student)?.name || "학생");
+                        const cName = String(unwrap(bill?.class)?.name || "-");
                         return (
                           <option key={p.payment_id} value={String(p.payment_id)}>
                             {formatDateDot(p.paid_at)} · {sName} ({cName}) ·{" "}
@@ -932,7 +963,7 @@ export default function PrintCenterPage() {
                     1. 수강생 대장 (정식 재원생 전용 · 테스트 반/학생 제외 · 학부모 연락처 · A4 페이지 분할)
                    ========================================================= */}
                 {activeDoc === "student" &&
-                  studentPages.map((pageRows, pageIdx) => {
+                  studentPages.map((pageRows: StudentLedgerRow[], pageIdx: number) => {
                     const baseIndex =
                       pageIdx === 0
                         ? 0
@@ -981,7 +1012,7 @@ export default function PrintCenterPage() {
                             </tr>
                           </thead>
                           <tbody>
-                            {pageRows.map((st, rIdx) => (
+                            {pageRows.map((st: StudentLedgerRow, rIdx: number) => (
                               <tr key={st.studentId}>
                                 <td
                                   className="text-center tabular-nums text-slate-600 outline-none focus:bg-amber-50"
@@ -1035,7 +1066,7 @@ export default function PrintCenterPage() {
                               </tr>
                             ))}
 
-                            {Array.from({ length: blankCount }).map((_, bIdx) => (
+                            {Array.from({ length: blankCount }).map((_, bIdx: number) => (
                               <tr key={`stu-blank-${pageIdx}-${bIdx}`}>
                                 <td className="text-center text-slate-300" contentEditable suppressContentEditableWarning></td>
                                 <td contentEditable suppressContentEditableWarning></td>
@@ -1058,7 +1089,7 @@ export default function PrintCenterPage() {
                     2. 강사(직원) 명부 (퇴사·휴직·해임 제외 · 현직 인원 전용 · A4 페이지 분할)
                    ========================================================= */}
                 {activeDoc === "instructor" &&
-                  instructorPages.map((pageRows, pageIdx) => {
+                  instructorPages.map((pageRows: InstructorRosterRow[], pageIdx: number) => {
                     const baseIndex =
                       pageIdx === 0
                         ? 0
@@ -1104,7 +1135,7 @@ export default function PrintCenterPage() {
                             </tr>
                           </thead>
                           <tbody>
-                            {pageRows.map((inst, rIdx) => (
+                            {pageRows.map((inst: InstructorRosterRow, rIdx: number) => (
                               <tr key={inst.instructorId}>
                                 <td
                                   className="text-center tabular-nums text-slate-600 outline-none focus:bg-amber-50"
@@ -1158,7 +1189,7 @@ export default function PrintCenterPage() {
                               </tr>
                             ))}
 
-                            {Array.from({ length: blankCount }).map((_, bIdx) => (
+                            {Array.from({ length: blankCount }).map((_, bIdx: number) => (
                               <tr key={`inst-blank-${pageIdx}-${bIdx}`}>
                                 <td contentEditable suppressContentEditableWarning></td>
                                 <td contentEditable suppressContentEditableWarning></td>
@@ -1181,7 +1212,7 @@ export default function PrintCenterPage() {
                     3. 현금·수납 출납부 (A4 페이지 분할 + 합계 행)
                    ========================================================= */}
                 {activeDoc === "ledger" &&
-                  ledgerPages.map((pageRows, pageIdx) => {
+                  ledgerPages.map((pageRows: any[], pageIdx: number) => {
                     const firstLedgerCap = firstPageCap - 1;
                     const nextLedgerCap = CONTINUATION_PAGE_ROWS - 1;
                     const baseIndex =
@@ -1236,8 +1267,8 @@ export default function PrintCenterPage() {
                           <tbody>
                             {pageRows.map((p: any, rIdx: number) => {
                               const bill = unwrap(p.academy_billing);
-                              const sName = unwrap(bill?.student)?.name || "-";
-                              const cName = unwrap(bill?.class)?.name || "-";
+                              const sName = String(unwrap(bill?.student)?.name || "-");
+                              const cName = String(unwrap(bill?.class)?.name || "-");
                               const bm = bill?.billing_month ? `[${bill.billing_month}] ` : "";
                               return (
                                 <tr key={p.payment_id}>
@@ -1288,7 +1319,7 @@ export default function PrintCenterPage() {
                               );
                             })}
 
-                            {Array.from({ length: blankCount }).map((_, bIdx) => (
+                            {Array.from({ length: blankCount }).map((_, bIdx: number) => (
                               <tr key={`led-blank-${pageIdx}-${bIdx}`}>
                                 <td contentEditable suppressContentEditableWarning></td>
                                 <td contentEditable suppressContentEditableWarning></td>
@@ -1329,14 +1360,14 @@ export default function PrintCenterPage() {
                     {[
                       { copyType: "학원 보관용", serialSuffix: "A" },
                       { copyType: "학부모 교부용", serialSuffix: "B" },
-                    ].map((meta, idx) => {
+                    ].map((meta, idx: number) => {
                       const bill = activeReceiptPayment
                         ? unwrap(activeReceiptPayment.academy_billing)
                         : null;
-                      const studentName = unwrap(bill?.student)?.name || "";
-                      const courseName = unwrap(bill?.class)?.name || "";
-                      const billingMonth = bill?.billing_month || "";
-                      const payMethod = activeReceiptPayment?.payment_method || "";
+                      const studentName = String(unwrap(bill?.student)?.name || "");
+                      const courseName = String(unwrap(bill?.class)?.name || "");
+                      const billingMonth = String(bill?.billing_month || "");
+                      const payMethod = String(activeReceiptPayment?.payment_method || "");
                       const paidAmountStr = activeReceiptPayment
                         ? `₩ ${Number(activeReceiptPayment.paid_amount || 0).toLocaleString()} 원정`
                         : "₩ ";
