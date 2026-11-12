@@ -4,6 +4,7 @@ import { SupabaseClient } from '@supabase/supabase-js';
 import { resolveTodaySession } from "@/lib/clinicSession";
 import { awardClinicMinutePoints } from "@/app/actions/shopPoints";
 import { getKSTDateString, CLINIC_ROOM, isObjectiveQuestion } from '../utils';
+import { createPresenceRateLimiter } from "@/lib/presenceThrottle";
 
 interface UseClinicRealtimeProps {
   supabaseClient: SupabaseClient;
@@ -67,8 +68,7 @@ export function useClinicRealtime({
   const gradingChannelRef = useRef<any>(null);
   const handleTaActionRef = useRef<any>(null);
   const trackPresenceRef = useRef<any>(null);
-  const lastTrackAtRef = useRef<number>(0);
-  const lastTrackKeyRef = useRef<string>('');
+  const presenceLimiterRef = useRef(createPresenceRateLimiter({ minGapMs: 8500 }));
 
   // 🌟 questions 배열 참조가 바뀔 때마다 실시간 채널이 해체·재구독되지 않도록 최신 참조를 Ref로 유지
   const questionsRef = useRef<any[]>(questions);
@@ -486,6 +486,10 @@ export function useClinicRealtime({
   }, [studentInfo.id, hasQuestions]);
 
   handleTaActionRef.current = (payload: any, sId: string, sessionState: any) => {
+    if (payload.action === 'editor_lock') {
+      setEditorLocked(Boolean(payload.locked));
+      return;
+    }
     const currentSeat = mySeatRef.current;
     if (payload.seat !== currentSeat && payload.studentId !== sId) return;
 
@@ -604,23 +608,28 @@ export function useClinicRealtime({
     }
   };
 
-  // 🌟 ClientPresenceRateLimitReached 원천 차단: 모든 track() 호출에 최소 5초 스로틀 강제 적용
+  // 🌟 ClientPresenceRateLimitReached 원천 차단: 전역 32초 슬라이딩 윈도우(최대 4회, 최소 8.5초 간격) 및 상태 병합 적용
   trackPresenceRef.current = (seat: string, sId: string, sessionState: any, force = false, customActivity?: string) => {
     if (!clinicChannelRef.current || !seat) return;
     const defaultActivity = params.round === 1 ? (params.weekType === 'even' ? '과제오답유사 풀이중' : '주간테스트 풀이중') : params.round === 2 ? (params.overdue ? '미완료 과제 풀이중' : '과제 풀이중') : params.round === 3 ? '오답 클리닉 풀이중' : '클리닉 풀이중';
     const activity = customActivity || defaultActivity;
     const dur = sessionState?.duration_ms || 0;
-    const key = `${seat}_${activity}_${dur}`;
+    const dedupKey = `${seat}_${sId}_${activity}_${dur}`;
     const now = Date.now();
-    // 상태가 같으면 25초 이내 재전송 금지, 상태가 바뀌었더라도 최소 5초 이내 연속 track() 금지
-    if (now - lastTrackAtRef.current < 5000) return;
-    if (!force && key === lastTrackKeyRef.current && now - lastTrackAtRef.current < 25000) return;
-    lastTrackKeyRef.current = key;
-    lastTrackAtRef.current = now;
-    clinicChannelRef.current.track({
-      seat, name: studentInfo.name, studentId: sId, classes: studentInfo.classes, activity, updatedAt: now,
-      startedAt: new Date(sessionState?.started_at || now).getTime(), durationMs: sessionState?.duration_ms
-    }).catch(() => {});
+    presenceLimiterRef.current.scheduleTrack(
+      () => clinicChannelRef.current,
+      {
+        seat,
+        name: studentInfo.name,
+        studentId: sId,
+        classes: studentInfo.classes,
+        activity,
+        startedAt: new Date(sessionState?.started_at || now).getTime(),
+        durationMs: sessionState?.duration_ms,
+      },
+      dedupKey,
+      force
+    );
   };
 
   const connectChannel = async (sId: string, sessionState: any) => {
@@ -630,11 +639,13 @@ export function useClinicRealtime({
     }
     clinicChannelDisposedRef.current = false;
 
+    presenceLimiterRef.current.cancelPending();
     if (clinicChannelRef.current) {
       const oldCh = clinicChannelRef.current;
       clinicChannelRef.current = null;
       try { await supabaseClient.removeChannel(oldCh); } catch (e) {}
     }
+    presenceLimiterRef.current.resetControllerState();
     const myTenantId = localStorage.getItem("logica_tenant_id") || "hq";
     const channelName = `${CLINIC_ROOM}_${myTenantId}`;
     
@@ -740,14 +751,15 @@ export function useClinicRealtime({
 
   const untrackPresence = async () => {
     clinicChannelDisposedRef.current = true;
+    presenceLimiterRef.current.cancelPending();
     if (clinicReconnectTimerRef.current) {
       clearTimeout(clinicReconnectTimerRef.current);
       clinicReconnectTimerRef.current = null;
     }
     if (clinicChannelRef.current) {
       const ch = clinicChannelRef.current;
-      clinicChannelRef.current = null; 
-      try { await ch.untrack(); } catch(e) {}
+      clinicChannelRef.current = null;
+      // removeChannel(phx_leave) 호출 시 서버에서 Presence가 자동 해제되므로 불필요한 untrack() 쿼터 소모 제거
       try { await supabaseClient.removeChannel(ch); } catch(e) {}
     }
   };
@@ -756,6 +768,7 @@ export function useClinicRealtime({
   useEffect(() => {
     return () => {
       clinicChannelDisposedRef.current = true;
+      presenceLimiterRef.current.cancelPending();
       if (clinicReconnectTimerRef.current) {
         clearTimeout(clinicReconnectTimerRef.current);
         clinicReconnectTimerRef.current = null;
@@ -763,7 +776,6 @@ export function useClinicRealtime({
       if (clinicChannelRef.current) {
         const ch = clinicChannelRef.current;
         clinicChannelRef.current = null;
-        try { ch.untrack(); } catch (e) {}
         try { supabaseClient.removeChannel(ch); } catch (e) {}
       }
     };

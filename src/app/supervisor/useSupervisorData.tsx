@@ -246,6 +246,7 @@ export function useSupervisorData() {
     const studentsRef = useRef<Record<string, any>>({});
     const instructorPosByIdRef = useRef<Record<string, string>>({});
     const instructorPosByNameRef = useRef<Record<string, string>>({});
+    const taHandlingBroadcastRef = useRef<Record<string, { handling: string | null; name?: string; position?: string; instructorId?: string | null; updatedAt: number }>>({});
     const channelRef = useRef<any>(null);
 
     const registeredSeatsRef = useRef<Set<string>>(new Set());
@@ -1031,6 +1032,43 @@ export function useSupervisorData() {
 
     const handleTaActionFromOtherScreen = async (payload: any) => {
         const { seat, action, qNum, taName, taClientId, mark, uid } = payload;
+        if (action === 'editor_lock') {
+            setEditorLocked(Boolean(payload.locked));
+            return;
+        }
+        if (action === 'ta_handling') {
+            const key = String(taClientId || taName || '').trim();
+            if (!key) return;
+            const trimmedName = String(taName || '이름 미상').trim();
+            const resolvedPos =
+                String(payload.taPosition || '').trim() ||
+                (payload.instructorId ? instructorPosByIdRef.current[String(payload.instructorId)] : '') ||
+                instructorPosByNameRef.current[trimmedName] ||
+                '';
+            const updatedAt = Number(payload.updatedAt || Date.now());
+            taHandlingBroadcastRef.current[key] = {
+                handling: payload.handling ?? null,
+                name: trimmedName,
+                position: resolvedPos,
+                instructorId: payload.instructorId || null,
+                updatedAt,
+            };
+            setActiveTAs((prev) => {
+                const existing = prev[key];
+                return {
+                    ...prev,
+                    [key]: {
+                        name: trimmedName || existing?.name || '이름 미상',
+                        position: resolvedPos || existing?.position || '',
+                        instructorId: payload.instructorId || existing?.instructorId || null,
+                        joined_at: existing?.joined_at || updatedAt,
+                        handling: payload.handling ?? null,
+                        clientId: taClientId || existing?.clientId || key,
+                    },
+                };
+            });
+            return;
+        }
         const currentStudents = { ...studentsRef.current };
 
         if (action === 'force_cancel_call') {
@@ -1240,17 +1278,23 @@ export function useSupervisorData() {
             if (latestMeta.role === 'ta') {
                 const key = latestMeta.clientId || latestMeta.name;
                 const trimmedName = String(latestMeta.name || '이름 미상').trim();
+                const bc = key ? taHandlingBroadcastRef.current[String(key)] : undefined;
                 const resolvedPos =
-                    String(latestMeta.position || '').trim() ||
+                    String(latestMeta.position || bc?.position || '').trim() ||
                     (latestMeta.instructorId ? instructorPosByIdRef.current[String(latestMeta.instructorId)] : '') ||
                     instructorPosByNameRef.current[trimmedName] ||
                     '';
+                const metaUpdatedAt = Number(latestMeta.updatedAt || 0);
+                const effectiveHandling =
+                    bc && bc.updatedAt >= metaUpdatedAt
+                        ? bc.handling
+                        : (latestMeta.handling || null);
                 newActiveTAs[key] = {
                     name: trimmedName,
                     position: resolvedPos,
-                    instructorId: latestMeta.instructorId || null,
+                    instructorId: latestMeta.instructorId || bc?.instructorId || null,
                     joined_at: latestMeta.joined_at || Date.now(),
-                    handling: latestMeta.handling || null,
+                    handling: effectiveHandling,
                     clientId: latestMeta.clientId || key,
                 };
             } else if (latestMeta.studentId) {

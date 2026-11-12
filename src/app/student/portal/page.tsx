@@ -11,6 +11,7 @@ import { getPointBalance } from '@/app/actions/shopPoints';
 import { getActiveSeatLayout } from '@/app/actions/clinicSeatLayout';
 import { processIncompleteHomeworks, generateIncorrectClinic, healStudentIncorrectRecordsAction } from '@/app/actions/clinicActions';
 import { isConfidentialExamText, isConfidentialIncorrectRecord } from '@/lib/confidentialExamGuard';
+import { createPresenceRateLimiter } from '@/lib/presenceThrottle';
 
 const ENDED_ENROLLMENT_STATUSES = ["수강종료", "종료", "퇴원", "취소"];
 const isEndedEnrollment = (e: any): boolean => {
@@ -97,9 +98,12 @@ export default function StudentPortal() {
         return () => clearInterval(interval);
     }, []);
 
-    // 좀비 채널 재연결 원천 차단용 클린업 헬퍼
-    const disposePortalChannel = useCallback(async (withUntrack = false) => {
+    const portalPresenceLimiterRef = useRef(createPresenceRateLimiter({ minGapMs: 8500 }));
+
+    // 좀비 채널 재연결 원천 차단용 클린업 헬퍼 (removeChannel 시 서버 Presence가 자동 해제되므로 중복 untrack 제거)
+    const disposePortalChannel = useCallback(async (_withUntrack = false) => {
         portalChannelDisposedRef.current = true;
+        portalPresenceLimiterRef.current.cancelPending();
         if (portalReconnectTimerRef.current) {
             clearTimeout(portalReconnectTimerRef.current);
             portalReconnectTimerRef.current = null;
@@ -107,9 +111,6 @@ export default function StudentPortal() {
         if (channelRef.current) {
             const ch = channelRef.current;
             channelRef.current = null;
-            if (withUntrack) {
-                try { await ch.untrack(); } catch (e) {}
-            }
             try { await supabaseClient.removeChannel(ch); } catch (e) {}
         }
     }, []);
@@ -133,29 +134,26 @@ export default function StudentPortal() {
         if (updated && !trackedSeatRef.current) trackedSeatRef.current = candidate;
     }, []);
 
-    const lastPortalTrackAtRef = useRef<number>(0);
-    const lastPortalTrackKeyRef = useRef<string>('');
-
-    // 🌟 ClientPresenceRateLimitReached 방지: 동일 상태 연속 track() 호출 3초 스로틀 적용
+    // 🌟 ClientPresenceRateLimitReached 원천 차단: 전역 32초 슬라이딩 윈도우(최대 4회, 최소 8.5초 간격) 적용
     const trackPortalPresence = useCallback((seat: string, sId: string, sName: string, classes: string[], sessionState: any, force = false) => {
         if (!channelRef.current || !seat) return;
         const dur = sessionState?.duration_ms || DEFAULT_CLINIC_SESSION_DURATION_MS;
-        const key = `${seat}_${dur}`;
+        const dedupKey = `portal_${seat}_${sId}_${dur}`;
         const now = Date.now();
-        if (now - lastPortalTrackAtRef.current < 5000) return;
-        if (!force && key === lastPortalTrackKeyRef.current && now - lastPortalTrackAtRef.current < 25000) return;
-        lastPortalTrackKeyRef.current = key;
-        lastPortalTrackAtRef.current = now;
-        channelRef.current.track({
-            seat,
-            name: sName,
-            studentId: sId,
-            classes,
-            activity: '포털 대기 중 📋',
-            updatedAt: now,
-            startedAt: new Date(sessionState?.started_at || now).getTime(),
-            durationMs: dur
-        }).catch(() => {});
+        portalPresenceLimiterRef.current.scheduleTrack(
+            () => channelRef.current,
+            {
+                seat,
+                name: sName,
+                studentId: sId,
+                classes,
+                activity: '포털 대기 중 📋',
+                startedAt: new Date(sessionState?.started_at || now).getTime(),
+                durationMs: dur,
+            },
+            dedupKey,
+            force
+        );
     }, []);
 
     const connectPortalChannel = useCallback(async (sId: string, sName: string, classes: string[], sessionState: any) => {
@@ -165,11 +163,13 @@ export default function StudentPortal() {
         }
         portalChannelDisposedRef.current = false;
 
+        portalPresenceLimiterRef.current.cancelPending();
         if (channelRef.current) {
             const oldCh = channelRef.current;
             channelRef.current = null;
             try { await supabaseClient.removeChannel(oldCh); } catch (e) {}
         }
+        portalPresenceLimiterRef.current.resetControllerState();
 
         const myTenantId = localStorage.getItem("logica_tenant_id") || "hq";
         const channelName = `${CLINIC_ROOM}_${myTenantId}`;
@@ -217,6 +217,10 @@ export default function StudentPortal() {
                 }
             })
             .on('broadcast', { event: 'ta_action' }, ({ payload }: any) => {
+                if (payload.action === 'editor_lock') {
+                    setEditorLocked(Boolean(payload.locked));
+                    return;
+                }
                 const currentSeat = trackedSeatRef.current;
                 if (payload.seat !== currentSeat && payload.studentId !== sId) return;
 

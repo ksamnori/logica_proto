@@ -5,6 +5,7 @@ import React, { useEffect, useRef, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { createPortal } from "react-dom";
 import { supabase, CLINIC_ROOM } from "@/lib/supabase";
+import { createPresenceRateLimiter } from "@/lib/presenceThrottle";
 import { getActiveSeatLayout, saveSeatLayout } from "@/app/actions/clinicSeatLayout";
 import { Seat, SeatLayout, DEFAULT_CANVAS_W, DEFAULT_CANVAS_H, DEFAULT_SEAT_CARD_W, DEFAULT_SEAT_CARD_H, renumberSeats } from "@/lib/clinicSeatLayout";
 import SeatCanvas from "@/app/clinic/_shared/SeatCanvas";
@@ -45,6 +46,7 @@ export default function SeatLayoutEditorPage() {
 
     const channelRef = useRef<any>(null);
     const editorClientIdRef = useRef<string>("");
+    const presenceLimiterRef = useRef(createPresenceRateLimiter({ minGapMs: 7500 }));
     const dragStateRef = useRef<{ id: string; startX: number; startY: number; origX: number; origY: number; scale: number } | null>(null);
 
     const applyLayoutState = useCallback((l: SeatLayout) => {
@@ -133,21 +135,38 @@ export default function SeatLayoutEditorPage() {
             .subscribe((status: string) => { if (status === 'SUBSCRIBED') checkPresence(); });
 
         return () => {
+            presenceLimiterRef.current.cancelPending();
             if (channelRef.current) {
-                channelRef.current.untrack().catch(() => {});
-                supabase.removeChannel(channelRef.current);
+                const ch = channelRef.current;
+                channelRef.current = null;
+                supabase.removeChannel(ch);
             }
         };
     }, [isAuthorized, applyLayoutState]);
 
     const enterEditMode = () => {
         if (clinicOccupied) return;
-        channelRef.current?.track({ role: 'editor', clientId: editorClientIdRef.current, joined_at: Date.now() });
+        channelRef.current?.send({
+            type: 'broadcast',
+            event: 'ta_action',
+            payload: { action: 'editor_lock', locked: true, clientId: editorClientIdRef.current, timestamp: Date.now() },
+        });
+        presenceLimiterRef.current.scheduleTrack(
+            () => channelRef.current,
+            { role: 'editor', clientId: editorClientIdRef.current, joined_at: Date.now() },
+            `editor_${editorClientIdRef.current}`,
+            true
+        );
         setEditing(true);
     };
 
     const leaveEditMode = () => {
-        channelRef.current?.untrack();
+        channelRef.current?.send({
+            type: 'broadcast',
+            event: 'ta_action',
+            payload: { action: 'editor_lock', locked: false, clientId: editorClientIdRef.current, timestamp: Date.now() },
+        });
+        presenceLimiterRef.current.scheduleUntrack(() => channelRef.current);
         setEditing(false);
         setShowCloseConfirm(false);
     };

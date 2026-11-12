@@ -1,6 +1,7 @@
 // src/app/clinic/ta/pad/useTaHandheld.ts
 import { useEffect, useState, useRef, useCallback } from "react";
 import { supabase as sharedSupabaseClient } from "@/lib/supabase";
+import { createPresenceRateLimiter } from "@/lib/presenceThrottle";
 import { resolveActiveCall, resolveActiveRecheck } from "@/lib/clinicSession";
 import { seedTaTenantId, getInstructorName, getInstructorPosition, syncInstructorProfile } from "../taAccess";
 import { getActiveSeatLayout } from "@/app/actions/clinicSeatLayout";
@@ -119,13 +120,8 @@ export function useTaHandheld() {
       if (profile.position) setTaPosition(profile.position);
     });
 
-    const handleBeforeUnload = () => { if (clinicChannelRef.current) clinicChannelRef.current.untrack(); };
-    window.addEventListener('pagehide', handleBeforeUnload);
-    window.addEventListener('beforeunload', handleBeforeUnload);
-    return () => {
-      window.removeEventListener('pagehide', handleBeforeUnload);
-      window.removeEventListener('beforeunload', handleBeforeUnload);
-    };
+    // 브라우저 탭 종료 시 소켓 연결 해제로 서버 Presence가 자동 정리되므로 불필요한 중복 untrack() 호출 생략
+    return () => {};
   }, []);
 
   useEffect(() => {
@@ -133,13 +129,15 @@ export function useTaHandheld() {
     if (taName && taClientId && SUPABASE_URL && SUPABASE_ANON_KEY) connectClinicChannel();
     return () => {
       taDisposedRef.current = true;
+      taPresenceLimiterRef.current.cancelPending();
       if (taReconnectTimerRef.current) {
         clearTimeout(taReconnectTimerRef.current);
         taReconnectTimerRef.current = null;
       }
       if (clinicChannelRef.current) {
-        supabaseClient.removeChannel(clinicChannelRef.current);
+        const ch = clinicChannelRef.current;
         clinicChannelRef.current = null;
+        supabaseClient.removeChannel(ch);
       }
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -200,26 +198,40 @@ export function useTaHandheld() {
     }
   }, []);
 
-  const lastTaTrackAtRef = useRef<number>(0);
-  const lastTaHandlingRef = useRef<string | null | undefined>(undefined);
-  const taTrackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const taPresenceLimiterRef = useRef(createPresenceRateLimiter({ minGapMs: 8500 }));
+  const lastBroadcastHandlingRef = useRef<string | null | undefined>(undefined);
+  const taHandlingBroadcastRef = useRef<
+    Record<string, { handling: string | null; name: string; position: string; updatedAt: number }>
+  >({});
 
-  // 🌟 ClientPresenceRateLimitReached 원천 차단: 조교가 요청 카드를 빠르게 연속 터치해도
-  // 400ms 디바운스 + 최소 2초 간격 스로틀로 묶어 마지막 선택 상태 1건만 track() 전송
+  // 🌟 ClientPresenceRateLimitReached 원천 차단:
+  // 1) 빈번하게 바뀌는 카드 선택(handling) 신호는 속도 제한이 없는 Broadcast('ta_handling')로 0ms 즉시 전파
+  // 2) 접속자 명단·직책 유지를 위한 Presence track()은 전역 32초 슬라이딩 윈도우(최대 4회, 최소 8.5초 간격)로 안전 병합 전송
   const updateHandlingPresence = useCallback((callKey: string | null, immediate = false) => {
     if (!clinicChannelRef.current || !taName || !taClientId) return;
-    if (!immediate && lastTaHandlingRef.current === callKey && Date.now() - lastTaTrackAtRef.current < 30000) return;
 
-    if (taTrackTimerRef.current) {
-      clearTimeout(taTrackTimerRef.current);
-      taTrackTimerRef.current = null;
+    const now = Date.now();
+    if (immediate || lastBroadcastHandlingRef.current !== callKey) {
+      lastBroadcastHandlingRef.current = callKey;
+      clinicChannelRef.current.send({
+        type: 'broadcast',
+        event: 'ta_action',
+        payload: {
+          action: 'ta_handling',
+          taClientId,
+          taName,
+          taPosition,
+          instructorId: taInstructorId || undefined,
+          handling: callKey,
+          updatedAt: now,
+        },
+      });
     }
 
-    const sendTrack = () => {
-      if (!clinicChannelRef.current) return;
-      lastTaHandlingRef.current = callKey;
-      lastTaTrackAtRef.current = Date.now();
-      clinicChannelRef.current.track({
+    const dedupKey = `${taClientId}|${taName}|${taPosition}|${taInstructorId}|${callKey || ''}`;
+    taPresenceLimiterRef.current.scheduleTrack(
+      () => clinicChannelRef.current,
+      {
         role: 'ta',
         source: 'ta_pad',
         name: taName,
@@ -228,49 +240,44 @@ export function useTaHandheld() {
         joined_at: taJoinedAt,
         clientId: taClientId,
         handling: callKey,
-        updatedAt: Date.now()
-      }).catch(() => {});
-    };
-
-    const elapsed = Date.now() - lastTaTrackAtRef.current;
-    const MIN_INTERVAL_MS = 2000;
-    if (immediate && elapsed >= MIN_INTERVAL_MS) {
-      sendTrack();
-    } else {
-      const delay = Math.max(350, MIN_INTERVAL_MS - elapsed);
-      taTrackTimerRef.current = setTimeout(sendTrack, delay);
-    }
+      },
+      dedupKey,
+      immediate
+    );
   }, [taName, taPosition, taInstructorId, taClientId, taJoinedAt]);
 
-  // DB에서 최신 직책(taPosition) 동기화 완료 시 관제탑(/supervisor)에도 즉시 반영
+  // DB에서 최신 직책(taPosition) 동기화 완료 시 관제탑(/supervisor)에도 반영 (슬라이딩 윈도우가 안전하게 병합)
   useEffect(() => {
     if (isConnected && taName && taClientId) {
-      updateHandlingPresence(selectedCallKey, true);
+      updateHandlingPresence(selectedCallKey, false);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [taPosition, taInstructorId]);
 
   const disconnectClinicChannel = useCallback(async () => {
     taDisposedRef.current = true;
+    taPresenceLimiterRef.current.cancelPending();
     if (taReconnectTimerRef.current) {
       clearTimeout(taReconnectTimerRef.current);
       taReconnectTimerRef.current = null;
-    }
-    if (taTrackTimerRef.current) {
-      clearTimeout(taTrackTimerRef.current);
-      taTrackTimerRef.current = null;
     }
     if (clinicChannelRef.current) {
       const ch = clinicChannelRef.current;
       clinicChannelRef.current = null;
       try {
-        await ch.untrack();
+        if (taClientId) {
+          ch.send({
+            type: 'broadcast',
+            event: 'ta_action',
+            payload: { action: 'ta_handling', taClientId, taName, taPosition, handling: null, updatedAt: Date.now() },
+          });
+        }
       } catch {}
       try {
         await supabaseClient.removeChannel(ch);
       } catch {}
     }
-  }, []);
+  }, [taClientId, taName, taPosition]);
 
   const syncFromPresenceRef = useRef<() => void>(() => {});
 
@@ -280,6 +287,7 @@ export function useTaHandheld() {
     const taUpdatedAtByKey: Record<string, number> = {};
     const newClaimedByOthers: Record<string, string> = {};
     const taMetasMap = new Map<string, any>();
+    const activeClientIds = new Set<string>();
 
     let hasEditor = false;
     Object.values(state).forEach((metas) => {
@@ -291,11 +299,37 @@ export function useTaHandheld() {
 
       const candidateUpdatedAt = latestMeta.updatedAt || 0;
       const key = latestMeta.clientId || `${latestMeta.name || '이름미상'}_(clientId없음)`;
+      if (latestMeta.clientId) activeClientIds.add(String(latestMeta.clientId));
+
       if (taUpdatedAtByKey[key] === undefined || candidateUpdatedAt > taUpdatedAtByKey[key]) {
         taUpdatedAtByKey[key] = candidateUpdatedAt;
         if (latestMeta.clientId) taMetasMap.set(latestMeta.clientId, { clientId: latestMeta.clientId, joined_at: latestMeta.joined_at || 0 });
-        // 🌟 내가 아닌 다른 조교가 handling 중인 요청이면 잠금(🔒) 처리
-        if (latestMeta.handling && latestMeta.clientId !== taClientId) newClaimedByOthers[latestMeta.handling] = latestMeta.position ? `${latestMeta.name || '접속자'} ${latestMeta.position}` : (latestMeta.name || '다른 선생님');
+
+        // Broadcast로 더 최신 handling 상태가 도착해 있으면 우선 적용
+        const bc = latestMeta.clientId ? taHandlingBroadcastRef.current[latestMeta.clientId] : undefined;
+        const effectiveHandling =
+          bc && bc.updatedAt >= candidateUpdatedAt ? bc.handling : latestMeta.handling;
+        const effectiveName = (bc && bc.name) || latestMeta.name || '접속자';
+        const effectivePos = (bc && bc.position) || latestMeta.position || '';
+
+        if (effectiveHandling && latestMeta.clientId !== taClientId) {
+          newClaimedByOthers[effectiveHandling] = effectivePos
+            ? `${effectiveName} ${effectivePos}`
+            : effectiveName;
+        }
+      }
+    });
+
+    // 아직 초기 Presence sync 전이더라도 방금 Broadcast를 보낸 다른 패드의 잠금 신호 즉시 반영
+    const now = Date.now();
+    Object.entries(taHandlingBroadcastRef.current).forEach(([cid, bc]) => {
+      if (cid === taClientId) return;
+      if (!activeClientIds.has(cid) && now - bc.updatedAt > 60_000) {
+        delete taHandlingBroadcastRef.current[cid];
+        return;
+      }
+      if (bc.handling && !newClaimedByOthers[bc.handling] && (activeClientIds.has(cid) || now - bc.updatedAt < 30_000)) {
+        newClaimedByOthers[bc.handling] = bc.position ? `${bc.name} ${bc.position}` : bc.name;
       }
     });
 
@@ -564,6 +598,22 @@ export function useTaHandheld() {
 
   const handleTaActionFromOtherScreen = useCallback((payload: any) => {
     const { seat, action, qNum } = payload;
+    if (action === 'editor_lock') {
+      setEditorLocked(Boolean(payload.locked));
+      return;
+    }
+    if (action === 'ta_handling') {
+      if (payload.taClientId && payload.taClientId !== taClientId) {
+        taHandlingBroadcastRef.current[String(payload.taClientId)] = {
+          handling: payload.handling ?? null,
+          name: String(payload.taName || '접속자').trim(),
+          position: String(payload.taPosition || '').trim(),
+          updatedAt: Number(payload.updatedAt || Date.now()),
+        };
+        syncFromPresenceRef.current();
+      }
+      return;
+    }
     if (action === 'force_cancel_call' && qNum !== null && qNum !== undefined) {
       const key = `${seat}::${qNum}`;
       delete callsRef.current[key];
@@ -603,7 +653,7 @@ export function useTaHandheld() {
         window.dispatchEvent(new CustomEvent('logica:grading-verified', { detail: payload }));
       }
     }
-  }, [flushState]);
+  }, [flushState, taClientId]);
 
   const handleStudentActionRef = useRef(handleStudentAction);
   useEffect(() => { handleStudentActionRef.current = handleStudentAction; });
@@ -636,10 +686,13 @@ export function useTaHandheld() {
         clearTimeout(taReconnectTimerRef.current);
         taReconnectTimerRef.current = null;
       }
+      taPresenceLimiterRef.current.cancelPending();
       if (clinicChannelRef.current) {
         await supabaseClient.removeChannel(clinicChannelRef.current).catch(() => {});
         clinicChannelRef.current = null;
       }
+      taPresenceLimiterRef.current.resetControllerState();
+      lastBroadcastHandlingRef.current = undefined;
       
       const myTenantId = localStorage.getItem("logica_tenant_id") || "hq";
       const channelName = `${CLINIC_ROOM}_${myTenantId}`;
