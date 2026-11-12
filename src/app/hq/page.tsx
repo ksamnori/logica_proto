@@ -4,6 +4,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
+import { subscribePostgresChanges } from "@/lib/postgresRealtimeHub";
 import ProfileModal from "@/components/ProfileModal";
 import AdmissionAnalyticsPage from "@/app/(dashboard)/admission/analytics/page";
 import ContestDbPage from "@/app/(dashboard)/contest-db/page";
@@ -233,12 +234,11 @@ export default function HQWorkspacePage() {
     showNewChatView();
     loadRooms(); 
 
-    const channelName = `hq_global_${instId}`;
-    supabase.getChannels().forEach(ch => { if (ch.topic.includes(channelName)) supabase.removeChannel(ch); });
-
-    globalChannelRef.current = supabase.channel(channelName)
-      .on("postgres_changes", { event: "INSERT", schema: "public", table: "internal_chat_message" }, async (payload) => {
-        setTypingStaffName(null); 
+    const unsubHqMsg = subscribePostgresChanges(
+      { table: "internal_chat_message", events: ["INSERT"] },
+      async (payload) => {
+        if (!payload.new) return;
+        setTypingStaffName(null);
         const isRoomActive = document.hasFocus() && String(activeRoomIdRef.current) === String(payload.new.room_id);
 
         if (String(activeRoomIdRef.current) === String(payload.new.room_id)) {
@@ -248,19 +248,26 @@ export default function HQWorkspacePage() {
           await supabase.from("internal_chat_member").update({ last_read_at: new Date().toISOString() }).eq("room_id", payload.new.room_id).eq("instructor_id", instId);
         }
         await supabase.from("internal_chat_member").update({ is_active: true }).eq("room_id", payload.new.room_id).eq("instructor_id", instId);
-        loadRooms(); 
-      })
-      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "internal_chat_member" }, (payload) => {
-        if (String(activeRoomIdRef.current) === String(payload.new.room_id)) {
-          setRoomMembers(prev => prev.map(m => m.instructor_id === payload.new.instructor_id ? { ...m, last_read_at: payload.new.last_read_at } : m));
-        }
-        loadRooms(); 
-      })
-      .on("postgres_changes", { event: "INSERT", schema: "public", table: "internal_chat_member" }, () => loadRooms())
-      .subscribe();
+        loadRooms();
+      }
+    );
 
-    return () => { 
-      if (globalChannelRef.current) supabase.removeChannel(globalChannelRef.current); 
+    const unsubHqMember = subscribePostgresChanges(
+      { table: "internal_chat_member", events: ["INSERT", "UPDATE"] },
+      (payload) => {
+        if (payload.eventType === "UPDATE" && payload.new) {
+          if (String(activeRoomIdRef.current) === String(payload.new.room_id)) {
+            setRoomMembers(prev => prev.map(m => m.instructor_id === payload.new.instructor_id ? { ...m, last_read_at: payload.new.last_read_at } : m));
+          }
+        }
+        loadRooms();
+      }
+    );
+
+    return () => {
+      unsubHqMsg();
+      unsubHqMember();
+      if (globalChannelRef.current) supabase.removeChannel(globalChannelRef.current);
       if (activeChannelRef.current) supabase.removeChannel(activeChannelRef.current);
     };
   }, [instId]);

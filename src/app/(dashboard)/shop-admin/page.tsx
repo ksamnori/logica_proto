@@ -3,6 +3,7 @@
 
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { supabase } from '@/lib/supabase';
+import { subscribePostgresChanges } from '@/lib/postgresRealtimeHub';
 import { listProducts, createProduct, updateProduct, deleteProduct, listPurchases, cancelPurchase, ShopProduct, ShopPurchase } from '@/app/actions/shopProducts';
 import { getPointBalance, addPoints, spendPoints } from '@/app/actions/shopPoints';
 
@@ -81,13 +82,17 @@ export default function ShopAdminPage() {
     }
   }, [isAdmin, tenantId, loadProducts, loadPurchases]);
 
+  const loadProductsRef = useRef(loadProducts);
+  loadProductsRef.current = loadProducts;
+
   useEffect(() => {
     if (!tenantId) return;
-    const channel = supabase.channel(`shop_product_admin_sync_${tenantId}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'shop_product', filter: `tenant_id=eq.${tenantId}` }, () => loadProducts())
-      .subscribe();
-    return () => { supabase.removeChannel(channel); };
-  }, [tenantId, loadProducts]);
+    const unsubShop = subscribePostgresChanges(
+      { table: 'shop_product', filter: `tenant_id=eq.${tenantId}` },
+      () => loadProductsRef.current()
+    );
+    return () => { unsubShop(); };
+  }, [tenantId]);
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];

@@ -4,6 +4,7 @@
 import React, { useEffect, useState, useMemo, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
+import { subscribePostgresChanges } from "@/lib/postgresRealtimeHub";
 import {
   addToQueue,
   sendQueuedMessages,
@@ -233,39 +234,40 @@ export default function MakeupPage() {
     setLiveFeeds(data || []);
   }, [tenantId, getValidTenantId]);
 
+  const fetchQueueRef = useRef(fetchQueue);
+  fetchQueueRef.current = fetchQueue;
+  const fetchLiveFeedsRef = useRef(fetchLiveFeeds);
+  fetchLiveFeedsRef.current = fetchLiveFeeds;
+
   useEffect(() => {
     if (!isAuthorized) return;
     fetchInitialData();
     fetchQueue();
     fetchLiveFeeds();
+  }, [isAuthorized, fetchQueue, fetchLiveFeeds]);
 
-    const queueChannel = supabase
-      .channel("makeup_queue_realtime")
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "alimtalk_queue" },
-        () => {
-          fetchQueue();
-        }
-      )
-      .subscribe();
+  useEffect(() => {
+    if (!isAuthorized) return;
 
-    const logChannel = supabase
-      .channel("makeup_noti_log_realtime")
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "notification_log" },
-        () => {
-          fetchLiveFeeds();
-        }
-      )
-      .subscribe();
+    const unsubQueue = subscribePostgresChanges(
+      { table: "alimtalk_queue" },
+      () => {
+        fetchQueueRef.current();
+      }
+    );
+
+    const unsubLog = subscribePostgresChanges(
+      { table: "notification_log" },
+      () => {
+        fetchLiveFeedsRef.current();
+      }
+    );
 
     return () => {
-      supabase.removeChannel(queueChannel);
-      supabase.removeChannel(logChannel);
+      unsubQueue();
+      unsubLog();
     };
-  }, [isAuthorized, fetchQueue, fetchLiveFeeds]);
+  }, [isAuthorized]);
 
   const fetchInitialData = async () => {
     setIsLoading(true);

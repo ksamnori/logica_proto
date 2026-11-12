@@ -4,6 +4,7 @@
 import { useEffect, useState, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
+import { subscribePostgresChanges } from "@/lib/postgresRealtimeHub";
 import TaskModal from "@/components/task/TaskModal";
 
 export default function TaskBoardPage() {
@@ -75,9 +76,9 @@ export default function TaskBoardPage() {
       setStatsMonth(`${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`);
       fetchTasks();
 
-      const tenantId = localStorage.getItem("logica_tenant_id");
-      const channel = supabase.channel(`task_board_realtime_${tenantId}`)
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'instructor_memo' }, (payload) => {
+      const unsubTask = subscribePostgresChanges(
+        { table: 'instructor_memo' },
+        (payload) => {
           if (payload.eventType === 'INSERT') {
             setTasks(prev => {
               if (prev.find(t => t.memo_id === payload.new.memo_id)) return prev;
@@ -88,10 +89,10 @@ export default function TaskBoardPage() {
           } else if (payload.eventType === 'DELETE') {
             setTasks(prev => prev.filter(t => t.memo_id !== payload.old.memo_id));
           }
-        })
-        .subscribe();
+        }
+      );
 
-      return () => { supabase.removeChannel(channel); };
+      return () => { unsubTask(); };
     }
   }, [isAuthorized]);
 

@@ -4,6 +4,7 @@
 import React, { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
+import { subscribePostgresChanges } from "@/lib/postgresRealtimeHub";
 
 interface AgendaSidebarProps {
   currentUser: {
@@ -29,14 +30,15 @@ export default function AgendaSidebar({ currentUser, tenantId, hasAccess }: Agen
     fetchAgendas();
     fetchGoogleEvents();
 
-    const channelName = `dashboard_agenda_realtime_${tenantId}`;
-    const channel = supabase.channel(channelName)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'agenda' }, () => {
+    const unsubAgenda = subscribePostgresChanges(
+      { table: 'agenda' },
+      () => {
         fetchAgendas();
-      }).subscribe();
+      }
+    );
 
-    return () => { 
-      supabase.removeChannel(channel);
+    return () => {
+      unsubAgenda();
     };
   }, [currentUser.instId, tenantId]);
 

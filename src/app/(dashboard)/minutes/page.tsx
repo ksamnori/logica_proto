@@ -4,6 +4,7 @@
 import React, { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
+import { subscribePostgresChanges } from "@/lib/postgresRealtimeHub";
 import NewAgendaModal from "@/components/minutes/NewAgendaModal";
 import BindMeetingModal from "@/components/minutes/BindMeetingModal";
 import ScheduleMeetingModal from "@/components/minutes/ScheduleMeetingModal";
@@ -116,14 +117,14 @@ export default function MinutesPage() {
       fetchGoogleEvents();
       fetchInstructors();
 
-      const tenantId = localStorage.getItem("logica_tenant_id");
-      const channel = supabase.channel(`agenda_realtime_${tenantId}`)
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'agenda' }, () => {
+      const unsubAgenda = subscribePostgresChanges(
+        { table: 'agenda' },
+        () => {
           fetchAgendas();
-        })
-        .subscribe();
+        }
+      );
 
-      return () => { supabase.removeChannel(channel); };
+      return () => { unsubAgenda(); };
     }
   }, [isAuthorized]);
 

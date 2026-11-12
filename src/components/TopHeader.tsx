@@ -4,6 +4,7 @@
 import React, { useEffect, useState, useRef, useCallback } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import { supabase } from "@/lib/supabase";
+import { subscribePostgresChanges } from "@/lib/postgresRealtimeHub";
 import QuickMemo from "@/components/QuickMemo";
 
 const ENDED_ENROLLMENT_STATUSES = ["수강종료", "종료", "퇴원", "취소"];
@@ -468,50 +469,35 @@ export default function TopHeader({
     }
   }, [currentUid, isSuperAdmin]);
 
+  const loadBoardTodoCountsRef = useRef(loadBoardTodoCounts);
+  loadBoardTodoCountsRef.current = loadBoardTodoCounts;
+
   useEffect(() => {
     if (!currentUid) return;
 
-    loadBoardTodoCounts();
+    loadBoardTodoCountsRef.current();
 
     const triggerDebouncedReload = (delayMs = 200) => {
       if (reloadDebounceRef.current) clearTimeout(reloadDebounceRef.current);
       reloadDebounceRef.current = setTimeout(() => {
-        loadBoardTodoCounts();
+        loadBoardTodoCountsRef.current();
       }, delayMs);
     };
 
-    // 🌟 [핵심 버그 수정]
-    // 단일 채널에 3개 테이블(instructor_memo, supply_request, parent_request_log)을 한꺼번에 묶으면,
-    // 그중 하나라도 Supabase Realtime Publication에서 빠져 있을 때 phx_join 전체가 거절되어
-    // supply_request 실시간 알림까지 통째로 죽어버립니다.
-    // 테이블별 독립 토픽으로 분리하여 어느 한 테이블의 설정과 무관하게 즉시 동기화되도록 보장합니다.
-    const suffix = `${currentUid}_${Math.random().toString(36).slice(2, 8)}`;
-    const taskChannel = supabase
-      .channel(`hdr_task_sync_${suffix}`)
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "instructor_memo" },
-        () => triggerDebouncedReload(200)
-      )
-      .subscribe();
-
-    const supplyChannel = supabase
-      .channel(`hdr_supply_sync_${suffix}`)
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "supply_request" },
-        () => triggerDebouncedReload(200)
-      )
-      .subscribe();
-
-    const csChannel = supabase
-      .channel(`hdr_cs_sync_${suffix}`)
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "parent_request_log" },
-        () => triggerDebouncedReload(200)
-      )
-      .subscribe();
+    // 🌟 테이블별 Publication 격리 원칙을 유지하면서 칸반 페이지(/task, /supply, /cs)와
+    // 단일 공유 채널을 재사용하고 순차 연결(Staggered Join)하여 SQLSTATE 57014 병목을 차단합니다.
+    const unsubTask = subscribePostgresChanges(
+      { table: "instructor_memo" },
+      () => triggerDebouncedReload(200)
+    );
+    const unsubSupply = subscribePostgresChanges(
+      { table: "supply_request" },
+      () => triggerDebouncedReload(200)
+    );
+    const unsubCs = subscribePostgresChanges(
+      { table: "parent_request_log" },
+      () => triggerDebouncedReload(200)
+    );
 
     // 🌟 같은 브라우저 내 칸반 보드(/supply, /task, /cs) 조작 시 0ms 즉시 낙관적 반영 + DB 재검증
     const applyOptimisticBoardUpdate = (detail: any) => {
@@ -597,11 +583,11 @@ export default function TopHeader({
           bc.close();
         } catch {}
       }
-      supabase.removeChannel(taskChannel);
-      supabase.removeChannel(supplyChannel);
-      supabase.removeChannel(csChannel);
+      unsubTask();
+      unsubSupply();
+      unsubCs();
     };
-  }, [currentUid, loadBoardTodoCounts]);
+  }, [currentUid]);
 
   // 페이지 이동 시에도 최근 조회로부터 2초 이상 지났다면 최신 카운트 동기화
   useEffect(() => {

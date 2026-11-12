@@ -5,6 +5,7 @@ import { useEffect, useState, useRef } from "react";
 import React from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
+import { subscribePostgresChanges } from "@/lib/postgresRealtimeHub";
 import AgendaSidebar from "@/components/dashboard/AgendaSidebar";
 import AttendanceControlPanel from "@/components/admin/AttendanceControlPanel";
 import QuickSearchWidget from "@/components/admin/QuickSearchWidget";
@@ -259,13 +260,14 @@ export default function AdminDashboardPage() {
     if (!tenantId) return;
     fetchQueue();
 
-    const channel = supabase.channel('queue_realtime')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'alimtalk_queue' }, () => {
+    const unsubQueue = subscribePostgresChanges(
+      { table: 'alimtalk_queue' },
+      () => {
         fetchQueue();
-      })
-      .subscribe();
+      }
+    );
 
-    return () => { supabase.removeChannel(channel); };
+    return () => { unsubQueue(); };
   }, [tenantId]);
 
   useEffect(() => {
@@ -345,11 +347,13 @@ export default function AdminDashboardPage() {
 
   useEffect(() => {
     if (!tenantId) return;
-    const channel = supabase.channel('feed_realtime')
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'notification_log' }, () => {
-        fetchLiveFeeds(); 
-      }).subscribe();
-    return () => { supabase.removeChannel(channel); };
+    const unsubFeed = subscribePostgresChanges(
+      { table: 'notification_log', events: ['INSERT'] },
+      () => {
+        fetchLiveFeeds();
+      }
+    );
+    return () => { unsubFeed(); };
   }, [tenantId]);
 
   const loadDashboardData = async () => {

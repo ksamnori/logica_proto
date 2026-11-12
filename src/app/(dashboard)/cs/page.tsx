@@ -4,6 +4,7 @@
 import { useEffect, useState, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
+import { subscribePostgresChanges } from "@/lib/postgresRealtimeHub";
 
 const ENDED_ENROLLMENT_STATUSES = ["수강종료", "종료", "퇴원", "취소"];
 const isEndedEnrollment = (e: any): boolean => {
@@ -92,9 +93,9 @@ export default function CSBoardPage() {
       setStatsMonth(`${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`);
       fetchInitialData(instId, finalViewAll);
 
-      const tenantId = localStorage.getItem("logica_tenant_id");
-      const channel = supabase.channel(`cs_board_realtime_${tenantId}`)
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'parent_request_log' }, (payload) => {
+      const unsubCs = subscribePostgresChanges(
+        { table: 'parent_request_log' },
+        (payload) => {
           if (payload.eventType === 'INSERT') {
             fetchInitialData(instId, finalViewAll);
           } else if (payload.eventType === 'UPDATE') {
@@ -102,10 +103,10 @@ export default function CSBoardPage() {
           } else if (payload.eventType === 'DELETE') {
             setRequests(prev => prev.filter(r => r.request_id !== payload.old.request_id));
           }
-        })
-        .subscribe();
+        }
+      );
 
-      return () => { supabase.removeChannel(channel); };
+      return () => { unsubCs(); };
     }
   }, [isAuthorized, hasViewAllPerm]);
 

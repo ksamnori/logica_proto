@@ -4,6 +4,7 @@
 import { useEffect, useState, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
+import { subscribePostgresChanges } from "@/lib/postgresRealtimeHub";
 import SupplyModal from "@/components/supply/SupplyModal";
 
 export default function SupplyBoardPage() {
@@ -76,9 +77,9 @@ export default function SupplyBoardPage() {
       setStatsMonth(`${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`);
       fetchRequests();
 
-      const tenantId = localStorage.getItem("logica_tenant_id");
-      const channel = supabase.channel(`supply_board_realtime_${tenantId}`)
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'supply_request' }, (payload) => {
+      const unsubSupply = subscribePostgresChanges(
+        { table: 'supply_request' },
+        (payload) => {
           if (payload.eventType === 'INSERT') {
             setRequests(prev => {
               if (prev.find(r => r.request_id === payload.new.request_id)) return prev;
@@ -89,10 +90,10 @@ export default function SupplyBoardPage() {
           } else if (payload.eventType === 'DELETE') {
             setRequests(prev => prev.filter(r => r.request_id !== payload.old.request_id));
           }
-        })
-        .subscribe();
+        }
+      );
 
-      return () => { supabase.removeChannel(channel); };
+      return () => { unsubSupply(); };
     }
   }, [isAuthorized]);
 

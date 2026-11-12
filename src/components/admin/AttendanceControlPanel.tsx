@@ -3,6 +3,7 @@
 
 import React, { useState, useEffect, useMemo, useRef } from "react";
 import { supabase } from "../../lib/supabase";
+import { subscribePostgresChanges } from "@/lib/postgresRealtimeHub";
 
 const unwrap = <T,>(obj: T | T[] | undefined | null): T | undefined => {
   if (Array.isArray(obj)) return obj[0];
@@ -232,32 +233,28 @@ export default function AttendanceControlPanel({ classStats, todayIso, onQueueMe
 
   // 🌟 [핵심 수정] selectedAttClassIdRef 참조로 반 필터 전환 시 채널 재구독 폭주(IncreaseSubscriptionConnectionPool) 원천 차단
   useEffect(() => {
-    const attChannel = supabase
-      .channel('global_attendance_realtime')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'attendance' }, () => {
-          if (isBulkProcessing.current) return; 
-          const curId = selectedAttClassIdRef.current;
-          if (curId) requestFetch(curId);
-      }).subscribe();
+    const unsubAtt = subscribePostgresChanges(
+      { table: 'attendance' },
+      () => {
+        if (isBulkProcessing.current) return;
+        const curId = selectedAttClassIdRef.current;
+        if (curId) requestFetch(curId);
+      }
+    );
 
-    // 🌟 clinic_session_state의 UPDATE(학생 하트비트 last_seen_at)를 구독하면
-    // IncreaseSubscriptionConnectionPool DB 타임아웃이 발생하므로 INSERT/DELETE만 구독합니다.
-    const clinicChannel = supabase
-      .channel('global_clinic_realtime_radar')
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'clinic_session_state' }, () => {
-          if (isBulkProcessing.current) return;
-          const curId = selectedAttClassIdRef.current;
-          if (curId) requestFetch(curId);
-      })
-      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'clinic_session_state' }, () => {
-          if (isBulkProcessing.current) return;
-          const curId = selectedAttClassIdRef.current;
-          if (curId) requestFetch(curId);
-      }).subscribe();
+    // 🌟 clinic_session_state의 UPDATE(학생 하트비트 last_seen_at)를 제외하고 INSERT/DELETE만 공유 채널로 구독
+    const unsubClinic = subscribePostgresChanges(
+      { table: 'clinic_session_state', serverEvents: ['INSERT', 'DELETE'] },
+      () => {
+        if (isBulkProcessing.current) return;
+        const curId = selectedAttClassIdRef.current;
+        if (curId) requestFetch(curId);
+      }
+    );
 
-    return () => { 
-      supabase.removeChannel(attChannel); 
-      supabase.removeChannel(clinicChannel); 
+    return () => {
+      unsubAtt();
+      unsubClinic();
     };
   }, []);
 

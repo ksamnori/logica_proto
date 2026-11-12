@@ -3,6 +3,7 @@
 
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
+import { subscribePostgresChanges } from "@/lib/postgresRealtimeHub";
 import { RealtimeChannel } from "@supabase/supabase-js";
 
 export interface ChatMessage {
@@ -418,71 +419,86 @@ export default function FloatingChat({ instId: propInstId, onMicClick }: { instI
     checkHQStatus();
     loadStaffRooms(); 
 
-    const channelName = `inst_global_${instId}`;
-    supabase.getChannels().forEach((ch: RealtimeChannel) => { if (ch.topic.includes(channelName)) supabase.removeChannel(ch); });
+    // 🌟 기존 6개 개별 구독(INSERT/UPDATE 중복 등록)을 테이블별 공유 구독 4개로 축소하고,
+    // /hq 페이지와도 동일 채널을 공유하여 realtime.subscription INSERT 부하(57014)를 줄입니다.
+    const unsubChatMsg = subscribePostgresChanges<ChatMessage>(
+      { table: "chat_message", events: ["INSERT", "UPDATE"] },
+      async (payload) => {
+        const newMsg = payload.new;
+        if (!newMsg) return;
 
-    globalChannelRef.current = supabase.channel(channelName)
-      .on("postgres_changes", { event: "INSERT", schema: "public", table: "chat_message" }, async (payload: unknown) => {
-        const p = payload as RealtimePayload;
-        const newMsg = p.new as unknown as ChatMessage;
-        
-        setIsTyping(false);
-        const isRoomActive = document.hasFocus() && isChatOpenRef.current && activeTabRef.current === "parent" && String(activeRoomIdRef.current) === String(newMsg.room_id);
+        if (payload.eventType === "INSERT") {
+          setIsTyping(false);
+          const isRoomActive = document.hasFocus() && isChatOpenRef.current && activeTabRef.current === "parent" && String(activeRoomIdRef.current) === String(newMsg.room_id);
 
-        if (String(activeRoomIdRef.current) === String(newMsg.room_id)) {
-          setChatMessages(prev => prev.find((m: ChatMessage) => m.message_id === newMsg.message_id) ? prev : [...prev, newMsg]);
+          if (String(activeRoomIdRef.current) === String(newMsg.room_id)) {
+            setChatMessages(prev => prev.find((m: ChatMessage) => m.message_id === newMsg.message_id) ? prev : [...prev, newMsg]);
+          }
+
+          if (isRoomActive && newMsg.sender_type === "parent") {
+            await supabase.from("chat_message").update({ is_read: true }).eq("message_id", newMsg.message_id);
+          } else if (newMsg.sender_type === "parent") {
+            startFlashing();
+          }
+
+          loadChatRooms();
+        } else if (payload.eventType === "UPDATE") {
+          if (String(activeRoomIdRef.current) === String(newMsg.room_id)) {
+            setChatMessages(prev => prev.map((m: ChatMessage) => m.message_id === newMsg.message_id ? { ...m, is_read: newMsg.is_read } : m));
+          }
+          loadChatRooms();
         }
-        
-        if (isRoomActive && newMsg.sender_type === "parent") {
-          await supabase.from("chat_message").update({ is_read: true }).eq("message_id", newMsg.message_id);
-        } else if (newMsg.sender_type === "parent") {
-          startFlashing();
-        }
-        
-        loadChatRooms(); 
-      })
-      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "chat_message" }, (payload: unknown) => {
-        const p = payload as RealtimePayload;
-        const newMsg = p.new as unknown as ChatMessage;
-        if (String(activeRoomIdRef.current) === String(newMsg.room_id)) {
-          setChatMessages(prev => prev.map((m: ChatMessage) => m.message_id === newMsg.message_id ? { ...m, is_read: newMsg.is_read } : m));
-        }
-        loadChatRooms();
-      })
-      .on("postgres_changes", { event: "INSERT", schema: "public", table: "chat_room" }, () => loadChatRooms())
-      .on("postgres_changes", { event: "INSERT", schema: "public", table: "internal_chat_message" }, async (payload: unknown) => {
-        const p = payload as RealtimePayload;
-        const newMsg = p.new as unknown as InternalChatMessage;
-        
-        setTypingStaffName(null); 
+      }
+    );
+
+    const unsubChatRoom = subscribePostgresChanges(
+      { table: "chat_room", events: ["INSERT"] },
+      () => loadChatRooms()
+    );
+
+    const unsubStaffMsg = subscribePostgresChanges<InternalChatMessage>(
+      { table: "internal_chat_message", events: ["INSERT"] },
+      async (payload) => {
+        const newMsg = payload.new;
+        if (!newMsg) return;
+
+        setTypingStaffName(null);
         const isRoomActive = document.hasFocus() && isChatOpenRef.current && activeTabRef.current === "staff" && String(activeStaffRoomIdRef.current) === String(newMsg.room_id);
 
         if (String(activeStaffRoomIdRef.current) === String(newMsg.room_id)) {
           setStaffMessages(prev => prev.find((m: InternalChatMessage) => m.message_id === newMsg.message_id) ? prev : [...prev, newMsg]);
         }
-        
+
         if (isRoomActive && newMsg.sender_id !== instId) {
           await supabase.from("internal_chat_member").update({ last_read_at: new Date().toISOString() }).eq("room_id", newMsg.room_id).eq("instructor_id", instId);
         } else if (newMsg.sender_id !== instId) {
           startFlashing();
         }
-        
-        await supabase.from("internal_chat_member").update({ is_active: true }).eq("room_id", newMsg.room_id).eq("instructor_id", instId);
-        loadStaffRooms(); 
-      })
-      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "internal_chat_member" }, (payload: unknown) => {
-        const p = payload as RealtimePayload;
-        const updatedMember = p.new as unknown as StaffRoomMember;
-        if (String(activeStaffRoomIdRef.current) === String(updatedMember.room_id)) {
-          setStaffRoomMembers(prev => prev.map((m: StaffRoomMember) => m.instructor_id === updatedMember.instructor_id ? { ...m, last_read_at: updatedMember.last_read_at } : m));
-        }
-        loadStaffRooms(); 
-      })
-      .on("postgres_changes", { event: "INSERT", schema: "public", table: "internal_chat_member" }, () => loadStaffRooms())
-      .subscribe();
 
-    return () => { 
-      if (globalChannelRef.current) supabase.removeChannel(globalChannelRef.current); 
+        await supabase.from("internal_chat_member").update({ is_active: true }).eq("room_id", newMsg.room_id).eq("instructor_id", instId);
+        loadStaffRooms();
+      }
+    );
+
+    const unsubStaffMember = subscribePostgresChanges<StaffRoomMember>(
+      { table: "internal_chat_member", events: ["INSERT", "UPDATE"] },
+      (payload) => {
+        if (payload.eventType === "UPDATE" && payload.new) {
+          const updatedMember = payload.new;
+          if (String(activeStaffRoomIdRef.current) === String(updatedMember.room_id)) {
+            setStaffRoomMembers(prev => prev.map((m: StaffRoomMember) => m.instructor_id === updatedMember.instructor_id ? { ...m, last_read_at: updatedMember.last_read_at } : m));
+          }
+        }
+        loadStaffRooms();
+      }
+    );
+
+    return () => {
+      unsubChatMsg();
+      unsubChatRoom();
+      unsubStaffMsg();
+      unsubStaffMember();
+      if (globalChannelRef.current) supabase.removeChannel(globalChannelRef.current);
       if (activeChannelRef.current) supabase.removeChannel(activeChannelRef.current);
       if (activeStaffChannelRef.current) supabase.removeChannel(activeStaffChannelRef.current);
     };

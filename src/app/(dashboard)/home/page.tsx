@@ -4,6 +4,7 @@
 import React, { useEffect, useState, useMemo, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
+import { subscribePostgresChanges } from "@/lib/postgresRealtimeHub";
 import AgendaSidebar from "@/components/dashboard/AgendaSidebar";
 import { queueAttendanceNotice, queueAttendanceNoticeBulk, addToQueue, sendQueuedMessages, deleteQueueItem } from "@/app/actions/alimtalk";
 
@@ -225,39 +226,51 @@ export default function TeacherDashboardPage() {
     setMyQueue(Array.from(uniqueMap.values()));
   };
 
+  const fetchMyQueueRef = useRef(fetchMyQueue);
+  fetchMyQueueRef.current = fetchMyQueue;
+  const requestFetchRef = useRef(requestFetch);
+  requestFetchRef.current = requestFetch;
+
   useEffect(() => {
     if (!tenantId || myClasses.length === 0) return;
-    fetchMyQueue();
+    fetchMyQueueRef.current();
+  }, [tenantId, myClasses.length]);
 
-    const queueChannel = supabase.channel('teacher_queue_realtime')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'alimtalk_queue' }, () => {
-        fetchMyQueue();
-      }).subscribe();
+  const hasMyClasses = myClasses.length > 0;
 
-    const attendanceChannel = supabase.channel(`teacher_attendance_realtime_${tenantId}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'attendance' }, () => {
-          const curId = selectedClassIdRef.current;
-          if (curId && curId !== 'all') requestFetch(curId);
-      }).subscribe();
+  useEffect(() => {
+    if (!tenantId || !hasMyClasses) return;
 
-    // 🌟 clinic_session_state의 UPDATE(하트비트) 구독으로 인한 IncreaseSubscriptionConnectionPool 에러 방지 (INSERT/DELETE만 구독)
-    // 🌟 selectedClassIdRef 참조로 반 탭 전환 시 채널 재구독(unsubscribe/subscribe 폭주) 원천 차단
-    const clinicChannel = supabase.channel(`teacher_clinic_realtime_${tenantId}`)
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'clinic_session_state' }, () => {
-          const curId = selectedClassIdRef.current;
-          if (curId && curId !== 'all') requestFetch(curId);
-      })
-      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'clinic_session_state' }, () => {
-          const curId = selectedClassIdRef.current;
-          if (curId && curId !== 'all') requestFetch(curId);
-      }).subscribe();
+    const unsubQueue = subscribePostgresChanges(
+      { table: 'alimtalk_queue' },
+      () => {
+        fetchMyQueueRef.current();
+      }
+    );
+
+    const unsubAttendance = subscribePostgresChanges(
+      { table: 'attendance' },
+      () => {
+        const curId = selectedClassIdRef.current;
+        if (curId && curId !== 'all') requestFetchRef.current(curId);
+      }
+    );
+
+    // 🌟 clinic_session_state의 UPDATE(하트비트) 구독 제외 (INSERT/DELETE만 공유 채널로 구독)
+    const unsubClinic = subscribePostgresChanges(
+      { table: 'clinic_session_state', serverEvents: ['INSERT', 'DELETE'] },
+      () => {
+        const curId = selectedClassIdRef.current;
+        if (curId && curId !== 'all') requestFetchRef.current(curId);
+      }
+    );
 
     return () => {
-      supabase.removeChannel(queueChannel);
-      supabase.removeChannel(attendanceChannel);
-      supabase.removeChannel(clinicChannel);
+      unsubQueue();
+      unsubAttendance();
+      unsubClinic();
     };
-  }, [tenantId, myClasses.length]);
+  }, [tenantId, hasMyClasses]);
 
   const loadPermissions = async (role: string, tId: string, isGodMode: boolean) => {
     let fetchedMenus: string[] = [];

@@ -3,6 +3,7 @@
 
 import React, { useState, useEffect, useRef } from "react";
 import { supabase } from "@/lib/supabase";
+import { subscribePostgresChanges } from "@/lib/postgresRealtimeHub";
 import FloatingChat from "@/components/FloatingChat";
 import AiRecordModal from "@/components/minutes/AiRecordModal";
 import ProfileModal from "@/components/ProfileModal"; 
@@ -67,12 +68,14 @@ export default function MobileInstructorPortalPage() {
       fetchAgendas();
       fetchGoogleEvents();
 
-      const channel = supabase.channel('mobile_agenda_realtime')
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'agenda' }, () => {
+      const unsubAgenda = subscribePostgresChanges(
+        { table: 'agenda' },
+        () => {
           fetchAgendas();
-        }).subscribe();
+        }
+      );
 
-      return () => { supabase.removeChannel(channel); };
+      return () => { unsubAgenda(); };
     }
   }, [authState, currentUser.instId]);
 
