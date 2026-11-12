@@ -98,7 +98,7 @@ const getKstDateStr = (iso: string) => {
 };
 
 export default function TaGradingPage() {
-  const { taName, ready } = useTaEntry();
+  const { taName, taPosition, ready } = useTaEntry();
 
   const [step, setStep] = useState<Step>('STUDENT');
   const [isLoading, setIsLoading] = useState(true);
@@ -779,7 +779,7 @@ export default function TaGradingPage() {
 
   return (
     <div className="h-screen flex flex-col overflow-hidden bg-slate-50 font-pretendard">
-      <TaTopBar taName={taName} />
+      <TaTopBar taName={taName} taPosition={taPosition} />
       <header className="bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between shrink-0 shadow-sm z-10">
         <div>
           <h1 className="font-lexend text-lg font-bold text-brand tracking-tight leading-none flex items-center gap-1">

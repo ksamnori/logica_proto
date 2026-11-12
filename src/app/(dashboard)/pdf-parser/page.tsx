@@ -152,7 +152,7 @@ export const COGNITIVE_LEVEL_OPTIONS = [
 ];
 
 // =========================================================
-// Phase 2: 학년·학기 Prefix 범위 확장 엔진 (V4.4.0 100% 호환)
+// Phase 2: 학년·학기 Prefix 범위 확장 엔진 (V5.0.0 100% 호환)
 // =========================================================
 export const ALL_SEMESTER_PREFIXES = [
   "E11", "E12", "E21", "E22", "E31", "E32",
@@ -232,20 +232,93 @@ export function matchesAnyPrefix(codeVal: string | null | undefined, prefixes: s
 }
 
 // =========================================================
-// Phase 1 & V302: 무적의 텍스트/수식 정제 엔진 & 18종 마법 도구
+// Phase 1 & V302: 무적의 텍스트/수식 정제 엔진 (V115.1 & V121.1 네모박스 3종·단위 가드레일 통합)
 // =========================================================
+const BARE_BOX_FRAC_RE =
+  /((?:\\boxed\{\\phantom\{[0-9]+\}\}\s*)?\\d?frac\{\\boxed\{\\phantom\{[0-9]+\}\}\}\{\\boxed\{\\phantom\{[0-9]+\}\}\}(?:\s*\\text\{[^{}]*\})?|\\boxed\{\\phantom\{[0-9]+\}\}(?:\s*\\text\{[^{}]*\})?|\\square(?![A-Za-z])(?:\s*\\text\{[^{}]*\})?)/g;
+
+export function separateMacroAndAlpha(input: string): string {
+  if (!input) return input;
+  return input
+    .replace(/\\square(?=[A-Za-z])/g, "\\square ")
+    .replace(/\\blacksquare(?=[A-Za-z])/g, "\\blacksquare ")
+    .replace(/\\angle(?=[A-Za-z])/g, "\\angle ")
+    .replace(/\\triangle(?!(?:left|right|q|down)\b)(?=[A-Za-z])/g, "\\triangle ")
+    .replace(/\\blacktriangle(?!(?:left|right|down)\b)(?=[A-Za-z])/g, "\\blacktriangle ")
+    .replace(/\\times(?=[A-Za-z])/g, "\\times ")
+    .replace(/\\div(?!ideontimes\b)(?=[A-Za-z])/g, "\\div ")
+    .replace(/\\cdot(?![sp]\b)(?=[A-Za-z])/g, "\\cdot ")
+    .replace(/\\cdots(?=[A-Za-z])/g, "\\cdots ")
+    .replace(/\\pi(?!tchfork\b)(?=[A-Za-z])/g, "\\pi ")
+    .replace(/\\parallel(?=[A-Za-z])/g, "\\parallel ")
+    .replace(/\\perp(?=[A-Za-z])/g, "\\perp ")
+    .replace(/\\sim(?!(?:eq|ilar)\b)(?=[A-Za-z])/g, "\\sim ")
+    .replace(/\\cong(?=[A-Za-z])/g, "\\cong ")
+    .replace(/\\bigcirc(?=[A-Za-z])/g, "\\bigcirc ")
+    .replace(/\\rightarrow(?=[A-Za-z])/g, "\\rightarrow ")
+    .replace(/\\Rightarrow(?=[A-Za-z])/g, "\\Rightarrow ");
+}
+
 export function applySafeCleaner(text: string | null | undefined): string {
   if (!text || typeof text !== "string") return text || "";
   let cleaned = text.replace(/@@/g, "\\").replace(/<\{/g, "{").replace(/\}>/g, "}");
   cleaned = cleaned.replace(/\xa0/g, " ").replace(/\u200b/g, "");
+
+  // 1) JSON 이스케이프 제어문자 오변환 복구 (\boxed, \blacksquare, \frac, \text, \times, \triangle 등)
+  cleaned = cleaned
+    .replace(/\x08oxed/g, "\\boxed")
+    .replace(/\x08lacksquare/g, "\\blacksquare")
+    .replace(/\x08ecause/g, "\\because")
+    .replace(/\x0crac/g, "\\frac")
+    .replace(/\x09ext/g, "\\text")
+    .replace(/\x09imes/g, "\\times")
+    .replace(/\x09riangle/g, "\\triangle")
+    .replace(/\x09herefore/g, "\\therefore");
+
   cleaned = cleaned.replace(/∠/g, "\\angle ").replace(/°/g, "^{\\circ}");
   cleaned = cleaned.replace(/\\?degree\b/g, "^{\\circ}");
+
+  // 2) \squarecm, \squarem, \triangleABC 등 매크로+알파벳 붙음 오류 완벽 분리
+  cleaned = separateMacroAndAlpha(cleaned);
+
+  // 3) 인접 인라인 수식 두 개가 붙어 $$ 블록 수식으로 오인되는 현상 1차 분리
+  cleaned = cleaned.replace(
+    /(\$(?:\\square|\\boxed\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}))\$\$([^$]+\$)/g,
+    "$1$ $$$2"
+  );
+
+  // 4) 달러($) 짝이 정상일 때 수식 밖 노출된 \boxed{\phantom{...}} / 분수박스 / \square 자동 감싸기
+  const dollarCount = (cleaned.match(/\$/g) || []).length;
+  if (dollarCount % 2 === 0) {
+    const segments = cleaned.split(/(\$\$[\s\S]*?\$\$|\$[^$]*?\$)/g);
+    for (let i = 0; i < segments.length; i += 2) {
+      if (segments[i] && segments[i].includes("\\")) {
+        segments[i] = segments[i].replace(BARE_BOX_FRAC_RE, "$$$1$$");
+      }
+    }
+    cleaned = segments.join("");
+  }
+
+  // 5) 자동 감싸기 후 인접한 인라인 수식($$)이 생겼다면 공백으로 안전 분리
+  cleaned = cleaned.replace(
+    /(\$(?:\\square|(?:\\boxed\{\\phantom\{[0-9]+\}\}\s*)?\\d?frac\{\\boxed\{\\phantom\{[0-9]+\}\}\}\{\\boxed\{\\phantom\{[0-9]+\}\}\}|\\boxed\{\\phantom\{[0-9]+\}\}))\$\$([^$]+\$)/g,
+    "$1$ $$$2"
+  );
+
   return cleaned.trim();
 }
 
 export function fixJsonEscapes(text: string | null | undefined): string {
   if (!text) return text || "";
   let res = text
+    .replace(/\x08oxed/g, "\\boxed")
+    .replace(/\x08lacksquare/g, "\\blacksquare")
+    .replace(/\x08ecause/g, "\\because")
+    .replace(/\x0crac/g, "\\frac")
+    .replace(/\x09ext/g, "\\text")
+    .replace(/\x09imes/g, "\\times")
+    .replace(/\x09riangle/g, "\\triangle")
+    .replace(/\x09herefore/g, "\\therefore")
     .replace(/\x0c/g, "\\f")
     .replace(/\x08/g, "\\b")
     .replace(/\x0b/g, "\\v")
@@ -303,7 +376,8 @@ const NUM_CIRCLE_MAP: Record<string, string> = {
 
 export function cleanLatex(input: string | null | undefined): string {
   if (!input || typeof input !== "string") return input || "";
-  let text = input;
+  // 1차로 V115.1 / V121.1 가드레일(제어문자 복구, \squarecm 분리, 노출 네모박스 $ 감싸기) 수행
+  let text = applySafeCleaner(input);
 
   // 백슬래시가 날아간 ext{ } 복구 및 빈 껍데기 제거
   text = text.replace(/(?:\t|\\t| )?ext\s*\{/g, "\\text{");
@@ -328,7 +402,7 @@ export function cleanLatex(input: string | null | undefined): string {
   }
 
   text = text
-    .replaceAll("\\square", "□")
+    .replace(/\\square(?![a-zA-Z])/g, "□")
     .replaceAll("\\frac", "\\dfrac")
     .replaceAll("\\ddfrac", "\\dfrac")
     .replaceAll("\\textdiv", "\\div")
@@ -360,14 +434,18 @@ export function cleanLatex(input: string | null | undefined): string {
     for (const [ch, latex] of Object.entries(UNICODE_TO_LATEX)) {
       m = m.replaceAll(ch, latex);
     }
+    // □cm -> \squarecm 재발 원천 차단
+    m = separateMacroAndAlpha(m);
+
     if (m.startsWith("$$") && m.endsWith("$$")) {
       let inner = m.slice(2, -2);
       let prevInner = "";
       while (prevInner !== inner) {
         prevInner = inner;
-        inner = inner.replace(/\\+text\s*\{\s*([^{}]*)\s*\}/g, "$1");
+        inner = inner.replace(/\\+text\s*\{\s*([^{}]*[가-힣ㄱ-ㅎㅏ-ㅣ][^{}]*)\s*\}/g, "$1");
       }
       inner = inner.replace(/([ \t]*[가-힣ㄱ-ㅎㅏ-ㅣ][가-힣ㄱ-ㅎㅏ-ㅣ \t.,!?~]*[ \t]*)/g, "\\text{$1}");
+      inner = separateMacroAndAlpha(inner);
       m = `$$${inner}$$`;
     } else if (m.startsWith("$") && m.endsWith("$")) {
       let inner = m.slice(1, -1);
@@ -375,9 +453,10 @@ export function cleanLatex(input: string | null | undefined): string {
         let prevInner = "";
         while (prevInner !== inner) {
           prevInner = inner;
-          inner = inner.replace(/\\+text\s*\{\s*([^{}]*)\s*\}/g, "$1");
+          inner = inner.replace(/\\+text\s*\{\s*([^{}]*[가-힣ㄱ-ㅎㅏ-ㅣ][^{}]*)\s*\}/g, "$1");
         }
         inner = inner.replace(/([ \t]*[가-힣ㄱ-ㅎㅏ-ㅣ][가-힣ㄱ-ㅎㅏ-ㅣ \t.,!?~]*[ \t]*)/g, "\\text{$1}");
+        inner = separateMacroAndAlpha(inner);
         m = `$${inner}$`;
       }
     }
@@ -401,7 +480,7 @@ export function resetDollarAndText(text: string | null | undefined): string {
 export function forceInsertDfracDollar(text: string | null | undefined): string {
   if (!text) return "";
   return text.replace(
-    /(?<!\$)(\\dfrac\s*\{(?:[^{}]|\{[^{}]*\})*\}\s*\{(?:[^{}]|\{[^{}]*\})*\})(?!\$)/g,
+    /(?<!\$)(\\dfrac\s*\{(?:[^{}]|\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\})*\}\s*\{(?:[^{}]|\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\})*\})(?!\$)/g,
     "$$$1$$"
   );
 }
@@ -452,16 +531,16 @@ export function convertSlashToDfrac(text: string | null | undefined): string {
 
 export function autoWrapNakedMath(text: string | null | undefined): string {
   if (!text) return "";
-  let res = fixJsonEscapes(text);
+  let res = applySafeCleaner(fixJsonEscapes(text));
   res = res.replace(
-    /(?<!\$)(\\d?frac\s*\{(?:[^{}]|\{[^{}]*\})*\}\s*\{(?:[^{}]|\{[^{}]*\})*\})(?!\$)/g,
+    /(?<!\$)(\\d?frac\s*\{(?:[^{}]|\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\})*\}\s*\{(?:[^{}]|\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\})*\})(?!\$)/g,
     "$$$1$$"
   );
   res = res.replaceAll("\\frac", "\\dfrac").replaceAll("\\ddfrac", "\\dfrac");
   for (let i = 0; i < 3; i++) {
     res = res.replace(/(?<!\$)\$([^$]+)\$[ \t]*\$([^$]+)\$(?!\$)/g, "$$$1 $2$$");
   }
-  return res;
+  return separateMacroAndAlpha(res);
 }
 
 export function fixLeftRightBraces(text: string | null | undefined): string {
@@ -509,7 +588,71 @@ export function runFiveCombo(text: string | null | undefined): string {
   res = forceInsertDivDollar(res);
   res = forceInsertTimesDollar(res);
   res = forceInsertDotDollar(res);
-  return res;
+  return applySafeCleaner(res);
+}
+
+export function inferPrintedPagesInPlace(
+  items: any[],
+  directPrintedMap: Record<number, number>
+): void {
+  const knownRealPages = Object.keys(directPrintedMap)
+    .map((k) => Number(k))
+    .filter((n) => !isNaN(n))
+    .sort((a, b) => a - b);
+  if (knownRealPages.length === 0) return;
+
+  for (const it of items) {
+    const realP = Number(it?.detected_page_num);
+    if (isNaN(realP) || realP <= 0) continue;
+    if (directPrintedMap[realP] !== undefined) {
+      it.final_printed_page = String(directPrintedMap[realP]).slice(0, 20);
+    } else if (!it.final_printed_page) {
+      const prevCandidates = knownRealPages.filter((kp) => kp < realP);
+      const refP =
+        prevCandidates.length > 0
+          ? prevCandidates[prevCandidates.length - 1]
+          : knownRealPages[0];
+      const inferred = directPrintedMap[refP] + (realP - refP);
+      if (inferred > 0) {
+        it.final_printed_page = String(inferred).slice(0, 20);
+      }
+    }
+  }
+}
+
+export function buildStaticClassifyInstructionClient(
+  currGuide: string,
+  subGuide: string,
+  thkGuide: string,
+  applySubTaxonomy: boolean,
+  applyThinking: boolean
+): string {
+  const subRuleText = applySubTaxonomy
+    ? "\n3. [서브 교과 정밀 매핑 (sub_curriculum_id)]: [2-1. 서브 교과 세부유형 리스트]에서 실제 요구 개념에 가장 부합하는 Depth 8 `item_id` 코드만 기입하십시오."
+    : "";
+  const thkRuleText = applyThinking
+    ? "\n4. [사고력 할당 (thinking_id)]: 조건이 복합적이거나 사고력 문장제인 경우 적합한 `THK-XX-XX-XX` 코드만 기입하십시오."
+    : "";
+
+  const blocks: string[] = [currGuide || ""];
+  if (applySubTaxonomy && subGuide) blocks.push(subGuide);
+  if (applyThinking && thkGuide) blocks.push(thkGuide);
+  const joinedGuides = blocks.filter(Boolean).join("\n\n");
+
+  return `당신은 대한민국 수학 교육과정 데이터 분류 전문가입니다.
+전달되는 수학 문제 JSON 배열의 각 문항을 아래 분류표에 맞춰 정밀 분류하십시오.
+
+${joinedGuides}
+
+### [절대 규칙]
+1. [고유 ID 유지]: 입력된 \`question_id\`를 반환 배열에 100% 동일하게 유지하십시오.
+2. [메인 교과 Depth 8 강제 매핑 (curriculum_id)]: 반드시 [1-1. 메인 교과 세부유형 리스트]의 Depth 8 \`item_id\` 코드만 기입하십시오. 상위 Depth 7 단원 코드 사용을 금지합니다.${subRuleText}${thkRuleText}
+5. [인지 영역]: "이해 및 연산", "적용 및 응용", "추론 및 문제 해결" 중 택 1
+6. [유형, 난이도 및 정답률(solving_probability)]:
+   - 문제 유형: "MULTIPLE_CHOICE", "SUBJECTIVE", "DESCRIPTIVE" 중 택 1
+   - 난이도("최하", "하", "중", "상", "최상")와 정답률(15~95 사이 5단위 정수):
+     * 최상: 15~30 | 상: 30~50 | 중: 50~70 | 하: 70~85 | 최하: 85~95
+`;
 }
 
 // =========================================================
@@ -561,14 +704,22 @@ export function normalizeDifficultyForDb(val: any): string {
   return "중";
 }
 
-export function sanitizeCurriculumId(val: any): string | null {
+export function sanitizeCurriculumId(
+  val: any,
+  canonicalIdMap?: Map<string, string> | null
+): string | null {
   if (val === null || val === undefined) return null;
   const s = String(val).trim();
   if (!s || ["NONE", "NULL", "미분류", "-"].includes(s.toUpperCase())) return null;
   const codeMatch = s.match(/[EMH]\d{2,3}(?:-[0-9A-Za-z]+)+/i);
-  if (codeMatch) return codeMatch[0].toUpperCase();
-  const firstToken = s.split(/[\s:()\[\]]+/)[0]?.trim() || "";
-  return firstToken ? firstToken.slice(0, 50) : null;
+  const candidate = codeMatch
+    ? codeMatch[0].toUpperCase()
+    : (s.split(/[\s:()\[\]]+/)[0]?.trim().toUpperCase() || "");
+  if (!candidate) return null;
+  if (canonicalIdMap && canonicalIdMap.has(candidate)) {
+    return (canonicalIdMap.get(candidate) || candidate).slice(0, 50);
+  }
+  return candidate.slice(0, 50);
 }
 
 export function sanitizeThinkingId(val: any): string | null {
@@ -789,11 +940,13 @@ export default function PdfParserPage() {
   const [targetWidths, setTargetWidths] = useState<Record<string, number>>({});
 
   // =========================================================
-  // Phase 1 설정 상태 (V114.1 초고속 문제 추출 + V119.1 4단계 풀이 스트리밍)
+  // Phase 1 설정 상태 (V115.1 경량 추출 + V121.1 1-Pass 통합 추출·풀이 + 0원 백지 스킵)
   // =========================================================
   const [extractMode, setExtractMode] = useState<"PROBLEMS_ONLY" | "WITH_SOLUTION">(
     "WITH_SOLUTION"
   );
+  const [useSinglePass, setUseSinglePass] = useState<boolean>(true);
+  const [skipBlankPagesLocally, setSkipBlankPagesLocally] = useState<boolean>(true);
   const [aiStartPage, setAiStartPage] = useState<number>(1);
   const [aiEndPage, setAiEndPage] = useState<number>(1);
   const [pageConcurrency, setPageConcurrency] = useState<number>(3);
@@ -808,8 +961,68 @@ export default function PdfParserPage() {
   const [pipelineLogs, setPipelineLogs] = useState<string[]>([]);
   const abortScanRef = useRef<boolean>(false);
 
+  // 📊 실시간 토큰·캐시·사고토큰·0원 스킵 누적 집계기 (V115.1 / V121.1 / V5.0.0 공통)
+  const [tokenUsage, setTokenUsage] = useState({
+    calls: 0,
+    freeSkippedPages: 0,
+    promptTokens: 0,
+    cachedTokens: 0,
+    outputTokens: 0,
+    thoughtTokens: 0,
+  });
+  const tokenUsageRef = useRef({
+    calls: 0,
+    freeSkippedPages: 0,
+    promptTokens: 0,
+    cachedTokens: 0,
+    outputTokens: 0,
+    thoughtTokens: 0,
+  });
+
+  const recordApiUsage = useCallback((u: any) => {
+    if (!u || typeof u !== "object") return;
+    const next = {
+      calls: tokenUsageRef.current.calls + 1,
+      freeSkippedPages: tokenUsageRef.current.freeSkippedPages,
+      promptTokens: tokenUsageRef.current.promptTokens + Number(u.promptTokens || 0),
+      cachedTokens: tokenUsageRef.current.cachedTokens + Number(u.cachedTokens || 0),
+      outputTokens: tokenUsageRef.current.outputTokens + Number(u.outputTokens || 0),
+      thoughtTokens: tokenUsageRef.current.thoughtTokens + Number(u.thoughtTokens || 0),
+    };
+    tokenUsageRef.current = next;
+    setTokenUsage(next);
+  }, []);
+
+  const recordFreePageSkip = useCallback(() => {
+    const next = {
+      ...tokenUsageRef.current,
+      freeSkippedPages: tokenUsageRef.current.freeSkippedPages + 1,
+    };
+    tokenUsageRef.current = next;
+    setTokenUsage(next);
+  }, []);
+
+  const resetTokenUsage = useCallback(() => {
+    const zero = {
+      calls: 0,
+      freeSkippedPages: 0,
+      promptTokens: 0,
+      cachedTokens: 0,
+      outputTokens: 0,
+      thoughtTokens: 0,
+    };
+    tokenUsageRef.current = zero;
+    setTokenUsage(zero);
+  }, []);
+
+  const formatUsageSummary = useCallback(() => {
+    const u = tokenUsageRef.current;
+    const billedOut = u.outputTokens + u.thoughtTokens;
+    return `호출 ${u.calls}회 (0원스킵 ${u.freeSkippedPages}쪽) | 입력 ${u.promptTokens.toLocaleString()} (캐시 ${u.cachedTokens.toLocaleString()}) | 출력 ${u.outputTokens.toLocaleString()}+사고 ${u.thoughtTokens.toLocaleString()} (과금출력 ${billedOut.toLocaleString()})`;
+  }, []);
+
   // =========================================================
-  // Phase 2 설정 상태 (V4.4.0 교과 + 광범위 서브교과 + 사고력 트리플 분류)
+  // Phase 2 설정 상태 (V5.0.0 경량 분류 + 명시적 컨텍스트 캐시 + 대소문자 정규화)
   // =========================================================
   const [masterCategories, setMasterCategories] = useState<any[]>([]);
   const [masterItems, setMasterItems] = useState<any[]>([]);
@@ -822,7 +1035,7 @@ export default function PdfParserPage() {
   const [applyThinking, setApplyThinking] = useState<boolean>(false);
   const [classifyPageRange, setClassifyPageRange] = useState<string>("");
   const [classifyOnlyRework, setClassifyOnlyRework] = useState<boolean>(true);
-  const [classifyBatchSize, setClassifyBatchSize] = useState<number>(15);
+  const [classifyBatchSize, setClassifyBatchSize] = useState<number>(25);
   const [isClassifying, setIsClassifying] = useState<boolean>(false);
   const [classifyProgress, setClassifyProgress] = useState({
     completed: 0,
@@ -977,7 +1190,18 @@ export default function PdfParserPage() {
       if (savedWorkspace) {
         const parsed = JSON.parse(savedWorkspace);
         if (Array.isArray(parsed.problems) && parsed.problems.length > 0) {
-          setProblems(parsed.problems);
+          // V121.1: 기존 저장 데이터에도 강화된 수식 정제기를 소급 적용하여 \squarecm 등 즉시 복구
+          const healed = parsed.problems.map((it: any) => {
+            if (!it || typeof it !== "object") return it;
+            const nextIt: any = { ...it };
+            for (const f of TARGET_FIELDS) {
+              if (nextIt[f] && typeof nextIt[f] === "string") {
+                nextIt[f] = applySafeCleaner(nextIt[f]);
+              }
+            }
+            return nextIt;
+          });
+          setProblems(healed);
           if (parsed.bookTitle) setBookTitle(parsed.bookTitle);
         }
       }
@@ -1023,13 +1247,14 @@ export default function PdfParserPage() {
     return () => clearTimeout(timer);
   }, [problems, currentIdx, editorTab, activePipelineTab]);
 
-  // 필터링된 문제 목록 및 현재 문항
+  // 필터링된 문제 목록 및 현재 문항 (V5.0.0 대소문자 무관 Depth 8 판별 반영)
   const filteredIndices = useMemo(() => {
     const mainPrefixes = expandPrefixSpec(mainPrefixSpec);
-    const depth8Set = new Set(
+    const depth8UpperSet = new Set(
       masterItems
         .filter((i) => matchesAnyPrefix(i.item_id, mainPrefixes))
-        .map((i) => String(i.item_id).trim())
+        .map((i) => String(i.item_id || "").trim().toUpperCase())
+        .filter(Boolean)
     );
 
     return problems
@@ -1047,8 +1272,8 @@ export default function PdfParserPage() {
           if (!taxId || taxId === "None") return true;
           if (
             matchesAnyPrefix(taxId, mainPrefixes) &&
-            depth8Set.size > 0 &&
-            !depth8Set.has(taxId)
+            depth8UpperSet.size > 0 &&
+            !depth8UpperSet.has(taxId.toUpperCase())
           ) {
             return true;
           }
@@ -1292,6 +1517,9 @@ export default function PdfParserPage() {
           }
           throw new Error(errMsg);
         }
+        if (data?.usage) {
+          recordApiUsage(data.usage);
+        }
         return data.data;
       } catch (err: any) {
         if (timer) clearTimeout(timer);
@@ -1314,22 +1542,81 @@ export default function PdfParserPage() {
     return null;
   };
 
-  // PDF 한 페이지를 250 DPI (scale ≈ 3.47) JPEG Base64로 렌더링
+  // V115.1 & V121.1: 최적 해상도(190/200 DPI) 렌더링 + 로컬 0원 완전 백지 페이지 필터링
   const renderPdfPageToBase64 = async (
     targetPdf: any,
     targetPageNum: number,
-    dpi = 250
-  ): Promise<string> => {
+    dpi = 190,
+    checkBlank = false
+  ): Promise<string | null> => {
     const page = await targetPdf.getPage(targetPageNum);
     const scale = dpi / 72.0;
     const viewport = page.getViewport({ scale });
     const tempCanvas = document.createElement("canvas");
-    tempCanvas.width = viewport.width;
-    tempCanvas.height = viewport.height;
-    const ctx = tempCanvas.getContext("2d");
+    tempCanvas.width = Math.max(1, Math.floor(viewport.width));
+    tempCanvas.height = Math.max(1, Math.floor(viewport.height));
+    const ctx = tempCanvas.getContext("2d", { willReadFrequently: checkBlank });
     if (!ctx) throw new Error("Canvas context 생성 실패");
+
+    // 알파 배경을 순백색(#ffffff)으로 초기화 후 렌더링 (PyMuPDF alpha=False 동일 동작)
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, tempCanvas.width, tempCanvas.height);
     await page.render({ canvasContext: ctx, viewport }).promise;
+
+    if (checkBlank) {
+      try {
+        const imgData = ctx.getImageData(0, 0, tempCanvas.width, tempCanvas.height).data;
+        let nonWhitePixels = 0;
+        // 4픽셀 간격 샘플링으로 초고속 백지 판별 (밝기 < 245 인 유효 잉크 픽셀 탐지)
+        for (let i = 0; i < imgData.length; i += 16) {
+          if (imgData[i] < 245 || imgData[i + 1] < 245 || imgData[i + 2] < 245) {
+            nonWhitePixels++;
+            if (nonWhitePixels >= 12) break;
+          }
+        }
+        if (nonWhitePixels < 12) {
+          return null;
+        }
+      } catch {}
+    }
+
     return tempCanvas.toDataURL("image/jpeg", 0.82);
+  };
+
+  // V121.1: 누락 문항 핀포인트 단건 보완 풀이 헬퍼
+  const solveSingleItemFallback = async (
+    item: any,
+    base64Img: string,
+    token: string | undefined
+  ) => {
+    try {
+      const solData = await fetchWithRetryAndTimeout(
+        {
+          action: "solve",
+          imageBase64: base64Img,
+          question: item.question,
+          question_number: item.question_number,
+          sub_num: item.sub_num,
+          sub_sub_num: item.sub_sub_num,
+        },
+        token,
+        3,
+        75000
+      );
+      if (solData && (solData.answer || solData.step_1_concept)) {
+        item.step_1_concept = cleanLatex(solData.step_1_concept || "");
+        item.step_2_approach = cleanLatex(solData.step_2_approach || "");
+        item.step_3_process = cleanLatex(solData.step_3_process || "");
+        item.step_4_conclusion = cleanLatex(solData.step_4_conclusion || "");
+        item.answer = cleanLatex(solData.answer || "");
+        item.problem_type = normalizeRecordForQuestionDb(item).problem_type;
+        item.ai_status = "완료";
+      } else {
+        item.ai_status = "에러";
+      }
+    } catch {
+      item.ai_status = "에러";
+    }
   };
 
   const runSinglePdfPipeline = async (
@@ -1352,7 +1639,7 @@ export default function PdfParserPage() {
     const skipCount = endP - startP + 1 - pagesToProcess.length;
     if (skipCount > 0) {
       addLog(
-        `🔄 [이어하기 감지] ${pdfFileName}: 이미 완료된 ${skipCount}개 페이지를 0.1초 만에 건너뜁니다.`
+        `🔄 [이어하기 감지] ${pdfFileName}: 이미 완료된 ${skipCount}개 페이지를 즉시 건너뜁니다.`
       );
     }
     if (pagesToProcess.length === 0) {
@@ -1360,10 +1647,16 @@ export default function PdfParserPage() {
       return;
     }
 
+    const targetDpi = extractMode === "WITH_SOLUTION" ? 200 : 190;
+    const modeDesc =
+      extractMode === "WITH_SOLUTION"
+        ? useSinglePass
+          ? "⚡V121.1 1-Pass 통합(추출+4단계풀이)"
+          : "V121.1 2-Pass 분리(경량추출+일괄풀이)"
+        : "⚡V115.1 경량 비전추출(Lite·Minimal)";
+
     addLog(
-      `🚀 [${pdfFileName}] 남은 ${pagesToProcess.length}장 스트리밍 스캔 시작 (모드: ${
-        extractMode === "WITH_SOLUTION" ? "추출+4단계풀이(V119.1)" : "문제만 초고속 추출(V114.1)"
-      }, 동시성: ${pageConcurrency})`
+      `🚀 [${pdfFileName}] 남은 ${pagesToProcess.length}장 스캔 시작 (모드: ${modeDesc}, 해상도: ${targetDpi} DPI, 동시성: ${pageConcurrency})`
     );
 
     setAiProgress({
@@ -1372,6 +1665,7 @@ export default function PdfParserPage() {
       phaseLabel: `${pdfFileName} 스캔 중`,
     });
 
+    const directPrintedMap: Record<number, number> = {};
     const sharedPrintedPages: Record<number, number> = {};
     let doneCount = 0;
 
@@ -1387,46 +1681,70 @@ export default function PdfParserPage() {
 
         try {
           setPageNum(pNum);
-          addLog(`📂 물리적 [${pNum}쪽] 이미지 렌더링(250 DPI) 및 문제 추출 시작...`);
-          const base64Img = await renderPdfPageToBase64(targetPdfDoc, pNum, 250);
-
-          const extractRes = await fetchWithRetryAndTimeout(
-            {
-              action: "extract",
-              imageBase64: base64Img,
-              pageNum: pNum,
-            },
-            token
+          const base64Img = await renderPdfPageToBase64(
+            targetPdfDoc,
+            pNum,
+            targetDpi,
+            skipBlankPagesLocally
           );
 
-          const rawItems: any[] = extractRes?.problems || [];
-          if (!rawItems || rawItems.length === 0) {
-            addLog(`⏭️ 물리적 [${pNum}쪽] 문제 없음 (빈 페이지 완료 도장 기록)`);
+          if (base64Img === null) {
+            recordFreePageSkip();
+            addLog(`⏭️ 물리적 [${pNum}쪽] 빈 페이지 감지 ➔ API 호출 없이 0원 스킵! | 📊 ${formatUsageSummary()}`);
             completedSet.add(pNum);
             setCompletedPagesMap((prev) => ({
               ...prev,
               [pdfFileName]: Array.from(completedSet),
             }));
-            doneCount++;
-            setAiProgress((prev) => ({ ...prev, current: doneCount }));
             continue;
           }
 
-          // 인쇄된 페이지 번호 추론
-          let currentPrintedPage: number | null = null;
+          const isOnePass = extractMode === "WITH_SOLUTION" && useSinglePass;
+          addLog(
+            `📂 물리적 [${pNum}쪽] 작업 시작 (${isOnePass ? "⚡1-Pass 추출+풀이 통합" : extractMode === "WITH_SOLUTION" ? "2-Pass 경량추출+일괄풀이" : "⚡Lite 문제추출"}, ${targetDpi} DPI)`
+          );
+
+          const extractRes = await fetchWithRetryAndTimeout(
+            {
+              action: isOnePass ? "extract_and_solve" : "extract",
+              imageBase64: base64Img,
+            },
+            token,
+            isOnePass ? 4 : 5,
+            isOnePass ? 120000 : 75000
+          );
+
+          const rawItems: any[] = extractRes?.problems || [];
+          if (!rawItems || rawItems.length === 0) {
+            addLog(`ℹ️ 물리적 [${pNum}쪽] 추출할 문제 없음 (표지/개념 페이지 ➔ 진도장 기록) | 📊 ${formatUsageSummary()}`);
+            completedSet.add(pNum);
+            setCompletedPagesMap((prev) => ({
+              ...prev,
+              [pdfFileName]: Array.from(completedSet),
+            }));
+            continue;
+          }
+
+          // 인쇄된 페이지 번호 직접 탐지 및 기록
+          let detectedDirectPage: number | null = null;
           for (const item of rawItems) {
             const rawPage = String(item?.final_printed_page || "");
             const cleaned = rawPage.replace(/\D/g, "").replace(/^0+/, "");
             if (cleaned) {
-              currentPrintedPage = parseInt(cleaned, 10);
+              detectedDirectPage = parseInt(cleaned, 10);
               break;
             }
           }
-          if (currentPrintedPage === null) {
-            const prevPrinted = sharedPrintedPages[pNum - 1];
-            currentPrintedPage = prevPrinted ? prevPrinted + 1 : pNum;
+          if (detectedDirectPage !== null) {
+            directPrintedMap[pNum] = detectedDirectPage;
           }
-          sharedPrintedPages[pNum] = currentPrintedPage;
+          const fallbackPrinted =
+            detectedDirectPage !== null
+              ? detectedDirectPage
+              : sharedPrintedPages[pNum - 1]
+              ? sharedPrintedPages[pNum - 1] + 1
+              : pNum;
+          sharedPrintedPages[pNum] = fallbackPrinted;
 
           const seenInPage = new Set<string>();
           const pageExtractedItems: any[] = [];
@@ -1455,9 +1773,29 @@ export default function PdfParserPage() {
               qNum = `확인${qNum}`.replace(/\s+/g, "");
             }
 
-            const normText = cleanQText.replace(/\s+/g, "");
-            if (seenInPage.has(normText)) continue;
-            seenInPage.add(normText);
+            const subN = Number(item.sub_num ?? 0) || 0;
+            const subSubN = Number(item.sub_sub_num ?? 0) || 0;
+            const dedupKey = `${qNum}_${subN}_${subSubN}_${cleanQText.replace(/\s+/g, "")}`;
+            if (seenInPage.has(dedupKey)) continue;
+            seenInPage.add(dedupKey);
+
+            let s1 = "";
+            let s2 = "";
+            let s3 = "";
+            let s4 = "";
+            let ans = "";
+            let aiStatus = extractMode === "WITH_SOLUTION" ? "대기" : "추출완료";
+
+            if (isOnePass) {
+              s1 = cleanLatex(item.step_1_concept || "");
+              s2 = cleanLatex(item.step_2_approach || "");
+              s3 = cleanLatex(item.step_3_process || "");
+              s4 = cleanLatex(item.step_4_conclusion || "");
+              ans = cleanLatex(item.answer || "");
+              if (ans && s1) {
+                aiStatus = "완료";
+              }
+            }
 
             const newRecord = normalizeRecordForQuestionDb(
               {
@@ -1467,30 +1805,31 @@ export default function PdfParserPage() {
                 book_name: bookTitle || cleanBookName,
                 source_book_name: bookTitle || cleanBookName,
                 detected_page_num: pNum,
-                final_printed_page: String(currentPrintedPage),
+                final_printed_page:
+                  detectedDirectPage !== null ? String(detectedDirectPage) : String(fallbackPrinted),
                 question_number: qNum,
-                sub_num: item.sub_num ?? 0,
-                sub_sub_num: item.sub_sub_num ?? 0,
+                sub_num: subN,
+                sub_sub_num: subSubN,
                 problem_type: "SUBJECTIVE",
                 difficulty: "중",
                 solving_probability: 50,
                 question: cleanQText,
                 question_2: null,
                 options: null,
-                answer: "",
-                step_1_concept: "",
-                step_2_approach: "",
-                step_3_process: "",
-                step_4_conclusion: "",
-                ai_status: extractMode === "WITH_SOLUTION" ? "대기" : "추출완료",
+                answer: ans,
+                step_1_concept: s1,
+                step_2_approach: s2,
+                step_3_process: s3,
+                step_4_conclusion: s4,
+                ai_status: aiStatus,
                 classification_status: "PENDING",
                 verification_status: "PENDING",
                 is_human_verified: false,
                 human_verified: false,
                 engine_ver:
                   extractMode === "WITH_SOLUTION"
-                    ? "V119.1_Stream"
-                    : "V114.1_Async",
+                    ? "V121.1_BoxGuard"
+                    : "V115.1_Lite_BoxGuard",
               },
               bookTitle || cleanBookName
             );
@@ -1498,73 +1837,103 @@ export default function PdfParserPage() {
             pageExtractedItems.push(newRecord);
           }
 
-          // 모드 2: 페이지 단위 일괄 4단계 풀이 (페이지 이미지를 단 1회만 전송하여 페이지 내 전 문항을 한 번에 풀이 -> 토큰 85% 절감)
           if (extractMode === "WITH_SOLUTION" && pageExtractedItems.length > 0) {
-            addLog(
-              `✅ 물리적 [${pNum}쪽] (인쇄 ${currentPrintedPage}쪽) ${pageExtractedItems.length}문항 추출 완료! 🚀 페이지 일괄 4단계 풀이(이미지 1회 전송) 진입...`
-            );
-            try {
-              const pageSolutions = await fetchWithRetryAndTimeout(
-                {
-                  action: "solve_page",
-                  imageBase64: base64Img,
-                  items: pageExtractedItems.map((it) => ({
-                    question_id: it.question_id,
-                    question_number: it.question_number,
-                    sub_num: it.sub_num,
-                    sub_sub_num: it.sub_sub_num,
-                    question: it.question,
-                  })),
-                },
-                token,
-                3,
-                120000
+            if (isOnePass) {
+              // 1-Pass 통합 모드: 누락 문항이 있을 때만 핀포인트 단건 재시도
+              const missingItems = pageExtractedItems.filter((it) => it.ai_status !== "완료");
+              const solvedCnt = pageExtractedItems.length - missingItems.length;
+              addLog(
+                `💡 [1-Pass 통합 완료] 물리 ${pNum}쪽(인쇄 ${fallbackPrinted}쪽): 이미지 1회 호출로 ${solvedCnt}/${pageExtractedItems.length}문항 추출+풀이 동시 해결! | 📊 ${formatUsageSummary()}`
               );
-
-              const solMap = new Map<string, any>();
-              if (Array.isArray(pageSolutions)) {
-                pageSolutions.forEach((s: any, idx: number) => {
-                  if (s?.question_id) {
-                    solMap.set(String(s.question_id).trim(), s);
-                  } else if (pageExtractedItems[idx]) {
-                    solMap.set(String(pageExtractedItems[idx].question_id), s);
-                  }
-                });
+              if (missingItems.length > 0) {
+                addLog(
+                  `🔄 [누락 문항 단건 보완] 인쇄 ${fallbackPrinted}쪽 미해결 ${missingItems.length}문항 개별 재시도...`
+                );
+                await Promise.all(
+                  missingItems.map((it) => solveSingleItemFallback(it, base64Img, token))
+                );
               }
-
-              pageExtractedItems.forEach((item) => {
-                const solData = solMap.get(String(item.question_id));
-                if (solData && (solData.answer || solData.step_1_concept)) {
-                  item.step_1_concept = cleanLatex(solData.step_1_concept || "");
-                  item.step_2_approach = cleanLatex(solData.step_2_approach || "");
-                  item.step_3_process = cleanLatex(solData.step_3_process || "");
-                  item.step_4_conclusion = cleanLatex(solData.step_4_conclusion || "");
-                  item.answer = cleanLatex(solData.answer || "");
-                  item.problem_type = normalizeRecordForQuestionDb(item).problem_type;
-                  item.ai_status = "완료";
-                } else {
-                  item.ai_status = "에러";
-                }
-              });
-
+            } else {
+              // 2-Pass 분리 모드: Lite 추출 완료 후 페이지 일괄 풀이 + 누락분 단건 보완
               addLog(
-                `💡 [페이지 일괄 풀이 완료] 인쇄 ${currentPrintedPage}쪽 ${pageExtractedItems.length}개 문항 4단계 해설 생성 완료!`
+                `✅ 물리적 [${pNum}쪽] (인쇄 ${fallbackPrinted}쪽) ${pageExtractedItems.length}문항 경량 추출 완료! 🚀 일괄 풀이 진입...`
               );
-            } catch (solErr: any) {
-              pageExtractedItems.forEach((item) => {
-                item.ai_status = "에러";
-              });
+              if (pageExtractedItems.length === 1) {
+                await solveSingleItemFallback(pageExtractedItems[0], base64Img, token);
+              } else {
+                try {
+                  const pageSolutions = await fetchWithRetryAndTimeout(
+                    {
+                      action: "solve_page",
+                      imageBase64: base64Img,
+                      items: pageExtractedItems.map((it) => ({
+                        question_id: it.question_id,
+                        question_number: it.question_number,
+                        sub_num: it.sub_num,
+                        sub_sub_num: it.sub_sub_num,
+                        question: it.question,
+                      })),
+                    },
+                    token,
+                    3,
+                    115000
+                  );
+
+                  const solMap = new Map<string, any>();
+                  if (Array.isArray(pageSolutions)) {
+                    pageSolutions.forEach((s: any, idx: number) => {
+                      if (s?.question_id) {
+                        solMap.set(String(s.question_id).trim(), s);
+                      } else if (pageExtractedItems[idx]) {
+                        solMap.set(String(pageExtractedItems[idx].question_id), s);
+                      }
+                    });
+                  }
+
+                  const missingAfterPage: any[] = [];
+                  pageExtractedItems.forEach((item) => {
+                    const solData = solMap.get(String(item.question_id));
+                    if (solData && solData.answer && solData.step_1_concept) {
+                      item.step_1_concept = cleanLatex(solData.step_1_concept || "");
+                      item.step_2_approach = cleanLatex(solData.step_2_approach || "");
+                      item.step_3_process = cleanLatex(solData.step_3_process || "");
+                      item.step_4_conclusion = cleanLatex(solData.step_4_conclusion || "");
+                      item.answer = cleanLatex(solData.answer || "");
+                      item.problem_type = normalizeRecordForQuestionDb(item).problem_type;
+                      item.ai_status = "완료";
+                    } else {
+                      missingAfterPage.push(item);
+                    }
+                  });
+
+                  if (missingAfterPage.length > 0) {
+                    addLog(
+                      `🔄 [누락 문항 단건 보완] 인쇄 ${fallbackPrinted}쪽 미해결 ${missingAfterPage.length}문항 핀포인트 보완...`
+                    );
+                    await Promise.all(
+                      missingAfterPage.map((it) => solveSingleItemFallback(it, base64Img, token))
+                    );
+                  }
+                } catch (solErr: any) {
+                  addLog(
+                    `⚠️ [페이지 일괄 풀이 경고] 인쇄 ${fallbackPrinted}쪽 단건 보완 전환: ${solErr.message}`
+                  );
+                  await Promise.all(
+                    pageExtractedItems.map((it) => solveSingleItemFallback(it, base64Img, token))
+                  );
+                }
+              }
               addLog(
-                `❌ [페이지 일괄 풀이 실패] 인쇄 ${currentPrintedPage}쪽: ${solErr.message}`
+                `💡 [2-Pass 풀이 완료] 인쇄 ${fallbackPrinted}쪽 ${pageExtractedItems.length}문항 해설 생성 완료! | 📊 ${formatUsageSummary()}`
               );
             }
           } else {
             addLog(
-              `✅ 물리적 [${pNum}쪽] (인쇄 ${currentPrintedPage}쪽) ${pageExtractedItems.length}문항 초고속 추출 완료!`
+              `✅ 물리적 [${pNum}쪽] (인쇄 ${fallbackPrinted}쪽) ${pageExtractedItems.length}문항 초고속 추출 완료! | 📊 ${formatUsageSummary()}`
             );
           }
 
-          // 원자적 병합 및 정렬 (이전 다른 파일 잔여 데이터 배제 + 같은 페이지 기존 데이터 교체 + 고유키 중복 제거)
+          // 원자적 병합 및 정렬 + V115.1 비동기 인쇄 페이지 역산 보정
           setProblems((prev) => {
             const baseList = runAllPdfsMode
               ? prev
@@ -1584,6 +1953,12 @@ export default function PdfParserPage() {
               dedupMap.set(uKey, item);
             }
             const merged = sortProblemsList(Array.from(dedupMap.values()));
+
+            // 현재 파일 소속 문항들에 대해 주변 인식 페이지 번호로 누락 인쇄 쪽수 정밀 보정
+            const samePdfItems = merged.filter(
+              (m) => !m.pdf_source || m.pdf_source === pdfFileName
+            );
+            inferPrintedPagesInPlace(samePdfItems, directPrintedMap);
 
             // 단일 소문항 sub_num 정리 (같은 페이지+문항번호가 1개뿐이고 sub_sub_num이 0이면 sub_num=0)
             const qCounts: Record<string, number> = {};
@@ -1706,7 +2081,8 @@ export default function PdfParserPage() {
       let done = 0;
       for (const [pNum, pageItems] of Array.from(byPage.entries())) {
         if (abortScanRef.current) break;
-        const base64Img = await renderPdfPageToBase64(pdfDoc, pNum, 250);
+        const base64Img = await renderPdfPageToBase64(pdfDoc, pNum, 200, false);
+        if (!base64Img) continue;
         try {
           const pageSolutions = await fetchWithRetryAndTimeout(
             {
@@ -1762,7 +2138,7 @@ export default function PdfParserPage() {
   };
 
   // =========================================================
-  // 🧭 Phase 2: 정밀 분류 (교과 Depth 8 + 광범위 서브교과 + 사고력 트리플 분류 V4.4.0)
+  // 🧭 Phase 2: 정밀 분류 V5.0.0 (경량 모델 + 명시적 컨텍스트 캐싱 + 대소문자 정규화)
   // =========================================================
   const taxonomyGuides = useMemo(() => {
     const mainPrefixes = expandPrefixSpec(mainPrefixSpec);
@@ -1772,45 +2148,57 @@ export default function PdfParserPage() {
     const filtItem = masterItems.filter((i) =>
       matchesAnyPrefix(i.item_id, mainPrefixes)
     );
-    const depth8IdSet = new Set(
-      filtItem.map((i) => String(i.item_id).trim()).filter(Boolean)
+    const depth8UpperSet = new Set(
+      filtItem
+        .map((i) => String(i.item_id || "").trim().toUpperCase())
+        .filter(Boolean)
     );
 
-    // 🌟 ID -> 공식 분류명 인메모리 사전 (AI가 ID만 반환해도 클라이언트에서 100% 정확한 공식 단원명을 즉시 매핑 -> 출력 토큰 대폭 절감)
+    // 🌟 ID -> 공식 분류명 & 대소문자 정규화 사전 (V5.0.0 canonical_id_map 완벽 호환)
     const idToNameMap = new Map<string, string>();
+    const canonicalIdMap = new Map<string, string>();
     const catMap = new Map<string, any>();
+
     for (const c of masterCategories) {
       const cid = String(c.category_id || "").trim();
       if (!cid) continue;
       catMap.set(cid, c);
-      idToNameMap.set(cid, String(c.depth7 || c.full_path || cid).trim());
+      canonicalIdMap.set(cid.toUpperCase(), cid);
+      const nameVal = String(c.depth7 || c.full_path || cid).trim();
+      idToNameMap.set(cid, nameVal);
+      idToNameMap.set(cid.toUpperCase(), nameVal);
     }
     for (const i of masterItems) {
       const iid = String(i.item_id || "").trim();
       if (!iid) continue;
+      canonicalIdMap.set(iid.toUpperCase(), iid);
       const parentCat = catMap.get(String(i.category_id || "").trim());
-      const d8Label =
+      const d8Label = String(
         i.depth8 ||
-        i.item_name ||
-        i.title ||
-        (parentCat ? `${parentCat.depth7 || ""}` : iid);
-      idToNameMap.set(iid, String(d8Label).trim());
+          i.item_name ||
+          i.title ||
+          (parentCat ? `${parentCat.depth7 || ""}` : iid)
+      ).trim();
+      idToNameMap.set(iid, d8Label);
+      idToNameMap.set(iid.toUpperCase(), d8Label);
     }
     for (const t of thinkingCategories) {
       const tid = String(t.category_id || "").trim();
       if (!tid) continue;
-      idToNameMap.set(tid, String(t.depth3 || t.depth2 || t.full_path || tid).trim());
-      // Depth 2 prefix 매핑 지원 (예: THK-01-02)
-      const parts = tid.split("-");
+      const tidUp = tid.toUpperCase();
+      const label = String(t.full_path || t.depth3 || t.depth2 || tid).trim();
+      idToNameMap.set(tid, label);
+      idToNameMap.set(tidUp, label);
+      const parts = tidUp.split("-");
       if (parts.length >= 3) {
         const d2Id = parts.slice(0, 3).join("-");
         if (!idToNameMap.has(d2Id)) {
-          idToNameMap.set(d2Id, String(t.depth2 || t.depth1 || d2Id).trim());
+          idToNameMap.set(d2Id, String(t.depth2 || t.full_path || d2Id).trim());
         }
       }
     }
 
-    // 🌟 입력 토큰 50% 압축: 상위 Depth 7 단원 헤더 아래에 Depth 8 항목을 그룹핑하여 불필요한 경로 문자열 중복 제거
+    // 🌟 상위 Depth 7 단원 헤더 아래에 Depth 8 항목을 그룹핑하여 경로 중복 제거
     const buildCompactCurriculumGuide = (
       headerTitle: string,
       cats: any[],
@@ -1842,7 +2230,7 @@ export default function PdfParserPage() {
     };
 
     const currGuide = buildCompactCurriculumGuide(
-      `### [1-1. 메인 교과 세부유형 리스트 - item_id (범위: ${mainPrefixes.join(",")})]`,
+      `### [1-1. 메인 교과 세부유형 리스트 - item_id (범위: ${mainPrefixes.join(", ")})]`,
       filtCat,
       filtItem
     );
@@ -1851,7 +2239,7 @@ export default function PdfParserPage() {
     let subGuide = "";
     let subFiltCatCount = 0;
     let subFiltItemCount = 0;
-    const subDepth8IdSet = new Set<string>();
+    const subDepth8UpperSet = new Set<string>();
 
     if (subPrefixes.length > 0) {
       const subFiltCat = masterCategories.filter((c) =>
@@ -1863,11 +2251,11 @@ export default function PdfParserPage() {
       subFiltCatCount = subFiltCat.length;
       subFiltItemCount = subFiltItem.length;
       for (const i of subFiltItem) {
-        if (i.item_id) subDepth8IdSet.add(String(i.item_id).trim());
+        if (i.item_id) subDepth8UpperSet.add(String(i.item_id).trim().toUpperCase());
       }
 
       subGuide = buildCompactCurriculumGuide(
-        `### [2-1. 서브 교과 세부유형 리스트 - item_id (범위: ${subPrefixes.join(",")})]`,
+        `### [2-1. 서브 교과 세부유형 리스트 - item_id (범위: ${subPrefixes.join(", ")})]`,
         subFiltCat,
         subFiltItem
       );
@@ -1888,9 +2276,10 @@ export default function PdfParserPage() {
       filtItemCount: filtItem.length,
       subFiltCatCount,
       subFiltItemCount,
-      depth8IdSet,
-      subDepth8IdSet,
+      depth8UpperSet,
+      subDepth8UpperSet,
       idToNameMap,
+      canonicalIdMap,
       currGuide,
       subGuide,
       thkGuide,
@@ -1936,7 +2325,7 @@ export default function PdfParserPage() {
 
     const applySubTaxonomy = taxonomyGuides.subPrefixes.length > 0;
 
-    // V4.4.0 needs_rework 필터링 로직
+    // V5.0.0 needs_rework 필터링 로직 (대소문자 무관 비교로 무한 재분류 버그 원천 차단)
     const pendingTasks = problems.filter((q) => {
       const pNum =
         parseInt(String(q.detected_page_num || q.final_printed_page || 0), 10) || 0;
@@ -1951,8 +2340,8 @@ export default function PdfParserPage() {
       if (status !== "COMPLETE" || !taxId || taxId === "None") return true;
       if (
         matchesAnyPrefix(taxId, taxonomyGuides.mainPrefixes) &&
-        taxonomyGuides.depth8IdSet.size > 0 &&
-        !taxonomyGuides.depth8IdSet.has(taxId)
+        taxonomyGuides.depth8UpperSet.size > 0 &&
+        !taxonomyGuides.depth8UpperSet.has(taxId.toUpperCase())
       ) {
         return true;
       }
@@ -1960,8 +2349,8 @@ export default function PdfParserPage() {
         if (!subTaxId || subTaxId === "None") return true;
         if (
           matchesAnyPrefix(subTaxId, taxonomyGuides.subPrefixes) &&
-          taxonomyGuides.subDepth8IdSet.size > 0 &&
-          !taxonomyGuides.subDepth8IdSet.has(subTaxId)
+          taxonomyGuides.subDepth8UpperSet.size > 0 &&
+          !taxonomyGuides.subDepth8UpperSet.has(subTaxId.toUpperCase())
         ) {
           return true;
         }
@@ -1971,42 +2360,84 @@ export default function PdfParserPage() {
 
     if (pendingTasks.length === 0) {
       return alert(
-        "✅ 지정된 범위 내의 모든 문항이 이미 Depth 8까지 완벽하게 분류되어 있습니다! (전체를 다시 분류하려면 '미분류/Depth7 이하만 재분류' 체크를 해제하세요.)"
+        "✅ 지정된 범위 내의 모든 문항이 이미 Depth 8까지 완벽하게 분류되어 있습니다! (전체를 다시 분류하려면 '미분류 & Depth 7 이하만 재작업' 체크를 해제하세요.)"
       );
     }
 
     setIsClassifying(true);
     setClassifyProgress({ completed: 0, total: pendingTasks.length });
     addLog(
-      `📚 [메인 교과] DB 필터링 완료! (범위: ${taxonomyGuides.mainPrefixes.join(", ")} | Depth7: ${taxonomyGuides.filtCatCount}개, Depth8: ${taxonomyGuides.filtItemCount}개)`
+      `📚 [메인 교과] 압축 가이드 준비 완료 (범위: ${taxonomyGuides.mainPrefixes.join(", ")} | Depth7: ${taxonomyGuides.filtCatCount}개, Depth8: ${taxonomyGuides.filtItemCount}개)`
     );
     if (applySubTaxonomy) {
       addLog(
-        `🧭 [서브 교과] 광범위 DB 필터링 완료! (범위: ${taxonomyGuides.subPrefixes.join(", ")} | Depth7: ${taxonomyGuides.subFiltCatCount}개, Depth8: ${taxonomyGuides.subFiltItemCount}개)`
+        `🧭 [서브 교과] 압축 가이드 준비 완료 (범위: ${taxonomyGuides.subPrefixes.join(", ")} | Depth7: ${taxonomyGuides.subFiltCatCount}개, Depth8: ${taxonomyGuides.subFiltItemCount}개)`
       );
     }
     if (applyThinking) {
-      addLog(`🧠 [사고력] DB 로드 완료! (후보: ${thinkingCategories.length}개)`);
+      addLog(`🧠 [사고력] 압축 가이드 로드 완료 (후보: ${thinkingCategories.length}개)`);
     }
     addLog(
-      `⚡ 타겟 페이지(${startP}~${endP === 99999 ? "전체" : endP}쪽) 대기 및 재분류 대상: ${pendingTasks.length}개 문항`
+      `⚡ 타겟 페이지(${startP}~${endP === 99999 ? "전체" : endP}쪽) 대기 및 재분류 대상: ${pendingTasks.length}개 문항 (배치 크기: ${classifyBatchSize}문항)`
     );
+
+    let activeCacheName: string | null = null;
+    let authAccessToken: string | undefined = undefined;
 
     try {
       const {
         data: { session },
       } = await supabase.auth.getSession();
       const token = session?.access_token;
+      authAccessToken = token;
 
-      const bSize = Math.max(1, Math.min(30, classifyBatchSize));
+      const bSize = Math.max(1, Math.min(35, classifyBatchSize));
       const batches: any[][] = [];
       for (let i = 0; i < pendingTasks.length; i += bSize) {
         batches.push(pendingTasks.slice(i, i + bSize));
       }
 
+      const staticInstruction = buildStaticClassifyInstructionClient(
+        taxonomyGuides.currGuide,
+        taxonomyGuides.subGuide,
+        taxonomyGuides.thkGuide,
+        applySubTaxonomy,
+        applyThinking
+      );
+
+      // V5.0.0: 실제 처리 배치가 2개 이상일 때만 명시적 컨텍스트 캐시를 생성하여 반복 입력 비용 절감
+      if (batches.length >= 2) {
+        try {
+          const cacheRes = await fetchWithRetryAndTimeout(
+            {
+              action: "create_classify_cache",
+              staticInstruction,
+            },
+            token,
+            1,
+            25000
+          );
+          if (cacheRes?.cacheName) {
+            activeCacheName = String(cacheRes.cacheName);
+            const tokStr = cacheRes.cachedTokenCount
+              ? `, ${Number(cacheRes.cachedTokenCount).toLocaleString()} 토큰`
+              : "";
+            addLog(
+              `⚡ [명시적 컨텍스트 캐시 활성화] 캐시 생성 성공 (${activeCacheName}${tokStr}) ➔ 반복 분류표 입력 비용 대폭 절감!`
+            );
+          } else {
+            addLog(
+              `ℹ️ [명시적 캐시 생략 ➔ 고정 프리픽스 모드 전환] (${cacheRes?.fallbackReason || "분류표 소규모"})`
+            );
+          }
+        } catch {
+          addLog(`ℹ️ [명시적 캐시 생략 ➔ 고정 프리픽스 모드 자동 전환]`);
+        }
+      }
+
       let completedCount = 0;
       let batchIdx = 0;
-      const maxWorkers = 2; // V4.4.0 MAX_WORKERS = 2
+      const maxWorkers = 3; // V5.0.0 MAX_WORKERS = 3
 
       const runBatchWorker = async () => {
         while (batchIdx < batches.length) {
@@ -2019,22 +2450,21 @@ export default function PdfParserPage() {
           }));
           const t0 = Date.now();
           addLog(
-            `⏳ [Phase 2 배치 ${currentBatchNum}/${batches.length}] 문항 ${slimBatch.length}개 AI 정밀 분류 요청 중...`
+            `⏳ [Phase 2 배치 ${currentBatchNum}/${batches.length}] 문항 ${slimBatch.length}개 경량 정밀 분류 요청 중${activeCacheName ? " (⚡캐시 참조)" : ""}...`
           );
           try {
             const results = await fetchWithRetryAndTimeout(
               {
                 action: "classify",
                 batchData: slimBatch,
-                currGuide: taxonomyGuides.currGuide,
-                subGuide: taxonomyGuides.subGuide,
-                thkGuide: taxonomyGuides.thkGuide,
+                cacheName: activeCacheName,
+                staticInstruction,
                 applySubTaxonomy,
                 applyThinking,
               },
               token,
-              3,
-              0
+              4,
+              90000
             );
 
             if (Array.isArray(results) && results.length > 0) {
@@ -2052,19 +2482,28 @@ export default function PdfParserPage() {
                   if (!res) return q;
 
                   const nextQ: any = { ...q };
-                  const cleanMainId = sanitizeCurriculumId(res.curriculum_id);
+                  const cleanMainId = sanitizeCurriculumId(
+                    res.curriculum_id,
+                    taxonomyGuides.canonicalIdMap
+                  );
                   nextQ.taxonomy_id = cleanMainId;
                   nextQ.taxonomy_name =
-                    (cleanMainId && taxonomyGuides.idToNameMap.get(cleanMainId)) ||
+                    (cleanMainId &&
+                      (taxonomyGuides.idToNameMap.get(cleanMainId) ||
+                        taxonomyGuides.idToNameMap.get(cleanMainId.toUpperCase()))) ||
                     String(res.curriculum_name || "").trim() ||
                     "미분류";
 
                   if (applySubTaxonomy) {
-                    const subId = sanitizeCurriculumId(res.sub_curriculum_id);
+                    const subId = sanitizeCurriculumId(
+                      res.sub_curriculum_id,
+                      taxonomyGuides.canonicalIdMap
+                    );
                     if (subId) {
                       nextQ.sub_taxonomy_id = subId;
                       nextQ.sub_taxonomy_name =
                         taxonomyGuides.idToNameMap.get(subId) ||
+                        taxonomyGuides.idToNameMap.get(subId.toUpperCase()) ||
                         String(res.sub_curriculum_name || "").trim() ||
                         "미분류";
                     } else {
@@ -2079,6 +2518,7 @@ export default function PdfParserPage() {
                       nextQ.thk_taxonomy_id = thkId;
                       nextQ.thk_taxonomy_name =
                         taxonomyGuides.idToNameMap.get(thkId) ||
+                        taxonomyGuides.idToNameMap.get(thkId.toUpperCase()) ||
                         String(res.thinking_name || "").trim() ||
                         "미분류";
                     } else {
@@ -2121,13 +2561,18 @@ export default function PdfParserPage() {
                 if (r) {
                   completedCount++;
                   const probDisp = r.solving_probability ? `${r.solving_probability}%` : "N/A";
-                  const subDisp = applySubTaxonomy ? ` | 서브교과: ${r.sub_curriculum_id || "-"}` : "";
-                  const thkDisp = applyThinking ? ` | 사고력: ${r.thinking_id || "-"}` : "";
+                  const mainCanon =
+                    sanitizeCurriculumId(r.curriculum_id, taxonomyGuides.canonicalIdMap) || "-";
+                  const subCanon = applySubTaxonomy
+                    ? ` | 서브교과: ${sanitizeCurriculumId(r.sub_curriculum_id, taxonomyGuides.canonicalIdMap) || "-"}`
+                    : "";
+                  const thkDisp = applyThinking ? ` | 사고력: ${sanitizeThinkingId(r.thinking_id) || "-"}` : "";
                   addLog(
-                    `✅ [타겟 완료: ${completedCount}/${pendingTasks.length}] Page: ${qItem.detected_page_num} (${qItem.question_number}번) | 교과: ${r.curriculum_id || "-"}${subDisp}${thkDisp} | 난이도: ${r.difficulty || "중"} (${probDisp}) [${elapsedSec}초]`
+                    `✅ [완료: ${completedCount}/${pendingTasks.length}] Page: ${qItem.detected_page_num} (${qItem.question_number}번) | 교과: ${mainCanon}${subCanon}${thkDisp} | 난이도: ${r.difficulty || "중"} (${probDisp}) [${elapsedSec}초]`
                   );
                 }
               }
+              addLog(`📊 [누적 토큰] ${formatUsageSummary()}`);
               setClassifyProgress({
                 completed: Math.min(completedCount, pendingTasks.length),
                 total: pendingTasks.length,
@@ -2144,8 +2589,26 @@ export default function PdfParserPage() {
           runBatchWorker()
         )
       );
-      addLog(`🎉 [Phase 2 트리플 분류 완료] 총 ${pendingTasks.length}개 문항 분류 및 정렬이 완료되었습니다!`);
+      addLog(`🎉 [Phase 2 종료] 총 ${pendingTasks.length}개 문항 분류 완료! | 📊 ${formatUsageSummary()}`);
     } finally {
+      if (activeCacheName) {
+        try {
+          await fetch("/api/gemini-parse", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${authAccessToken || ""}`,
+            },
+            body: JSON.stringify({
+              action: "delete_classify_cache",
+              cacheName: activeCacheName,
+            }),
+          });
+          addLog(
+            "🧹 [캐시 정리 완료] 작업 종료 후 명시적 캐시를 즉시 삭제하여 보관(TTL) 요금을 차단했습니다."
+          );
+        } catch {}
+      }
       setIsClassifying(false);
     }
   };
@@ -2221,7 +2684,7 @@ export default function PdfParserPage() {
             const next: any = { ...item };
             for (const f of TARGET_FIELDS) {
               if (res[f] && typeof res[f] === "string") {
-                next[f] = res[f].trim();
+                next[f] = applySafeCleaner(res[f]);
               }
             }
             return next;
@@ -3126,14 +3589,31 @@ export default function PdfParserPage() {
       <div className="bg-slate-900 rounded-2xl px-4 py-3 shadow-lg flex flex-wrap justify-between items-center shrink-0 gap-3">
         <div className="flex items-center gap-3">
           <div>
-            <h1 className="text-lg sm:text-xl font-extrabold text-white flex items-center gap-2">
+            <h1 className="text-lg sm:text-xl font-extrabold text-white flex items-center gap-2 flex-wrap">
               <span>👑</span> Ultimate 로지카 PDF 추출·분류·검수 센터
               <span className="text-[11px] bg-indigo-500 text-white px-2 py-0.5 rounded-full font-bold">
-                V119.1 + V4.4.0 + V302 통합판
+                V115.1 · V121.1 + V5.0.0 + V302 초절전판
               </span>
+              {(tokenUsage.calls > 0 || tokenUsage.freeSkippedPages > 0) && (
+                <span className="text-[11px] bg-emerald-950/90 text-emerald-300 border border-emerald-500/40 px-2.5 py-0.5 rounded-full font-bold flex items-center gap-1.5">
+                  <span>
+                    📊 호출 {tokenUsage.calls}회 (0원스킵 {tokenUsage.freeSkippedPages}쪽) · 입력{" "}
+                    {tokenUsage.promptTokens.toLocaleString()} (캐시{" "}
+                    {tokenUsage.cachedTokens.toLocaleString()}) · 출력{" "}
+                    {(tokenUsage.outputTokens + tokenUsage.thoughtTokens).toLocaleString()}
+                  </span>
+                  <button
+                    onClick={resetTokenUsage}
+                    className="text-[10px] text-slate-400 hover:text-white underline ml-0.5"
+                    title="토큰 누적 카운터 초기화"
+                  >
+                    리셋
+                  </button>
+                </span>
+              )}
             </h1>
             <p className="text-xs text-slate-400 font-medium">
-              Phase 1 (비전 추출 + 4단계 풀이) ➔ Phase 2 (교과 Depth8 + 서브교과 + 사고력 분류) ➔ Phase 3 (V302 수식 마법도구 & 4슬롯 이미지 검수)
+              Phase 1 (Lite 최소추론 · 1-Pass 통합추출 · 0원 백지스킵 · 네모박스 3종) ➔ Phase 2 (V5.0 명시적 컨텍스트 캐시 분류) ➔ Phase 3 (V302 검수)
             </p>
           </div>
         </div>
@@ -3279,7 +3759,7 @@ export default function PdfParserPage() {
               </div>
             )}
 
-            {/* 추출 모드 선택 (문제만 vs 문제+4단계해설) */}
+            {/* 추출 모드 선택 (V115.1 경량 추출 vs V121.1 문제+4단계해설) */}
             <div className="flex items-center gap-1 bg-indigo-50 p-1 rounded-lg border border-indigo-200">
               <button
                 onClick={() => setExtractMode("PROBLEMS_ONLY")}
@@ -3288,8 +3768,9 @@ export default function PdfParserPage() {
                     ? "bg-indigo-600 text-white"
                     : "text-indigo-700 hover:bg-indigo-100"
                 }`}
+                title="gemini-3.5-flash-lite (minimal 추론, 190 DPI) 초저가 비전 추출"
               >
-                ⚡ 문제만 추출 (V114.1 초고속)
+                ⚡ 문제만 추출 (V115.1 Lite)
               </button>
               <button
                 onClick={() => setExtractMode("WITH_SOLUTION")}
@@ -3298,10 +3779,38 @@ export default function PdfParserPage() {
                     ? "bg-indigo-600 text-white"
                     : "text-indigo-700 hover:bg-indigo-100"
                 }`}
+                title="네모박스 3종 정밀 구분 + 4단계 해설 동시 생성 (200 DPI)"
               >
-                🧠 문제 + 4단계 해설 추출 (V119.1)
+                🧠 문제 + 4단계 해설 (V121.1)
               </button>
             </div>
+
+            {extractMode === "WITH_SOLUTION" && (
+              <div className="flex items-center gap-1 bg-amber-50 px-2 py-1 rounded-lg border border-amber-200 text-xs font-extrabold text-amber-900">
+                <span>방식:</span>
+                <select
+                  value={useSinglePass ? "SINGLE" : "TWO"}
+                  onChange={(e) => setUseSinglePass(e.target.value === "SINGLE")}
+                  className="bg-white border border-amber-300 rounded px-1.5 py-0.5 text-xs font-extrabold text-amber-900"
+                  title="1-Pass는 페이지 이미지를 1회만 전송하여 추출과 풀이를 동시에 끝내 이미지 입력 토큰을 절반으로 절약합니다."
+                >
+                  <option value="SINGLE">⚡ 1-Pass 통합호출 (최대 절약·권장)</option>
+                  <option value="TWO">2-Pass 분리호출 (Lite추출+Flash풀이)</option>
+                </select>
+              </div>
+            )}
+
+            <label
+              className="flex items-center gap-1 text-xs font-bold text-emerald-800 bg-emerald-50 px-2.5 py-1 rounded-lg border border-emerald-200 cursor-pointer"
+              title="백지 페이지를 브라우저에서 사전 감지하여 API 호출 없이 0원으로 건너뜁니다."
+            >
+              <input
+                type="checkbox"
+                checked={skipBlankPagesLocally}
+                onChange={(e) => setSkipBlankPagesLocally(e.target.checked)}
+              />
+              <span>💸 0원 백지 스킵</span>
+            </label>
           </div>
 
           {/* 2. 페이지 범위 & 동시성 & 이어하기 & 실행 버튼 */}
@@ -3483,9 +3992,10 @@ export default function PdfParserPage() {
               >
                 <option value={5}>5문항씩</option>
                 <option value={10}>10문항씩</option>
-                <option value={15}>15문항씩 (권장·기본)</option>
+                <option value={15}>15문항씩</option>
                 <option value={20}>20문항씩 (토큰 절약)</option>
-                <option value={25}>25문항씩 (대용량 절약)</option>
+                <option value={25}>25문항씩 (V5.0 권장·기본)</option>
+                <option value={30}>30문항씩 (초대용량 절약)</option>
               </select>
             </div>
           </div>
@@ -3538,10 +4048,17 @@ export default function PdfParserPage() {
               🚀 5단 콤보
             </button>
             <button
-              onClick={() => applyMagicFunction(cleanLatex, "V302 정제엔진")}
+              onClick={() => applyMagicFunction(cleanLatex, "V302+BoxGuard 정제엔진")}
               className="px-2 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded text-[11px] font-extrabold"
             >
               ✨ 자동정제
+            </button>
+            <button
+              onClick={() => applyMagicFunction(applySafeCleaner, "네모박스·단위 가드레일")}
+              className="px-2 py-1 bg-teal-600 hover:bg-teal-500 text-white rounded text-[11px] font-extrabold"
+              title="\squarecm 단위 붙음 분리, 제어문자 복구, 노출 네모박스 자동 $ 감싸기"
+            >
+              📦 네모·단위교정
             </button>
             <button
               onClick={() =>
@@ -3848,13 +4365,18 @@ export default function PdfParserPage() {
 
           {/* 하단 실시간 파이프라인 콘솔 로그 */}
           <div className="h-28 bg-slate-950 border-t border-slate-800 p-2 overflow-y-auto font-mono text-[11px] text-slate-300 shrink-0">
-            <div className="flex justify-between items-center mb-1 text-[10px] text-slate-500 font-sans font-bold">
-              <span>⚡ 파이프라인 실시간 로그 (Phase 1 & Phase 2 & V302)</span>
+            <div className="flex flex-wrap justify-between items-center gap-2 mb-1 text-[10px] text-slate-400 font-sans font-bold">
+              <span>
+                ⚡ 실시간 로그 · 호출 {tokenUsage.calls}회 (0원스킵 {tokenUsage.freeSkippedPages}쪽) | 입력{" "}
+                {tokenUsage.promptTokens.toLocaleString()} (캐시적중{" "}
+                <span className="text-emerald-400">{tokenUsage.cachedTokens.toLocaleString()}</span>) | 출력{" "}
+                {tokenUsage.outputTokens.toLocaleString()} + 사고 {tokenUsage.thoughtTokens.toLocaleString()}
+              </span>
               <button
                 onClick={() => setPipelineLogs([])}
-                className="hover:text-slate-300"
+                className="hover:text-slate-200"
               >
-                지우기
+                로그 지우기
               </button>
             </div>
             {pipelineLogs.length === 0 ? (

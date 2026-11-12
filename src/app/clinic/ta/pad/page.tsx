@@ -187,7 +187,7 @@ function HandwritingOverlayPreview({
 
 export default function TaHandheldDashboard() {
   const {
-    taName, taClientId, isConnected, gridSnapshot, callsSnapshot, rechecksSnapshot,
+    taName, taPosition, disconnectClinicChannel, taClientId, isConnected, gridSnapshot, callsSnapshot, rechecksSnapshot,
     claimedByOthers,
     selectedCallKey, setSelectedCallKey, markState, setMarkState,
     handleConfirmCall, handleConfirmRecheck, formatElapsed, updateHandlingPresence,
@@ -230,7 +230,13 @@ export default function TaHandheldDashboard() {
         .custom-scrollbar::-webkit-scrollbar { width:5px; } .custom-scrollbar::-webkit-scrollbar-thumb { background:#cbd5e1; border-radius:10px; }
       `}}/>
 
-      <TaTopBar taName={taName} isConnected={isConnected} hasActiveRequest={!!selectedCallKey} />
+      <TaTopBar
+        taName={taName}
+        taPosition={taPosition}
+        isConnected={isConnected}
+        hasActiveRequest={!!selectedCallKey}
+        onBeforeLogout={disconnectClinicChannel}
+      />
 
       <div className="max-w-[2200px] mx-auto px-4 pt-4 space-y-3 flex-1 flex flex-col pb-6 min-h-0 overflow-hidden w-full">
 

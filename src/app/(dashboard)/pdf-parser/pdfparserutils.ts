@@ -1,4 +1,11 @@
-// src/app/(dashboard)/pdf-parser/pdfParserUtils.ts
+// src/app/(dashboard)/pdf-parser/pdfparserutils.ts
+// =========================================================
+// V115.1 / V121.1 / V5.0.0 + V302 통합 유틸리티 엔진
+// - 빈칸 네모박스 3종($\square$, $\boxed{\phantom{000...}}$, 분수 박스) 보존 및 노출 매크로 자동 $ 감싸기
+// - \squarecm, \squarem, \triangleABC 등 명령어+알파벳 붙음 오류 2중 차단
+// - JSON 파싱 중 제어문자(\x08oxed, \x0crac, \x09ext 등) 복구
+// - Phase 2 대소문자 정규화(canonicalIdMap) 및 인쇄 페이지 역산(inferPrintedPagesInPlace)
+// =========================================================
 
 export const generateUUID = (): string => {
   if (typeof crypto !== "undefined" && crypto.randomUUID) return crypto.randomUUID();
@@ -44,7 +51,7 @@ export const COGNITIVE_LEVEL_OPTIONS = [
 ];
 
 // =========================================================
-// Phase 2: 학년·학기 Prefix 범위 확장 엔진 (V4.4.0 100% 호환)
+// Phase 2: 학년·학기 Prefix 범위 확장 엔진 (V5.0.0 100% 호환)
 // =========================================================
 export const ALL_SEMESTER_PREFIXES = [
   "E11", "E12", "E21", "E22", "E31", "E32",
@@ -124,20 +131,97 @@ export function matchesAnyPrefix(codeVal: string | null | undefined, prefixes: s
 }
 
 // =========================================================
-// Phase 1 & V302: 무적의 텍스트/수식 정제 엔진 & 18종 마법 도구
+// Phase 1 & V302: 무적의 텍스트/수식 정제 엔진 (V115.1 & V121.1 가드레일 통합)
 // =========================================================
+
+// 수식 밖에서 달러($) 없이 노출된 박스/대분수박스/분수박스 매크로를 안전하게 감싸기 위한 정규식
+const BARE_BOX_FRAC_RE =
+  /((?:\\boxed\{\\phantom\{[0-9]+\}\}\s*)?\\d?frac\{\\boxed\{\\phantom\{[0-9]+\}\}\}\{\\boxed\{\\phantom\{[0-9]+\}\}\}(?:\s*\\text\{[^{}]*\})?|\\boxed\{\\phantom\{[0-9]+\}\}(?:\s*\\text\{[^{}]*\})?|\\square(?![A-Za-z])(?:\s*\\text\{[^{}]*\})?)/g;
+
+// \squarecm, \squarem, \triangleABC 등 명령어+알파벳 붙음 오류를 공백으로 안전 분리
+export function separateMacroAndAlpha(input: string): string {
+  if (!input) return input;
+  return input
+    .replace(/\\square(?=[A-Za-z])/g, "\\square ")
+    .replace(/\\blacksquare(?=[A-Za-z])/g, "\\blacksquare ")
+    .replace(/\\angle(?=[A-Za-z])/g, "\\angle ")
+    .replace(/\\triangle(?!(?:left|right|q|down)\b)(?=[A-Za-z])/g, "\\triangle ")
+    .replace(/\\blacktriangle(?!(?:left|right|down)\b)(?=[A-Za-z])/g, "\\blacktriangle ")
+    .replace(/\\times(?=[A-Za-z])/g, "\\times ")
+    .replace(/\\div(?!ideontimes\b)(?=[A-Za-z])/g, "\\div ")
+    .replace(/\\cdot(?![sp]\b)(?=[A-Za-z])/g, "\\cdot ")
+    .replace(/\\cdots(?=[A-Za-z])/g, "\\cdots ")
+    .replace(/\\pi(?!tchfork\b)(?=[A-Za-z])/g, "\\pi ")
+    .replace(/\\parallel(?=[A-Za-z])/g, "\\parallel ")
+    .replace(/\\perp(?=[A-Za-z])/g, "\\perp ")
+    .replace(/\\sim(?!(?:eq|ilar)\b)(?=[A-Za-z])/g, "\\sim ")
+    .replace(/\\cong(?=[A-Za-z])/g, "\\cong ")
+    .replace(/\\bigcirc(?=[A-Za-z])/g, "\\bigcirc ")
+    .replace(/\\rightarrow(?=[A-Za-z])/g, "\\rightarrow ")
+    .replace(/\\Rightarrow(?=[A-Za-z])/g, "\\Rightarrow ");
+}
+
 export function applySafeCleaner(text: string | null | undefined): string {
   if (!text || typeof text !== "string") return text || "";
+
   let cleaned = text.replace(/@@/g, "\\").replace(/<\{/g, "{").replace(/\}>/g, "}");
   cleaned = cleaned.replace(/\xa0/g, " ").replace(/\u200b/g, "");
+
+  // 1) JSON 이스케이프 제어문자 오변환 복구 (\boxed, \blacksquare, \frac, \text, \times, \triangle 등)
+  cleaned = cleaned
+    .replace(/\x08oxed/g, "\\boxed")
+    .replace(/\x08lacksquare/g, "\\blacksquare")
+    .replace(/\x08ecause/g, "\\because")
+    .replace(/\x0crac/g, "\\frac")
+    .replace(/\x09ext/g, "\\text")
+    .replace(/\x09imes/g, "\\times")
+    .replace(/\x09riangle/g, "\\triangle")
+    .replace(/\x09herefore/g, "\\therefore");
+
   cleaned = cleaned.replace(/∠/g, "\\angle ").replace(/°/g, "^{\\circ}");
   cleaned = cleaned.replace(/\\?degree\b/g, "^{\\circ}");
+
+  // 2) \squarecm, \squarem, \squarekg, \triangleABC 등 매크로+알파벳 붙음 오류 완벽 분리
+  cleaned = separateMacroAndAlpha(cleaned);
+
+  // 3) 인접 인라인 수식 두 개가 붙어 $$ 블록 수식으로 오인되는 현상 1차 분리
+  cleaned = cleaned.replace(
+    /(\$(?:\\square|\\boxed\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}))\$\$([^$]+\$)/g,
+    "$1$ $$$2"
+  );
+
+  // 4) 달러($) 짝이 정상일 때, 수식 바깥에 날것으로 노출된 \boxed{\phantom{...}} 나 \square 를 $...$로 자동 감싸기
+  const dollarCount = (cleaned.match(/\$/g) || []).length;
+  if (dollarCount % 2 === 0) {
+    const segments = cleaned.split(/(\$\$[\s\S]*?\$\$|\$[^$]*?\$)/g);
+    for (let i = 0; i < segments.length; i += 2) {
+      if (segments[i] && segments[i].includes("\\")) {
+        segments[i] = segments[i].replace(BARE_BOX_FRAC_RE, "$$$1$$");
+      }
+    }
+    cleaned = segments.join("");
+  }
+
+  // 5) 자동 감싸기 후 인접한 인라인 수식($$)이 생겼다면 공백으로 안전 분리
+  cleaned = cleaned.replace(
+    /(\$(?:\\square|(?:\\boxed\{\\phantom\{[0-9]+\}\}\s*)?\\d?frac\{\\boxed\{\\phantom\{[0-9]+\}\}\}\{\\boxed\{\\phantom\{[0-9]+\}\}\}|\\boxed\{\\phantom\{[0-9]+\}\}))\$\$([^$]+\$)/g,
+    "$1$ $$$2"
+  );
+
   return cleaned.trim();
 }
 
 export function fixJsonEscapes(text: string | null | undefined): string {
   if (!text) return text || "";
   let res = text
+    .replace(/\x08oxed/g, "\\boxed")
+    .replace(/\x08lacksquare/g, "\\blacksquare")
+    .replace(/\x08ecause/g, "\\because")
+    .replace(/\x0crac/g, "\\frac")
+    .replace(/\x09ext/g, "\\text")
+    .replace(/\x09imes/g, "\\times")
+    .replace(/\x09riangle/g, "\\triangle")
+    .replace(/\x09herefore/g, "\\therefore")
     .replace(/\x0c/g, "\\f")
     .replace(/\x08/g, "\\b")
     .replace(/\x0b/g, "\\v")
@@ -195,7 +279,9 @@ const NUM_CIRCLE_MAP: Record<string, string> = {
 
 export function cleanLatex(input: string | null | undefined): string {
   if (!input || typeof input !== "string") return input || "";
-  let text = input;
+
+  // 먼저 V115.1 / V121.1 안전 정제기(제어문자 복구, \squarecm 분리, 노출 네모박스 $ 감싸기) 수행
+  let text = applySafeCleaner(input);
 
   // 백슬래시가 날아간 ext{ } 복구 및 빈 껍데기 제거
   text = text.replace(/(?:\t|\\t| )?ext\s*\{/g, "\\text{");
@@ -219,8 +305,9 @@ export function cleanLatex(input: string | null | undefined): string {
       .replaceAll(`\\circled {${k}}`, v);
   }
 
+  // \square 뒤에 알파벳이 붙지 않도록 이미 분리된 상태에서 수식 치환 수행
   text = text
-    .replaceAll("\\square", "□")
+    .replace(/\\square(?![a-zA-Z])/g, "□")
     .replaceAll("\\frac", "\\dfrac")
     .replaceAll("\\ddfrac", "\\dfrac")
     .replaceAll("\\textdiv", "\\div")
@@ -252,14 +339,19 @@ export function cleanLatex(input: string | null | undefined): string {
     for (const [ch, latex] of Object.entries(UNICODE_TO_LATEX)) {
       m = m.replaceAll(ch, latex);
     }
+    // □cm -> \squarecm 재발 원천 차단을 위해 유니코드->LaTeX 치환 직후 매크로+알파벳 분리 실행
+    m = separateMacroAndAlpha(m);
+
     if (m.startsWith("$$") && m.endsWith("$$")) {
       let inner = m.slice(2, -2);
+      // 한글이 포함된 중첩 \text{...}만 정리하고 영문 단위(\text{ cm})는 그대로 보존
       let prevInner = "";
       while (prevInner !== inner) {
         prevInner = inner;
-        inner = inner.replace(/\\+text\s*\{\s*([^{}]*)\s*\}/g, "$1");
+        inner = inner.replace(/\\+text\s*\{\s*([^{}]*[가-힣ㄱ-ㅎㅏ-ㅣ][^{}]*)\s*\}/g, "$1");
       }
       inner = inner.replace(/([ \t]*[가-힣ㄱ-ㅎㅏ-ㅣ][가-힣ㄱ-ㅎㅏ-ㅣ \t.,!?~]*[ \t]*)/g, "\\text{$1}");
+      inner = separateMacroAndAlpha(inner);
       m = `$$${inner}$$`;
     } else if (m.startsWith("$") && m.endsWith("$")) {
       let inner = m.slice(1, -1);
@@ -267,9 +359,10 @@ export function cleanLatex(input: string | null | undefined): string {
         let prevInner = "";
         while (prevInner !== inner) {
           prevInner = inner;
-          inner = inner.replace(/\\+text\s*\{\s*([^{}]*)\s*\}/g, "$1");
+          inner = inner.replace(/\\+text\s*\{\s*([^{}]*[가-힣ㄱ-ㅎㅏ-ㅣ][^{}]*)\s*\}/g, "$1");
         }
         inner = inner.replace(/([ \t]*[가-힣ㄱ-ㅎㅏ-ㅣ][가-힣ㄱ-ㅎㅏ-ㅣ \t.,!?~]*[ \t]*)/g, "\\text{$1}");
+        inner = separateMacroAndAlpha(inner);
         m = `$${inner}$`;
       }
     }
@@ -293,7 +386,7 @@ export function resetDollarAndText(text: string | null | undefined): string {
 export function forceInsertDfracDollar(text: string | null | undefined): string {
   if (!text) return "";
   return text.replace(
-    /(?<!\$)(\\dfrac\s*\{(?:[^{}]|\{[^{}]*\})*\}\s*\{(?:[^{}]|\{[^{}]*\})*\})(?!\$)/g,
+    /(?<!\$)(\\dfrac\s*\{(?:[^{}]|\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\})*\}\s*\{(?:[^{}]|\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\})*\})(?!\$)/g,
     "$$$1$$"
   );
 }
@@ -302,7 +395,7 @@ export function safeWrapMathSymbol(text: string | null | undefined, symbol: stri
   if (!text) return "";
   const mathPattern = /(\$\$[\s\S]+?\$\$|\$(?:(?!\n\n)(?:\\\$|[^$]))+\$|\\begin\{[a-zA-Z*]+\}[\s\S]*?\\end\{[a-zA-Z*]+\})/g;
   const parts = text.split(mathPattern);
-  const re = new RegExp(`(?<!\\$)\\\\${symbol}(?!\\$)`, "g");
+  const re = new RegExp(`(?<!\\$)\\\\${symbol}(?![a-zA-Z])(?!\\$)`, "g");
   for (let i = 0; i < parts.length; i += 2) {
     parts[i] = parts[i].replace(re, `$\\${symbol}$`);
   }
@@ -344,16 +437,16 @@ export function convertSlashToDfrac(text: string | null | undefined): string {
 
 export function autoWrapNakedMath(text: string | null | undefined): string {
   if (!text) return "";
-  let res = fixJsonEscapes(text);
+  let res = applySafeCleaner(fixJsonEscapes(text));
   res = res.replace(
-    /(?<!\$)(\\d?frac\s*\{(?:[^{}]|\{[^{}]*\})*\}\s*\{(?:[^{}]|\{[^{}]*\})*\})(?!\$)/g,
+    /(?<!\$)(\\d?frac\s*\{(?:[^{}]|\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\})*\}\s*\{(?:[^{}]|\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\})*\})(?!\$)/g,
     "$$$1$$"
   );
   res = res.replaceAll("\\frac", "\\dfrac").replaceAll("\\ddfrac", "\\dfrac");
   for (let i = 0; i < 3; i++) {
     res = res.replace(/(?<!\$)\$([^$]+)\$[ \t]*\$([^$]+)\$(?!\$)/g, "$$$1 $2$$");
   }
-  return res;
+  return separateMacroAndAlpha(res);
 }
 
 export function fixLeftRightBraces(text: string | null | undefined): string {
@@ -401,7 +494,39 @@ export function runFiveCombo(text: string | null | undefined): string {
   res = forceInsertDivDollar(res);
   res = forceInsertTimesDollar(res);
   res = forceInsertDotDollar(res);
-  return res;
+  return applySafeCleaner(res);
+}
+
+// =========================================================
+// V115.1: 비동기 완료 순서 무관 인쇄 페이지 역산 보정기
+// =========================================================
+export function inferPrintedPagesInPlace(
+  items: any[],
+  directPrintedMap: Record<number, number>
+): void {
+  const knownRealPages = Object.keys(directPrintedMap)
+    .map((k) => Number(k))
+    .filter((n) => !isNaN(n))
+    .sort((a, b) => a - b);
+  if (knownRealPages.length === 0) return;
+
+  for (const it of items) {
+    const realP = Number(it?.detected_page_num);
+    if (isNaN(realP) || realP <= 0) continue;
+    if (directPrintedMap[realP] !== undefined) {
+      it.final_printed_page = String(directPrintedMap[realP]).slice(0, 20);
+    } else if (!it.final_printed_page) {
+      const prevCandidates = knownRealPages.filter((kp) => kp < realP);
+      const refP =
+        prevCandidates.length > 0
+          ? prevCandidates[prevCandidates.length - 1]
+          : knownRealPages[0];
+      const inferred = directPrintedMap[refP] + (realP - refP);
+      if (inferred > 0) {
+        it.final_printed_page = String(inferred).slice(0, 20);
+      }
+    }
+  }
 }
 
 // =========================================================
@@ -444,15 +569,72 @@ export function sortProblemsList<T>(items: T[]): T[] {
 export function normalizeDifficultyForDb(val: any): string {
   if (!val) return "중";
   const s = String(val).trim();
-  if (s === "중상") return "상";
-  if (s === "중하") return "중";
+  if (s.includes("최상")) return "최상";
+  if (s.includes("중상") || s === "상") return "상";
+  if (s.includes("중하") || s === "중") return "중";
+  if (s.includes("최하")) return "최하";
+  if (s.includes("하")) return "하";
   if ((ALLOWED_DIFFICULTIES as readonly string[]).includes(s)) return s;
   return "중";
 }
 
-export function autoInferProblemType(qText: string, q2Text: string, ansText: string, currentPt?: string | null): string {
-  if (currentPt && ["MULTIPLE_CHOICE", "SUBJECTIVE", "DESCRIPTIVE"].includes(currentPt)) {
-    return currentPt;
+export function sanitizeCurriculumId(
+  val: any,
+  canonicalIdMap?: Map<string, string> | Record<string, string> | null
+): string | null {
+  if (val === null || val === undefined) return null;
+  const s = String(val).trim();
+  if (!s || ["NONE", "NULL", "미분류", "-"].includes(s.toUpperCase())) return null;
+  const codeMatch = s.match(/[EMH]\d{2,3}(?:-[0-9A-Za-z]+)+/i);
+  const candidate = codeMatch
+    ? codeMatch[0].toUpperCase()
+    : (s.split(/[\s:()\[\]]+/)[0]?.trim().toUpperCase() || "");
+  if (!candidate) return null;
+  if (canonicalIdMap) {
+    if (canonicalIdMap instanceof Map) {
+      const mapped = canonicalIdMap.get(candidate);
+      if (mapped) return mapped.slice(0, 50);
+    } else if (canonicalIdMap[candidate]) {
+      return String(canonicalIdMap[candidate]).slice(0, 50);
+    }
+  }
+  return candidate.slice(0, 50);
+}
+
+export function sanitizeThinkingId(val: any): string | null {
+  if (val === null || val === undefined) return null;
+  const s = String(val).trim();
+  if (!s || ["NONE", "NULL", "미분류", "-"].includes(s.toUpperCase())) return null;
+  const thkMatch = s.match(/THK-\d{2}(?:-\d{2}){0,2}/i);
+  if (thkMatch) return thkMatch[0].toUpperCase().slice(0, 20);
+  return null;
+}
+
+export function sanitizeCognitiveLevel(val: any): string | null {
+  if (val === null || val === undefined) return null;
+  const s = String(val).trim();
+  if (!s || s === "미지정" || ["NONE", "NULL"].includes(s.toUpperCase())) return null;
+  if (s.includes("추론") || s.includes("문제")) return "추론 및 문제 해결";
+  if (s.includes("적용") || s.includes("응용")) return "적용 및 응용";
+  if (s.includes("이해") || s.includes("연산")) return "이해 및 연산";
+  return s.slice(0, 20);
+}
+
+export function autoInferProblemType(
+  qText: string,
+  q2Text: string,
+  ansText: string,
+  currentPt?: string | null
+): string {
+  const ptStr = String(currentPt || "").trim().toUpperCase();
+  if (ptStr.includes("MULTIPLE_CHOICE") || ptStr.includes("객관식")) {
+    return "MULTIPLE_CHOICE";
+  }
+  if (ptStr.includes("DESCRIPTIVE") || ptStr.includes("서술형")) {
+    return "DESCRIPTIVE";
+  }
+  if (ptStr.includes("SUBJECTIVE") || ptStr.includes("주관식") || ptStr.includes("단답형")) {
+    return "SUBJECTIVE";
   }
   const fullQ = `${qText || ""}\n${q2Text || ""}`;
   const ans = String(ansText || "").trim();
@@ -465,27 +647,39 @@ export function autoInferProblemType(qText: string, q2Text: string, ansText: str
   ) {
     return "DESCRIPTIVE";
   }
-  if (currentPt && !["일반", "유사", "쌍둥이", "None", "null", ""].includes(currentPt)) {
-    return currentPt;
-  }
   return "SUBJECTIVE";
 }
 
+export function clampVarchar(val: any, maxLen = 20, fallback: string | null = null): string | null {
+  if (val === null || val === undefined) return fallback;
+  const s = String(val).trim();
+  if (!s || ["NONE", "NULL", "UNDEFINED"].includes(s.toUpperCase())) return fallback;
+  return s.slice(0, maxLen);
+}
+
 export function normalizeRecordForQuestionDb(raw: any, fallbackBookTitle = ""): any {
-  const rec = { ...raw };
+  const rec: any = { ...raw };
 
   if (!rec.question_id) {
     rec.question_id = rec.id || generateUUID();
   }
 
-  rec.question = rec.question !== undefined && rec.question !== null ? String(rec.question) : String(rec.questionText || "");
+  rec.question =
+    rec.question !== undefined && rec.question !== null
+      ? String(rec.question)
+      : String(rec.questionText || "");
   const q2Val = rec.question_2 !== undefined ? rec.question_2 : rec.questionText2;
   rec.question_2 = q2Val && String(q2Val).trim() !== "" ? String(q2Val) : null;
 
   rec.difficulty = normalizeDifficultyForDb(rec.difficulty);
 
   const probVal = rec.solving_probability;
-  if (probVal === null || probVal === undefined || String(probVal).trim() === "" || String(probVal) === "None") {
+  if (
+    probVal === null ||
+    probVal === undefined ||
+    String(probVal).trim() === "" ||
+    String(probVal) === "None"
+  ) {
     rec.solving_probability = 50;
   } else {
     const parsed = parseInt(String(probVal), 10);
@@ -518,32 +712,51 @@ export function normalizeRecordForQuestionDb(raw: any, fallbackBookTitle = ""): 
   }
 
   const qn = rec.question_number ?? rec.qNum;
-  rec.question_number = qn !== null && qn !== undefined && String(qn).trim() !== "" ? String(qn).trim().slice(0, 20) : "1";
+  rec.question_number =
+    qn !== null && qn !== undefined && String(qn).trim() !== ""
+      ? String(qn).trim().slice(0, 20)
+      : "1";
 
-  rec.problem_type = autoInferProblemType(rec.question, rec.question_2 || "", rec.answer || "", rec.problem_type);
+  rec.problem_type = autoInferProblemType(
+    rec.question,
+    rec.question_2 || "",
+    rec.answer || "",
+    rec.problem_type
+  );
+  rec.cognitive_level = sanitizeCognitiveLevel(rec.cognitive_level);
 
-  const cog = rec.cognitive_level;
-  rec.cognitive_level = !cog || String(cog).trim() === "" || cog === "미지정" || cog === "None" ? null : String(cog).trim();
-
-  const bn = rec.book_name || rec.source_book_name || fallbackBookTitle || (rec.pdf_source ? String(rec.pdf_source).replace(/\.pdf$/i, "") : "");
+  const bn =
+    rec.book_name ||
+    rec.source_book_name ||
+    fallbackBookTitle ||
+    (rec.pdf_source ? String(rec.pdf_source).replace(/\.pdf$/i, "") : "");
   rec.book_name = bn || null;
   rec.source_book_name = bn || null;
 
-  if (!rec.sub_taxonomy_id || String(rec.sub_taxonomy_id).trim() in { "": 1, None: 1, null: 1 }) {
-    rec.sub_taxonomy_id = null;
+  rec.taxonomy_id = sanitizeCurriculumId(rec.taxonomy_id);
+  rec.sub_taxonomy_id = sanitizeCurriculumId(rec.sub_taxonomy_id);
+  if (!rec.sub_taxonomy_id) {
     rec.sub_taxonomy_name = null;
   }
-  if (!rec.thk_taxonomy_id || String(rec.thk_taxonomy_id).trim() in { "": 1, None: 1, null: 1 }) {
-    rec.thk_taxonomy_id = null;
+
+  rec.thk_taxonomy_id = sanitizeThinkingId(rec.thk_taxonomy_id);
+  if (!rec.thk_taxonomy_id) {
     rec.thk_taxonomy_name = null;
   }
 
-  const verified = Boolean(rec.is_human_verified || rec.human_verified || rec.verification_status === "APPROVED");
+  rec.ai_status = clampVarchar(rec.ai_status, 20, "완료");
+  rec.classification_status = clampVarchar(rec.classification_status, 20, "COMPLETE");
+  rec.verification_status = clampVarchar(rec.verification_status, 20, "APPROVED");
+  rec.image_type = clampVarchar(rec.image_type, 20, null);
+  rec.image_2_type = clampVarchar(rec.image_2_type, 20, null);
+  rec.answer_image_type = clampVarchar(rec.answer_image_type, 20, null);
+  rec.engine_ver = clampVarchar(rec.engine_ver, 20, null);
+
+  const verified = Boolean(
+    rec.is_human_verified || rec.human_verified || rec.verification_status === "APPROVED"
+  );
   rec.is_human_verified = verified;
   rec.human_verified = verified;
-  if (!rec.verification_status) {
-    rec.verification_status = verified ? "APPROVED" : "PENDING";
-  }
 
   return rec;
 }

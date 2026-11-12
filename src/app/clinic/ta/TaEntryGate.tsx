@@ -1,24 +1,39 @@
 // src/app/clinic/ta/TaEntryGate.tsx
 //
-// 조교 채점 화면이 쓰는 이름 로딩 훅. 이름을 따로 물어보지 않고, 강사 로그인 시
-// 저장된 실명(logica_instructor_name)을 그대로 가져다 쓴다.
+// 조교 채점 화면이 쓰는 이름·직책 로딩 훅.
+// 로그인 시 저장된 실명(logica_instructor_name)과 직책(logica_instructor_position)을 우선 사용하며
+// instructor 테이블과 실시간 동기화한다.
 "use client";
 
 import { useEffect, useState } from "react";
-import { TA_NAME_STORAGE_KEY, seedTaTenantId, getInstructorName } from "./taAccess";
+import { supabase } from "@/lib/supabase";
+import {
+  getInstructorName,
+  getInstructorPosition,
+  seedTaTenantId,
+  syncInstructorProfile,
+  TA_NAME_STORAGE_KEY,
+} from "./taAccess";
 
 export function useTaEntry() {
   const [taName, setTaName] = useState<string | null>(null);
+  const [taPosition, setTaPosition] = useState<string>("");
 
   useEffect(() => {
-    const saved = localStorage.getItem(TA_NAME_STORAGE_KEY) || '';
-    const name = saved || getInstructorName();
+    const name = getInstructorName();
+    const pos = getInstructorPosition();
     if (name) {
       localStorage.setItem(TA_NAME_STORAGE_KEY, name);
       seedTaTenantId();
     }
     setTaName(name);
+    setTaPosition(pos);
+
+    syncInstructorProfile(supabase).then((profile) => {
+      if (profile.name) setTaName(profile.name);
+      if (profile.position) setTaPosition(profile.position);
+    });
   }, []);
 
-  return { taName: taName || '', ready: taName !== null };
+  return { taName: taName || "", taPosition, ready: taName !== null };
 }

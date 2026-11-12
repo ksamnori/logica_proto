@@ -2,7 +2,7 @@
 import { useEffect, useState, useRef, useCallback } from "react";
 import { supabase as sharedSupabaseClient } from "@/lib/supabase";
 import { resolveActiveCall, resolveActiveRecheck } from "@/lib/clinicSession";
-import { seedTaTenantId, getInstructorName } from "../taAccess";
+import { seedTaTenantId, getInstructorName, getInstructorPosition, syncInstructorProfile } from "../taAccess";
 import { getActiveSeatLayout } from "@/app/actions/clinicSeatLayout";
 import { SEAT_LAYOUT_UPDATED_EVENT, formatSeatLabel, Seat, DEFAULT_CANVAS_W, DEFAULT_CANVAS_H, DEFAULT_SEAT_CARD_W, DEFAULT_SEAT_CARD_H } from "@/lib/clinicSeatLayout";
 
@@ -49,6 +49,8 @@ const supabaseClient = sharedSupabaseClient;
 
 export function useTaHandheld() {
   const [taName, setTaName] = useState<string>("");
+  const [taPosition, setTaPosition] = useState<string>("");
+  const [taInstructorId, setTaInstructorId] = useState<string>("");
   const [taClientId, setTaClientId] = useState<string>("");
   const [taJoinedAt, setTaJoinedAt] = useState<number>(0);
   
@@ -88,7 +90,10 @@ export function useTaHandheld() {
   const taDisposedRef = useRef<boolean>(false);
 
   useEffect(() => {
-    let savedName = localStorage.getItem(TA_NAME_STORAGE_KEY) || "";
+    // 현재 로그인된 사용자(logica_instructor_name)를 최우선 적용하여 공유 패드에서 이전 접속자 이름이 남지 않도록 보장
+    const initialName = getInstructorName();
+    const initialPos = getInstructorPosition();
+    const initialInstId = localStorage.getItem("logica_instructor_id") || "";
     let savedClientId = localStorage.getItem(TA_CLIENT_ID_STORAGE_KEY);
 
     if (!savedClientId) {
@@ -98,14 +103,21 @@ export function useTaHandheld() {
 
     setTaClientId(savedClientId);
     setTaJoinedAt(Date.now());
+    setTaPosition(initialPos);
+    setTaInstructorId(initialInstId);
 
-    if (!savedName) savedName = getInstructorName();
-
-    if (savedName) {
-      localStorage.setItem(TA_NAME_STORAGE_KEY, savedName);
+    if (initialName) {
+      localStorage.setItem(TA_NAME_STORAGE_KEY, initialName);
       seedTaTenantId();
-      setTaName(savedName);
+      setTaName(initialName);
     }
+
+    // DB(instructor 테이블)에서 최신 실명·직책(position) 검증 및 실시간 동기화
+    syncInstructorProfile(supabaseClient).then((profile) => {
+      if (profile.instructorId) setTaInstructorId(profile.instructorId);
+      if (profile.name) setTaName(profile.name);
+      if (profile.position) setTaPosition(profile.position);
+    });
 
     const handleBeforeUnload = () => { if (clinicChannelRef.current) clinicChannelRef.current.untrack(); };
     window.addEventListener('pagehide', handleBeforeUnload);
@@ -209,7 +221,10 @@ export function useTaHandheld() {
       lastTaTrackAtRef.current = Date.now();
       clinicChannelRef.current.track({
         role: 'ta',
+        source: 'ta_pad',
         name: taName,
+        position: taPosition,
+        instructorId: taInstructorId || undefined,
         joined_at: taJoinedAt,
         clientId: taClientId,
         handling: callKey,
@@ -225,7 +240,37 @@ export function useTaHandheld() {
       const delay = Math.max(350, MIN_INTERVAL_MS - elapsed);
       taTrackTimerRef.current = setTimeout(sendTrack, delay);
     }
-  }, [taName, taClientId, taJoinedAt]);
+  }, [taName, taPosition, taInstructorId, taClientId, taJoinedAt]);
+
+  // DB에서 최신 직책(taPosition) 동기화 완료 시 관제탑(/supervisor)에도 즉시 반영
+  useEffect(() => {
+    if (isConnected && taName && taClientId) {
+      updateHandlingPresence(selectedCallKey, true);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [taPosition, taInstructorId]);
+
+  const disconnectClinicChannel = useCallback(async () => {
+    taDisposedRef.current = true;
+    if (taReconnectTimerRef.current) {
+      clearTimeout(taReconnectTimerRef.current);
+      taReconnectTimerRef.current = null;
+    }
+    if (taTrackTimerRef.current) {
+      clearTimeout(taTrackTimerRef.current);
+      taTrackTimerRef.current = null;
+    }
+    if (clinicChannelRef.current) {
+      const ch = clinicChannelRef.current;
+      clinicChannelRef.current = null;
+      try {
+        await ch.untrack();
+      } catch {}
+      try {
+        await supabaseClient.removeChannel(ch);
+      } catch {}
+    }
+  }, []);
 
   const syncFromPresenceRef = useRef<() => void>(() => {});
 
@@ -250,7 +295,7 @@ export function useTaHandheld() {
         taUpdatedAtByKey[key] = candidateUpdatedAt;
         if (latestMeta.clientId) taMetasMap.set(latestMeta.clientId, { clientId: latestMeta.clientId, joined_at: latestMeta.joined_at || 0 });
         // 🌟 내가 아닌 다른 조교가 handling 중인 요청이면 잠금(🔒) 처리
-        if (latestMeta.handling && latestMeta.clientId !== taClientId) newClaimedByOthers[latestMeta.handling] = latestMeta.name || '다른 조교';
+        if (latestMeta.handling && latestMeta.clientId !== taClientId) newClaimedByOthers[latestMeta.handling] = latestMeta.position ? `${latestMeta.name || '접속자'} ${latestMeta.position}` : (latestMeta.name || '다른 선생님');
       }
     });
 
@@ -664,7 +709,7 @@ export function useTaHandheld() {
   };
 
   return {
-    taName, taClientId, isConnected, gridSnapshot, callsSnapshot, rechecksSnapshot,
+    taName, taPosition, disconnectClinicChannel, taClientId, isConnected, gridSnapshot, callsSnapshot, rechecksSnapshot,
     claimedByOthers, totalTaCount,
     selectedCallKey, setSelectedCallKey, markState, setMarkState,
     handleConfirmCall, handleConfirmRecheck, formatElapsed, updateHandlingPresence,

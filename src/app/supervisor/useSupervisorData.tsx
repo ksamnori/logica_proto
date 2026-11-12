@@ -6,6 +6,7 @@ import { endTodaySession, pickLatestSessionPerStudent, resolveEndSessionForStude
 import { getActiveSeatLayout } from '@/app/actions/clinicSeatLayout';
 import { listPadDevicesByTenant } from '@/app/actions/clinicPadDevice';
 import { Seat, SEAT_LAYOUT_UPDATED_EVENT, DEFAULT_CANVAS_W, DEFAULT_CANVAS_H, DEFAULT_SEAT_CARD_W, DEFAULT_SEAT_CARD_H } from '@/lib/clinicSeatLayout';
+import { resolvePositionLabel } from '@/app/clinic/ta/taAccess';
 
 // 대문항(그룹) 기준 균등 배점 + 서브문항((1),(2) 등) 분할 배점 및 TO/RO 부분점수(score_ratio) 계산 유틸리티
 
@@ -243,6 +244,8 @@ export function useSupervisorData() {
     const [pendingVerifications, setPendingVerifications] = useState<any[]>([]);
 
     const studentsRef = useRef<Record<string, any>>({});
+    const instructorPosByIdRef = useRef<Record<string, string>>({});
+    const instructorPosByNameRef = useRef<Record<string, string>>({});
     const channelRef = useRef<any>(null);
 
     const registeredSeatsRef = useRef<Set<string>>(new Set());
@@ -562,19 +565,68 @@ export function useSupervisorData() {
     useEffect(() => {
         if (!isAuthorized) return;
         
+        const fetchInstructorsForTaPosition = async () => {
+            const myTenantId = localStorage.getItem('logica_tenant_id') || '';
+            let instQuery = supabaseClient
+                .from('instructor')
+                .select('instructor_id, name, position, role')
+                .is('deleted_at', null);
+            if (myTenantId && myTenantId !== 'hq') {
+                instQuery = instQuery.eq('tenant_id', myTenantId);
+            }
+            const { data: instRows } = await instQuery;
+            if (instRows) {
+                const byId: Record<string, string> = {};
+                const byName: Record<string, string> = {};
+                instRows.forEach((row: any) => {
+                    const posLabel = resolvePositionLabel(row.position, row.role);
+                    if (row.instructor_id && posLabel) byId[String(row.instructor_id)] = posLabel;
+                    if (row.name && posLabel) byName[String(row.name).trim()] = posLabel;
+                });
+                instructorPosByIdRef.current = byId;
+                instructorPosByNameRef.current = byName;
+                if (channelRef.current && syncPresenceRef.current) {
+                    syncPresenceRef.current(channelRef.current.presenceState());
+                }
+            }
+        };
+
         const fetchAllStudents = async () => {
-            const { data } = await supabaseClient.from('student').select('student_id, name, enrollment(status, end_date, class(name, code))');
+            const myTenantId = localStorage.getItem('logica_tenant_id') || '';
+            let stuQuery = supabaseClient
+                .from('student')
+                .select('student_id, name, status, deleted_at, enrollment(status, end_date, class(name, code, status))')
+                .eq('status', '재원')
+                .is('deleted_at', null)
+                .not('name', 'ilike', '%테스트%');
+            if (myTenantId && myTenantId !== 'hq') {
+                stuQuery = stuQuery.eq('tenant_id', myTenantId);
+            }
+
+            const { data } = await stuQuery;
             if (data) {
                 const grouped: Record<string, { label: string; students: any[] }> = {};
                 data.forEach((s: any) => {
-                    const activeEnrolls = (s.enrollment || []).filter((e: any) => !isEndedEnrollment(e));
-                    const classEntries = activeEnrolls.map((e: any) => e.class).filter(Boolean) || [];
+                    const trimmedName = String(s.name || '').trim();
+                    // 학원에 정식 등록된('재원') 학생만 표시하고 이름에 '테스트'가 포함된 계정은 원천 제외
+                    if (!trimmedName || trimmedName.includes('테스트')) return;
+                    if (String(s.status || '').trim() !== '재원' || s.deleted_at) return;
+
+                    const activeEnrolls = (s.enrollment || []).filter((e: any) => {
+                        if (isEndedEnrollment(e)) return false;
+                        const cls = Array.isArray(e.class) ? e.class[0] : e.class;
+                        if (!cls) return false;
+                        return cls.status !== '종료' && cls.status !== '폐강';
+                    });
+                    const classEntries = activeEnrolls
+                        .map((e: any) => (Array.isArray(e.class) ? e.class[0] : e.class))
+                        .filter(Boolean);
                     const classes = classEntries.map((c: any) => c.name);
                     const firstClass = classEntries[0];
                     const cLabel = firstClass ? firstClass.name : '반 미배정';
                     const cKey = firstClass ? `${firstClass.name}::${firstClass.code || ''}` : '반 미배정';
                     if (!grouped[cKey]) grouped[cKey] = { label: cLabel, students: [] };
-                    grouped[cKey].students.push({ id: s.student_id, name: s.name, classes });
+                    grouped[cKey].students.push({ id: s.student_id, name: trimmedName, classes });
                 });
                 const sortedGrouped: Record<string, { label: string; students: any[] }> = {};
                 Object.keys(grouped).sort((a, b) => grouped[a].label.localeCompare(grouped[b].label)).forEach(k => {
@@ -645,7 +697,7 @@ export function useSupervisorData() {
 
             updateStudents(newStudents);
         };
-        fetchAllStudents(); loadInitialSeatsFromDB();
+        fetchInstructorsForTaPosition(); fetchAllStudents(); loadInitialSeatsFromDB();
     }, [isAuthorized, updateStudents]);
 
     const fetchClinicRecords = useCallback(async () => {
@@ -1187,7 +1239,20 @@ export function useSupervisorData() {
             }
             if (latestMeta.role === 'ta') {
                 const key = latestMeta.clientId || latestMeta.name;
-                newActiveTAs[key] = { name: latestMeta.name || '이름 미상', joined_at: latestMeta.joined_at || Date.now(), handling: latestMeta.handling || null, clientId: latestMeta.clientId || key };
+                const trimmedName = String(latestMeta.name || '이름 미상').trim();
+                const resolvedPos =
+                    String(latestMeta.position || '').trim() ||
+                    (latestMeta.instructorId ? instructorPosByIdRef.current[String(latestMeta.instructorId)] : '') ||
+                    instructorPosByNameRef.current[trimmedName] ||
+                    '';
+                newActiveTAs[key] = {
+                    name: trimmedName,
+                    position: resolvedPos,
+                    instructorId: latestMeta.instructorId || null,
+                    joined_at: latestMeta.joined_at || Date.now(),
+                    handling: latestMeta.handling || null,
+                    clientId: latestMeta.clientId || key,
+                };
             } else if (latestMeta.studentId) {
                 if (!presenceByStudentId[latestMeta.studentId] || latestMeta.updatedAt > presenceByStudentId[latestMeta.studentId].lastUpdatedAt) {
                     presenceByStudentId[latestMeta.studentId] = { ...latestMeta, lastUpdatedAt: latestMeta.updatedAt };

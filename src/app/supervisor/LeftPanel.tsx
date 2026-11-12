@@ -63,7 +63,7 @@ export default function LeftPanel({ data }: { data: any }) {
                 </div>
             ) : leftTab === 'ta' ? (
                 <div className="flex-1 overflow-y-auto p-3 bg-slate-50">
-                    {Object.keys(activeTAs).length === 0 && Object.keys(taStats).length === 0 ? (
+                    {Object.keys(activeTAs).length === 0 ? (
                         <div className="text-center text-xs text-slate-400 py-8">접속한 조교가 없습니다.</div>
                     ) : (
                         <>
@@ -89,9 +89,16 @@ export default function LeftPanel({ data }: { data: any }) {
 
                                 return (
                                     <div key={ta.clientId} className="bg-white border border-slate-200 rounded-xl p-3 mb-2 shadow-sm hover:shadow-md hover:border-slate-300 transition-all">
-                                        <div className="flex justify-between items-start">
-                                            <span className="font-bold text-slate-800 text-[12px]">{ta.name}</span>
-                                            <span className="text-[10px] text-slate-400 font-semibold tracking-tight">근무 <span className="tabular-nums">{formatDuration(now - ta.joined_at)}</span></span>
+                                        <div className="flex justify-between items-start gap-1.5">
+                                            <div className="flex items-center gap-1 min-w-0 flex-wrap">
+                                                <span className="font-bold text-slate-800 text-[12px] truncate">{ta.name}</span>
+                                                {ta.position && (
+                                                    <span className="text-[10px] font-bold text-indigo-700 bg-indigo-50 border border-indigo-200 px-1.5 py-0.5 rounded shrink-0">
+                                                        {ta.position}
+                                                    </span>
+                                                )}
+                                            </div>
+                                            <span className="text-[10px] text-slate-400 font-semibold tracking-tight shrink-0">근무 <span className="tabular-nums">{formatDuration(now - ta.joined_at)}</span></span>
                                         </div>
                                         {isReallyHandling ? (
                                             <div className="text-[11px] font-bold text-rose-600 mt-1.5 flex items-center gap-1">
