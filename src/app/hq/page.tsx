@@ -1,837 +1,892 @@
 // src/app/hq/page.tsx
 "use client";
 
-import React, { useState, useEffect, useRef } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { supabase } from "@/lib/supabase";
-import { subscribePostgresChanges } from "@/lib/postgresRealtimeHub";
-import ProfileModal from "@/components/ProfileModal";
-import AdmissionAnalyticsPage from "@/app/(dashboard)/admission/analytics/page";
-import ContestDbPage from "@/app/(dashboard)/contest-db/page";
-import { fetchContestAccess, hasSupabaseSession } from "@/app/(dashboard)/contest-db/useContestDb";
-import type { ContestAccessLevel } from "@/app/(dashboard)/contest-db/contestUtils";
-import HqPermissionPanel from "./HqPermissionPanel";
+import { useHqShell } from "@/components/hq/HqShellContext";
+import ApprovalCreateModal from "@/components/hq/approvals/ApprovalCreateModal";
+import ApprovalDetailModal from "@/components/hq/approvals/ApprovalDetailModal";
+import CertificatePrintModal from "@/components/hq/members/CertificatePrintModal";
+import {
+  APPROVAL_DOC_META,
+  AUTO_DELEGATION_RULES,
+  getRankLevel,
+  getRankMeta,
+  HQ_RANK_LIST,
+} from "@/lib/hq/constants";
+import { hqFetch, resolveStoragePublicUrl } from "@/lib/hq/clientApi";
+import type {
+  HqApprovalDoc,
+  HqApprovalDocType,
+  HqExpense,
+  HqPublication,
+} from "@/lib/hq/types";
 
-export default function HQWorkspacePage() {
+export default function HqHomeDashboardPage() {
   const router = useRouter();
-  
-  const [instId, setInstId] = useState("");
-  const [instName, setInstName] = useState("");
-  const [instPosition, setInstPosition] = useState(""); 
-  const [instRole, setInstRole] = useState("");
-  const [isProfileOpen, setIsProfileOpen] = useState(false);
+  const {
+    me,
+    members,
+    isHrManager,
+    isHqAdmin,
+    unsignedContractCount,
+    myTodayAttendance,
+    myWeeklyMinutes,
+    unreadChatCount,
+    schemaMissing,
+    refreshMembers,
+    refreshApprovalBadge,
+  } = useHqShell();
 
-  // 🌟 좌측 메뉴 상태 ('chat': 기본 메신저 뷰, 'admission_analytics': 진단평가 분석 뷰, 'contest_db': 문제 DB)
-  const [activeMenu, setActiveMenu] = useState<"chat" | "admission_analytics" | "contest_db" | "permissions">("chat");
+  const [docs, setDocs] = useState<HqApprovalDoc[]>([]);
+  const [expenses, setExpenses] = useState<HqExpense[]>([]);
+  const [books, setBooks] = useState<HqPublication[]>([]);
+  const [loadingData, setLoadingData] = useState(true);
 
-  // 🌟 문제 DB 열람 권한 (DB 허용 명단 contest_db_access 기준. 'word' = 문장제, 'all' = 전체, null = 없음)
-  const [contestAccess, setContestAccess] = useState<ContestAccessLevel>(null);
-  // 🌟 권한 관리자 여부 (DB 명단 hq_admins 기준. 메뉴 표시용이고, 실제 변경은 서버 API가 다시 확인)
-  const [isHqAdmin, setIsHqAdmin] = useState(false);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [defaultDocType, setDefaultDocType] =
+    useState<HqApprovalDocType>("GENERAL");
+  const [selectedDoc, setSelectedDoc] = useState<HqApprovalDoc | null>(null);
+  const [certModalOpen, setCertModalOpen] = useState(false);
 
-  // 🌟 페이지 진입 시 우측 탭 기본값을 "new"(조직도)로 설정
-  const [activeView, setActiveView] = useState<"list" | "room" | "new">("new");
-  const [rooms, setRooms] = useState<any[]>([]);
-  const [activeRoomId, setActiveRoomId] = useState<string | null>(null);
-  const [activeRoomName, setActiveRoomName] = useState("");
-  const [messages, setMessages] = useState<any[]>([]);
-  const [chatInput, setChatInput] = useState("");
-  const [unreadCount, setUnreadCount] = useState(0);
-  
-  const [allInstructors, setAllInstructors] = useState<any[]>([]);
-  const [searchKeyword, setSearchKeyword] = useState("");
-  const [selectedInstIds, setSelectedInstIds] = useState<string[]>([]);
-  const [roomMembers, setRoomMembers] = useState<any[]>([]);
-  
-  const [typingStaffName, setTypingStaffName] = useState<string | null>(null);
-  const [expandedTenants, setExpandedTenants] = useState<string[]>([]);
-  const [expandedDepts, setExpandedDepts] = useState<string[]>([]);
+  const currentMonth = useMemo(() => {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+  }, []);
 
-  const activeRoomIdRef = useRef<string | null>(null);
-  useEffect(() => { activeRoomIdRef.current = activeRoomId; }, [activeRoomId]);
-
-  const activeChannelRef = useRef<any>(null); 
-  const globalChannelRef = useRef<any>(null);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
-  const typingTimerRef = useRef<any>(null);
-
-  useEffect(() => {
-    const id = localStorage.getItem("logica_instructor_id");
-    if (!id) {
-      alert("로그인이 필요합니다.");
-      router.push("/hq-login"); 
-      return;
-    }
-    setInstId(id);
-    setInstName(localStorage.getItem("logica_instructor_name") || "본사 직원");
-    setInstPosition(localStorage.getItem("logica_instructor_position") || "직원");
-    setInstRole(localStorage.getItem("logica_instructor_role") || "");
-
-    // DB에서 최신 직책/권한 정보 확인
-    supabase
-      .from("instructor")
-      .select("role, position, chat_position")
-      .eq("instructor_id", id)
-      .maybeSingle()
-      .then(({ data }) => {
-        if (data) {
-          if (data.role) setInstRole(data.role);
-          if (data.position || data.chat_position) {
-            setInstPosition(data.position || data.chat_position);
-          }
-        }
-      });
-  }, [router]);
-
-  const meInst = allInstructors.find(i => i.instructor_id === instId);
-
-  // 🌟 진단평가 분석 권한: DB 명단(hq_permissions) 기준. 권한 관리 메뉴에서 켜고 끔
-  //    (예전에는 역할·직책에 ADMIN/본사 관리자가 있으면 열렸지만, 출판사 직원이 전원 ADMIN 이라 명단으로 바꿈)
-  const [canAccessAnalytics, setCanAccessAnalytics] = useState(false);
-  // 포털은 localStorage 로 로그인 상태를 유지하지만, 메뉴 권한 확인에는 Supabase 로그인 세션이 필요함
-  const [sessionExpired, setSessionExpired] = useState(false);
-
-  /** 내 메뉴 권한들을 DB 명단에서 다시 불러옴 (권한 관리에서 본인 권한을 바꿨을 때도 호출) */
-  const refreshMyPermissions = async () => {
-    // 로그인 세션이 끊긴 상태에서 권한 함수를 부르면 비로그인 요청이 되어 DB 오류 로그만 쌓이므로 먼저 확인
-    if (!(await hasSupabaseSession())) {
-      setContestAccess(null);
-      setCanAccessAnalytics(false);
-      setIsHqAdmin(false);
-      setSessionExpired(true);
-      return;
-    }
-    setSessionExpired(false);
-    fetchContestAccess().then(setContestAccess);
-    supabase.rpc("has_hq_permission", { p_permission: "admission_analytics" })
-      .then(({ data }) => setCanAccessAnalytics(data === true));
-    supabase.rpc("is_hq_admin").then(({ data }) => setIsHqAdmin(data === true));
-  };
-
-  useEffect(() => {
-    if (!instId) return;
-    refreshMyPermissions();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [instId]);
-
-  const handleClickContestMenu = () => {
-    if (!contestAccess) {
-      alert("⛔ 문제 DB 열람 권한이 등록된 계정만 열 수 있습니다.\n필요하면 최고관리자에게 권한 등록을 요청하세요.");
-      return;
-    }
-    setActiveMenu("contest_db");
-  };
-
-  const handleClickAnalyticsMenu = () => {
-    if (!canAccessAnalytics) {
-      alert("⛔ 진단평가 분석 권한이 등록된 계정만 열 수 있습니다.\n필요하면 권한 관리자에게 요청하세요.");
-      return;
-    }
-    setActiveMenu("admission_analytics");
-  };
-
-  useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages, typingStaffName]);
-
-  useEffect(() => {
-    const handleFocus = async () => {
-      if (activeRoomIdRef.current && instId) {
-        await supabase.from("internal_chat_member").update({ last_read_at: new Date().toISOString() })
-          .eq("room_id", activeRoomIdRef.current)
-          .eq("instructor_id", instId);
-        loadRooms();
-      }
-    };
-    window.addEventListener("focus", handleFocus);
-    return () => window.removeEventListener("focus", handleFocus);
-  }, [instId]);
-
-  const getProfileImageUrl = (path: string | null | undefined) => {
-    if (!path || path.trim() === "") return null;
-    if (path.startsWith("http")) return path;
-    const { data } = supabase.storage.from("system_images").getPublicUrl(path);
-    return data.publicUrl;
-  };
-
-  const loadRooms = async () => {
-    if (!instId) return;
+  const loadDashboardData = useCallback(async () => {
+    setLoadingData(true);
     try {
-      const { data } = await supabase.from('internal_chat_member')
-        .select('room_id, internal_chat_room(title, room_type, created_at), last_read_at')
-        .eq('instructor_id', instId).eq('is_active', true); 
-      
-      let totalUnread = 0;
-      const roomsWithData = await Promise.all((data || []).map(async (r: any) => {
-        const { data: msgs } = await supabase.from('internal_chat_message')
-          .select('message_id, content, created_at, sender_id')
-          .eq('room_id', r.room_id).order('created_at', { ascending: false });
-
-        let displayTitle = r.internal_chat_room?.title || '선생님 대화방';
-        let displayAvatar = null;
-        
-        if (r.internal_chat_room?.room_type === 'DIRECT') {
-          const { data: otherMember } = await supabase.from('internal_chat_member').select('instructor_id').eq('room_id', r.room_id).neq('instructor_id', instId).maybeSingle();
-          if (otherMember?.instructor_id) {
-            const { data: instData } = await supabase.from('instructor').select('name, position, chat_position, profile_image_url').eq('instructor_id', otherMember.instructor_id).maybeSingle();
-            if (instData) {
-              displayTitle = `${instData.name} ${instData.chat_position || instData.position || '선생님'}`;
-              if (instData.profile_image_url) displayAvatar = getProfileImageUrl(instData.profile_image_url);
-            }
-          }
-        }
-
-        const isRoomActive = document.hasFocus() && r.room_id === activeRoomIdRef.current;
-        const unread = (msgs || []).filter((m:any) => m.sender_id !== instId && new Date(m.created_at) > new Date(r.last_read_at || '1970-01-01T00:00:00Z')).length;
-        if (!isRoomActive) totalUnread += unread;
-
-        return { ...r, displayTitle, displayAvatar, unreadCount: isRoomActive ? 0 : unread, latestMsg: msgs && msgs.length > 0 ? msgs[0] : null };
-      }));
-
-      roomsWithData.sort((a, b) => {
-        const aTime = a.latestMsg ? new Date(a.latestMsg.created_at).getTime() : new Date(a.internal_chat_room?.created_at || 0).getTime();
-        const bTime = b.latestMsg ? new Date(b.latestMsg.created_at).getTime() : new Date(b.internal_chat_room?.created_at || 0).getTime();
-        return bTime - aTime;
-      });
-
-      setRooms(roomsWithData);
-      setUnreadCount(totalUnread);
-    } catch(e) {}
-  };
-
-  const showNewChatView = async () => {
-    setActiveView("new"); setSearchKeyword(""); setSelectedInstIds([]);
-    try {
-      const safeTenantMap: Record<string, string> = {
-        '1ff4299c-d72b-4d99-97b0-45fee08e3b73': '대치 본원',
-        'd59395b0-8c9c-4dd3-9e25-ff569da98abc': '본사',
-        'e24e540f-ebdd-40eb-b20b-696c113def6d': '서초 가맹점'
-      };
-
-      try {
-        const { data: tenantData } = await supabase.from("academy_tenant").select("*");
-        if (tenantData) tenantData.forEach((t: any) => { safeTenantMap[String(t.tenant_id)] = t.name; });
-      } catch (e) {}
-
-      const { data: instData } = await supabase.from("instructor").select("*").eq("status", "재직").order("name");
-      
-      if (instData) {
-        const enrichedData = instData.map((inst: any) => ({ ...inst, academy_tenant: { name: safeTenantMap[String(inst.tenant_id)] || '소속 미지정' } }));
-        setAllInstructors(enrichedData);
-
-        const tSet = new Set<string>(); const dSet = new Set<string>();
-        enrichedData.forEach((inst: any) => {
-          const tName = (inst.academy_tenant.name || '소속 미지정').trim();
-          const dName = (inst.department || '부서 미지정').trim();
-          tSet.add(tName); dSet.add(`${tName}_${dName}`);
-        });
-        setExpandedTenants(Array.from(tSet)); setExpandedDepts(Array.from(dSet));
-      }
-    } catch(e) {}
-  };
-
-  useEffect(() => {
-    if (!instId) return;
-    // 🌟 페이지 진입 시 조직도 목록과 채팅방 안읽음 개수를 동시에 불러옵니다.
-    showNewChatView();
-    loadRooms(); 
-
-    const unsubHqMsg = subscribePostgresChanges(
-      { table: "internal_chat_message", events: ["INSERT"] },
-      async (payload) => {
-        if (!payload.new) return;
-        setTypingStaffName(null);
-        const isRoomActive = document.hasFocus() && String(activeRoomIdRef.current) === String(payload.new.room_id);
-
-        if (String(activeRoomIdRef.current) === String(payload.new.room_id)) {
-          setMessages(prev => prev.find(m => m.message_id === payload.new.message_id) ? prev : [...prev, payload.new]);
-        }
-        if (isRoomActive && payload.new.sender_id !== instId) {
-          await supabase.from("internal_chat_member").update({ last_read_at: new Date().toISOString() }).eq("room_id", payload.new.room_id).eq("instructor_id", instId);
-        }
-        await supabase.from("internal_chat_member").update({ is_active: true }).eq("room_id", payload.new.room_id).eq("instructor_id", instId);
-        loadRooms();
-      }
-    );
-
-    const unsubHqMember = subscribePostgresChanges(
-      { table: "internal_chat_member", events: ["INSERT", "UPDATE"] },
-      (payload) => {
-        if (payload.eventType === "UPDATE" && payload.new) {
-          if (String(activeRoomIdRef.current) === String(payload.new.room_id)) {
-            setRoomMembers(prev => prev.map(m => m.instructor_id === payload.new.instructor_id ? { ...m, last_read_at: payload.new.last_read_at } : m));
-          }
-        }
-        loadRooms();
-      }
-    );
-
-    return () => {
-      unsubHqMsg();
-      unsubHqMember();
-      if (globalChannelRef.current) supabase.removeChannel(globalChannelRef.current);
-      if (activeChannelRef.current) supabase.removeChannel(activeChannelRef.current);
-    };
-  }, [instId]);
-
-  const toggleInstSelection = (id: string) => setSelectedInstIds(prev => prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]);
-
-  const handleStartGroupChat = async () => {
-    if (selectedInstIds.length === 0) return;
-    if (selectedInstIds.length === 1) {
-      const target = allInstructors.find((i: any) => i.instructor_id === selectedInstIds[0]);
-      if (target) {
-        const targetInstId = target.instructor_id;
-        const targetName = target.name;
-        const targetPos = target.chat_position || target.position;
-
-        try {
-          if (targetInstId === instId) {
-            const { data: myRooms } = await supabase.from('internal_chat_member').select('room_id').eq('instructor_id', instId);
-            const myRoomIds = myRooms?.map((r: any) => r.room_id) || [];
-            if (myRoomIds.length > 0) {
-               const { data: selfRoom } = await supabase.from('internal_chat_room')
-                  .select('room_id')
-                  .in('room_id', myRoomIds)
-                  .ilike('title', '%(나)%')
-                  .limit(1).maybeSingle();
-               if (selfRoom) {
-                   openRoom(selfRoom.room_id, `${targetName} (나)`);
-                   return;
-               }
-            }
-            const titleWithPos = `${targetName} (나)`;
-            const { data: newRoom } = await supabase.from('internal_chat_room').insert({ room_type: 'DIRECT', title: titleWithPos, created_by: instId }).select().single();
-            if (newRoom) {
-              await supabase.from('internal_chat_member').insert([{ room_id: newRoom.room_id, instructor_id: instId }]);
-              openRoom(newRoom.room_id, titleWithPos);
-            }
-            return;
-          }
-
-          const { data: targetRooms } = await supabase.from('internal_chat_member').select('room_id').eq('instructor_id', targetInstId);
-          let rId = null;
-          if (targetRooms && targetRooms.length > 0) {
-            const { data: commonMembers } = await supabase.from('internal_chat_member').select('room_id, internal_chat_room!inner(room_type)').eq('instructor_id', instId).in('room_id', targetRooms.map(r=>r.room_id)).eq('internal_chat_room.room_type', 'DIRECT');
-            if (commonMembers && commonMembers.length > 0) rId = commonMembers[0].room_id;
-          }
-          if (!rId) {
-            const titleWithPos = `${targetName} ${targetPos || '선생님'}`;
-            const { data: newRoom } = await supabase.from('internal_chat_room').insert({ room_type: 'DIRECT', title: titleWithPos, created_by: instId }).select().single();
-            if (newRoom) {
-              rId = newRoom.room_id;
-              await supabase.from('internal_chat_member').insert([{ room_id: rId, instructor_id: instId }, { room_id: rId, instructor_id: targetInstId }]);
-            }
-          }
-          if (rId) openRoom(rId, `${targetName} ${targetPos || '선생님'}`);
-        } catch(e) { alert("방 생성 에러"); }
-      }
-      return;
-    }
-
-    const roomName = prompt("새 그룹 채팅방 이름을 입력하세요.", "새 그룹 채팅방");
-    if (!roomName) return;
-
-    try {
-      const { data: newRoom } = await supabase.from('internal_chat_room').insert({ room_type: 'GROUP', title: roomName, created_by: instId }).select().single();
-      const membersToInsert = selectedInstIds.map(id => ({ room_id: newRoom.room_id, instructor_id: id }));
-      if (!selectedInstIds.includes(instId)) membersToInsert.push({ room_id: newRoom.room_id, instructor_id: instId }); 
-      await supabase.from('internal_chat_member').insert(membersToInsert);
-      openRoom(newRoom.room_id, roomName);
-    } catch (e: any) { alert("그룹방 생성 에러: " + e.message); }
-  };
-
-  const openRoom = async (roomId: string, roomName: string) => {
-    setActiveMenu("chat");
-    setActiveRoomId(roomId); setActiveRoomName(roomName); setActiveView("room"); setMessages([]);
-    setUnreadCount(prev => Math.max(0, prev - (rooms.find((r: any) => r.room_id === roomId)?.unreadCount || 0)));
-    setRooms(prev => prev.map((r: any) => r.room_id === roomId ? { ...r, unreadCount: 0 } : r));
-
-    if (activeChannelRef.current) supabase.removeChannel(activeChannelRef.current);
-    
-    const roomChannelName = `staff_room_${roomId}`;
-    supabase.getChannels().forEach((ch) => { if (ch.topic.includes(roomChannelName)) supabase.removeChannel(ch); });
-
-    activeChannelRef.current = supabase.channel(roomChannelName, { config: { broadcast: { self: false } } })
-      .on("broadcast", { event: "typing" }, (payload: any) => {
-        if (payload.payload?.sender_id !== instId) { 
-          setTypingStaffName(payload.payload?.sender_name || "알 수 없는"); 
-          clearTimeout(typingTimerRef.current); 
-          typingTimerRef.current = setTimeout(() => setTypingStaffName(null), 3000); 
-        }
-      }).subscribe();
-
-    try {
-      await supabase.from("internal_chat_member").update({ last_read_at: new Date().toISOString(), is_active: true }).eq("room_id", roomId).eq("instructor_id", instId);
-      const [msgRes, memRes] = await Promise.all([
-        supabase.from("internal_chat_message").select("*").eq("room_id", roomId).order("created_at", { ascending: true }),
-        supabase.from("internal_chat_member").select("instructor_id, last_read_at, instructor(name, position, chat_position, profile_image_url)").eq("room_id", roomId)
+      const [aprRes, expRes, pubRes] = await Promise.all([
+        hqFetch<{
+          success: boolean;
+          data: { docs: HqApprovalDoc[] };
+        }>("/api/hq/approvals").catch(() => ({
+          success: false,
+          data: { docs: [] },
+        })),
+        hqFetch<{
+          success: boolean;
+          data: { expenses: HqExpense[] };
+        }>(`/api/hq/expenses?month=${currentMonth}`).catch(() => ({
+          success: false,
+          data: { expenses: [] },
+        })),
+        hqFetch<{
+          success: boolean;
+          data: { books: HqPublication[] };
+        }>("/api/hq/publishing").catch(() => ({
+          success: false,
+          data: { books: [] },
+        })),
       ]);
-      setMessages(msgRes.data || []);
-      setRoomMembers(memRes.data || []);
-      loadRooms(); 
-    } catch (e) {}
-  };
 
-  const sendMsg = async () => {
-    const text = chatInput.trim();
-    if (!text || !activeRoomId) return;
-    setChatInput("");
-    try {
-      const { data: newMsg, error } = await supabase.from("internal_chat_message").insert({ room_id: activeRoomId, sender_id: instId, content: text }).select().single();
-      if (error) throw error;
-      if (newMsg) {
-        setMessages(prev => [...prev, newMsg]);
-        await supabase.from("internal_chat_member").update({ last_read_at: new Date().toISOString() }).eq("room_id", activeRoomId).eq("instructor_id", instId);
-        loadRooms(); 
-      }
-    } catch (e: any) { alert("메시지 전송 에러: " + e.message); }
-  };
-
-  const deleteRoom = async (roomId: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (!confirm("⚠️ 이 대화방을 목록에서 삭제(나가기) 하시겠습니까?")) return;
-    try {
-      await supabase.from("internal_chat_member").update({ is_active: false }).eq("room_id", roomId).eq("instructor_id", instId);
-      const { count } = await supabase.from("internal_chat_member").select("*", { count: "exact", head: true }).eq("room_id", roomId).eq("is_active", true);
-      if (count === 0) {
-        await supabase.from("internal_chat_message").delete().eq("room_id", roomId);
-        await supabase.from("internal_chat_member").delete().eq("room_id", roomId);
-        await supabase.from("internal_chat_room").delete().eq("room_id", roomId);
-      }
-      loadRooms();
-      if (activeRoomId === roomId) { setActiveRoomId(null); setActiveView('list'); }
-    } catch (error) { alert("삭제 중 오류가 발생했습니다."); }
-  };
-
-  const handleLogout = () => {
-    if (confirm('로그아웃 하시겠습니까?')) {
-      localStorage.clear();
-      router.push('/hq-login');
+      setDocs(aprRes.data?.docs || []);
+      setExpenses(expRes.data?.expenses || []);
+      setBooks(pubRes.data?.books || []);
+    } finally {
+      setLoadingData(false);
     }
+  }, [currentMonth]);
+
+  useEffect(() => {
+    loadDashboardData();
+  }, [loadDashboardData]);
+
+  const activeMembers = useMemo(
+    () => members.filter((m) => m.work_status === "재직"),
+    [members]
+  );
+
+  const myLevel = getRankLevel(me?.rank_code);
+  const myRankMeta = getRankMeta(me?.rank_code);
+
+  // 현재 내 차례에 올라온 결재 대기 문서 (긴급 우선)
+  const myTurnDocs = useMemo(() => {
+    if (!me) return [];
+    return docs
+      .filter((doc) => {
+        if (doc.status !== "PENDING" && doc.status !== "IN_PROGRESS") {
+          return false;
+        }
+        const cur = doc.steps.find(
+          (s) => Number(s.step_order) === Number(doc.current_step_order)
+        );
+        return (
+          cur && cur.approver_id === me.instructor_id && cur.status === "CURRENT"
+        );
+      })
+      .sort((a, b) => Number(b.urgent) - Number(a.urgent));
+  }, [docs, me]);
+
+  // 내가 상신한 최근 결재 문서
+  const myDraftDocs = useMemo(() => {
+    if (!me) return [];
+    return docs
+      .filter((d) => d.drafter_id === me.instructor_id)
+      .slice(0, 6);
+  }, [docs, me]);
+
+  // 부서별 재직 인원 요약
+  const deptSummary = useMemo(() => {
+    const map = new Map<
+      string,
+      { dept: string; count: number; headName: string | null }
+    >();
+    activeMembers.forEach((m) => {
+      const dept = m.department || "미지정";
+      const cur = map.get(dept) || { dept, count: 0, headName: null };
+      cur.count += 1;
+      if (m.is_dept_head && !cur.headName) {
+        cur.headName = `${m.name} ${m.job_title}`;
+      }
+      map.set(dept, cur);
+    });
+    return Array.from(map.values()).sort((a, b) => b.count - a.count);
+  }, [activeMembers]);
+
+  // 이번 달 비용 요약
+  const expenseStats = useMemo(() => {
+    let total = 0;
+    let pendingCount = 0;
+    let pendingAmount = 0;
+    expenses.forEach((ex) => {
+      if (ex.settlement_status !== "반려") {
+        total += ex.amount;
+      }
+      if (ex.settlement_status === "정산대기") {
+        pendingCount += 1;
+        pendingAmount += ex.amount;
+      }
+    });
+    return { total, pendingCount, pendingAmount };
+  }, [expenses]);
+
+  // 직책·직급 맥락 기반 선제적 업무 제안 (Proactive Insights)
+  const proactiveNotices = useMemo(() => {
+    const items: {
+      id: string;
+      tone: "urgent" | "warn" | "info" | "ok";
+      badge: string;
+      text: string;
+      actionLabel?: string;
+      onClick?: () => void;
+    }[] = [];
+
+    if (myTurnDocs.length > 0) {
+      const urgentCnt = myTurnDocs.filter((d) => d.urgent).length;
+      items.push({
+        id: "my-turn",
+        tone: urgentCnt > 0 ? "urgent" : "warn",
+        badge: urgentCnt > 0 ? `긴급 ${urgentCnt}건` : "결재 대기",
+        text: `${me?.name || ""} ${me?.job_title || ""}님의 승인을 기다리는 결재 문서가 ${myTurnDocs.length}건 있습니다.`,
+        actionLabel: "결재함 열기 →",
+        onClick: () => router.push("/hq/approvals"),
+      });
+    }
+
+    const hasHigherApprover = activeMembers.some(
+      (m) => getRankLevel(m.rank_code) >= 3
+    );
+    if (!schemaMissing && activeMembers.length > 0 && !hasHigherApprover) {
+      items.push({
+        id: "rank-setup",
+        tone: "warn",
+        badge: "조직 설정 필요",
+        text: "아직 팀장(Lv.3)·본부장(Lv.4)·대표(Lv.5) 결재 직급자가 지정되지 않았습니다. 구성원 관리에서 직급과 부서장을 배정하면 3단계 결재선이 자동 완성됩니다.",
+        actionLabel: "직급 설정하기 →",
+        onClick: () => router.push("/hq/members"),
+      });
+    }
+
+    if ((isHrManager || myLevel >= 3) && expenseStats.pendingCount > 0) {
+      items.push({
+        id: "expense-pending",
+        tone: "info",
+        badge: "경비 정산",
+        text: `이번 달 정산 대기 중인 경비 전표가 ${expenseStats.pendingCount}건 (${expenseStats.pendingAmount.toLocaleString()}원) 있습니다.`,
+        actionLabel: "정산 관리 →",
+        onClick: () => router.push("/hq/expenses"),
+      });
+    }
+
+    if (isHrManager || myLevel >= 3) {
+      const scopeMembers =
+        myLevel >= 4 || isHrManager
+          ? activeMembers
+          : activeMembers.filter((m) => m.department === me?.department);
+      const lowLeaveUsage = scopeMembers.filter(
+        (m) =>
+          m.annual_leave_total >= 10 &&
+          m.annual_leave_used / Math.max(1, m.annual_leave_total) < 0.2
+      );
+      if (lowLeaveUsage.length > 0) {
+        items.push({
+          id: "leave-encourage",
+          tone: "info",
+          badge: "연차 촉진 인사이트",
+          text: `${
+            myLevel >= 4 || isHrManager ? "본부 전체" : `${me?.department} 내`
+          } 연차 소진율 20% 미만 구성원이 ${lowLeaveUsage.length}명 있습니다. 분기 휴가 계획을 독려해 주세요.`,
+          actionLabel: "구성원 연차 확인 →",
+          onClick: () => router.push("/hq/members"),
+        });
+      }
+    }
+
+    if (!schemaMissing && !myTodayAttendance) {
+      items.push({
+        id: "attendance-checkin",
+        tone: "info",
+        badge: "근태 · 유연근무",
+        text: "오늘 아직 출근 체크인 전입니다. 정규출근·시차출퇴근·재택원고·인쇄감리 외근 중 오늘의 근무 형태를 등록해 주세요.",
+        actionLabel: "출근 · 유연근무 선택 →",
+        onClick: () => router.push("/hq/attendance"),
+      });
+    } else if (myWeeklyMinutes >= 45 * 60) {
+      items.push({
+        id: "weekly-overtime-warn",
+        tone: myWeeklyMinutes >= 50 * 60 ? "urgent" : "warn",
+        badge: "주 52시간 주의",
+        text: `이번 주 누적 근무시간이 ${Math.floor(myWeeklyMinutes / 60)}시간을 넘었습니다. 마감 후 대체휴무 활용을 권장합니다.`,
+        actionLabel: "근로시간 확인 →",
+        onClick: () => router.push("/hq/attendance"),
+      });
+    }
+
+    if (unsignedContractCount > 0) {
+      items.push({
+        id: "unsigned-contract",
+        tone: "warn",
+        badge: `전자서명 ${unsignedContractCount}건`,
+        text: `서명 대기 중인 전자계약서(근로·연봉·출판외주/인세)가 ${unsignedContractCount}건 있습니다.`,
+        actionLabel: "전자서명하기 →",
+        onClick: () => router.push("/hq/contracts"),
+      });
+    }
+
+    const urgentBooks = books.filter((b) => {
+      if (b.stage === "PUBLISHED" || !b.press_deadline) return false;
+      const diff =
+        (new Date(`${b.press_deadline}T00:00:00`).getTime() -
+          new Date(`${new Date().toISOString().slice(0, 10)}T00:00:00`).getTime()) /
+        (1000 * 60 * 60 * 24);
+      return diff <= 7;
+    });
+    if (urgentBooks.length > 0) {
+      items.push({
+        id: "urgent-press-deadline",
+        tone: "urgent",
+        badge: `하판 임박 ${urgentBooks.length}종`,
+        text: `7일 이내 인쇄 하판 마감 예정인 도서가 ${urgentBooks.length}종(「${urgentBooks[0].title}」 등) 있습니다.`,
+        actionLabel: "출판 공정 보드 →",
+        onClick: () => router.push("/hq/publishing"),
+      });
+    }
+
+    if (unreadChatCount > 0) {
+      items.push({
+        id: "unread-chat",
+        tone: "info",
+        badge: "사내 메신저",
+        text: `읽지 않은 전사 메신저 대화가 ${unreadChatCount}건 도착해 있습니다.`,
+        actionLabel: "메신저 열기 →",
+        onClick: () => router.push("/hq/messenger"),
+      });
+    }
+
+    if (items.length === 0) {
+      items.push({
+        id: "all-clear",
+        tone: "ok",
+        badge: "정상 운영",
+        text: "현재 밀린 결재나 이상 징후가 없습니다. 상단 빠른 기안 버튼으로 휴가·품의·지출결의를 바로 상신할 수 있습니다.",
+      });
+    }
+
+    return items;
+  }, [
+    myTurnDocs,
+    me,
+    activeMembers,
+    schemaMissing,
+    isHrManager,
+    myLevel,
+    expenseStats,
+    myTodayAttendance,
+    myWeeklyMinutes,
+    unsignedContractCount,
+    books,
+    unreadChatCount,
+    router,
+  ]);
+
+  const openQuickDraft = (docType: HqApprovalDocType) => {
+    setDefaultDocType(docType);
+    setCreateOpen(true);
   };
 
-  const filteredInstructors = allInstructors.filter((inst: any) => (inst?.name || "").includes(searchKeyword));
-  const orgTree: Record<string, Record<string, any[]>> = {};
-  filteredInstructors.forEach((inst: any) => {
-    const tenantName = (inst.academy_tenant?.name || '소속 미지정').trim();
-    const deptName = (inst.department || '부서 미지정').trim();
-    if (!orgTree[tenantName]) orgTree[tenantName] = {};
-    if (!orgTree[tenantName][deptName]) orgTree[tenantName][deptName] = [];
-    orgTree[tenantName][deptName].push(inst);
-  });
-
-  const toggleTenant = (t: string) => setExpandedTenants(p => p.includes(t) ? p.filter(x => x !== t) : [...p, t]);
-  const toggleDept = (d: string) => setExpandedDepts(p => p.includes(d) ? p.filter(x => x !== d) : [...p, d]);
-
-  if (!instId) return <div className="min-h-screen bg-slate-100 flex items-center justify-center font-bold text-slate-400">데이터 로딩 중...</div>;
-
-  const activeMyTenantName = (meInst?.academy_tenant?.name || '소속 미지정').trim();
-  const activeMyDeptName = (meInst?.department || '부서 미지정').trim();
+  const handleAfterUpdate = async () => {
+    await Promise.all([
+      loadDashboardData(),
+      refreshApprovalBadge(),
+      refreshMembers(),
+    ]);
+  };
 
   return (
-    <div className="h-screen flex flex-col overflow-hidden bg-slate-200 font-pretendard">
-      
-      <header className="bg-gradient-to-r from-slate-900 to-slate-800 text-white px-4 sm:px-5 py-3 flex justify-between items-center shadow-md z-20 shrink-0 gap-2">
-        <div className="flex items-center min-w-0">
-          <div className="min-w-0">
-            {/* 🌟 좌상단 제목 변경 */}
-            <h1 className="text-[14px] sm:text-[16px] font-bold leading-tight truncate">천종현수학연구소 임시 포털</h1>
-            <p className="text-xs sm:text-xs text-slate-400 mt-0.5 leading-tight truncate">전사 소통 채널 (B2B / 사내)</p>
-          </div>
-        </div>
-        <div className="flex items-center gap-2 sm:gap-3 shrink-0">
-          
-          <button onClick={() => setIsProfileOpen(true)} className="p-1.5 sm:p-2 bg-slate-700/50 hover:bg-slate-700 rounded-full transition-colors group relative shrink-0" title="내 정보 수정 및 자동응답 설정">
-            <svg className="w-4 h-4 sm:w-5 sm:h-5 text-slate-200 group-hover:text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
-          </button>
-          
-          <div className="text-right flex flex-col justify-center mx-1">
-            <div className="text-[12px] sm:text-[13px] font-bold leading-tight truncate max-w-[65px] sm:max-w-[120px]">{instName}</div>
-            <div className="text-xs sm:text-xs text-slate-400 font-normal truncate max-w-[65px] sm:max-w-[120px]">{instPosition}</div>
-          </div>
-
-          <div className="w-px h-5 bg-slate-600 shrink-0"></div>
-          
-          <button onClick={handleLogout} className="whitespace-nowrap text-xs font-bold text-rose-300 hover:text-rose-400 bg-rose-500/10 px-2 sm:px-3 py-1.5 rounded-lg transition-colors shrink-0">로그아웃</button>
-        </div>
-      </header>
-
-      <div className="flex-1 flex overflow-hidden">
-        
-        {/* 🌟 1. 좌측 업무 메뉴 사이드바 */}
-        <aside className="w-[220px] bg-slate-900 text-slate-200 flex flex-col border-r border-slate-800 shrink-0 z-10 select-none">
-          <div className="p-4 border-b border-slate-800">
-            <button
-              onClick={() => setActiveMenu("chat")}
-              className={`w-full flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl font-bold text-[13px] transition-all ${
-                activeMenu === "chat"
-                  ? "bg-slate-800 text-white shadow-sm border border-slate-700"
-                  : "text-slate-400 hover:bg-slate-800/60 hover:text-slate-200"
-              }`}
-            >
-              <span>💬</span>
-              <span>사내 메신저 화면</span>
-            </button>
-          </div>
-
-          <div className="flex-1 overflow-y-auto p-4 space-y-6">
-            {sessionExpired && (
-              <div className="rounded-xl bg-amber-500/10 border border-amber-500/30 px-3 py-2.5 text-[12px] text-amber-200 leading-relaxed">
-                로그인 정보가 만료되어 메뉴 권한을 확인하지 못했습니다.
-                <button onClick={() => { localStorage.clear(); router.push('/hq-login'); }} className="block mt-1.5 font-bold text-amber-100 underline">
-                  다시 로그인하기
-                </button>
-              </div>
-            )}
-            <div>
-              <div className="px-3 mb-2 text-[11px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
-                <span>🏫</span>
-                <span>학원 사업</span>
-              </div>
-              <div className="space-y-1">
-                <button
-                  onClick={handleClickAnalyticsMenu}
-                  className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl font-bold text-[13px] transition-all ${
-                    activeMenu === "admission_analytics"
-                      ? "bg-brand text-white shadow-md"
-                      : "text-slate-300 hover:bg-slate-800 hover:text-white"
-                  }`}
-                >
-                  <span className="flex items-center gap-2 truncate">
-                    <span>📊</span>
-                    <span className="truncate">진단평가 분석</span>
+    <>
+      <div className="p-6 space-y-6 max-w-[1440px] w-full mx-auto print:hidden">
+        {/* 1. 상단 직급·맥락 기반 워크스페이스 브리핑 & 빠른 액션 */}
+        <section className="rounded-3xl bg-gradient-to-br from-slate-900 via-slate-800 to-brand text-white p-6 sm:p-7 shadow-lg border border-slate-800">
+          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-5">
+            <div className="space-y-2">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="px-2.5 py-0.5 rounded-full bg-white/15 text-xs font-bold text-blue-100">
+                  {me?.department || "본부"} · Lv.{myRankMeta.level}{" "}
+                  {me?.job_title || myRankMeta.defaultTitle}
+                </span>
+                {isHrManager && (
+                  <span className="px-2.5 py-0.5 rounded-full bg-emerald-400/20 border border-emerald-300/30 text-xs font-bold text-emerald-200">
+                    HR · 조직관리 권한
                   </span>
-                  {!canAccessAnalytics && (
-                    <span className="text-xs text-slate-500 shrink-0" title="진단평가 분석 권한 등록자 전용">
-                      🔒
-                    </span>
-                  )}
-                </button>
-              </div>
-            </div>
-
-            <div>
-              <div className="px-3 mb-2 text-[11px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
-                <span>📚</span>
-                <span>출판 사업</span>
-              </div>
-              <div className="space-y-1">
-                <button
-                  onClick={handleClickContestMenu}
-                  className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl font-bold text-[13px] transition-all ${
-                    activeMenu === "contest_db"
-                      ? "bg-brand text-white shadow-md"
-                      : "text-slate-300 hover:bg-slate-800 hover:text-white"
-                  }`}
-                >
-                  <span className="flex items-center gap-2 truncate">
-                    <span>📐</span>
-                    <span className="truncate">사고력·문장제 문제 DB</span>
-                  </span>
-                  {!contestAccess && (
-                    <span className="text-xs text-slate-500 shrink-0" title="문제 DB 열람 권한 등록자 전용">
-                      🔒
-                    </span>
-                  )}
-                </button>
-              </div>
-            </div>
-
-            {isHqAdmin && (
-              <div>
-                <div className="px-3 mb-2 text-[11px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
-                  <span>⚙️</span>
-                  <span>관리</span>
-                </div>
-                <div className="space-y-1">
-                  <button
-                    onClick={() => setActiveMenu("permissions")}
-                    className={`w-full flex items-center gap-2 px-3.5 py-2.5 rounded-xl font-bold text-[13px] transition-all ${
-                      activeMenu === "permissions"
-                        ? "bg-brand text-white shadow-md"
-                        : "text-slate-300 hover:bg-slate-800 hover:text-white"
-                    }`}
-                  >
-                    <span>🔐</span>
-                    <span className="truncate">권한 관리</span>
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
-        </aside>
-
-        {/* 🌟 2. 중앙 메인 영역 (진단평가 분석 페이지 또는 채팅 대화방) */}
-        <div className={`${!activeRoomId && activeMenu === "chat" ? 'hidden md:flex' : 'flex'} flex-1 flex-col bg-[#eef2f6] relative min-w-0 overflow-hidden`}>
-          {activeMenu === "admission_analytics" && canAccessAnalytics ? (
-            <div className="flex-1 w-full h-full overflow-hidden relative">
-              <AdmissionAnalyticsPage />
-            </div>
-          ) : activeMenu === "contest_db" ? (
-            <div className="flex-1 w-full h-full overflow-hidden relative flex flex-col pt-4">
-              <ContestDbPage />
-            </div>
-          ) : activeMenu === "permissions" && isHqAdmin ? (
-            <div className="flex-1 w-full h-full overflow-hidden relative">
-              {/* 본인 권한을 바꾸면 좌측 메뉴 잠금 표시도 바로 갱신 */}
-              <HqPermissionPanel onChanged={refreshMyPermissions} />
-            </div>
-          ) : activeRoomId ? (
-            <>
-              <div className="bg-white px-5 py-3.5 border-b border-slate-200 flex items-center gap-3 z-10 shrink-0 shadow-sm">
-                <button onClick={() => { setActiveView("list"); setActiveRoomId(null); loadRooms(); }} className="md:hidden p-2 text-slate-500 bg-slate-100 hover:bg-slate-200 rounded-lg">
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 19l-7-7 7-7"></path></svg>
-                </button>
-                <div className="w-10 h-10 bg-slate-100 border border-slate-200 rounded-full flex justify-center items-center text-slate-500 font-bold shrink-0 overflow-hidden relative">
-                    <span className="absolute z-0">💬</span>
-                    {rooms.find(r => r.room_id === activeRoomId)?.displayAvatar && <img src={rooms.find(r => r.room_id === activeRoomId)?.displayAvatar} className="absolute w-full h-full object-cover z-10" alt="profile"/>}
-                </div>
-                <div className="flex flex-col flex-1 min-w-0">
-                  <span className="font-bold text-slate-800 text-[16px] truncate">{activeRoomName}</span>
-                </div>
-              </div>
-
-              <div className="flex-1 overflow-y-auto p-4 sm:p-5 flex flex-col gap-3">
-                {messages.length === 0 ? <div className="text-center text-slate-400 font-bold text-sm mt-20">대화를 시작해보세요.</div> :
-                  messages.map(msg => {
-                    const isMe = msg.sender_id === instId;
-                    const unreadBy = roomMembers.filter(m => m.instructor_id !== instId && new Date(m.last_read_at || 0) < new Date(msg.created_at)).length;
-                    const senderInfo = roomMembers.find(m => m.instructor_id === msg.sender_id)?.instructor;
-                    const avatarUrl = getProfileImageUrl(senderInfo?.profile_image_url);
-
-                    return (
-                      <div key={msg.message_id} className={`flex w-full mb-1 ${isMe ? 'justify-end' : 'justify-start'}`}>
-                        {!isMe && (
-                          <div className="relative w-9 h-9 bg-slate-300 rounded-full flex justify-center items-center text-white text-xs shrink-0 overflow-hidden shadow-sm mr-2">
-                            <span className="absolute z-0 font-bold text-[14px]">T</span>
-                            {avatarUrl && <img src={avatarUrl} alt="profile" className="absolute w-full h-full object-cover z-10" onError={(e) => { e.currentTarget.style.display = 'none'; }} />}
-                          </div>
-                        )}
-                        <div className={`flex flex-col max-w-[75%] ${isMe ? 'items-end' : 'items-start'}`}>
-                          {!isMe && (
-                            <span className="text-[12px] font-bold text-slate-600 mb-1 ml-1">
-                              {senderInfo?.name || '알수없음'} 
-                              <span className="font-normal text-xs text-slate-400 ml-0.5">{senderInfo?.chat_position || senderInfo?.position || '선생님'}</span>
-                            </span>
-                          )}
-                          <div className={`flex items-end gap-1.5 ${isMe ? 'flex-row-reverse' : 'flex-row'}`}>
-                            <div className={`px-4 py-2.5 rounded-2xl shadow-sm text-[14px] leading-relaxed break-words font-medium ${isMe ? 'bg-slate-800 text-white rounded-tr-sm' : 'bg-white text-slate-800 rounded-tl-sm border border-slate-100'}`}>
-                              {String(msg.content).split('\n').map((line, i) => <React.Fragment key={i}>{line}<br/></React.Fragment>)}
-                            </div>
-                            <div className={`flex flex-col shrink-0 text-xs text-slate-500 font-bold ${isMe ? 'items-end' : 'items-start'}`}>
-                              {isMe && unreadBy > 0 && <span className="text-brand mb-0.5">{unreadBy}</span>}
-                              <span className="whitespace-nowrap">{new Date(msg.created_at).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })}</span>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    )
-                  })
-                }
-
-                {typingStaffName && (
-                  <div className="flex justify-start w-full mb-1 mt-2">
-                    <div className="relative w-9 h-9 bg-slate-300 rounded-full flex justify-center items-center text-white text-xs shrink-0 overflow-hidden shadow-sm mr-2">
-                      <span className="absolute z-0 font-bold text-[14px]">T</span>
-                      {rooms.find(r => r.room_id === activeRoomId)?.displayAvatar && <img src={rooms.find(r => r.room_id === activeRoomId)?.displayAvatar} className="absolute w-full h-full object-cover z-10" alt="profile"/>}
-                    </div>
-                    <div className="flex flex-col items-start max-w-[75%]">
-                      <span className="text-[12px] font-bold text-slate-600 mb-1 ml-1">{typingStaffName}</span>
-                      <div className="px-4 py-2.5 rounded-2xl shadow-sm font-bold text-[13px] bg-white text-slate-400 rounded-tl-sm border border-slate-100 animate-pulse">
-                        메시지를 입력 중입니다...
-                      </div>
-                    </div>
-                  </div>
                 )}
-                <div ref={messagesEndRef} />
               </div>
-              
-              <div className="bg-white p-4 border-t border-slate-200 flex items-end gap-3 z-10 shadow-[0_-5px_15px_rgba(0,0,0,0.02)]">
-                <textarea 
-                  rows={2} 
-                  value={chatInput} 
-                  onChange={e => { 
-                    setChatInput(e.target.value); 
-                    activeChannelRef.current?.send({ type: "broadcast", event: "typing", payload: { sender_id: instId, sender_name: instName } }); 
-                  }} 
-                  onKeyPress={e => { if(e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMsg(); }}} 
-                  className="flex-1 bg-slate-100 rounded-xl px-4 py-3 text-[14px] font-bold text-slate-800 resize-none focus:outline-none focus:ring-2 focus:ring-slate-300 custom-scroll" 
-                  placeholder="메시지를 입력하세요" 
-                />
-                <button onClick={sendMsg} disabled={!chatInput.trim()} className="p-4 bg-slate-800 text-white rounded-xl hover:bg-slate-900 transition-colors shadow-md disabled:opacity-50 disabled:cursor-not-allowed shrink-0">
-                  <svg className="w-5 h-5 translate-x-[2px]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"></path></svg>
-                </button>
-              </div>
-            </>
-          ) : (
-            <div className="flex-1 flex flex-col items-center justify-center text-slate-400">
-              <div className="w-20 h-20 bg-slate-200/50 rounded-full flex items-center justify-center mb-4 text-4xl shadow-inner">💬</div>
-              <p className="font-bold text-[15px] text-slate-500">우측 조직도에서 대화 상대를 선택하거나 좌측 메뉴를 선택하세요.</p>
+              <h1 className="text-xl sm:text-2xl font-extrabold tracking-tight">
+                안녕하세요, {me?.name || "구성원"} {me?.job_title || ""}님 👋
+              </h1>
+              <p className="text-xs sm:text-sm text-slate-300 font-medium">
+                {myRankMeta.description} — 직급과 부서 권한에 맞춘 당일 우선 업무를 안내합니다.
+              </p>
             </div>
-          )}
-        </div>
 
-        {/* 🌟 3. 우측 사이드바 (기본 화면: 조직도) */}
-        {/* 문제 DB·권한 관리 화면은 폭이 넓어야 해서 열려 있는 동안 조직도를 숨김 */}
-        <div className={`${activeMenu === "contest_db" || activeMenu === "permissions" ? 'hidden' : activeRoomId && activeMenu === "chat" ? 'hidden md:flex' : 'flex'} w-full md:w-[340px] flex-col bg-white border-l border-slate-300 shrink-0 z-10 shadow-lg`}>
-          <div className="flex px-4 pt-4 pb-0 bg-slate-50 border-b border-slate-200 gap-2">
-            <button onClick={() => { showNewChatView(); setActiveRoomId(null); }} className={`flex-1 py-2.5 text-[14px] font-bold border-b-2 transition-colors flex items-center justify-center gap-1.5 ${activeView === "new" ? "border-slate-800 text-slate-800" : "border-transparent text-slate-400 hover:text-slate-600"}`}>
-              조직도
-            </button>
-            <button onClick={() => { setActiveView("list"); setActiveRoomId(null); loadRooms(); }} className={`flex-1 py-2.5 text-[14px] font-bold border-b-2 transition-colors flex items-center justify-center gap-1.5 ${activeView !== "new" ? "border-slate-800 text-slate-800" : "border-transparent text-slate-400 hover:text-slate-600"}`}>
-              채팅 목록 {unreadCount > 0 && <span className="bg-rose-500 text-white text-xs px-2 py-0.5 rounded-full">{unreadCount}</span>}
-            </button>
-          </div>
-
-          {activeView === "new" ? (
-            <div className="flex-1 flex flex-col min-h-0 bg-slate-50 relative">
-              <div className="p-3 border-b border-slate-200 bg-white shrink-0">
-                <input type="text" value={searchKeyword} onChange={e => setSearchKeyword(e.target.value)} placeholder="직원 또는 가맹점 검색" className="w-full bg-slate-100 rounded-lg px-4 py-2 text-[13px] font-bold text-slate-700 focus:outline-none focus:ring-2 focus:ring-slate-300" />
-              </div>
-              <div className="flex-1 overflow-y-auto custom-scroll p-4 space-y-3 pb-20">
-                {Object.keys(orgTree).length === 0 ? <div className="text-center py-10 text-slate-400 font-bold text-sm">검색 결과가 없습니다.</div> :
-                  Object.keys(orgTree).sort((a, b) => {
-                    const aTrim = a.trim();
-                    const bTrim = b.trim();
-                    if (activeMyTenantName && aTrim === activeMyTenantName) return -1;
-                    if (activeMyTenantName && bTrim === activeMyTenantName) return 1;
-                    if (aTrim === '본사') return -1;
-                    if (bTrim === '본사') return 1;
-                    return a.localeCompare(b);
-                  }).map(tenantName => {
-                    const isTenantExpanded = expandedTenants.includes(tenantName) || searchKeyword.length > 0;
-                    const tenantMembersCount = Object.values(orgTree[tenantName]).reduce((acc, curr) => acc + curr.length, 0);
-                    const isMyTenant = activeMyTenantName && tenantName.trim() === activeMyTenantName;
-
-                    return (
-                      <div key={tenantName} className="mb-2">
-                        <button onClick={() => toggleTenant(tenantName)} className="w-full bg-slate-200/80 hover:bg-slate-300/80 text-slate-800 px-4 py-3 rounded-xl font-bold text-[13px] flex justify-between items-center transition-colors shadow-sm">
-                          <span className="flex items-center">
-                            🏢 {tenantName} 
-                            {isMyTenant && <span className="ml-1.5 px-1.5 py-0.5 bg-blue-100 text-blue-600 text-xs rounded font-bold">내 지점</span>}
-                            <span className="text-xs font-normal ml-1">({tenantMembersCount}명)</span>
-                          </span>
-                          <svg className={`w-4 h-4 transform transition-transform ${isTenantExpanded ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"></path></svg>
-                        </button>
-                        {isTenantExpanded && (
-                          <div className="mt-2 ml-2 border-l-2 border-slate-200 pl-3 space-y-2">
-                            {Object.keys(orgTree[tenantName]).sort((a, b) => {
-                              const aTrim = a.trim();
-                              const bTrim = b.trim();
-                              if (isMyTenant && activeMyDeptName && aTrim === activeMyDeptName) return -1;
-                              if (isMyTenant && activeMyDeptName && bTrim === activeMyDeptName) return 1;
-                              return a.localeCompare(b);
-                            }).map(deptName => {
-                              const deptId = `${tenantName}_${deptName}`;
-                              const isDeptExpanded = expandedDepts.includes(deptId) || searchKeyword.length > 0;
-                              const deptMembers = orgTree[tenantName][deptName];
-                              const isMyDept = isMyTenant && activeMyDeptName && deptName.trim() === activeMyDeptName;
-
-                              return (
-                                <div key={deptId} className="mb-1">
-                                  <button onClick={() => toggleDept(deptId)} className="w-full bg-white hover:bg-slate-50 text-slate-700 px-4 py-2.5 rounded-lg font-bold text-[12px] flex justify-between items-center border border-slate-200 transition-colors shadow-sm">
-                                    <span className="flex items-center">
-                                      📁 {deptName} 
-                                      {isMyDept && <span className="ml-1.5 px-1.5 py-0.5 bg-emerald-100 text-emerald-600 text-xs rounded font-bold">내 부서</span>}
-                                      <span className="text-xs font-normal ml-1 text-slate-400">({deptMembers.length}명)</span>
-                                    </span>
-                                    <svg className={`w-3.5 h-3.5 text-slate-400 transform transition-transform ${isDeptExpanded ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"></path></svg>
-                                  </button>
-                                  {isDeptExpanded && (
-                                    <div className="mt-1.5 space-y-1.5">
-                                      {[...deptMembers].sort((a: any, b: any) => {
-                                        if (a.instructor_id === instId) return -1;
-                                        if (b.instructor_id === instId) return 1;
-                                        return a.name.localeCompare(b.name);
-                                      }).map((inst: any) => {
-                                        const isSelected = selectedInstIds.includes(inst.instructor_id);
-                                        const avatarUrl = getProfileImageUrl(inst.profile_image_url);
-                                        const isMe = inst.instructor_id === instId;
-
-                                        return (
-                                          <div key={inst.instructor_id} onClick={() => toggleInstSelection(inst.instructor_id)} className={`bg-white p-3 rounded-lg border shadow-sm cursor-pointer transition-all flex items-center gap-3 ${isSelected ? 'border-slate-800 bg-slate-50' : 'border-slate-200 hover:border-slate-400'}`}>
-                                            <div className={`w-5 h-5 rounded flex items-center justify-center shrink-0 border ${isSelected ? 'bg-slate-800 border-slate-800 text-white' : 'border-slate-300'}`}>
-                                              {isSelected && <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7"></path></svg>}
-                                            </div>
-                                            <div className="relative w-10 h-10 bg-slate-200 rounded-full flex items-center justify-center text-slate-600 font-bold text-[13px] shrink-0 overflow-hidden">
-                                              <span className="absolute z-0">T</span>
-                                              {avatarUrl && <img src={avatarUrl} alt="profile" className="absolute w-full h-full object-cover z-10" onError={(e) => { e.currentTarget.style.display = 'none'; }} />}
-                                            </div>
-                                            <div className="flex-1 flex flex-col">
-                                              <div className="font-bold text-slate-800 text-sm flex items-center">
-                                                {inst.name}
-                                                {isMe && <span className="ml-1.5 px-1.5 py-0.5 bg-brand text-white text-xs rounded font-bold">나</span>}
-                                              </div>
-                                              <div className="text-xs text-slate-500 font-bold mt-0.5">{inst.chat_position || inst.position || '직원'}</div>
-                                            </div>
-                                          </div>
-                                        )
-                                      })}
-                                    </div>
-                                  )}
-                                </div>
-                              )
-                            })}
-                          </div>
-                        )}
-                      </div>
-                    )
-                  })
-                }
-              </div>
-              <div className="absolute bottom-0 left-0 right-0 p-4 bg-white border-t border-slate-200 shadow-[0_-5px_20px_rgba(0,0,0,0.05)] z-20">
-                <button onClick={handleStartGroupChat} disabled={selectedInstIds.length === 0} className={`w-full py-3.5 rounded-xl font-bold text-[14px] transition-colors shadow-sm ${selectedInstIds.length > 0 ? 'bg-slate-800 text-white hover:bg-slate-900' : 'bg-slate-200 text-slate-400 cursor-not-allowed'}`}>
-                  {selectedInstIds.length > 0 ? `${selectedInstIds.length}명과 메신저 시작` : '대화 상대를 선택하세요'}
+            {/* 빠른 기안 · 셀프서비스 실행 바 */}
+            <div className="flex flex-wrap items-center gap-2 shrink-0">
+              <button
+                type="button"
+                onClick={() => router.push("/hq/attendance")}
+                className="px-3.5 py-2.5 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-300/30 text-emerald-100 text-xs font-extrabold transition-colors"
+              >
+                ⏱️ 출퇴근·유연근무
+              </button>
+              <button
+                type="button"
+                onClick={() => router.push("/hq/contracts")}
+                className="px-3.5 py-2.5 rounded-xl bg-white/10 hover:bg-white/20 border border-white/15 text-white text-xs font-bold transition-colors"
+              >
+                📑 전자계약·저작권
+              </button>
+              <button
+                type="button"
+                onClick={() => router.push("/hq/publishing")}
+                className="px-3.5 py-2.5 rounded-xl bg-white/10 hover:bg-white/20 border border-white/15 text-white text-xs font-bold transition-colors"
+              >
+                📚 출판 공정 보드
+              </button>
+              {(
+                [
+                  { type: "LEAVE", label: "🌴 휴가신청" },
+                  { type: "EXPENSE", label: "💳 지출결의" },
+                  { type: "PURCHASE", label: "🛒 인쇄·구매품의" },
+                ] as const
+              ).map((btn) => (
+                <button
+                  key={btn.type}
+                  type="button"
+                  onClick={() => openQuickDraft(btn.type)}
+                  className="px-3.5 py-2.5 rounded-xl bg-white/10 hover:bg-white/20 border border-white/15 text-white text-xs font-bold transition-colors"
+                >
+                  {btn.label}
                 </button>
-              </div>
-            </div>
-          ) : (
-            <div className="flex-1 overflow-y-auto bg-slate-50 p-4 space-y-2">
-              {rooms.length === 0 ? (
-                 <div className="text-center py-20 flex flex-col items-center gap-3">
-                   <span className="text-slate-400 font-bold text-sm">진행중인 대화가 없습니다.</span>
-                   <button onClick={showNewChatView} className="bg-slate-800 hover:bg-slate-900 text-white font-bold px-5 py-3 rounded-xl text-xs transition-colors shadow-sm">조직도에서 찾기</button>
-                 </div>
-              ) : (
-                rooms.map((r, idx) => {
-                  let previewText = r.latestMsg ? r.latestMsg.content : '대화 내역이 없습니다.';
-                  if (previewText.length > 25) previewText = previewText.substring(0, 25) + '...';
-
-                  return (
-                    <div key={idx} onClick={() => openRoom(r.room_id, r.displayTitle)} className={`bg-white p-4 rounded-xl border shadow-sm transition-all flex items-center gap-3 cursor-pointer group ${activeRoomId === r.room_id && activeMenu === "chat" ? 'border-slate-500 ring-1 ring-slate-500' : 'border-slate-200 hover:border-slate-400'}`}>
-                      <div className="relative shrink-0 w-12 h-12">
-                        <div className="relative w-full h-full bg-slate-100 border border-slate-200 rounded-full flex justify-center items-center text-slate-500 font-bold overflow-hidden">
-                          <span className="absolute z-0">{r.internal_chat_room?.room_type === 'GROUP' ? '👥' : 'T'}</span>
-                          {r.internal_chat_room?.room_type !== 'GROUP' && r.displayAvatar && <img src={r.displayAvatar} alt="profile" className="absolute w-full h-full object-cover z-10" onError={(e) => { e.currentTarget.style.display = 'none'; }} />}
-                        </div>
-                        {r.unreadCount > 0 && <span className="absolute -top-1.5 -right-1.5 min-w-[22px] h-[22px] px-1.5 bg-rose-500 text-white text-xs font-bold rounded-full border-2 border-white flex items-center justify-center z-20 shadow-sm">{r.unreadCount > 99 ? '99+' : r.unreadCount}</span>}
-                      </div>
-                      <div className="flex flex-col min-w-0 flex-1">
-                        <div className="flex justify-between items-center">
-                          <span className="font-bold text-slate-800 text-[14px] truncate">{r.displayTitle}</span>
-                          {r.latestMsg && <span className="text-xs font-bold text-slate-400 shrink-0">{new Date(r.latestMsg.created_at).toLocaleDateString('ko-KR', {month:'short', day:'numeric'})}</span>}
-                        </div>
-                        <div className="mt-1"><span className={`text-[12px] ${r.unreadCount > 0 ? 'text-slate-800 font-bold' : 'text-slate-500 font-medium'} truncate block`}>{previewText}</span></div>
-                      </div>
-                      <button onClick={(e) => deleteRoom(r.room_id, e)} className="p-2 text-slate-300 hover:text-rose-500 opacity-0 group-hover:opacity-100 shrink-0 transition-opacity">
-                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
-                      </button>
-                    </div>
-                  );
-                })
+              ))}
+              {me && (
+                <button
+                  type="button"
+                  onClick={() => setCertModalOpen(true)}
+                  className="px-3.5 py-2.5 rounded-xl bg-white text-slate-900 hover:bg-blue-50 text-xs font-extrabold shadow-sm transition-colors"
+                >
+                  🪪 증명서 발급
+                </button>
               )}
             </div>
-          )}
-        </div>
+          </div>
 
+          {/* 선제적 업무 제안 스트립 */}
+          <div className="mt-5 pt-5 border-t border-white/10 grid grid-cols-1 md:grid-cols-2 gap-2.5">
+            {proactiveNotices.map((notice) => {
+              const badgeStyle =
+                notice.tone === "urgent"
+                  ? "bg-rose-500 text-white"
+                  : notice.tone === "warn"
+                    ? "bg-amber-400 text-slate-900"
+                    : notice.tone === "ok"
+                      ? "bg-emerald-500 text-white"
+                      : "bg-sky-400/20 text-sky-200 border border-sky-300/30";
+              return (
+                <div
+                  key={notice.id}
+                  className="rounded-2xl bg-white/8 border border-white/10 px-4 py-3 flex items-center justify-between gap-3"
+                >
+                  <div className="flex items-start gap-2.5 min-w-0">
+                    <span
+                      className={`px-2 py-0.5 rounded-md text-[11px] font-extrabold shrink-0 mt-0.5 ${badgeStyle}`}
+                    >
+                      {notice.badge}
+                    </span>
+                    <p className="text-xs text-slate-100 leading-relaxed font-medium">
+                      {notice.text}
+                    </p>
+                  </div>
+                  {notice.actionLabel && notice.onClick && (
+                    <button
+                      type="button"
+                      onClick={notice.onClick}
+                      className="text-xs font-extrabold text-blue-200 hover:text-white whitespace-nowrap shrink-0"
+                    >
+                      {notice.actionLabel}
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </section>
+
+        {/* 2. 핵심 HR · 결재 · 비용 KPI 요약 카드 4종 */}
+        <section className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+          <div
+            onClick={() => router.push("/hq/approvals")}
+            className="bg-white rounded-2xl p-5 border border-slate-200 shadow-xs hover:border-brand/40 cursor-pointer transition-all"
+          >
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold text-slate-500">
+                내 결재 대기 문서
+              </span>
+              <span className="text-lg">✍️</span>
+            </div>
+            <div className="mt-2 flex items-baseline gap-2">
+              <span className="text-2xl font-extrabold text-slate-900">
+                {myTurnDocs.length}건
+              </span>
+              {myTurnDocs.some((d) => d.urgent) && (
+                <span className="px-2 py-0.5 rounded-full bg-rose-100 text-rose-700 text-[11px] font-extrabold">
+                  긴급 포함
+                </span>
+              )}
+            </div>
+            <p className="text-[11px] text-slate-400 mt-1.5 font-medium">
+              전체 열람 가능 결재문서 {docs.length}건
+            </p>
+          </div>
+
+          <div
+            onClick={() => router.push("/hq/members")}
+            className="bg-white rounded-2xl p-5 border border-slate-200 shadow-xs hover:border-brand/40 cursor-pointer transition-all"
+          >
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold text-slate-500">
+                본부 재직 구성원
+              </span>
+              <span className="text-lg">👥</span>
+            </div>
+            <div className="mt-2 flex items-baseline gap-2">
+              <span className="text-2xl font-extrabold text-slate-900">
+                {activeMembers.length}명
+              </span>
+              <span className="text-xs font-bold text-slate-500">
+                ({deptSummary.length}개 부서)
+              </span>
+            </div>
+            <p className="text-[11px] text-slate-400 mt-1.5 font-medium">
+              임원·부서장{" "}
+              {activeMembers.filter((m) => getRankLevel(m.rank_code) >= 3).length}
+              명 · 실무진{" "}
+              {activeMembers.filter((m) => getRankLevel(m.rank_code) <= 2).length}명
+            </p>
+          </div>
+
+          <div
+            onClick={() => openQuickDraft("LEAVE")}
+            className="bg-white rounded-2xl p-5 border border-slate-200 shadow-xs hover:border-brand/40 cursor-pointer transition-all"
+          >
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold text-slate-500">
+                내 잔여 연차 현황
+              </span>
+              <span className="text-lg">🌴</span>
+            </div>
+            <div className="mt-2 flex items-baseline gap-2">
+              <span className="text-2xl font-extrabold text-emerald-600">
+                {me?.annual_leave_remain ?? 15}일
+              </span>
+              <span className="text-xs font-semibold text-slate-400">
+                / 총 {me?.annual_leave_total ?? 15}일
+              </span>
+            </div>
+            <p className="text-[11px] text-slate-400 mt-1.5 font-medium">
+              사용 완료 {me?.annual_leave_used ?? 0}일 · 클릭하여 휴가 기안
+            </p>
+          </div>
+
+          <div
+            onClick={() => router.push("/hq/expenses")}
+            className="bg-white rounded-2xl p-5 border border-slate-200 shadow-xs hover:border-brand/40 cursor-pointer transition-all"
+          >
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold text-slate-500">
+                당월({currentMonth}) 경비 합계
+              </span>
+              <span className="text-lg">💳</span>
+            </div>
+            <div className="mt-2 flex items-baseline gap-2">
+              <span className="text-2xl font-extrabold text-slate-900">
+                {expenseStats.total.toLocaleString()}원
+              </span>
+            </div>
+            <p className="text-[11px] text-slate-400 mt-1.5 font-medium">
+              정산 대기 {expenseStats.pendingCount}건 (
+              {expenseStats.pendingAmount.toLocaleString()}원)
+            </p>
+          </div>
+        </section>
+
+        {/* 3. 하단 메인 그리드: 좌측 결재 워크플로우 / 우측 직급 체계 & 조직 요약 */}
+        <section className="grid grid-cols-1 lg:grid-cols-12 gap-5">
+          {/* 좌측 7칸: 내 결재 차례 & 최근 상신 문서 */}
+          <div className="lg:col-span-7 space-y-5">
+            {/* 내 결재 차례 박스 */}
+            <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
+              <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <h3 className="text-sm font-extrabold text-slate-800">
+                    🔔 내가 지금 결재할 문서
+                  </h3>
+                  <span className="px-2 py-0.5 rounded-full bg-rose-100 text-rose-700 text-xs font-extrabold">
+                    {myTurnDocs.length}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => router.push("/hq/approvals")}
+                  className="text-xs font-bold text-brand hover:underline"
+                >
+                  전자결재 전체보기 →
+                </button>
+              </div>
+
+              {loadingData ? (
+                <div className="p-8 text-center text-xs font-bold text-slate-400">
+                  결재 현황을 불러오는 중입니다...
+                </div>
+              ) : myTurnDocs.length === 0 ? (
+                <div className="p-8 text-center">
+                  <p className="text-xs font-bold text-slate-400">
+                    현재 내 결재 순서로 대기 중인 문서가 없습니다.
+                  </p>
+                </div>
+              ) : (
+                <div className="divide-y divide-slate-100">
+                  {myTurnDocs.slice(0, 5).map((doc) => {
+                    const meta =
+                      APPROVAL_DOC_META[doc.doc_type] ||
+                      APPROVAL_DOC_META.GENERAL;
+                    return (
+                      <div
+                        key={doc.approval_id}
+                        onClick={() => setSelectedDoc(doc)}
+                        className="px-5 py-3.5 hover:bg-slate-50 cursor-pointer flex items-center justify-between gap-3 transition-colors"
+                      >
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-1.5 mb-1">
+                            {doc.urgent && (
+                              <span className="px-1.5 py-0.5 rounded bg-rose-600 text-white text-[10px] font-extrabold">
+                                긴급
+                              </span>
+                            )}
+                            <span
+                              className={`px-2 py-0.5 rounded border text-[10px] font-bold ${meta.badgeClass}`}
+                            >
+                              {meta.icon} {meta.shortLabel}
+                            </span>
+                            <span className="text-[11px] text-slate-400 font-semibold">
+                              {doc.drafter_dept} · {doc.drafter_name}{" "}
+                              {doc.drafter_title}
+                            </span>
+                          </div>
+                          <div className="text-sm font-bold text-slate-800 truncate">
+                            {doc.title}
+                          </div>
+                        </div>
+
+                        <div className="text-right shrink-0">
+                          <div className="text-xs font-extrabold text-brand">
+                            {doc.doc_type === "LEAVE"
+                              ? `${doc.leave_days}일 (${doc.leave_type})`
+                              : doc.amount > 0
+                                ? `${doc.amount.toLocaleString()}원`
+                                : `${doc.current_step_order}/${doc.total_steps}단계`}
+                          </div>
+                          <span className="inline-block mt-1 px-2.5 py-1 rounded-lg bg-brand text-white text-[11px] font-bold">
+                            검토 · 승인
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* 내가 기안한 최근 문서 */}
+            <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
+              <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
+                <h3 className="text-sm font-extrabold text-slate-800">
+                  📤 내가 상신한 최근 문서
+                </h3>
+                <button
+                  type="button"
+                  onClick={() => openQuickDraft("GENERAL")}
+                  className="text-xs font-bold text-brand hover:underline"
+                >
+                  + 새 기안 작성
+                </button>
+              </div>
+
+              {myDraftDocs.length === 0 ? (
+                <div className="p-8 text-center text-xs font-bold text-slate-400">
+                  아직 기안한 전자결재 문서가 없습니다.
+                </div>
+              ) : (
+                <div className="divide-y divide-slate-100">
+                  {myDraftDocs.map((doc) => {
+                    const meta =
+                      APPROVAL_DOC_META[doc.doc_type] ||
+                      APPROVAL_DOC_META.GENERAL;
+                    const statusLabel =
+                      doc.status === "APPROVED"
+                        ? {
+                            t: "최종 승인",
+                            c: "bg-emerald-50 text-emerald-700 border-emerald-200",
+                          }
+                        : doc.status === "REJECTED"
+                          ? {
+                              t: "반려됨",
+                              c: "bg-rose-50 text-rose-700 border-rose-200",
+                            }
+                          : doc.status === "CANCELLED"
+                            ? {
+                                t: "회수됨",
+                                c: "bg-slate-100 text-slate-500 border-slate-200",
+                              }
+                            : {
+                                t: `${doc.current_step_order}/${doc.total_steps}단계 진행중`,
+                                c: "bg-amber-50 text-amber-800 border-amber-200",
+                              };
+                    return (
+                      <div
+                        key={doc.approval_id}
+                        onClick={() => setSelectedDoc(doc)}
+                        className="px-5 py-3.5 hover:bg-slate-50 cursor-pointer flex items-center justify-between gap-3 transition-colors"
+                      >
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-1.5 mb-0.5">
+                            <span className="text-xs">{meta.icon}</span>
+                            <span className="text-xs font-bold text-slate-800 truncate">
+                              {doc.title}
+                            </span>
+                          </div>
+                          <div className="text-[11px] text-slate-400 font-mono">
+                            {doc.doc_no} ·{" "}
+                            {new Date(doc.submitted_at).toLocaleDateString(
+                              "ko-KR"
+                            )}
+                          </div>
+                        </div>
+                        <span
+                          className={`px-2.5 py-1 rounded-full border text-[11px] font-extrabold shrink-0 ${statusLabel.c}`}
+                        >
+                          {statusLabel.t}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* 우측 5칸: 직급별 결재 단계 규정 & 부서 조직 요약 */}
+          <div className="lg:col-span-5 space-y-5">
+            {/* 직급별 결재 단계 및 자동 전결 기준 안내 */}
+            <div className="bg-white rounded-2xl border border-slate-200 shadow-xs p-5 space-y-4">
+              <div className="flex items-center justify-between">
+                <h3 className="text-sm font-extrabold text-slate-800">
+                  🏛️ 본부 직급 체계 · 결재 전결 기준
+                </h3>
+                <button
+                  type="button"
+                  onClick={() => router.push("/hq/members")}
+                  className="text-xs font-bold text-brand hover:underline"
+                >
+                  구성원 관리 →
+                </button>
+              </div>
+
+              <div className="space-y-2">
+                {[...HQ_RANK_LIST].reverse().map((rk) => {
+                  const count = activeMembers.filter(
+                    (m) => m.rank_code === rk.code
+                  ).length;
+                  return (
+                    <div
+                      key={rk.code}
+                      className="p-3 rounded-xl bg-slate-50 border border-slate-200/80 flex items-center justify-between gap-2"
+                    >
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span
+                            className={`px-2 py-0.5 rounded border text-[10px] font-extrabold ${rk.badgeClass}`}
+                          >
+                            Lv.{rk.level} {rk.shortLabel}
+                          </span>
+                          <span className="text-xs font-bold text-slate-700 truncate">
+                            {rk.description}
+                          </span>
+                        </div>
+                      </div>
+                      <span className="text-xs font-extrabold text-slate-700 shrink-0">
+                        {count}명
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+
+              <div className="rounded-xl bg-blue-50/70 border border-blue-200/70 p-3.5 text-xs text-slate-700 space-y-1">
+                <div className="font-extrabold text-brand">
+                  ⚡ 자동 전결 워크플로우 규정
+                </div>
+                <p>
+                  • 단기 휴가({AUTO_DELEGATION_RULES.TEAM_LEAD_MAX_LEAVE_DAYS}일 이하) 및 소액 지출·품의(
+                  {(AUTO_DELEGATION_RULES.TEAM_LEAD_MAX_AMOUNT / 10000).toFixed(0)}만원 이하):{" "}
+                  <b>팀장·실장(Lv.3) 전결</b>
+                </p>
+                <p>
+                  • 중액 지출·품의(
+                  {(AUTO_DELEGATION_RULES.DIRECTOR_MAX_AMOUNT / 10000).toFixed(0)}만원 이하):{" "}
+                  <b>본부장·이사(Lv.4) 전결</b>
+                </p>
+                <p>
+                  • 100만원 초과 고액 품의 · 장기 휴가 · 중요 기안:{" "}
+                  <b>대표·소장(Lv.5) 최종 승인</b>
+                </p>
+              </div>
+            </div>
+
+            {/* 부서별 재직 인원 & 리더 현황 */}
+            <div className="bg-white rounded-2xl border border-slate-200 shadow-xs p-5 space-y-3">
+              <div className="flex items-center justify-between">
+                <h3 className="text-sm font-extrabold text-slate-800">
+                  🏢 부서별 조직 현황
+                </h3>
+                <span className="text-xs font-semibold text-slate-400">
+                  총 {deptSummary.length}개 부서
+                </span>
+              </div>
+
+              {deptSummary.length === 0 ? (
+                <div className="py-6 text-center text-xs text-slate-400 font-bold">
+                  등록된 본부 구성원이 없습니다.
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {deptSummary.map((d) => (
+                    <div
+                      key={d.dept}
+                      onClick={() => router.push("/hq/members")}
+                      className="px-3.5 py-2.5 rounded-xl border border-slate-200 hover:border-slate-300 bg-white flex items-center justify-between cursor-pointer transition-colors"
+                    >
+                      <div>
+                        <div className="text-xs font-extrabold text-slate-800">
+                          {d.dept}
+                        </div>
+                        <div className="text-[11px] text-slate-500">
+                          {d.headName ? `부서장: ${d.headName}` : "부서장 미지정"}
+                        </div>
+                      </div>
+                      <span className="px-2.5 py-1 rounded-lg bg-slate-100 text-slate-700 text-xs font-extrabold">
+                        {d.count}명
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* 최근 입사/재직 구성원 미니 아바타 열 */}
+              {activeMembers.length > 0 && (
+                <div className="pt-2 border-t border-slate-100 flex items-center justify-between">
+                  <div className="flex -space-x-2 overflow-hidden">
+                    {activeMembers.slice(0, 7).map((m) => {
+                      const avatar = resolveStoragePublicUrl(
+                        m.profile_image_url
+                      );
+                      return (
+                        <div
+                          key={m.instructor_id}
+                          title={`${m.name} ${m.job_title} (${m.department})`}
+                          className="relative w-7 h-7 rounded-full bg-slate-200 border-2 border-white flex items-center justify-center text-[10px] font-bold text-slate-700 overflow-hidden"
+                        >
+                          <span>{m.name.slice(0, 1)}</span>
+                          {avatar && (
+                            <img
+                              src={avatar}
+                              alt={m.name}
+                              className="absolute inset-0 w-full h-full object-cover"
+                            />
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => router.push("/hq/messenger")}
+                    className="text-xs font-bold text-slate-600 hover:text-brand"
+                  >
+                    💬 사내 메신저 열기
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        </section>
       </div>
 
-      <ProfileModal 
-        isOpen={isProfileOpen} 
-        onClose={() => setIsProfileOpen(false)} 
-        instId={instId} 
-        instructorName={instName} 
-        isHQ={true}
+      {/* 기안 작성 모달 */}
+      <ApprovalCreateModal
+        isOpen={createOpen}
+        me={me}
+        members={members}
+        defaultDocType={defaultDocType}
+        onClose={() => setCreateOpen(false)}
+        onCreated={handleAfterUpdate}
       />
-    </div>
+
+      {/* 결재 상세 · 승인/전결/반려/인쇄 모달 */}
+      <ApprovalDetailModal
+        doc={selectedDoc}
+        me={me}
+        isHqAdmin={isHqAdmin}
+        onClose={() => setSelectedDoc(null)}
+        onUpdated={handleAfterUpdate}
+      />
+
+      {/* 본인 재직·경력증명서 셀프 발급 모달 */}
+      <CertificatePrintModal
+        isOpen={certModalOpen}
+        member={me}
+        onClose={() => setCertModalOpen(false)}
+      />
+    </>
   );
 }
