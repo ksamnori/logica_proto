@@ -9,6 +9,10 @@ export const GEMINI_MODEL_STORAGE_KEY = 'logica_gemini_model';
 export const DEFAULT_GEMINI_MODEL = 'gemini-flash-latest';
 export const PEN_COLORS = ['#1C2530', '#DC2626', '#2563EB', '#16A34A'];
 export const ERASER_WIDTH_MULTIPLIER = 6;
+// 문제 첫 줄 위·좌우·아래 여백까지 모두 캔버스 필기 가능 영역으로 포함하여 분자(1/2) 상단 잘림 원천 차단
+export const STAGE_PADDING_PX = 28;
+export const STAGE_BOTTOM_PADDING_PX = 48;
+export const CANVAS_BACKING_SCALE = 2;
 
 // 🌟 수퍼바이저·학생포털과 동일하게 오전 6시 리셋 기준 적용
 export const getKSTDateString = () => {
@@ -189,9 +193,9 @@ export const combineDbHints = (step1: any, step2: any) => {
 export const measureStageDimensions = async (
   stageEl: HTMLElement | null,
   rawInkDataUrl: string | null
-): Promise<{ stageWidth: number; stageHeight: number; cropHeight: number }> => {
+): Promise<{ stageWidth: number; stageHeight: number; cropHeight: number; stagePadding: number }> => {
   if (typeof window === 'undefined' || !stageEl) {
-    return { stageWidth: 640, stageHeight: 480, cropHeight: 320 };
+    return { stageWidth: 720, stageHeight: 540, cropHeight: 420, stagePadding: STAGE_PADDING_PX };
   }
   const stageRect = stageEl.getBoundingClientRect();
   const stageW = Math.max(1, Math.round(stageRect.width));
@@ -200,7 +204,7 @@ export const measureStageDimensions = async (
   let contentMaxY = 0;
   const qDisplayRoot = stageEl.firstElementChild as HTMLElement | null;
   if (qDisplayRoot) {
-    contentMaxY = Math.max(contentMaxY, qDisplayRoot.scrollHeight || 0);
+    contentMaxY = Math.max(contentMaxY, (qDisplayRoot.offsetTop || 0) + (qDisplayRoot.scrollHeight || 0));
     const r = qDisplayRoot.getBoundingClientRect();
     if (r.height > 0) {
       contentMaxY = Math.max(contentMaxY, r.bottom - stageRect.top);
@@ -223,39 +227,50 @@ export const measureStageDimensions = async (
         im.onerror = () => resolve(null);
         im.src = rawInkDataUrl;
       });
-      if (inkImg) {
+      if (inkImg && inkImg.naturalWidth > 0 && inkImg.naturalHeight > 0) {
+        const w = inkImg.naturalWidth;
+        const h = inkImg.naturalHeight;
         const probeCanvas = document.createElement('canvas');
-        probeCanvas.width = stageW;
-        probeCanvas.height = stageH;
+        probeCanvas.width = w;
+        probeCanvas.height = h;
         const pCtx = probeCanvas.getContext('2d');
         if (pCtx) {
-          pCtx.drawImage(inkImg, 0, 0, stageW, stageH);
-          const imgData = pCtx.getImageData(0, 0, stageW, stageH).data;
-          for (let y = stageH - 1; y >= 0; y--) {
+          pCtx.drawImage(inkImg, 0, 0);
+          const imgData = pCtx.getImageData(0, 0, w, h).data;
+          // 얇은 세로획('1')도 절대 누락되지 않도록 원본 해상도 모든 픽셀(x += 1)을 정밀 스캔
+          for (let y = h - 1; y >= 0; y--) {
             let rowHasInk = false;
-            const rowOffset = y * stageW * 4;
-            for (let x = 0; x < stageW; x += 2) {
-              if (imgData[rowOffset + x * 4 + 3] > 15) {
-                rowHasInk = true;
-                break;
+            const rowOffset = y * w * 4;
+            for (let x = 0; x < w; x++) {
+              if (x === 0 && y === 0) continue; // (0,0) 메타데이터 픽셀 제외
+              const idx = rowOffset + x * 4;
+              const a = imgData[idx + 3];
+              if (a > 10) {
+                const r = imgData[idx];
+                const g = imgData[idx + 1];
+                const b = imgData[idx + 2];
+                if (!(r >= 250 && g >= 250 && b >= 250)) {
+                  rowHasInk = true;
+                  break;
+                }
               }
             }
             if (rowHasInk) {
-              inkMaxY = y;
+              inkMaxY = Math.ceil((y / h) * stageH);
               break;
             }
           }
         }
       }
-    } catch (e) {}
+    } catch {}
   }
 
   const cropH = Math.min(
     stageH,
-    Math.max(Math.ceil(contentMaxY), Math.ceil(inkMaxY), 180) + 36
+    Math.max(Math.ceil(contentMaxY), Math.ceil(inkMaxY), 200) + 56
   );
 
-  return { stageWidth: stageW, stageHeight: stageH, cropHeight: cropH };
+  return { stageWidth: stageW, stageHeight: stageH, cropHeight: cropH, stagePadding: STAGE_PADDING_PX };
 };
 
 /**
@@ -313,16 +328,17 @@ export const captureCompositeQuestionImage = async (
     if (!inkImg) return rawInkDataUrl;
 
     const { cropHeight } = await measureStageDimensions(stageEl, rawInkDataUrl);
-    const scale = Math.min(2, window.devicePixelRatio || 1);
+    const exportH = Math.max(cropHeight, stageH);
+    const scale = CANVAS_BACKING_SCALE;
     const outCanvas = document.createElement('canvas');
     outCanvas.width = Math.round(stageW * scale);
-    outCanvas.height = Math.round(cropHeight * scale);
+    outCanvas.height = Math.round(exportH * scale);
     const ctx = outCanvas.getContext('2d');
     if (!ctx) return rawInkDataUrl;
 
     ctx.scale(scale, scale);
     ctx.fillStyle = '#ffffff';
-    ctx.fillRect(0, 0, stageW, cropHeight);
+    ctx.fillRect(0, 0, stageW, exportH);
 
     ctx.save();
     ctx.globalAlpha = 0.78;

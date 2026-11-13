@@ -18,7 +18,7 @@ import { useClinicTimer } from "./hooks/useClinicTimer";
 import { useClinicDataFetch } from "./hooks/useClinicDataFetch";
 import { useClinicRealtime } from "./hooks/useClinicRealtime";
 
-import { ClinicCanvas } from "./components/ClinicCanvas";
+import { ClinicCanvas, flushActiveClinicCanvas } from "./components/ClinicCanvas";
 import { ClinicKeypad } from "./components/ClinicKeypad";
 import { ClinicQuestionNav } from "./components/ClinicQuestionNav";
 import { QuestionDisplay } from "./components/QuestionDisplay";
@@ -30,7 +30,9 @@ import {
   PEN_COLORS, formatMathTextForWeb,
   saveHintState, keypadAnswersMatch, isKeypadEnterable, mcAnswersMatch, isObjectiveQuestion,
   captureCompositeQuestionImage,
-  measureStageDimensions
+  measureStageDimensions,
+  STAGE_PADDING_PX,
+  STAGE_BOTTOM_PADDING_PX
 } from "./utils";
 
 // 대문항(그룹) 기준 균등 배점 + 서브문항((1),(2) 등) 분할 배점 및 TO/RO 부분점수(score_ratio) 계산 유틸리티
@@ -490,6 +492,8 @@ export default function ClinicViewer() {
 
   const handleClearCanvas = () => {
     delete studentDrawings.current[currentQIndex];
+    delete penGradeCache.current[currentQIndex];
+    delete penGradeMetaCache.current[currentQIndex];
     studentAnswers.current[currentQIndex] = null;
     setCanvasClearTrigger(p => p + 1);
     forceUpdate();
@@ -650,6 +654,9 @@ export default function ClinicViewer() {
   };
 
   const ensurePenGraded = useCallback((idx: number): Promise<void> => {
+    if (idx === currentQIndex) {
+      flushActiveClinicCanvas();
+    }
     if (penGradeCache.current[idx] !== undefined) return Promise.resolve();
     if (penGradeInFlight.current[idx]) return penGradeInFlight.current[idx];
     const qItem = questions[idx];
@@ -665,7 +672,7 @@ export default function ClinicViewer() {
       .finally(() => { delete penGradeInFlight.current[idx]; });
     penGradeInFlight.current[idx] = p;
     return p;
-  }, [questions]);
+  }, [questions, currentQIndex]);
 
   const isQuestionCorrect = useCallback(async (idx: number): Promise<boolean> => {
     const qItem = questions[idx];
@@ -745,6 +752,7 @@ export default function ClinicViewer() {
   };
 
   const persistExamAnswersToDB = async (): Promise<number> => {
+    flushActiveClinicCanvas();
     const rawAssignId = questions[0]?.examAssignmentId || params.assignmentId;
     if (!isTimedRound || !rawAssignId) return 0;
 
@@ -826,6 +834,7 @@ export default function ClinicViewer() {
 
   const handleTimeUp = async (forceAction?: string, sessionExpired = false) => {
     if (timeUpHandledRef.current) return;
+    flushActiveClinicCanvas();
     timeUpHandledRef.current = true;
     setTimeIsUp(true); setIsBatchGrading(true);
 
@@ -917,12 +926,18 @@ export default function ClinicViewer() {
     const qItem = questions[currentQIndex];
     const isSubjective = !isObjectiveQuestion(qItem);
     const useAI = isSubjective && getAnswerMode(currentQIndex, qItem) === 'pen';
-    const myAns = studentAnswers.current[currentQIndex];
+    // 🌟 제출 직전 캔버스를 0ms 동기 플러시하여 마지막 획(예: 분수 1/2의 분자 '1') 누락 원천 차단
+    const flushedDrawing = useAI ? flushActiveClinicCanvas() : null;
+    const myAns = useAI
+      ? (flushedDrawing || studentDrawings.current[currentQIndex] || studentAnswers.current[currentQIndex])
+      : studentAnswers.current[currentQIndex];
 
     if (!myAns) { alert(useAI ? "답을 먼저 그려주세요!" : "정답을 먼저 입력해주세요!"); return; }
 
     const stageEl = typeof document !== 'undefined' ? document.getElementById('clinic-question-stage') : null;
-    const stageDims = useAI ? await measureStageDimensions(stageEl, myAns) : { stageWidth: 640, stageHeight: 480, cropHeight: 320 };
+    const stageDims = useAI
+      ? await measureStageDimensions(stageEl, myAns)
+      : { stageWidth: 720, stageHeight: 540, cropHeight: 420, stagePadding: STAGE_PADDING_PX };
     const aiCompositeAns = useAI ? ((await captureCompositeQuestionImage(stageEl, myAns)) || myAns) : myAns;
 
     if (useAI && qItem.aiGradable === false) { requestManualGradingDirect(currentQIndex, qItem, myAns, stageDims); return; }
@@ -954,7 +969,7 @@ export default function ClinicViewer() {
         uid: qItem.uid, qNum: currentQIndex + 1,
         questionText: qItem.questionText, questionText2: qItem.questionText2 || '',
         imageUrl: qItem.imageUrl || '', image2Url: qItem.image2Url || '',
-        stageWidth: stageDims.stageWidth, stageHeight: stageDims.stageHeight, cropHeight: stageDims.cropHeight,
+        stageWidth: stageDims.stageWidth, stageHeight: stageDims.stageHeight, cropHeight: stageDims.cropHeight, stagePadding: stageDims.stagePadding,
         correctAnswer: qItem.answer,
         imageDataUrl: myAns, recognizedText: gradingMeta?.recognized_text || '', aiExplanation: gradingMeta?.explanation || '', aiConfidence: gradingMeta?.confidence || null, initial: true,
       };
@@ -1013,13 +1028,13 @@ export default function ClinicViewer() {
     setIsSubmitting(false);
   };
 
-  const requestManualGradingDirect = (idx: number, qItem: any, imageDataUrl: string, stageDims?: { stageWidth: number; stageHeight: number; cropHeight: number }) => {
+  const requestManualGradingDirect = (idx: number, qItem: any, imageDataUrl: string, stageDims?: { stageWidth: number; stageHeight: number; cropHeight: number; stagePadding?: number }) => {
     recheckState.current[idx] = 'pending';
     const payload = {
       uid: qItem.uid, qNum: idx + 1,
       questionText: qItem.questionText, questionText2: qItem.questionText2 || '',
       imageUrl: qItem.imageUrl || '', image2Url: qItem.image2Url || '',
-      stageWidth: stageDims?.stageWidth || 640, stageHeight: stageDims?.stageHeight || 480, cropHeight: stageDims?.cropHeight || 320,
+      stageWidth: stageDims?.stageWidth || 720, stageHeight: stageDims?.stageHeight || 540, cropHeight: stageDims?.cropHeight || 420, stagePadding: stageDims?.stagePadding ?? STAGE_PADDING_PX,
       correctAnswer: qItem.answer, imageDataUrl, recognizedText: '', aiExplanation: '', aiConfidence: null, initial: true
     };
     sendAction('recheck_request', payload);
@@ -1180,13 +1195,17 @@ export default function ClinicViewer() {
   const requestRecheck = () => {
     if (!lastGradingContextRef.current) return;
     const { idx, uid, q, imageDataUrl, stageDims, gradingMeta } = lastGradingContextRef.current;
+    if (idx === currentQIndex) {
+      flushActiveClinicCanvas();
+    }
+    const latestImg = studentDrawings.current[idx] || imageDataUrl;
     setResultModal(null); recheckState.current[idx] = 'pending';
     const recheckPayload = {
       uid, qNum: idx + 1,
       questionText: q.questionText, questionText2: q.questionText2 || '',
       imageUrl: q.imageUrl || '', image2Url: q.image2Url || '',
-      stageWidth: stageDims?.stageWidth || 640, stageHeight: stageDims?.stageHeight || 480, cropHeight: stageDims?.cropHeight || 320,
-      correctAnswer: q.answer, imageDataUrl, recognizedText: gradingMeta?.recognized_text || '', aiExplanation: gradingMeta?.explanation || '', aiConfidence: gradingMeta?.confidence || null
+      stageWidth: stageDims?.stageWidth || 720, stageHeight: stageDims?.stageHeight || 540, cropHeight: stageDims?.cropHeight || 420, stagePadding: stageDims?.stagePadding ?? STAGE_PADDING_PX,
+      correctAnswer: q.answer, imageDataUrl: latestImg, recognizedText: gradingMeta?.recognized_text || '', aiExplanation: gradingMeta?.explanation || '', aiConfidence: gradingMeta?.confidence || null
     };
     sendAction('recheck_request', recheckPayload);
     const sid = clinicSessionStateRef.current?.id;
@@ -1198,8 +1217,18 @@ export default function ClinicViewer() {
 
   const requestRecheckForReviewItem = (item: any) => {
     recheckState.current[item.idx] = 'pending';
+    const qRef = questions[item.idx] || {};
     const recheckPayload = {
-      uid: item.uid, qNum: item.qNum, questionText: item.questionText, correctAnswer: item.correctAnswer, imageDataUrl: item.imageDataUrl, recognizedText: item.recognizedText, aiExplanation: item.aiExplanation, aiConfidence: item.aiConfidence,
+      uid: item.uid, qNum: item.qNum,
+      questionText: item.questionText || qRef.questionText || '',
+      questionText2: item.questionText2 || qRef.questionText2 || '',
+      imageUrl: item.imageUrl || qRef.imageUrl || '',
+      image2Url: item.image2Url || qRef.image2Url || '',
+      stageWidth: item.stageWidth,
+      stageHeight: item.stageHeight,
+      cropHeight: item.cropHeight,
+      stagePadding: item.stagePadding ?? STAGE_PADDING_PX,
+      correctAnswer: item.correctAnswer, imageDataUrl: studentDrawings.current[item.idx] || item.imageDataUrl, recognizedText: item.recognizedText, aiExplanation: item.aiExplanation, aiConfidence: item.aiConfidence,
       recordId: item.recordId, tqId: item.tqId, questionId: item.questionId, examAssignmentId: item.examAssignmentId, deferredWrite: true,
     };
     sendAction('recheck_request', recheckPayload);
@@ -1457,8 +1486,14 @@ export default function ClinicViewer() {
               </div>
 
               <div className="flex-1 relative overflow-hidden">
-                <div className={`h-full overflow-y-auto custom-scrollbar p-8 md:p-10 ${!isTimedRound ? 'pb-32' : ''}`}>
-                  <div id="clinic-question-stage" className="relative min-h-full">
+                <div className={`h-full overflow-y-auto custom-scrollbar p-2 md:p-3 ${!isTimedRound ? 'pb-28' : ''}`}>
+                  <div
+                    id="clinic-question-stage"
+                    className="relative min-h-full"
+                    style={{
+                      padding: `${STAGE_PADDING_PX}px ${STAGE_PADDING_PX}px ${STAGE_BOTTOM_PADDING_PX}px ${STAGE_PADDING_PX}px`,
+                    }}
+                  >
                     <div className={`transition-opacity text-2xl md:text-3xl lg:text-[36px] leading-loose lg:leading-[2.2] font-semibold text-slate-800 ${isSubjective && curAnsMode === 'pen' ? 'opacity-70' : ''}`}>
                       <QuestionDisplay html={q.questionText} imageUrl={q.imageUrl} image2Url={q.image2Url} html2={q.questionText2} />
                     </div>
@@ -1472,6 +1507,10 @@ export default function ClinicViewer() {
                         studentAnswers={studentAnswers}
                         forceUpdate={forceUpdate}
                         clearTrigger={canvasClearTrigger}
+                        onStrokeSaved={(savedIdx) => {
+                          delete penGradeCache.current[savedIdx];
+                          delete penGradeMetaCache.current[savedIdx];
+                        }}
                       />
                     )}
                   </div>

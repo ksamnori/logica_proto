@@ -6,10 +6,12 @@ import { useRouter } from 'next/navigation';
 import { useSupervisorData } from './useSupervisorData';
 import { formatDuration } from './supervisorUtils';
 import { supabaseClient } from './supervisorUtils';
+import { signOutLocalSession } from '@/lib/localLogout';
 import LeftPanel from './LeftPanel';
 import SeatGrid from './SeatGrid';
 import SeatCardBody from './SeatCardBody';
 import UnlockPanel from "@/components/clinic/UnlockPanel";
+import HandwritingOverlayPreview from "@/components/clinic/HandwritingOverlayPreview";
 
 const MathText = React.memo(function MathText({ html, className }: { html: string; className?: string }) {
     const ref = useRef<HTMLDivElement>(null);
@@ -248,12 +250,9 @@ export default function SupervisorDashboard() {
         setIsVerifying(false);
     };
 
-    const handleLogout = () => {
+    const handleLogout = async () => {
         if (window.confirm('로그아웃 하시겠습니까?')) {
-            localStorage.removeItem('logica_instructor_id');
-            localStorage.removeItem('logica_instructor_role');
-            localStorage.removeItem('logica_instructor_position');
-            localStorage.removeItem('logica_instructor_name');
+            await signOutLocalSession(supabaseClient);
             router.push('/');
         }
     };
@@ -363,28 +362,34 @@ export default function SupervisorDashboard() {
                                 return (
                                     <div key={ans.answer_id} className={`bg-white rounded-2xl shadow-sm border-[3px] overflow-hidden flex flex-col md:flex-row transition-colors ${isOverridden ? 'border-emerald-400' : 'border-rose-200'}`}>
                                         <div className="w-full md:w-2/3 p-6 relative bg-white border-b md:border-b-0 md:border-r border-slate-100 min-h-[300px] flex flex-col justify-start items-start">
-                                            <div className="relative w-full max-w-full z-10 text-lg">
-                                                {ans.questionText ? (
-                                                    <MathText className="font-bold text-slate-800 leading-relaxed font-myungjo" html={ans.questionText} />
-                                                ) : (
-                                                    <div className="text-sm font-bold text-slate-400 bg-slate-50 p-4 rounded-xl border border-slate-200 text-center">
-                                                        [문제 텍스트 데이터가 없습니다]
-                                                    </div>
-                                                )}
-                                                
-                                                {ans.imageUrl && ans.imageUrl !== '' && (
-                                                    <img src={ans.imageUrl} className="max-w-full rounded-lg mt-4 shadow-sm" alt="문제 원본 이미지" />
-                                                )}
-                                                {ans.image2Url && ans.image2Url !== '' && (
-                                                    <img src={ans.image2Url} className="max-w-full rounded-lg mt-4 shadow-sm" alt="문제 원본 이미지 2" />
-                                                )}
-                                                {ans.questionText2 && (
-                                                    <MathText className="font-bold text-slate-800 leading-relaxed font-myungjo mt-4" html={ans.questionText2} />
-                                                )}
-                                            </div>
-                                            
-                                            {ans.isDrawing && (
-                                                <img src={ans.cleanInput} className="absolute top-0 left-0 w-full h-full object-contain object-top pointer-events-none opacity-90 mix-blend-multiply z-20 p-6" alt="학생 손글씨" />
+                                            {ans.isDrawing ? (
+                                                <HandwritingOverlayPreview
+                                                    imageDataUrl={ans.cleanInput}
+                                                    questionText={ans.questionText}
+                                                    questionText2={ans.questionText2}
+                                                    imageUrl={ans.imageUrl}
+                                                    image2Url={ans.image2Url}
+                                                />
+                                            ) : (
+                                                <div className="relative w-full max-w-full z-10 text-lg">
+                                                    {ans.questionText ? (
+                                                        <MathText className="font-bold text-slate-800 leading-relaxed font-myungjo" html={ans.questionText} />
+                                                    ) : (
+                                                        <div className="text-sm font-bold text-slate-400 bg-slate-50 p-4 rounded-xl border border-slate-200 text-center">
+                                                            [문제 텍스트 데이터가 없습니다]
+                                                        </div>
+                                                    )}
+                                                    
+                                                    {ans.imageUrl && ans.imageUrl !== '' && (
+                                                        <img src={ans.imageUrl} className="max-w-full rounded-lg mt-4 shadow-sm" alt="문제 원본 이미지" />
+                                                    )}
+                                                    {ans.image2Url && ans.image2Url !== '' && (
+                                                        <img src={ans.image2Url} className="max-w-full rounded-lg mt-4 shadow-sm" alt="문제 원본 이미지 2" />
+                                                    )}
+                                                    {ans.questionText2 && (
+                                                        <MathText className="font-bold text-slate-800 leading-relaxed font-myungjo mt-4" html={ans.questionText2} />
+                                                    )}
+                                                </div>
                                             )}
                                         </div>
 

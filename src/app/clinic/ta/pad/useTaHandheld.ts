@@ -41,7 +41,7 @@ export interface CallData {
 export interface RecheckData {
   seat: string; studentId?: string; uid: string; qNum: number; name: string; classes: string[];
   questionText: string; questionText2?: string; imageUrl?: string; image2Url?: string;
-  stageWidth?: number; stageHeight?: number; cropHeight?: number;
+  stageWidth?: number; stageHeight?: number; cropHeight?: number; stagePadding?: number;
   correctAnswer: string; imageDataUrl: string; recognizedText: string; aiExplanation: string; aiConfidence: number | null; requestedAt: number;
   initial?: boolean;
 }
@@ -586,7 +586,7 @@ export function useTaHandheld() {
         seat, studentId: st.studentId, uid: data.uid, qNum: data.qNum, name: data.name, classes: st.classes || [],
         questionText: data.questionText || '', questionText2: data.questionText2 || '',
         imageUrl: data.imageUrl || '', image2Url: data.image2Url || '',
-        stageWidth: data.stageWidth, stageHeight: data.stageHeight, cropHeight: data.cropHeight,
+        stageWidth: data.stageWidth, stageHeight: data.stageHeight, cropHeight: data.cropHeight, stagePadding: data.stagePadding,
         correctAnswer: data.correctAnswer || '',
         imageDataUrl: data.imageDataUrl || '', recognizedText: data.recognizedText || '',
         aiExplanation: data.aiExplanation || '', aiConfidence: data.aiConfidence ?? null,

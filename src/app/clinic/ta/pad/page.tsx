@@ -6,7 +6,6 @@ import { useTaHandheld, formatSeat } from "./useTaHandheld";
 import SeatCanvas from "@/app/clinic/_shared/SeatCanvas";
 import { DEFAULT_CANVAS_W, DEFAULT_CANVAS_H, DEFAULT_SEAT_CARD_W, DEFAULT_SEAT_CARD_H } from "@/lib/clinicSeatLayout";
 import TaTopBar from "../TaTopBar";
-import { QuestionDisplay } from "@/app/clinic/viewer/components/QuestionDisplay";
 import UnlockPanel from "@/components/clinic/UnlockPanel";
 
 let mathJaxInitStarted = false;
@@ -34,156 +33,7 @@ const MathText = React.memo(function MathText({ html, className }: { html: strin
 });
 
 
-// 🌟 학생 화면의 원본 스테이지 크기(stageWidth × stageHeight) 그대로 문제(MathJax+이미지)와 투명 손글씨를 (0,0)에 겹쳐 축소 표시하는 내장 컴포넌트
-function HandwritingOverlayPreview({
-  imageDataUrl,
-  questionText,
-  questionText2,
-  imageUrl,
-  image2Url,
-  stageWidth,
-  stageHeight,
-  cropHeight,
-}: {
-  imageDataUrl: string;
-  questionText?: string;
-  questionText2?: string;
-  imageUrl?: string;
-  image2Url?: string;
-  stageWidth?: number;
-  stageHeight?: number;
-  cropHeight?: number;
-}) {
-  const containerRef = React.useRef<HTMLDivElement>(null);
-  const contentMeasureRef = React.useRef<HTMLDivElement>(null);
-  const [containerWidth, setContainerWidth] = React.useState<number>(0);
-  const [naturalSize, setNaturalSize] = React.useState<{ w: number; h: number }>({
-    w: stageWidth || 640,
-    h: stageHeight || 480,
-  });
-  const [measuredContentH, setMeasuredContentH] = React.useState<number>(0);
-
-  React.useEffect(() => {
-    if (!containerRef.current) return;
-    const updateWidth = () => {
-      if (containerRef.current) {
-        setContainerWidth(containerRef.current.clientWidth);
-      }
-    };
-    updateWidth();
-    const ro = new ResizeObserver(updateWidth);
-    ro.observe(containerRef.current);
-    return () => ro.disconnect();
-  }, []);
-
-  React.useEffect(() => {
-    if (!contentMeasureRef.current) return;
-    const updateContentH = () => {
-      if (contentMeasureRef.current) {
-        setMeasuredContentH(contentMeasureRef.current.scrollHeight);
-      }
-    };
-    updateContentH();
-    const timer = setTimeout(updateContentH, 250);
-    const ro = new ResizeObserver(updateContentH);
-    ro.observe(contentMeasureRef.current);
-    return () => {
-      clearTimeout(timer);
-      ro.disconnect();
-    };
-  }, [questionText, questionText2, imageUrl, image2Url]);
-
-  const baseW = stageWidth && stageWidth > 0 ? stageWidth : naturalSize.w;
-  const baseH = stageHeight && stageHeight > 0 ? stageHeight : naturalSize.h;
-
-  const hasQuestionContext = Boolean(
-    (questionText && questionText.trim()) ||
-      (questionText2 && questionText2.trim()) ||
-      (imageUrl && imageUrl.trim()) ||
-      (image2Url && image2Url.trim())
-  );
-
-  const effectiveCropH = (() => {
-    const baseCrop = cropHeight && cropHeight > 0 ? cropHeight : baseH;
-    if (measuredContentH > 0) {
-      return Math.min(baseH, Math.max(baseCrop, measuredContentH + 36, 180));
-    }
-    return Math.min(baseH, Math.max(baseCrop, 180));
-  })();
-
-  const scale =
-    containerWidth > 0 && baseW > 0 ? Math.min(1, containerWidth / baseW) : 1;
-  const scaledHeight = Math.round(effectiveCropH * scale);
-
-  if (!hasQuestionContext) {
-    return (
-      <img
-        className="w-full max-h-[380px] object-contain rounded-lg bg-white"
-        src={imageDataUrl}
-        alt="학생 손글씨 답안"
-      />
-    );
-  }
-
-  return (
-    <div
-      ref={containerRef}
-      className="w-full overflow-hidden rounded-lg bg-white relative"
-      style={{
-        height: scaledHeight > 0 ? `${scaledHeight}px` : "auto",
-        minHeight: "160px",
-        backgroundImage: "radial-gradient(#cbd5e1 1.25px, transparent 1.25px)",
-        backgroundSize: "20px 20px",
-      }}
-    >
-      <div
-        style={{
-          width: `${baseW}px`,
-          height: `${baseH}px`,
-          transform: `scale(${scale})`,
-          transformOrigin: "top left",
-          position: "relative",
-        }}
-      >
-        <div
-          ref={contentMeasureRef}
-          className="opacity-75 pointer-events-none select-none"
-        >
-          <QuestionDisplay
-            html={questionText || ""}
-            imageUrl={imageUrl}
-            image2Url={image2Url}
-            html2={questionText2}
-          />
-        </div>
-        <img
-          src={imageDataUrl}
-          alt="학생 손글씨 답안"
-          onLoad={(e) => {
-            if (!stageWidth || !stageHeight) {
-              const im = e.currentTarget;
-              if (im.naturalWidth > 0 && im.naturalHeight > 0) {
-                const dprGuess = im.naturalWidth > 1000 ? 2 : 1;
-                setNaturalSize({
-                  w: Math.round(im.naturalWidth / dprGuess),
-                  h: Math.round(im.naturalHeight / dprGuess),
-                });
-              }
-            }
-          }}
-          style={{
-            position: "absolute",
-            top: 0,
-            left: 0,
-            width: `${baseW}px`,
-            height: `${baseH}px`,
-            pointerEvents: "none",
-          }}
-        />
-      </div>
-    </div>
-  );
-}
+import HandwritingOverlayPreview from "@/components/clinic/HandwritingOverlayPreview";
 
 export default function TaHandheldDashboard() {
   const {
@@ -361,6 +211,7 @@ export default function TaHandheldDashboard() {
                         stageWidth={currentRecheck.stageWidth}
                         stageHeight={currentRecheck.stageHeight}
                         cropHeight={currentRecheck.cropHeight}
+                        stagePadding={currentRecheck.stagePadding}
                       />
                     </div>
                   ) : (
