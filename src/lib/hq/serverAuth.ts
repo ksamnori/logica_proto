@@ -138,7 +138,11 @@ export async function requireHqCaller(
   const isHqTenantMember = Boolean(
     inst.tenant_id && hqTenantIds.has(String(inst.tenant_id))
   );
-  const isSuperRole = String(inst.role || "").toUpperCase() === "SUPER_ADMIN";
+  const posStr = String(inst.position || "");
+  const isSuperRole =
+    String(inst.role || "").toUpperCase() === "SUPER_ADMIN" ||
+    posStr.includes("최고관리자") ||
+    posStr.includes("대장");
 
   if (!isHqTenantMember && !isSuperRole && !rpcHqAdmin) {
     return apiFail("본부(HQ) 소속 임직원만 접근할 수 있습니다.", 403);
@@ -149,33 +153,21 @@ export async function requireHqCaller(
   const prof = !profileRes.error ? profileRes.data : null;
 
   const inferred = inferRankFromPosition(inst.chat_position, inst.position);
-  const rankCode: HqRankCode = (prof?.rank_code as HqRankCode) || inferred.rankCode;
+  const rankCode: HqRankCode =
+    (prof?.rank_code as HqRankCode) || (isSuperRole ? "CEO" : inferred.rankCode);
   const rankLevel = getRankLevel(rankCode);
   const jobTitle = prof?.job_title || inferred.jobTitle;
   const department = (prof?.department || inst.department || "미지정").trim();
 
-  let hasAnyExecutive = false;
-  if (!schemaMissing) {
-    const { count } = await supabaseAdmin
-      .from("hq_member_profile")
-      .select("instructor_id", { count: "exact", head: true })
-      .in("rank_code", ["CEO", "DIRECTOR"]);
-    hasAnyExecutive = (count ?? 0) > 0;
-  }
-
-  // 최고관리자: DB is_hq_admin 등록자, 대표·소장(Lv.5), 또는 임원 미배정 초기 상태의 본사 SUPER_ADMIN
-  const isHqAdmin =
-    rpcHqAdmin ||
-    rankCode === "CEO" ||
-    (!hasAnyExecutive && isHqTenantMember && isSuperRole);
+  // 최고관리자: DB is_hq_admin 등록자, 전체 시스템 SUPER_ADMIN(최고관리자), 또는 대표·소장(Lv.5)
+  const isHqAdmin = rpcHqAdmin || isSuperRole || rankCode === "CEO";
 
   // 인사·급여 관리자: 최고관리자, 본부장·이사(Lv.4+), 경영지원 팀장(Lv.3+), 또는 최고관리자가 위임한 인사담당자(is_hr_admin)
   const isHrManager =
     isHqAdmin ||
     rankLevel >= 4 ||
     Boolean(prof?.is_hr_admin) ||
-    (department.includes("경영지원") && rankLevel >= 3) ||
-    (!hasAnyExecutive && isSuperRole);
+    (department.includes("경영지원") && rankLevel >= 3);
 
   return {
     userId: user.id,

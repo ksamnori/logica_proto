@@ -26,6 +26,7 @@ export default function SuperAdminModal({ isOpen, onClose }: SuperAdminModalProp
       await supabase.auth.signOut();
       localStorage.clear();
       document.cookie = "sb-access-token=; path=/; max-age=0;"; 
+      document.cookie = "logica_tenant_id=; path=/; max-age=0;";
       
       const fakeEmail = `${adminId}@logica.com`;
       const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
@@ -40,7 +41,7 @@ export default function SuperAdminModal({ isOpen, onClose }: SuperAdminModalProp
       }
 
       if (authData.session) {
-        document.cookie = `sb-access-token=${authData.session.access_token}; path=/; max-age=86400;`;
+        document.cookie = `sb-access-token=${authData.session.access_token}; path=/; max-age=604800;`;
       }
 
       const { data: adminData, error: dbError } = await supabase
@@ -66,6 +67,7 @@ export default function SuperAdminModal({ isOpen, onClose }: SuperAdminModalProp
         // 🌟 [추가됨] 최고관리자도 시스템 이용을 위해 소속 지점(본사 등) 꼬리표를 챙겨야 합니다!
         if (adminData.tenant_id) {
           localStorage.setItem("logica_tenant_id", adminData.tenant_id);
+          document.cookie = `logica_tenant_id=${adminData.tenant_id}; path=/; max-age=604800;`;
         }
 
         sessionStorage.setItem("just_logged_in", "true");

@@ -213,17 +213,19 @@ export default function MobileInstructorPortalPage() {
       }
 
       if (authData.session) {
-        document.cookie = `sb-access-token=${authData.session.access_token}; path=/; max-age=86400;`;
+        document.cookie = `sb-access-token=${authData.session.access_token}; path=/; max-age=604800;`;
       }
 
       sessionStorage.setItem("logica_instructor_id", instData.instructor_id);
+      localStorage.setItem("logica_instructor_id", instData.instructor_id);
       localStorage.setItem("logica_instructor_name", instData.name);
       localStorage.setItem("logica_instructor_role", instData.role || "");
       localStorage.setItem("logica_instructor_position", instData.position || "");
       
-      // 🌟 [추가됨] 브라우저에 소속 지점 저장 (채팅 위젯 등이 사용할 수 있도록)
+      // 🌟 [추가됨] 브라우저에 소속 지점 저장 (채팅 위젯 및 서버 액션 쿠키가 사용할 수 있도록)
       if (instData.tenant_id) {
         localStorage.setItem("logica_tenant_id", instData.tenant_id);
+        document.cookie = `logica_tenant_id=${instData.tenant_id}; path=/; max-age=604800;`;
       }
       
       loadDashboard(instData.instructor_id);
@@ -239,6 +241,7 @@ export default function MobileInstructorPortalPage() {
       localStorage.removeItem("logica_instructor_name");
       localStorage.removeItem("logica_tenant_id"); // 🌟 안전하게 꼬리표 삭제
       document.cookie = "sb-access-token=; path=/; max-age=0;"; 
+      document.cookie = "logica_tenant_id=; path=/; max-age=0;";
       window.location.reload();
     }
   };

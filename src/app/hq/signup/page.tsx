@@ -15,7 +15,7 @@ export default function HqSignupPage() {
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
   const [password, setPassword] = useState("");
-  const [department, setDepartment] = useState<string>(HQ_DEFAULT_DEPARTMENTS[1]);
+  const [department, setDepartment] = useState<string>(HQ_DEFAULT_DEPARTMENTS[0]);
   const [customDept, setCustomDept] = useState("");
   const [rankCode, setRankCode] = useState<HqRankCode>("STAFF");
   const [jobTitle, setJobTitle] = useState("연구원");

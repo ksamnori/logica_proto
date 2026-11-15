@@ -19,12 +19,31 @@ function getSupabaseSingleton(): SupabaseClient {
   if (!g._supabaseInstance) {
     g._supabaseInstance = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-    // 토큰 자동 갱신(TOKEN_REFRESHED) 시 미들웨어(proxy.ts)용 쿠키도 최신 상태로 동기화
+    // 토큰 자동 갱신(TOKEN_REFRESHED) 및 세션 복원(INITIAL_SESSION) 시 쿠키도 최신 상태로 동기화
     if (!g._supabaseAuthListenerBound) {
       g._supabaseAuthListenerBound = true;
       g._supabaseInstance.auth.onAuthStateChange((event: string, session: any) => {
-        if ((event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') && session?.access_token) {
-          document.cookie = `sb-access-token=${session.access_token}; path=/; max-age=86400;`;
+        if (
+          (event === 'INITIAL_SESSION' || event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') &&
+          session?.access_token
+        ) {
+          document.cookie = `sb-access-token=${session.access_token}; path=/; max-age=604800;`;
+          try {
+            const cachedInstId = localStorage.getItem('logica_instructor_id');
+            const cachedTenantId = (localStorage.getItem('logica_tenant_id') || '').trim();
+            if (
+              cachedInstId &&
+              cachedInstId === session.user?.id &&
+              cachedTenantId &&
+              cachedTenantId !== 'hq' &&
+              cachedTenantId !== 'null' &&
+              cachedTenantId !== 'undefined'
+            ) {
+              document.cookie = `logica_tenant_id=${cachedTenantId}; path=/; max-age=604800;`;
+            }
+          } catch {
+            // 스토리지 접근 불가 환경 무시
+          }
         }
       });
     }

@@ -96,8 +96,13 @@ export async function syncInstructorProfile(supabaseClient: any): Promise<{
         if (position) {
           localStorage.setItem(TA_POSITION_STORAGE_KEY, position);
         }
-        if (inst.tenant_id && !localStorage.getItem('logica_tenant_id')) {
-          localStorage.setItem('logica_tenant_id', inst.tenant_id);
+        if (inst.tenant_id) {
+          if (!localStorage.getItem('logica_tenant_id')) {
+            localStorage.setItem('logica_tenant_id', inst.tenant_id);
+          }
+          if (!document.cookie.includes('logica_tenant_id=')) {
+            document.cookie = `logica_tenant_id=${inst.tenant_id}; path=/; max-age=604800;`;
+          }
         }
       }
     }

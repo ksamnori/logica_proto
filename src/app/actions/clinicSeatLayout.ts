@@ -2,8 +2,8 @@
 "use server";
 
 import { createClient } from "@supabase/supabase-js";
-import { cookies } from "next/headers";
 import { SeatLayout, Seat } from "@/lib/clinicSeatLayout";
+import { resolveServerTenantId } from "@/lib/serverTenant";
 
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL || "",
@@ -11,8 +11,7 @@ const supabaseAdmin = createClient(
 );
 
 async function getTenantId() {
-  const cookieStore = await cookies();
-  return cookieStore.get("logica_tenant_id")?.value;
+  return resolveServerTenantId();
 }
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;

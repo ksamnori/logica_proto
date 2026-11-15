@@ -37,7 +37,7 @@ export default function MemberFormModal({
   const [password, setPassword] = useState("");
   const [email, setEmail] = useState("");
   const [employeeNo, setEmployeeNo] = useState("");
-  const [department, setDepartment] = useState("연구개발팀");
+  const [department, setDepartment] = useState<string>(HQ_DEFAULT_DEPARTMENTS[0]);
   const [customDept, setCustomDept] = useState("");
   const [rankCode, setRankCode] = useState<HqRankCode>("STAFF");
   const [jobTitle, setJobTitle] = useState("연구원");
@@ -77,7 +77,7 @@ export default function MemberFormModal({
       setPassword("");
       setEmail("");
       setEmployeeNo("");
-      setDepartment("연구개발팀");
+      setDepartment(HQ_DEFAULT_DEPARTMENTS[0]);
       setCustomDept("");
       setRankCode("STAFF");
       setJobTitle("연구원");

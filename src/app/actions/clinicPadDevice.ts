@@ -2,7 +2,7 @@
 "use server";
 
 import { createClient } from "@supabase/supabase-js";
-import { cookies } from "next/headers";
+import { resolveServerTenantId } from "@/lib/serverTenant";
 
 const supabaseAdmin = createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL || "",
@@ -10,8 +10,7 @@ const supabaseAdmin = createClient(
 );
 
 async function getTenantId() {
-    const cookieStore = await cookies();
-    return cookieStore.get("logica_tenant_id")?.value;
+    return resolveServerTenantId();
 }
 
 // 이 기기가 어느 좌석에 고정 등록돼 있는지 조회한다. 클라이언트가 anon key로 clinic_pad_device를

@@ -129,7 +129,10 @@ export default function TeacherDashboardPage() {
             localStorage.setItem("logica_instructor_name", name);
             if (role) localStorage.setItem("logica_instructor_role", role);
             if (position) localStorage.setItem("logica_instructor_position", position);
-            if (instRow.tenant_id) localStorage.setItem("logica_tenant_id", instRow.tenant_id);
+            if (instRow.tenant_id) {
+              localStorage.setItem("logica_tenant_id", instRow.tenant_id);
+              document.cookie = `logica_tenant_id=${instRow.tenant_id}; path=/; max-age=604800;`;
+            }
           }
         } else {
           instId = "";

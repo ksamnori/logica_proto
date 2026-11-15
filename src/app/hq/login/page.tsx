@@ -8,19 +8,23 @@ import { FALLBACK_HQ_TENANT_ID } from "@/lib/hq/constants";
 
 export default function HqLoginPage() {
   const router = useRouter();
-  const [formData, setFormData] = useState({ phone: "", password: "" });
+  const [formData, setFormData] = useState({ loginId: "", password: "" });
   const [isLoading, setIsLoading] = useState(false);
 
-  const formatPhone = (val: string) => {
-    const res = val.replace(/[^0-9]/g, "").slice(0, 11);
+  const formatPhoneIfDigits = (val: string) => {
+    const trimmed = val.trim();
+    if (!trimmed) return "";
+    // 영문·@·점 등이 포함되면 이메일/아이디 입력으로 간주하여 그대로 유지
+    if (!/^[0-9-]+$/.test(trimmed)) return val;
+    const res = trimmed.replace(/[^0-9]/g, "").slice(0, 11);
     if (res.length < 4) return res;
     if (res.length < 8) return `${res.slice(0, 3)}-${res.slice(3)}`;
     return `${res.slice(0, 3)}-${res.slice(3, 7)}-${res.slice(7, 11)}`;
   };
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.name === "phone") {
-      setFormData({ ...formData, phone: formatPhone(e.target.value) });
+    if (e.target.name === "loginId") {
+      setFormData({ ...formData, loginId: formatPhoneIfDigits(e.target.value) });
     } else {
       setFormData({ ...formData, [e.target.name]: e.target.value });
     }
@@ -28,15 +32,23 @@ export default function HqLoginPage() {
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formData.phone || !formData.password) {
-      alert("연락처와 비밀번호를 입력해주세요.");
+    const rawId = formData.loginId.trim();
+    if (!rawId || !formData.password) {
+      alert("휴대폰 번호(또는 이메일·아이디)와 비밀번호를 입력해주세요.");
       return;
     }
 
     setIsLoading(true);
     try {
-      const cleanPhone = formData.phone.replace(/[^0-9]/g, "");
-      const authEmail = `${cleanPhone}@logica.com`;
+      let authEmail = "";
+      if (rawId.includes("@")) {
+        authEmail = rawId;
+      } else if (/^[0-9-]+$/.test(rawId)) {
+        const cleanPhone = rawId.replace(/[^0-9]/g, "");
+        authEmail = `${cleanPhone}@logica.com`;
+      } else {
+        authEmail = `${rawId}@logica.com`;
+      }
 
       const { data: authData, error: authError } =
         await supabase.auth.signInWithPassword({
@@ -45,7 +57,7 @@ export default function HqLoginPage() {
         });
 
       if (authError || !authData.user) {
-        throw new Error("연락처 또는 비밀번호가 일치하지 않습니다.");
+        throw new Error("계정 정보(연락처·이메일) 또는 비밀번호가 일치하지 않습니다.");
       }
 
       const [instRes, adminRpcRes] = await Promise.all([
@@ -77,8 +89,11 @@ export default function HqLoginPage() {
         String(instData.tenant_id || "") === FALLBACK_HQ_TENANT_ID ||
         String(tenantObj?.tenant_type || "").toUpperCase() === "HQ" ||
         String(tenantObj?.name || "").includes("본사");
+      const posStr = String(instData.position || "");
       const isSuperRole =
-        String(instData.role || "").toUpperCase() === "SUPER_ADMIN";
+        String(instData.role || "").toUpperCase() === "SUPER_ADMIN" ||
+        posStr.includes("최고관리자") ||
+        posStr.includes("대장");
       const isHqAdmin = adminRpcRes.data === true;
 
       if (!isHqTenant && !isSuperRole && !isHqAdmin) {
@@ -136,16 +151,15 @@ export default function HqLoginPage() {
         <form onSubmit={handleLogin} className="space-y-4">
           <div>
             <label className="block text-xs font-bold text-slate-700 mb-1.5">
-              휴대폰 번호 (사내 ID)
+              휴대폰 번호 또는 이메일 · 아이디
             </label>
             <input
               type="text"
-              name="phone"
-              value={formData.phone}
-              maxLength={13}
+              name="loginId"
+              value={formData.loginId}
               onChange={handleChange}
-              className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-brand font-bold tracking-wider text-slate-900"
-              placeholder="010-1234-5678"
+              className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-brand font-bold text-slate-900"
+              placeholder="010-1234-5678 또는 이메일 입력"
             />
           </div>
 

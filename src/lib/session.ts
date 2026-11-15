@@ -1,5 +1,13 @@
 import { supabase } from "@/lib/supabase";
 
+const SESSION_COOKIE_MAX_AGE = 60 * 60 * 24 * 7; // 7일
+
+function getBrowserCookie(name: string): string {
+  if (typeof document === "undefined") return "";
+  const match = document.cookie.match(new RegExp(`(?:^|;\\s*)${name}=([^;]*)`));
+  return match ? decodeURIComponent(match[1]).trim() : "";
+}
+
 // 로그인 세션(localStorage 기반)이 유실됐는지 판별한다.
 // role/tenant가 비어있는 것을 "권한 0개인 로그인 상태"로 오인해 권한 없음 화면을 띄우지 않도록,
 // 대시보드 페이지들은 권한 DB 조회 전에 이 함수로 로그아웃 여부부터 판별해야 한다.
@@ -33,11 +41,11 @@ export async function recoverInstructorSession(): Promise<boolean> {
     localStorage.setItem("logica_instructor_position", instructor.position || "");
     if (instructor.tenant_id) {
       localStorage.setItem("logica_tenant_id", instructor.tenant_id);
-      document.cookie = `logica_tenant_id=${instructor.tenant_id}; path=/; max-age=86400;`;
+      document.cookie = `logica_tenant_id=${instructor.tenant_id}; path=/; max-age=${SESSION_COOKIE_MAX_AGE};`;
     }
 
     if (session?.access_token) {
-      document.cookie = `sb-access-token=${session.access_token}; path=/; max-age=86400;`;
+      document.cookie = `sb-access-token=${session.access_token}; path=/; max-age=${SESSION_COOKIE_MAX_AGE};`;
     }
 
     return true;
@@ -46,8 +54,31 @@ export async function recoverInstructorSession(): Promise<boolean> {
   }
 }
 
-// 세션 가드의 표준 진입점: 캐시가 있으면 즉시 true. 없으면 복구를 한 번 시도하고 결과를 반환한다.
+// 세션 가드의 표준 진입점: 캐시가 있으면 쿠키 누락 여부까지 즉시 보정하고, 없으면 DB 복구를 시도한다.
 export async function ensureInstructorSession(): Promise<boolean> {
-  if (!isInstructorSessionMissing()) return true;
-  return recoverInstructorSession();
+  if (isInstructorSessionMissing()) {
+    return recoverInstructorSession();
+  }
+
+  if (typeof window !== "undefined") {
+    const cachedTenantId = (localStorage.getItem("logica_tenant_id") || "").trim();
+    const cookieTenantId = getBrowserCookie("logica_tenant_id");
+    const cookieAccessToken = getBrowserCookie("sb-access-token");
+
+    if (
+      cachedTenantId &&
+      cachedTenantId !== "hq" &&
+      cachedTenantId !== "null" &&
+      cachedTenantId !== "undefined" &&
+      !cookieTenantId
+    ) {
+      document.cookie = `logica_tenant_id=${cachedTenantId}; path=/; max-age=${SESSION_COOKIE_MAX_AGE};`;
+    }
+
+    if (!cookieAccessToken || (!cachedTenantId && !cookieTenantId)) {
+      return recoverInstructorSession();
+    }
+  }
+
+  return true;
 }

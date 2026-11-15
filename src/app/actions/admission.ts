@@ -2,8 +2,8 @@
 "use server";
 
 import { createClient } from "@supabase/supabase-js";
-import { cookies } from "next/headers";
 import { revalidatePath } from "next/cache"; // 🌟 [추가] Next.js 캐시 초기화를 위한 함수 임포트
+import { resolveServerTenantId } from "@/lib/serverTenant";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
@@ -12,10 +12,9 @@ const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey, {
   auth: { autoRefreshToken: false, persistSession: false }
 });
 
-// 🌟 [핵심 변경] 직관적인 쿠키 읽기로 통일!
+// 🌟 쿠키(`logica_tenant_id`) 우선 조회 + 만료 시 로그인 세션으로 DB 복구
 async function getTenantId() {
-  const cookieStore = await cookies();
-  return cookieStore.get("logica_tenant_id")?.value;
+  return resolveServerTenantId();
 }
 
 function buildStandardCandidateList(standardName: string): string[] {

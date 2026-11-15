@@ -2,9 +2,9 @@
 "use server";
 
 import { createClient } from "@supabase/supabase-js";
-import { cookies } from "next/headers";
 import bcrypt from "bcryptjs";
 import { formatPhone, normalizeGrade, phoneVariants } from "@/lib/normalize";
+import { resolveServerTenantId } from "@/lib/serverTenant";
 
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL || "",
@@ -12,8 +12,7 @@ const supabaseAdmin = createClient(
 );
 
 async function getTenantId() {
-  const cookieStore = await cookies();
-  return cookieStore.get("logica_tenant_id")?.value;
+  return resolveServerTenantId();
 }
 
 export async function registerStudentAction(data: {

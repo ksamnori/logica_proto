@@ -34,6 +34,10 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         return; 
       }
 
+      if (session?.access_token) {
+        document.cookie = `sb-access-token=${session.access_token}; path=/; max-age=604800;`;
+      }
+
       // 🌟 [핵심 해결] 이메일 자르기 꼼수를 버리고, 정확한 고유 UID(user.id)로 강사를 검색합니다!
       if (user.id) {
         // 3. DB에서 강사 정보 실시간으로 가져오기
@@ -44,6 +48,15 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           .single();
 
         if (instructor) {
+          localStorage.setItem("logica_instructor_id", instructor.instructor_id);
+          if (instructor.name) localStorage.setItem("logica_instructor_name", instructor.name);
+          if (instructor.role) localStorage.setItem("logica_instructor_role", instructor.role);
+          localStorage.setItem("logica_instructor_position", instructor.position || "");
+          if (instructor.tenant_id) {
+            localStorage.setItem("logica_tenant_id", instructor.tenant_id);
+            document.cookie = `logica_tenant_id=${instructor.tenant_id}; path=/; max-age=604800;`;
+          }
+
           const role = String(instructor.role || '').toUpperCase();
           const pos = String(instructor.position || '');
           
@@ -72,6 +85,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const handleLogout = async () => {
     if (confirm("로그아웃 하시겠습니까?")) {
       document.cookie = "sb-access-token=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;";
+      document.cookie = "logica_tenant_id=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;";
       localStorage.clear();
       sessionStorage.clear();
       

@@ -62,7 +62,7 @@ export default function LoginPage() {
       }
 
       if (authData.session) {
-        document.cookie = `sb-access-token=${authData.session.access_token}; path=/; max-age=86400;`;
+        document.cookie = `sb-access-token=${authData.session.access_token}; path=/; max-age=604800;`;
       }
 
       const userId = authData.user?.id;
@@ -139,7 +139,7 @@ export default function LoginPage() {
       
       if (instructorData.tenant_id) {
         localStorage.setItem("logica_tenant_id", instructorData.tenant_id);
-        document.cookie = `logica_tenant_id=${instructorData.tenant_id}; path=/; max-age=86400;`;
+        document.cookie = `logica_tenant_id=${instructorData.tenant_id}; path=/; max-age=604800;`;
       }
       sessionStorage.setItem("just_logged_in", "true");
 
@@ -202,7 +202,7 @@ export default function LoginPage() {
       }
 
       if (authData.session) {
-        document.cookie = `sb-access-token=${authData.session.access_token}; path=/; max-age=86400;`;
+        document.cookie = `sb-access-token=${authData.session.access_token}; path=/; max-age=604800;`;
       }
 
       const userId = authData.user?.id;
@@ -278,7 +278,7 @@ export default function LoginPage() {
         
         if (instructorData.tenant_id) {
           localStorage.setItem("logica_tenant_id", instructorData.tenant_id);
-          document.cookie = `logica_tenant_id=${instructorData.tenant_id}; path=/; max-age=86400;`;
+          document.cookie = `logica_tenant_id=${instructorData.tenant_id}; path=/; max-age=604800;`;
         }
 
         sessionStorage.setItem("just_logged_in", "true");

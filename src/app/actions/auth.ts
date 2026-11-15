@@ -2,7 +2,7 @@
 "use server";
 
 import { createClient, SupabaseClient } from "@supabase/supabase-js";
-import { cookies } from "next/headers";
+import { resolveServerTenantId } from "@/lib/serverTenant";
 
 const getAdminClient = () =>
   createClient(
@@ -45,8 +45,7 @@ async function getCallerTenant(clientTenantId?: string): Promise<{
   cookieTenantId: string;
   localTenantId: string;
 }> {
-  const cookieStore = await cookies();
-  const cookieTenantId = (cookieStore.get("logica_tenant_id")?.value || "").trim();
+  const cookieTenantId = ((await resolveServerTenantId(clientTenantId)) || "").trim();
   const localTenantId = (clientTenantId || "").trim();
   const callerTenant = localTenantId || cookieTenantId;
   return { callerTenant, cookieTenantId, localTenantId };

@@ -84,14 +84,13 @@ export const HQ_RANK_LIST: RankMeta[] = [
 ];
 
 export const HQ_DEFAULT_DEPARTMENTS = [
+  "사업부",
+  "집필팀",
   "경영지원팀",
   "연구개발팀",
   "출판편집팀",
   "디자인팀",
   "제작·마케팅팀",
-  "학원사업팀",
-  "IT개발팀",
-  "임원실",
 ] as const;
 
 export const HQ_EMPLOYMENT_TYPES = [
@@ -695,7 +694,7 @@ export function inferRankFromPosition(
     (rawPos === "본사 관리자" || rawPos === "본사 직원" ? "" : rawPos) ||
     "사원";
 
-  if (/대표|소장|회장|사장|발행인/.test(effective)) {
+  if (/대표|소장|회장|사장|발행인|최고관리자|대장/.test(effective)) {
     return { rankCode: "CEO", jobTitle: effective, isDeptHead: true };
   }
   if (/본부장|부소장|이사|상무|전무|주간/.test(effective)) {

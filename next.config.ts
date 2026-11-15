@@ -18,6 +18,10 @@ const nextConfig: NextConfig = {
       allowedOrigins: ["192.168.0.112", "192.168.1.2"],
       bodySizeLimit: "10mb", // 🌟 이미지 업로드 용량을 10MB로 넉넉하게 늘려줍니다.
     },
+    // 🌟 구글 드라이브(L:\) 가상 드라이브에서 대용량(.sst 수백 MB) Turbopack 캐시 mmap 메모리 부족 방지
+    turbopackFileSystemCacheForDev: false,
+    webpackMemoryOptimizations: true,
+    preloadEntriesOnStart: false,
   },
 
   // 🌟 2. Turbopack/Next.js 번들링 모듈 누락 방지

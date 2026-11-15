@@ -5,6 +5,7 @@ import { useEffect, useState, useMemo, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { getExamsAction, deleteExamAction } from "@/app/actions/examActions";
 import { supabase } from "@/lib/supabase"; 
+import { ensureInstructorSession } from "@/lib/session";
 
 // 분리된 모달 컴포넌트 임포트
 import PublishModal from "@/components/exam/PublishModal";
@@ -336,6 +337,12 @@ export default function ExamListPage() {
 
   useEffect(() => {
     const checkAccess = async () => {
+      if (!(await ensureInstructorSession())) {
+        alert("로그인 정보가 없습니다. 다시 로그인해 주세요.");
+        router.replace("/");
+        return;
+      }
+
       const role = localStorage.getItem("logica_instructor_role") || "";
       const pos = localStorage.getItem("logica_instructor_position") || "";
       const tId = localStorage.getItem("logica_tenant_id") || "";
@@ -394,7 +401,7 @@ export default function ExamListPage() {
     if (!isSilent) setIsLoading(true);
     
     const tenantId = localStorage.getItem("logica_tenant_id");
-    const result = await getExamsAction();
+    const result = await getExamsAction(tenantId || undefined);
     
     if (result.success) {
       let fetchedExams = result.data || [];
@@ -829,7 +836,8 @@ export default function ExamListPage() {
       }
     }
 
-    const result = await deleteExamAction(examId);
+    const tenantId = localStorage.getItem("logica_tenant_id");
+    const result = await deleteExamAction(examId, tenantId || undefined);
     if (result.success) {
       alert(result.message);
       loadExams(true);

@@ -2,18 +2,17 @@
 "use server";
 
 import { createClient } from "@supabase/supabase-js";
-import { cookies } from "next/headers";
 import { normalizeMasterCategoryRow } from "@/lib/normalize";
+import { resolveServerTenantId } from "@/lib/serverTenant";
 
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL || "",
   process.env.SUPABASE_SERVICE_ROLE_KEY || ""
 );
 
-// 🌟 [핵심 변경] JWT 해독 대신, 방금 로그인 창에서 구운 직관적인 쿠키를 읽어옵니다.
-async function getTenantId() {
-  const cookieStore = await cookies();
-  return cookieStore.get("logica_tenant_id")?.value;
+// 🌟 쿠키(`logica_tenant_id`) 우선 조회 + 쿠키 만료 시 로그인 세션 토큰(`sb-access-token`)으로 DB 자동 복구
+async function getTenantId(clientTenantId?: string) {
+  return resolveServerTenantId(clientTenantId);
 }
 
 function parseGradeFromCodeOrText(taxIdRaw: string, fallbackText: string = ""): string {
@@ -44,8 +43,8 @@ function parseGradeFromCodeOrText(taxIdRaw: string, fallbackText: string = ""): 
   return "";
 }
 
-export async function getExamsAction() {
-  const tenantId = await getTenantId();
+export async function getExamsAction(clientTenantId?: string) {
+  const tenantId = await getTenantId(clientTenantId);
   if (!tenantId) return { success: false, message: "소속 지점 정보(쿠키)가 없어 문제지를 불러올 수 없습니다.", data: [] };
 
   try {
@@ -267,8 +266,8 @@ export async function getExamsAction() {
   }
 }
 
-export async function deleteExamAction(examId: string) {
-  const tenantId = await getTenantId();
+export async function deleteExamAction(examId: string, clientTenantId?: string) {
+  const tenantId = await getTenantId(clientTenantId);
   if (!tenantId) return { success: false, message: "삭제 권한이 없습니다." };
 
   try {
