@@ -108,6 +108,16 @@ export function normalizeCompanySettings(raw: any): HqCompanySettings {
         incomingExtra.work_rules.length > 0
           ? incomingExtra.work_rules
           : def.extra_settings.work_rules,
+      work_condition_rules:
+        Array.isArray(incomingExtra.work_condition_rules) &&
+        incomingExtra.work_condition_rules.length > 0
+          ? incomingExtra.work_condition_rules
+          : def.extra_settings.work_condition_rules,
+      work_form_policies:
+        Array.isArray(incomingExtra.work_form_policies) &&
+        incomingExtra.work_form_policies.length > 0
+          ? incomingExtra.work_form_policies
+          : def.extra_settings.work_form_policies,
       info_approval_policy: {
         ...def.extra_settings.info_approval_policy,
         ...(incomingExtra.info_approval_policy || {}),

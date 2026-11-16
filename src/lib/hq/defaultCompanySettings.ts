@@ -3,6 +3,8 @@ import {
   DEFAULT_APPROVAL_POLICIES,
   DEFAULT_APPROVAL_TEMPLATES,
   DEFAULT_DOC_FOLDERS,
+  DEFAULT_WORK_CONDITION_RULES,
+  DEFAULT_WORK_FORM_POLICIES,
 } from "./defaultApprovalPolicies";
 import { DEFAULT_WORK_RULES } from "./defaultWorkRules";
 import type {
@@ -514,6 +516,8 @@ export const DEFAULT_HQ_COMPANY_SETTINGS: HqCompanySettings = {
     approval_labels: [],
     substitute_approvals: [],
     work_rules: DEFAULT_WORK_RULES,
+    work_condition_rules: DEFAULT_WORK_CONDITION_RULES,
+    work_form_policies: DEFAULT_WORK_FORM_POLICIES,
   },
 };
 

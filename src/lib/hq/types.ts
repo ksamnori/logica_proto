@@ -705,6 +705,38 @@ export interface HqWorkRuleItem {
   allow_insufficient_break: boolean;
 }
 
+export interface HqWorkConditionRule {
+  policy_id: string; // approval_policies 내 work 카테고리 id 매칭
+  title: string;
+  subtitle: string;
+  icon: string;
+  reason_required: boolean;
+  allow_holiday_substitute?: boolean; // 휴일 근무 전용
+  past_edit_limit_days?: string; // 과거 근무 수정 전용 (예: "3일")
+}
+
+export interface HqWorkFormPolicy {
+  id: string;
+  policy_id: string; // approval_policies 내 work 카테고리 id 매칭
+  name: string;
+  icon: string;
+  description: string;
+  is_mandatory?: boolean; // '근무' 기본 정책 (필수 배지)
+  available_time_range:
+    | "제한 없음"
+    | "정규 근무 시간 내"
+    | "평일 08:00 ~ 20:00";
+  schedule_share_scope: "공유 안함" | "소속 조직 공유" | "전사 공유";
+  offsite_restriction:
+    | "사용 안 함"
+    | "GPS 위치 제한"
+    | "IP 네트워크 제한"
+    | "GPS · IP 모두 제한";
+  allow_night_work: boolean;
+  allow_holiday_work: boolean;
+  reason_required: boolean;
+}
+
 export interface HqCompanyExtraSettings {
   doc_prefix_cert?: string;
   doc_prefix_approval?: string;
@@ -735,6 +767,8 @@ export interface HqCompanyExtraSettings {
   approval_labels?: HqCustomApprovalLabel[];
   substitute_approvals?: HqSubstituteApprovalRule[];
   work_rules?: HqWorkRuleItem[];
+  work_condition_rules?: HqWorkConditionRule[];
+  work_form_policies?: HqWorkFormPolicy[];
 }
 
 export interface HqCompanySettings {

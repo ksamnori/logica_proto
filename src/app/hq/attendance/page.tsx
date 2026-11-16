@@ -562,13 +562,24 @@ export default function HqAttendancePage() {
             >
               ✏️ 출퇴근 누락 · 수기 보정
             </button>
-            <button
-              type="button"
-              onClick={() => router.push("/hq/approvals?new=1&type=LEAVE")}
-              className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-sm"
-            >
-              🌴 연차 · 반차 · 마감대체휴무 신청
-            </button>
+            <div className="flex flex-wrap items-center gap-1.5">
+              <button
+                type="button"
+                onClick={() =>
+                  router.push("/hq/approvals?new=1&policy=wk-biztrip")
+                }
+                className="px-3 py-2 rounded-xl bg-sky-50 hover:bg-sky-100 border border-sky-200 text-sky-700 text-xs font-bold"
+              >
+                ✈️ 출장 · 근무 승인 신청
+              </button>
+              <button
+                type="button"
+                onClick={() => router.push("/hq/approvals?new=1&type=LEAVE")}
+                className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-sm"
+              >
+                🌴 연차 · 반차 · 마감대체휴무 신청
+              </button>
+            </div>
           </div>
         </section>
       </div>

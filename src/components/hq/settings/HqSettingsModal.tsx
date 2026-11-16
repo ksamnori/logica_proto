@@ -31,6 +31,7 @@ import {
   HqDocBoxSettingsSection,
 } from "./HqCustomInfoDocBoxSection";
 import HqHrInfoSettingsSection from "./HqHrInfoSettingsSection";
+import HqWorkPolicySettingsSection from "./HqWorkPolicySettingsSection";
 import HqWorkTypeSettingsSection from "./HqWorkTypeSettingsSection";
 
 export type HqSettingsTab =
@@ -2054,42 +2055,24 @@ export default function HqSettingsModal({
             )}
 
             {activeTab === "work-policy" && (
-              <div className="space-y-6">
-                <div>
-                  <h2 className="text-[22px] font-extrabold text-slate-900">
-                    근무 정책 · 승인
-                  </h2>
-                  <p className="text-xs text-slate-400 mt-1">
-                    출장·외근·원격·연장·휴일·야간 근무 등 근무 항목별 승인 정책을 관리합니다.
-                  </p>
-                </div>
-                <div className="p-5 rounded-2xl border border-slate-200 flex flex-wrap items-center justify-between gap-3 text-xs">
-                  <div>
-                    <div className="font-bold text-slate-900 text-sm">
-                      근무 항목별 승인 · 참조 결재선 설정
-                    </div>
-                    <p className="text-slate-500 mt-0.5">
-                      승인 정책 관리 &gt; [근무] 탭의 11개 정책과 실시간으로 연동됩니다.
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setApprovalPolicySubCat("work");
-                      setActiveTab("approval-policy");
-                    }}
-                    className="px-4 py-2 rounded-xl bg-slate-900 text-white font-bold"
-                  >
-                    근무 승인 정책 열기 →
-                  </button>
-                </div>
-                <StepNavFooter
-                  prevLabel="근무 유형"
-                  onPrev={() => setActiveTab("work-type")}
-                  nextLabel="초과 근무 보상"
-                  onNext={() => setActiveTab("overtime-comp")}
-                />
-              </div>
+              <HqWorkPolicySettingsSection
+                settings={settings}
+                members={members}
+                canEdit={canEdit}
+                saving={saving}
+                onSaveExtra={async (nextExtra, toastMessage) => {
+                  await savePartialSettings(
+                    {
+                      extra_settings: {
+                        ...settings.extra_settings,
+                        ...nextExtra,
+                      },
+                    },
+                    toastMessage
+                  );
+                }}
+                onNavigateTab={(tab) => setActiveTab(tab)}
+              />
             )}
 
             {activeTab === "overtime-comp" && (

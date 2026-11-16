@@ -4,6 +4,8 @@ import type {
   HqApprovalTemplate,
   HqDocFolderItem,
   HqPolicyAssignee,
+  HqWorkConditionRule,
+  HqWorkFormPolicy,
 } from "./types";
 
 export const DEFAULT_DOC_FOLDERS: HqDocFolderItem[] = [
@@ -295,7 +297,7 @@ export const DEFAULT_APPROVAL_POLICIES: HqApprovalPolicyItem[] = [
     icon: "☀️",
     allow_edit: false,
     per_requester: false,
-    cc_list: [cloneAssignee(PRESET_ASSIGNEES.KIM_GS)],
+    cc_list: [cloneAssignee(PRESET_ASSIGNEES.CHUN)],
     steps: [
       { step_order: 1, assignees: [cloneAssignee(PRESET_ASSIGNEES.ORG_HEAD_1)] },
     ],
@@ -307,7 +309,7 @@ export const DEFAULT_APPROVAL_POLICIES: HqApprovalPolicyItem[] = [
     icon: "🌙",
     allow_edit: false,
     per_requester: false,
-    cc_list: [cloneAssignee(PRESET_ASSIGNEES.KIM_GS)],
+    cc_list: [cloneAssignee(PRESET_ASSIGNEES.CHUN)],
     steps: [
       { step_order: 1, assignees: [cloneAssignee(PRESET_ASSIGNEES.ORG_HEAD_1)] },
     ],
@@ -668,5 +670,121 @@ export const DEFAULT_APPROVAL_POLICIES: HqApprovalPolicyItem[] = [
     per_requester: false,
     cc_list: [],
     steps: [],
+  },
+];
+
+// ============================================================================
+// 설정 > 근무 > 근무 정책 · 승인 — 1) 승인 · 참조 상황별 7개 규칙
+// ============================================================================
+export const DEFAULT_WORK_CONDITION_RULES: HqWorkConditionRule[] = [
+  {
+    policy_id: "wk-overtime",
+    title: "연장 근무",
+    subtitle: "근무 유형에서의 일하는 시간을 넘어선 근무 등록 시 승인 · 참조가 발생해요.",
+    icon: "🔥",
+    reason_required: false,
+  },
+  {
+    policy_id: "wk-holiday",
+    title: "휴일 근무",
+    subtitle: "주휴일을 비롯한 휴일에 근무를 등록하면 승인 · 참조가 발생해요.",
+    icon: "☀️",
+    reason_required: false,
+    allow_holiday_substitute: false,
+  },
+  {
+    policy_id: "wk-night",
+    title: "야간 근무",
+    subtitle: "오후 10시 – 다음날 오전 6시 사이에 근무 등록 시 승인 · 참조가 발생해요.",
+    icon: "🌙",
+    reason_required: false,
+  },
+  {
+    policy_id: "wk-edit-past",
+    title: "과거 근무 수정",
+    subtitle: "과거에 등록된 근무를 수정하면 승인 · 참조가 발생해요.",
+    icon: "✏️",
+    reason_required: false,
+    past_edit_limit_days: "3일",
+  },
+  {
+    policy_id: "wk-inclusive-over",
+    title: "포괄 임금 초과",
+    subtitle: "근무 등록 시 계약된 포괄 임금 시간을 초과하면 승인 · 참조가 발생해요.",
+    icon: "💰",
+    reason_required: false,
+  },
+  {
+    policy_id: "wk-legal-over",
+    title: "법정근로시간 초과",
+    subtitle: "근무 등록 시 법정근로시간을 초과하면 승인 · 참조가 발생해요.",
+    icon: "⚠️",
+    reason_required: false,
+  },
+  {
+    policy_id: "wk-offsite-reg",
+    title: "근무지 밖 근무 등록",
+    subtitle: "GPS 및 IP로 제한된 근무지 위치 외에서 근무 등록 시 승인 · 참조가 발생해요.",
+    icon: "📍",
+    reason_required: false,
+  },
+];
+
+// ============================================================================
+// 설정 > 근무 > 근무 정책 · 승인 — 2) 근무 정책 4개 기본 항목 (근무/외근/원격근무/출장)
+// ============================================================================
+export const DEFAULT_WORK_FORM_POLICIES: HqWorkFormPolicy[] = [
+  {
+    id: "wf-form-normal",
+    policy_id: "wk-normal",
+    name: "근무",
+    icon: "💼",
+    description: "",
+    is_mandatory: true,
+    available_time_range: "제한 없음",
+    schedule_share_scope: "공유 안함",
+    offsite_restriction: "사용 안 함",
+    allow_night_work: true,
+    allow_holiday_work: true,
+    reason_required: false,
+  },
+  {
+    id: "wf-form-outside",
+    policy_id: "wk-outside",
+    name: "외근",
+    icon: "🚗",
+    description: "",
+    available_time_range: "제한 없음",
+    schedule_share_scope: "전사 공유",
+    offsite_restriction: "사용 안 함",
+    allow_night_work: true,
+    allow_holiday_work: true,
+    reason_required: false,
+  },
+  {
+    id: "wf-form-remote",
+    policy_id: "wk-remote",
+    name: "원격근무",
+    icon: "🏠",
+    description: "",
+    available_time_range: "제한 없음",
+    schedule_share_scope: "전사 공유",
+    offsite_restriction: "사용 안 함",
+    allow_night_work: true,
+    allow_holiday_work: true,
+    reason_required: false,
+  },
+  {
+    id: "wf-form-biztrip",
+    policy_id: "wk-biztrip",
+    name: "출장",
+    icon: "✈️",
+    description: "",
+    available_time_range: "제한 없음",
+    schedule_share_scope: "전사 공유",
+    offsite_restriction: "사용 안 함",
+    allow_night_work: false,
+    allow_holiday_work: false,
+    reason_required: false,
   },
 ];

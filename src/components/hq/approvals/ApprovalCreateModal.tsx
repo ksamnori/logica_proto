@@ -34,6 +34,7 @@ interface Props {
   me: HqMember | null;
   members: HqMember[];
   defaultDocType?: HqApprovalDocType;
+  defaultPolicyId?: string | null;
   onClose: () => void;
   onCreated: () => void;
 }
@@ -43,6 +44,7 @@ export default function ApprovalCreateModal({
   me,
   members,
   defaultDocType = "GENERAL",
+  defaultPolicyId = null,
   onClose,
   onCreated,
 }: Props) {
@@ -50,14 +52,27 @@ export default function ApprovalCreateModal({
   const [selectedPolicyId, setSelectedPolicyId] = useState<string | null>(null);
   const [selectedPolicyCcText, setSelectedPolicyCcText] = useState<string>("");
 
-  const workflowPolicies = useMemo(() => {
-    const raw =
-      shell?.companySettings?.extra_settings?.approval_policies &&
+  const allApprovalPolicies = useMemo(() => {
+    return shell?.companySettings?.extra_settings?.approval_policies &&
       shell.companySettings.extra_settings.approval_policies.length > 0
-        ? shell.companySettings.extra_settings.approval_policies
-        : DEFAULT_APPROVAL_POLICIES;
-    return raw.filter((p) => p.category === "workflow");
+      ? shell.companySettings.extra_settings.approval_policies
+      : DEFAULT_APPROVAL_POLICIES;
   }, [shell?.companySettings?.extra_settings?.approval_policies]);
+
+  const workflowPolicies = useMemo(
+    () => allApprovalPolicies.filter((p) => p.category === "workflow"),
+    [allApprovalPolicies]
+  );
+
+  const workPolicies = useMemo(
+    () =>
+      allApprovalPolicies.filter(
+        (p) =>
+          p.category === "work" &&
+          (p.steps.some((s) => s.assignees.length > 0) || p.cc_list.length > 0)
+      ),
+    [allApprovalPolicies]
+  );
 
   const [docType, setDocType] = useState<HqApprovalDocType>(defaultDocType);
   const [urgent, setUrgent] = useState(false);
@@ -93,6 +108,109 @@ export default function ApprovalCreateModal({
   const [steps, setSteps] = useState<RecommendedStepDraft[]>([]);
   const [submitting, setSubmitting] = useState(false);
 
+  const applyPolicyPreset = (pol: HqApprovalPolicyItem) => {
+    setSelectedPolicyId(pol.id);
+    const mappedType: HqApprovalDocType = pol.mapped_doc_type || "GENERAL";
+    setDocType(mappedType);
+    setTitle(`[${pol.title}] `);
+    if (pol.description) {
+      setContent(pol.description);
+    }
+
+    const matchedRule =
+      pol.per_requester && me
+        ? (pol.requester_rules || []).find((r) =>
+            r.requester_names.includes(me.name)
+          )
+        : null;
+    const targetSteps = matchedRule ? matchedRule.steps : pol.steps;
+    const targetCc = matchedRule ? matchedRule.cc_list : pol.cc_list;
+
+    setSelectedPolicyCcText(
+      targetCc.length > 0 ? targetCc.map((c) => c.name).join(", ") : "없음"
+    );
+
+    const todayKey = new Date().toISOString().slice(0, 10);
+    const activeSubRules = (
+      shell?.companySettings?.extra_settings?.substitute_approvals || []
+    ).filter(
+      (sr) =>
+        sr.is_active && sr.start_date <= todayKey && sr.end_date >= todayKey
+    );
+
+    const resolvedSteps: RecommendedStepDraft[] = [];
+    targetSteps.forEach((st) => {
+      st.assignees.forEach((asg) => {
+        let targetName = asg.name;
+        let found: HqMember | undefined;
+        if (asg.kind === "ROLE" && asg.role_key === "ORG_HEAD_1" && me) {
+          found = members.find(
+            (m) =>
+              m.work_status === "재직" &&
+              m.department === me.department &&
+              m.is_dept_head &&
+              m.instructor_id !== me.instructor_id
+          );
+          if (found) targetName = found.name;
+        }
+
+        const subHit = activeSubRules.find(
+          (sr) => sr.original_approver_name === targetName
+        );
+        let isSubbed = false;
+        if (subHit) {
+          const polOverride = subHit.per_policy_enabled
+            ? subHit.policy_substitutes?.find((po) => po.policy_id === pol.id)
+            : undefined;
+          targetName = polOverride
+            ? polOverride.substitute_name
+            : subHit.substitute_approver_name;
+          isSubbed = true;
+          found = undefined;
+        }
+
+        if (!found) {
+          found = members.find(
+            (m) =>
+              m.work_status === "재직" &&
+              m.name === targetName &&
+              m.instructor_id !== me?.instructor_id
+          );
+        }
+
+        if (found) {
+          resolvedSteps.push({
+            step_order: resolvedSteps.length + 1,
+            step_role: "FINAL_APPROVER",
+            role_label: isSubbed
+              ? `${resolvedSteps.length + 1}단계 대결승인`
+              : `${resolvedSteps.length + 1}단계 승인`,
+            approver_id: found.instructor_id,
+            approver_name: found.name,
+            approver_dept: found.department,
+            approver_rank: found.rank_code,
+            approver_title: found.job_title,
+          });
+        }
+      });
+    });
+
+    if (resolvedSteps.length > 0) {
+      const normalized = resolvedSteps.map((s, idx) => ({
+        ...s,
+        step_order: idx + 1,
+        step_role:
+          idx === resolvedSteps.length - 1
+            ? ("FINAL_APPROVER" as const)
+            : ("REVIEWER" as const),
+      }));
+      setSteps(normalized);
+      setCustomMode(true);
+    } else {
+      setCustomMode(false);
+    }
+  };
+
   useEffect(() => {
     if (!isOpen) return;
     const today = new Date().toISOString().slice(0, 10);
@@ -116,7 +234,17 @@ export default function ApprovalCreateModal({
     setCustomMode(false);
     setSelectedPolicyId(null);
     setSelectedPolicyCcText("");
-  }, [isOpen, defaultDocType]);
+
+    if (defaultPolicyId) {
+      const foundPol = allApprovalPolicies.find(
+        (p) => p.id === defaultPolicyId
+      );
+      if (foundPol) {
+        applyPolicyPreset(foundPol);
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen, defaultDocType, defaultPolicyId]);
 
   // 휴가 종류 또는 시작/종료일 변경 시 일수 자동 계산
   useEffect(() => {
@@ -478,127 +606,36 @@ export default function ApprovalCreateModal({
                       <button
                         key={pol.id}
                         type="button"
-                        onClick={() => {
-                          setSelectedPolicyId(pol.id);
-                          const mappedType: HqApprovalDocType =
-                            pol.mapped_doc_type || "GENERAL";
-                          setDocType(mappedType);
-                          setTitle(`[${pol.title}] `);
-                          if (pol.description) {
-                            setContent(pol.description);
-                          }
+                        onClick={() => applyPolicyPreset(pol)}
+                        className={`px-2.5 py-1.5 rounded-lg border text-xs font-bold transition-all flex items-center gap-1.5 ${
+                          active
+                            ? "bg-emerald-50 border-emerald-400 text-emerald-800 shadow-2xs"
+                            : "bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100"
+                        }`}
+                      >
+                        <span>{pol.icon}</span>
+                        <span>{pol.title}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
 
-                          // 요청자별 승인 규칙 또는 기본 설정 매칭
-                          const matchedRule =
-                            pol.per_requester && me
-                              ? (pol.requester_rules || []).find((r) =>
-                                  r.requester_names.includes(me.name)
-                                )
-                              : null;
-                          const targetSteps = matchedRule
-                            ? matchedRule.steps
-                            : pol.steps;
-                          const targetCc = matchedRule
-                            ? matchedRule.cc_list
-                            : pol.cc_list;
-
-                          setSelectedPolicyCcText(
-                            targetCc.length > 0
-                              ? targetCc.map((c) => c.name).join(", ")
-                              : "없음"
-                          );
-
-                          // 실제 재직 구성원과 매칭되는 승인자가 있으면 결재선에 즉시 반영 (+ 대결 설정 반영)
-                          const todayKey = new Date().toISOString().slice(0, 10);
-                          const activeSubRules = (
-                            shell?.companySettings?.extra_settings
-                              ?.substitute_approvals || []
-                          ).filter(
-                            (sr) =>
-                              sr.is_active &&
-                              sr.start_date <= todayKey &&
-                              sr.end_date >= todayKey
-                          );
-
-                          const resolvedSteps: RecommendedStepDraft[] = [];
-                          targetSteps.forEach((st) => {
-                            st.assignees.forEach((asg) => {
-                              let targetName = asg.name;
-                              let found: HqMember | undefined;
-                              if (
-                                asg.kind === "ROLE" &&
-                                asg.role_key === "ORG_HEAD_1" &&
-                                me
-                              ) {
-                                found = members.find(
-                                  (m) =>
-                                    m.work_status === "재직" &&
-                                    m.department === me.department &&
-                                    m.is_dept_head &&
-                                    m.instructor_id !== me.instructor_id
-                                );
-                                if (found) targetName = found.name;
-                              }
-
-                              // 부재 대결자가 설정된 기간이면 대결자로 자동 전환
-                              const subHit = activeSubRules.find(
-                                (sr) => sr.original_approver_name === targetName
-                              );
-                              let isSubbed = false;
-                              if (subHit) {
-                                const polOverride = subHit.per_policy_enabled
-                                  ? subHit.policy_substitutes?.find(
-                                      (po) => po.policy_id === pol.id
-                                    )
-                                  : undefined;
-                                targetName = polOverride
-                                  ? polOverride.substitute_name
-                                  : subHit.substitute_approver_name;
-                                isSubbed = true;
-                                found = undefined;
-                              }
-
-                              if (!found) {
-                                found = members.find(
-                                  (m) =>
-                                    m.work_status === "재직" &&
-                                    m.name === targetName &&
-                                    m.instructor_id !== me?.instructor_id
-                                );
-                              }
-
-                              if (found) {
-                                resolvedSteps.push({
-                                  step_order: resolvedSteps.length + 1,
-                                  step_role: "FINAL_APPROVER",
-                                  role_label: isSubbed
-                                    ? `${resolvedSteps.length + 1}단계 대결승인`
-                                    : `${resolvedSteps.length + 1}단계 승인`,
-                                  approver_id: found.instructor_id,
-                                  approver_name: found.name,
-                                  approver_dept: found.department,
-                                  approver_rank: found.rank_code,
-                                  approver_title: found.job_title,
-                                });
-                              }
-                            });
-                          });
-
-                          if (resolvedSteps.length > 0) {
-                            const normalized = resolvedSteps.map((s, idx) => ({
-                              ...s,
-                              step_order: idx + 1,
-                              step_role:
-                                idx === resolvedSteps.length - 1
-                                  ? ("FINAL_APPROVER" as const)
-                                  : ("REVIEWER" as const),
-                            }));
-                            setSteps(normalized);
-                            setCustomMode(true);
-                          } else {
-                            setCustomMode(false);
-                          }
-                        }}
+            {/* 근무 정책 · 승인 (출장 · 외근 · 원격 · 연장 · 휴일 · 야간 등) 빠른 선택 */}
+            {workPolicies.length > 0 && (
+              <div className="mt-2.5 pt-2.5 border-t border-slate-100">
+                <div className="text-[11px] font-bold text-slate-500 mb-2">
+                  ✈️ 근무 · 출장 · 초과근무 승인 신청 (근무 정책 · 승인 연동)
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {workPolicies.map((pol: HqApprovalPolicyItem) => {
+                    const active = selectedPolicyId === pol.id;
+                    return (
+                      <button
+                        key={pol.id}
+                        type="button"
+                        onClick={() => applyPolicyPreset(pol)}
                         className={`px-2.5 py-1.5 rounded-lg border text-xs font-bold transition-all flex items-center gap-1.5 ${
                           active
                             ? "bg-emerald-50 border-emerald-400 text-emerald-800 shadow-2xs"

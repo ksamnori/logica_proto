@@ -78,6 +78,7 @@ function HqApprovalsContent() {
   const [createOpen, setCreateOpen] = useState(false);
   const [defaultDocType, setDefaultDocType] =
     useState<HqApprovalDocType>("GENERAL");
+  const [defaultPolicyId, setDefaultPolicyId] = useState<string | null>(null);
   const [selectedDoc, setSelectedDoc] = useState<HqApprovalDoc | null>(null);
 
   const loadApprovals = useCallback(async () => {
@@ -116,10 +117,11 @@ function HqApprovalsContent() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [me?.instructor_id]);
 
-  // 헤더 [새 결재 기안] (?new=1&type=...) 쿼리 파라미터 처리
+  // 헤더 [새 결재 기안] (?new=1&type=...&policy=...) 쿼리 파라미터 처리
   useEffect(() => {
     if (searchParams.get("new") === "1") {
       const reqType = searchParams.get("type") as HqApprovalDocType | null;
+      const reqPolicy = searchParams.get("policy");
       if (
         reqType &&
         ["GENERAL", "LEAVE", "PURCHASE", "EXPENSE"].includes(reqType)
@@ -128,6 +130,7 @@ function HqApprovalsContent() {
       } else {
         setDefaultDocType("GENERAL");
       }
+      setDefaultPolicyId(reqPolicy || null);
       setCreateOpen(true);
       router.replace("/hq/approvals");
     }
@@ -534,7 +537,11 @@ function HqApprovalsContent() {
         me={me}
         members={members}
         defaultDocType={defaultDocType}
-        onClose={() => setCreateOpen(false)}
+        defaultPolicyId={defaultPolicyId}
+        onClose={() => {
+          setCreateOpen(false);
+          setDefaultPolicyId(null);
+        }}
         onCreated={handleRefreshAll}
       />
 

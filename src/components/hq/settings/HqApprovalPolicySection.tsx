@@ -72,7 +72,7 @@ function notifyModeLabel(mode?: HqCcNotifyMode): string {
 // ============================================================================
 // 공통 아바타 배지 렌더러 (역할 1차 조직장 [1] vs 구성원 이니셜 배지)
 // ============================================================================
-function AssigneeAvatar({ item }: { item: HqPolicyAssignee }) {
+export function AssigneeAvatar({ item }: { item: HqPolicyAssignee }) {
   if (item.kind === "ROLE") {
     const symbol =
       item.role_key === "ORG_HEAD_1"
@@ -112,7 +112,7 @@ interface LineEditorProps {
   onOpenPicker: (target: { type: "CC" } | { type: "STEP"; stepIndex: number }) => void;
 }
 
-function ApprovalLineEditor({
+export function ApprovalLineEditor({
   ccList,
   steps,
   canEdit,
