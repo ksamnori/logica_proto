@@ -786,6 +786,122 @@ export interface HqWorkplaceWifiIpItem {
   is_enabled: boolean;
 }
 
+export interface HqAnnualLeavePolicyItem {
+  id: string;
+  policy_id: string; // approval_policies 내 'lv-annual' 등 매칭
+  name: string; // 예: "기본 연차 정책"
+  description: string;
+  is_default?: boolean;
+  // 기본 설정
+  request_on_register: boolean; // 휴가를 등록할 때 승인/참조 요청
+  request_on_cancel: boolean; // 등록한 휴가를 취소할 때 승인 요청
+  usage_unit_category: "시간" | "반차" | "일";
+  hourly_sub_unit:
+    | "1분"
+    | "5분"
+    | "10분"
+    | "15분"
+    | "20분"
+    | "30분"
+    | "1시간"
+    | "2시간";
+  advance_use_enabled: boolean; // 당겨쓰기 허용
+  advance_use_mode: "자유롭게 사용 가능" | "사용량 제한";
+  advance_use_limit_days?: number; // 사용량 제한 시 최대 일수
+  // 연차 부여 방식
+  accrual_basis: "회계일" | "입사일";
+  fiscal_month_day: string; // 예: "1월 1일"
+  effective_start_date: string; // 예: "2021-01-01"
+  first_year_monthly_rule:
+    | "매월 개근시 1일 부여"
+    | "입사 시 11일 선부여"
+    | "부여 안 함";
+  first_year_annual_rule:
+    | "첫 회계일에 근무한 기간의 연차 부여"
+    | "1년 만근시 15일 부여";
+  decimal_rounding:
+    | "일 단위 올림 처리"
+    | "0.5일 단위 올림 처리"
+    | "시간 단위로 비례 부여"
+    | "소수점 둘째 자리 반올림";
+  extra_bonus_days: number; // 법정 외 추가 부여 일수 (기본 0)
+  use_group_hire_date: boolean; // 그룹 입사일 기준 여부
+  // 자동 소멸 설정 (연말 일괄 소멸 / 유예 / 소멸 안 함 모두 선택 가능)
+  monthly_expire_point:
+    | "입사일로부터 1년 후"
+    | "당해 연말 (매년 12월 31일)"
+    | "첫 회계일 후 1년"
+    | "소멸 안 함";
+  monthly_grace_period: string; // "유예기간 없음" | "1개월" .. "24개월"
+  annual_expire_point:
+    | "부여일로부터 1년 후"
+    | "당해 연말 (매년 12월 31일)"
+    | "소멸 안 함";
+  annual_grace_period: string; // "유예기간 없음" | "1개월" .. "24개월"
+  // 스마트 연차 촉진
+  smart_promotion_enabled: boolean;
+  // 적용 구성원
+  apply_all_default?: boolean;
+  assigned_members: HqOvertimeAssignedMember[];
+}
+
+export interface HqAnnualLeaveGlobalSettings {
+  hide_visibility_banner?: boolean;
+  retiree_adjustment_rule:
+    | "구성원에게 유리한 기준으로 적용"
+    | "항상 근로기준법 기준으로 적용";
+  // 연차 촉진 설정 (연차 사용 계획 'wf-leave-plan' 연동)
+  promotion_remind_member: boolean;
+  promotion_remind_admin: boolean;
+  promotion_plan_notify_timing: string; // "사용 계획일 10일 전" 등
+  smart_annual_timing: string; // "소멸 6개월 전 + 10일 후" 등
+  smart_monthly_timing_1st: string; // "소멸 3개월 전"
+  smart_monthly_timing_2nd: string; // "소멸 1개월 전"
+  policies: HqAnnualLeavePolicyItem[];
+}
+
+export type HqCustomLeaveGrantMethod =
+  | "신청 시 부여"
+  | "연차 소진 시 부여"
+  | "관리자가 직접 부여"
+  | "입사 시 부여"
+  | "반복 부여"
+  | "근속 시 부여";
+
+export interface HqCustomLeaveItem {
+  id: string;
+  policy_id: string; // approval_policies 내 leave 카테고리 id 매칭
+  name: string;
+  icon: string;
+  description: string;
+  is_mandatory?: boolean; // '필수' 법정/기본 휴가 배지
+  is_reward_type?: boolean; // '보상' 휴가 전용 모달 형태
+  grant_method: HqCustomLeaveGrantMethod;
+  repeat_cycle?: string; // "입사 월부터 매월" | "매월 1일 부여" | "매년 1월 1일 부여" | "입사일 기준 매년"
+  repeat_use_group_hire?: boolean;
+  tenure_years_rule?: string; // 근속 시 부여 기준 (예: "만 3년 · 5년 · 10년 근속 시")
+  grant_unit: "일 단위 부여" | "시간 단위 부여" | "분 단위 부여";
+  grant_amount: number; // 예: 보건 1, 산전후 본인 90, 다태아 120, 배우자출산 10, 결혼 5, 조의 3/2
+  usage_unit:
+    | "한번에 모두 사용"
+    | "일 단위 사용"
+    | "반차 단위 사용"
+    | "시간차 사용 (30분 단위)"
+    | "시간차 사용 (1시간 단위)"
+    | "시간차 사용 (제한없음)";
+  pay_type: "유급" | "무급" | "일부 유급";
+  partial_paid_days?: number; // 일부 유급일 때 유급 일수 (예: 산전후 본인 60일, 다태아 75일)
+  request_on_register: boolean;
+  request_on_cancel: boolean;
+  allow_advance_register?: boolean; // 보상 휴가: 휴가 사전 등록 가능
+  // 추가 설정
+  target_gender: "모두" | "여성" | "남성";
+  proof_document_mode: "없음" | "사전 제출" | "사후 제출" | "선택 제출";
+  proof_document_guide?: string;
+  deduct_on_holidays: boolean; // 휴일에 등록된 휴가 차감
+  apply_to_existing_granted?: boolean; // 기존 부여된 휴가에도 반영하기
+}
+
 export interface HqCompanyExtraSettings {
   doc_prefix_cert?: string;
   doc_prefix_approval?: string;
@@ -821,6 +937,8 @@ export interface HqCompanyExtraSettings {
   overtime_comp_settings?: HqOvertimeCompSettings;
   workplaces?: HqWorkplaceLocationItem[];
   workplace_ips?: HqWorkplaceWifiIpItem[];
+  annual_leave_settings?: HqAnnualLeaveGlobalSettings;
+  custom_leaves?: HqCustomLeaveItem[];
 }
 
 export interface HqCompanySettings {

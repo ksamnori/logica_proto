@@ -27,10 +27,13 @@ async function applyPostApprovalSideEffects(
 ) {
   const nowIso = new Date().toISOString();
 
-  // 1) 휴가·연차 신청서(LEAVE) 최종 승인 → 연차 사용 일수 자동 반영
+  // 1) 휴가·연차 신청서(LEAVE) 최종 승인 → 연차 차감 대상(연차·반차·시간차)만 차감 반영
   if (doc.doc_type === "LEAVE" && Number(doc.leave_days) > 0) {
-    const leaveMeta = LEAVE_TYPES.find((lt) => lt.label === doc.leave_type);
-    const shouldDeduct = leaveMeta ? leaveMeta.deductAnnual : true;
+    const leaveLabel = String(doc.leave_type || "");
+    const leaveMeta = LEAVE_TYPES.find((lt) => lt.label === leaveLabel);
+    const shouldDeduct = leaveMeta
+      ? leaveMeta.deductAnnual
+      : leaveLabel.includes("연차") || leaveLabel.includes("반차");
     if (shouldDeduct) {
       const { data: prof } = await supabaseAdmin
         .from("hq_member_profile")
@@ -39,7 +42,7 @@ async function applyPostApprovalSideEffects(
         .maybeSingle();
 
       const prevUsed = Number(prof?.annual_leave_used ?? 0);
-      const nextUsed = Number((prevUsed + Number(doc.leave_days)).toFixed(1));
+      const nextUsed = Number((prevUsed + Number(doc.leave_days)).toFixed(2));
       await supabaseAdmin
         .from("hq_member_profile")
         .upsert(
@@ -58,13 +61,14 @@ async function applyPostApprovalSideEffects(
       const endStr = String(doc.end_date || startStr);
       const startDt = new Date(`${startStr}T00:00:00`);
       const endDt = new Date(`${endStr}T00:00:00`);
-      const isHalf = String(doc.leave_type || "").includes("반차");
+      const isHalf =
+        leaveLabel.includes("반차") || leaveLabel.includes("시간차");
       const attendanceRows: Record<string, any>[] = [];
 
       if (!Number.isNaN(startDt.getTime()) && !Number.isNaN(endDt.getTime())) {
         const cursor = new Date(startDt);
         let guard = 0;
-        while (cursor <= endDt && guard < 31) {
+        while (cursor <= endDt && guard < 130) {
           const dow = cursor.getDay();
           if (dow !== 0 && dow !== 6) {
             const y = cursor.getFullYear();

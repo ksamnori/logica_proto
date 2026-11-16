@@ -22,6 +22,7 @@ import type {
   HqHolidayGroup,
   HqHolidayItem,
 } from "@/lib/hq/types";
+import HqAnnualLeaveSettingsSection from "./HqAnnualLeaveSettingsSection";
 import HqApprovalPolicySection, {
   HqApprovalLabelsSection,
   HqSubstituteApprovalModal,
@@ -30,6 +31,7 @@ import {
   HqCustomInfoModal,
   HqDocBoxSettingsSection,
 } from "./HqCustomInfoDocBoxSection";
+import HqCustomLeaveSettingsSection from "./HqCustomLeaveSettingsSection";
 import HqHrInfoSettingsSection from "./HqHrInfoSettingsSection";
 import HqOvertimeCompSettingsSection from "./HqOvertimeCompSettingsSection";
 import HqWorkPolicySettingsSection from "./HqWorkPolicySettingsSection";
@@ -49,7 +51,8 @@ export type HqSettingsTab =
   | "work-policy"
   | "overtime-comp"
   | "work-place"
-  | "leave-setting";
+  | "leave-setting"
+  | "custom-leave";
 
 interface Props {
   isOpen: boolean;
@@ -1009,6 +1012,16 @@ export default function HqSettingsModal({
                 <span className="flex items-center gap-2.5">
                   <span className="text-slate-400 text-sm">🏖️</span>
                   <span>연차 설정</span>
+                </span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveTab("custom-leave")}
+                className={navBtnClass("custom-leave")}
+              >
+                <span className="flex items-center gap-2.5">
+                  <span className="text-slate-400 text-sm">🌴</span>
+                  <span>맞춤 휴가</span>
                 </span>
               </button>
             </div>
@@ -2119,76 +2132,45 @@ export default function HqSettingsModal({
             )}
 
             {activeTab === "leave-setting" && (
-              <div className="space-y-6">
-                <div>
-                  <h2 className="text-[22px] font-extrabold text-slate-900">
-                    연차 설정
-                  </h2>
-                  <p className="text-xs text-slate-400 mt-1">
-                    신규 구성원 기본 연차 부여 기준 및 반차 사용 정책을 설정합니다.
-                  </p>
-                </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
-                  <div className="p-4 rounded-2xl border border-slate-200 space-y-1.5">
-                    <div className="font-bold text-slate-500">
-                      연차 부여 기준
-                    </div>
-                    <select
-                      disabled={!canEdit}
-                      value={
-                        settings.extra_settings?.leave_basis || "회계일 기준"
-                      }
-                      onChange={(e) =>
-                        setSettings({
-                          ...settings,
-                          extra_settings: {
-                            ...settings.extra_settings,
-                            leave_basis: e.target.value as any,
-                          },
-                        })
-                      }
-                      className="w-full px-3 py-2 rounded-lg bg-[#f5f6f8] font-bold text-slate-900"
-                    >
-                      <option value="회계일 기준">회계일 기준 (매년 1월 1일)</option>
-                      <option value="입사일 기준">입사일 기준</option>
-                    </select>
-                  </div>
-                  <div className="p-4 rounded-2xl border border-slate-200 space-y-1.5">
-                    <div className="font-bold text-slate-500">
-                      기본 연차 부여 일수 (일)
-                    </div>
-                    <input
-                      type="number"
-                      disabled={!canEdit}
-                      value={settings.extra_settings?.default_annual_leave ?? 15}
-                      onChange={(e) =>
-                        setSettings({
-                          ...settings,
-                          extra_settings: {
-                            ...settings.extra_settings,
-                            default_annual_leave: Number(e.target.value),
-                          },
-                        })
-                      }
-                      className="w-full px-3 py-2 rounded-lg bg-[#f5f6f8] font-extrabold text-slate-900"
-                    />
-                  </div>
-                </div>
-                {canEdit && (
-                  <button
-                    type="button"
-                    onClick={() =>
-                      savePartialSettings(
-                        { extra_settings: settings.extra_settings },
-                        "연차 정책이 저장되었습니다."
-                      )
-                    }
-                    className="px-5 py-2.5 rounded-xl bg-slate-900 text-white text-xs font-bold"
-                  >
-                    연차 설정 저장
-                  </button>
-                )}
-              </div>
+              <HqAnnualLeaveSettingsSection
+                settings={settings}
+                members={members}
+                canEdit={canEdit}
+                saving={saving}
+                onSaveExtra={async (nextExtra, toastMessage) => {
+                  await savePartialSettings(
+                    {
+                      extra_settings: {
+                        ...settings.extra_settings,
+                        ...nextExtra,
+                      },
+                    },
+                    toastMessage
+                  );
+                }}
+                onNavigateTab={(tab) => setActiveTab(tab)}
+              />
+            )}
+
+            {activeTab === "custom-leave" && (
+              <HqCustomLeaveSettingsSection
+                settings={settings}
+                members={members}
+                canEdit={canEdit}
+                saving={saving}
+                onSaveExtra={async (nextExtra, toastMessage) => {
+                  await savePartialSettings(
+                    {
+                      extra_settings: {
+                        ...settings.extra_settings,
+                        ...nextExtra,
+                      },
+                    },
+                    toastMessage
+                  );
+                }}
+                onNavigateTab={(tab) => setActiveTab(tab)}
+              />
             )}
           </div>
         </div>

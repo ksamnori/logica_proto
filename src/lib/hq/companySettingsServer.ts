@@ -137,6 +137,22 @@ export function normalizeCompanySettings(raw: any): HqCompanySettings {
       workplace_ips: Array.isArray(incomingExtra.workplace_ips)
         ? incomingExtra.workplace_ips
         : def.extra_settings.workplace_ips,
+      annual_leave_settings: incomingExtra.annual_leave_settings
+        ? {
+            ...def.extra_settings.annual_leave_settings,
+            ...incomingExtra.annual_leave_settings,
+            policies:
+              Array.isArray(incomingExtra.annual_leave_settings.policies) &&
+              incomingExtra.annual_leave_settings.policies.length > 0
+                ? incomingExtra.annual_leave_settings.policies
+                : def.extra_settings.annual_leave_settings?.policies || [],
+          }
+        : def.extra_settings.annual_leave_settings,
+      custom_leaves:
+        Array.isArray(incomingExtra.custom_leaves) &&
+        incomingExtra.custom_leaves.length > 0
+          ? incomingExtra.custom_leaves
+          : def.extra_settings.custom_leaves,
       info_approval_policy: {
         ...def.extra_settings.info_approval_policy,
         ...(incomingExtra.info_approval_policy || {}),

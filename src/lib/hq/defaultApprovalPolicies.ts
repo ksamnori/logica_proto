@@ -531,7 +531,9 @@ export const DEFAULT_APPROVAL_POLICIES: HqApprovalPolicyItem[] = [
     allow_edit: false,
     per_requester: false,
     cc_list: [],
-    steps: [{ step_order: 1, assignees: [cloneAssignee(PRESET_ASSIGNEES.CHUN)] }],
+    steps: [
+      { step_order: 1, assignees: [cloneAssignee(PRESET_ASSIGNEES.ORG_HEAD_1)] },
+    ],
   },
   {
     id: "lv-reward",
@@ -540,7 +542,7 @@ export const DEFAULT_APPROVAL_POLICIES: HqApprovalPolicyItem[] = [
     icon: "✨",
     allow_edit: false,
     per_requester: false,
-    cc_list: [cloneAssignee(PRESET_ASSIGNEES.KIM_GS)],
+    cc_list: [cloneAssignee(PRESET_ASSIGNEES.CHUN)],
     steps: [],
   },
 

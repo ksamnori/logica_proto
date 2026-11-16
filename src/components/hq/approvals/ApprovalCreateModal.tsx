@@ -22,9 +22,14 @@ import {
   uploadHqReceiptFile,
 } from "@/lib/hq/clientApi";
 import { DEFAULT_APPROVAL_POLICIES } from "@/lib/hq/defaultApprovalPolicies";
+import {
+  DEFAULT_ANNUAL_LEAVE_SETTINGS,
+  DEFAULT_CUSTOM_LEAVES,
+} from "@/lib/hq/defaultLeaveSettings";
 import type {
   HqApprovalDocType,
   HqApprovalPolicyItem,
+  HqCustomLeaveItem,
   HqMember,
   PurchaseLineItem,
 } from "@/lib/hq/types";
@@ -73,6 +78,79 @@ export default function ApprovalCreateModal({
       ),
     [allApprovalPolicies]
   );
+
+  const customLeaveList: HqCustomLeaveItem[] = useMemo(() => {
+    const saved = shell?.companySettings?.extra_settings?.custom_leaves;
+    return saved && saved.length > 0 ? saved : DEFAULT_CUSTOM_LEAVES;
+  }, [shell?.companySettings?.extra_settings?.custom_leaves]);
+
+  const primaryAnnualPolicy = useMemo(() => {
+    const saved =
+      shell?.companySettings?.extra_settings?.annual_leave_settings?.policies;
+    const list =
+      saved && saved.length > 0
+        ? saved
+        : DEFAULT_ANNUAL_LEAVE_SETTINGS.policies;
+    return list.find((p) => p.is_default) || list[0];
+  }, [shell?.companySettings?.extra_settings?.annual_leave_settings]);
+
+  const selectableLeaveOptions = useMemo(() => {
+    const base: {
+      label: string;
+      deductAnnual: boolean;
+      defaultDays: number;
+      policyId: string;
+      proofGuide?: string;
+      proofMode?: string;
+    }[] = [
+      {
+        label: "연차",
+        deductAnnual: true,
+        defaultDays: 1,
+        policyId: primaryAnnualPolicy?.policy_id || "lv-annual",
+      },
+      {
+        label: "오전 반차",
+        deductAnnual: true,
+        defaultDays: 0.5,
+        policyId: primaryAnnualPolicy?.policy_id || "lv-annual",
+      },
+      {
+        label: "오후 반차",
+        deductAnnual: true,
+        defaultDays: 0.5,
+        policyId: primaryAnnualPolicy?.policy_id || "lv-annual",
+      },
+    ];
+
+    if (primaryAnnualPolicy?.usage_unit_category === "시간") {
+      const sub = primaryAnnualPolicy.hourly_sub_unit || "2시간";
+      const subDays = sub === "1시간" ? 0.125 : 0.25;
+      base.push({
+        label: `시간차 연차 (${sub})`,
+        deductAnnual: true,
+        defaultDays: subDays,
+        policyId: primaryAnnualPolicy.policy_id || "lv-annual",
+      });
+    }
+
+    customLeaveList.forEach((cl) => {
+      const daysVal =
+        cl.grant_unit === "시간 단위 부여"
+          ? Math.max(0.25, Math.round((cl.grant_amount / 8) * 100) / 100)
+          : cl.grant_amount || 1;
+      base.push({
+        label: cl.name,
+        deductAnnual: false,
+        defaultDays: daysVal,
+        policyId: cl.policy_id,
+        proofMode: cl.proof_document_mode,
+        proofGuide: cl.proof_document_guide,
+      });
+    });
+
+    return base;
+  }, [customLeaveList, primaryAnnualPolicy]);
 
   const [docType, setDocType] = useState<HqApprovalDocType>(defaultDocType);
   const [urgent, setUrgent] = useState(false);
@@ -249,9 +327,11 @@ export default function ApprovalCreateModal({
   // 휴가 종류 또는 시작/종료일 변경 시 일수 자동 계산
   useEffect(() => {
     if (docType !== "LEAVE") return;
-    const meta = LEAVE_TYPES.find((l) => l.label === leaveType);
-    if (meta && meta.defaultDays === 0.5) {
-      setLeaveDays("0.5");
+    const matchedOpt = selectableLeaveOptions.find(
+      (o) => o.label === leaveType
+    );
+    if (matchedOpt && matchedOpt.defaultDays < 1) {
+      setLeaveDays(String(matchedOpt.defaultDays));
       if (effectiveDate) setEndDate(effectiveDate);
       return;
     }
@@ -259,6 +339,10 @@ export default function ApprovalCreateModal({
       const s = new Date(effectiveDate);
       const e = new Date(endDate);
       if (!Number.isNaN(s.getTime()) && !Number.isNaN(e.getTime()) && e >= s) {
+        if (s.getTime() === e.getTime() && matchedOpt && matchedOpt.defaultDays > 1) {
+          setLeaveDays(String(matchedOpt.defaultDays));
+          return;
+        }
         let workDays = 0;
         const cur = new Date(s);
         while (cur <= e) {
@@ -269,7 +353,7 @@ export default function ApprovalCreateModal({
         setLeaveDays(String(Math.max(1, workDays)));
       }
     }
-  }, [docType, leaveType, effectiveDate, endDate]);
+  }, [docType, leaveType, effectiveDate, endDate, selectableLeaveOptions]);
 
   const purchaseTotal = useMemo(
     () =>
@@ -790,16 +874,38 @@ export default function ApprovalCreateModal({
               <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
                 <div>
                   <label className="block text-xs font-bold text-slate-700 mb-1">
-                    휴가 구분
+                    휴가 구분 (연차 · 맞춤 휴가 연동)
                   </label>
                   <select
                     value={leaveType}
-                    onChange={(e) => setLeaveType(e.target.value)}
+                    onChange={(e) => {
+                      const nextLabel = e.target.value;
+                      setLeaveType(nextLabel);
+                      const opt = selectableLeaveOptions.find(
+                        (o) => o.label === nextLabel
+                      );
+                      if (opt) {
+                        setLeaveDays(String(opt.defaultDays));
+                        const linkedPol = allApprovalPolicies.find(
+                          (p) => p.id === opt.policyId
+                        );
+                        if (linkedPol) {
+                          applyPolicyPreset({
+                            ...linkedPol,
+                            mapped_doc_type: "LEAVE",
+                          });
+                        }
+                        setTitle(`[${nextLabel}] ${me.name} 휴가 신청`);
+                      }
+                    }}
                     className="w-full px-3 py-2 rounded-xl border border-slate-300 bg-white font-bold text-slate-800"
                   >
-                    {LEAVE_TYPES.map((lt) => (
+                    {selectableLeaveOptions.map((lt) => (
                       <option key={lt.label} value={lt.label}>
-                        {lt.label} {lt.deductAnnual ? "(연차차감)" : "(미차감)"}
+                        {lt.label}{" "}
+                        {lt.deductAnnual
+                          ? "(연차차감)"
+                          : `(맞춤휴가 · 기본 ${lt.defaultDays}일)`}
                       </option>
                     ))}
                   </select>
@@ -838,14 +944,29 @@ export default function ApprovalCreateModal({
                   </label>
                   <input
                     type="number"
-                    step="0.5"
-                    min="0.5"
+                    step="0.25"
+                    min="0.125"
                     value={leaveDays}
                     onChange={(e) => setLeaveDays(e.target.value)}
                     className="w-full px-3 py-2 rounded-xl border border-slate-300 bg-white font-extrabold text-emerald-700"
                   />
                 </div>
               </div>
+
+              {(() => {
+                const curOpt = selectableLeaveOptions.find(
+                  (o) => o.label === leaveType
+                );
+                if (!curOpt || !curOpt.proofMode || curOpt.proofMode === "없음")
+                  return null;
+                return (
+                  <div className="px-3 py-2 rounded-xl bg-white/80 border border-emerald-200 text-[11px] text-emerald-800 font-semibold">
+                    📎 증명 자료 안내 ({curOpt.proofMode}):{" "}
+                    {curOpt.proofGuide ||
+                      "관련 증빙 서류(진단서·소견서·청첩장 등)를 하단 증빙 파일에 첨부하거나 추후 제출해 주세요."}
+                  </div>
+                );
+              })()}
 
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1">

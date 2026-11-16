@@ -7,6 +7,10 @@ import {
   DEFAULT_WORK_FORM_POLICIES,
 } from "./defaultApprovalPolicies";
 import {
+  DEFAULT_ANNUAL_LEAVE_SETTINGS,
+  DEFAULT_CUSTOM_LEAVES,
+} from "./defaultLeaveSettings";
+import {
   DEFAULT_OVERTIME_COMP_SETTINGS,
   DEFAULT_WORKPLACES,
   DEFAULT_WORKPLACE_IPS,
@@ -526,6 +530,8 @@ export const DEFAULT_HQ_COMPANY_SETTINGS: HqCompanySettings = {
     overtime_comp_settings: DEFAULT_OVERTIME_COMP_SETTINGS,
     workplaces: DEFAULT_WORKPLACES,
     workplace_ips: DEFAULT_WORKPLACE_IPS,
+    annual_leave_settings: DEFAULT_ANNUAL_LEAVE_SETTINGS,
+    custom_leaves: DEFAULT_CUSTOM_LEAVES,
   },
 };
 
