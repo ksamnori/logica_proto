@@ -210,6 +210,23 @@ export function normalizeCompanySettings(raw: any): HqCompanySettings {
               : [],
           }
         : def.extra_settings.security_settings,
+      permission_settings: incomingExtra.permission_settings
+        ? {
+            ...def.extra_settings.permission_settings,
+            ...incomingExtra.permission_settings,
+            super_admin_names:
+              Array.isArray(
+                incomingExtra.permission_settings.super_admin_names
+              ) &&
+              incomingExtra.permission_settings.super_admin_names.length > 0
+                ? incomingExtra.permission_settings.super_admin_names
+                : def.extra_settings.permission_settings?.super_admin_names ||
+                  [],
+            groups: Array.isArray(incomingExtra.permission_settings.groups)
+              ? incomingExtra.permission_settings.groups
+              : def.extra_settings.permission_settings?.groups || [],
+          }
+        : def.extra_settings.permission_settings,
       info_approval_policy: {
         ...def.extra_settings.info_approval_policy,
         ...(incomingExtra.info_approval_policy || {}),

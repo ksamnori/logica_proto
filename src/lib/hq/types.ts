@@ -1146,6 +1146,30 @@ export interface HqAuditLogItem {
   created_at: string;
 }
 
+export type HqPermissionScope =
+  | "전체 구성원"
+  | "하위 조직 포함"
+  | "소속 조직";
+
+export interface HqPermissionGroupItem {
+  id: string;
+  name: string;
+  description: string;
+  is_system?: boolean; // "SUPER_ADMIN" | "ORG_HEAD" | "DEFAULT_MEMBER" 구분용
+  system_kind?: "SUPER_ADMIN" | "ORG_HEAD" | "DEFAULT_MEMBER";
+  member_names: string[]; // 그룹에 배정된 구성원 이름 목록 (예: ["천종현", "김근식", "이웅행"])
+  permissions: Record<string, boolean>; // permKey -> 허용 여부
+  scopes: Record<string, HqPermissionScope>; // 범위 지정형 permKey -> 범위
+}
+
+export interface HqPermissionSettings {
+  super_admin_names: string[];
+  org_head_permissions: Record<string, boolean>;
+  org_head_scopes: Record<string, HqPermissionScope>;
+  default_member_permissions: Record<string, boolean>;
+  groups: HqPermissionGroupItem[];
+}
+
 export interface HqCompanyExtraSettings {
   doc_prefix_cert?: string;
   doc_prefix_approval?: string;
@@ -1186,6 +1210,7 @@ export interface HqCompanyExtraSettings {
   payroll_settings?: HqPayrollSettings;
   retiree_doc_settings?: HqRetireeDocSettingItem[];
   security_settings?: HqSecuritySettings;
+  permission_settings?: HqPermissionSettings;
 }
 
 export interface HqCompanySettings {

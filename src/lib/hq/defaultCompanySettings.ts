@@ -12,6 +12,7 @@ import {
   DEFAULT_CUSTOM_LEAVES,
 } from "./defaultLeaveSettings";
 import { DEFAULT_PAYROLL_SETTINGS } from "./defaultPayrollSettings";
+import { DEFAULT_PERMISSION_SETTINGS } from "./defaultPermissionSettings";
 import { DEFAULT_SECURITY_SETTINGS } from "./defaultSecuritySettings";
 import {
   DEFAULT_OVERTIME_COMP_SETTINGS,
@@ -538,6 +539,7 @@ export const DEFAULT_HQ_COMPANY_SETTINGS: HqCompanySettings = {
     payroll_settings: DEFAULT_PAYROLL_SETTINGS,
     retiree_doc_settings: DEFAULT_RETIREE_DOC_SETTINGS,
     security_settings: DEFAULT_SECURITY_SETTINGS,
+    permission_settings: DEFAULT_PERMISSION_SETTINGS,
   },
 };
 

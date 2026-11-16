@@ -165,19 +165,47 @@ export async function requireHqCaller(
   const department = (prof?.department || inst.department || "미지정").trim();
 
   // 최고관리자: DB is_hq_admin 등록자, 전체 시스템 SUPER_ADMIN(최고관리자), 또는 대표·소장(Lv.5)
-  const isHqAdmin = rpcHqAdmin || isSuperRole || rankCode === "CEO";
+  let isHqAdmin = rpcHqAdmin || isSuperRole || rankCode === "CEO";
 
   // 인사·급여 관리자: 최고관리자, 본부장·이사(Lv.4+), 경영지원 팀장(Lv.3+), 또는 최고관리자가 위임한 인사담당자(is_hr_admin)
-  const isDelegatedHrAdmin = !isHqAdmin && Boolean(prof?.is_hr_admin);
-  const isHrManager =
+  let isDelegatedHrAdmin = !isHqAdmin && Boolean(prof?.is_hr_admin);
+  let isHrManager =
     isHqAdmin ||
     rankLevel >= 4 ||
     Boolean(prof?.is_hr_admin) ||
     (department.includes("경영지원") && rankLevel >= 3);
 
-  // 특정 IP에서만 접근 허용 보안 정책 검증 (로컬 개발환경 및 최고관리자 설정 복구 경로는 안전하게 보장)
+  // 권한 설정(권한 그룹) 및 특정 IP 접근 허용 보안 정책 검증
   try {
     const { settings } = await readCompanySettingsServer(supabaseAdmin);
+    const callerName = String(inst.name || "").trim();
+    const permCfg = settings.extra_settings?.permission_settings;
+    if (permCfg && callerName) {
+      if (
+        Array.isArray(permCfg.super_admin_names) &&
+        permCfg.super_admin_names.includes(callerName)
+      ) {
+        isHqAdmin = true;
+        isHrManager = true;
+      } else if (Array.isArray(permCfg.groups)) {
+        const myGroups = permCfg.groups.filter(
+          (g) => Array.isArray(g.member_names) && g.member_names.includes(callerName)
+        );
+        const hasAdminGroupPerm = myGroups.some(
+          (g) =>
+            g.permissions?.["company.basic_manage"] ||
+            g.permissions?.["hr.employment_manage"] ||
+            g.permissions?.["payroll.run"] ||
+            g.permissions?.["permission.manage"] ||
+            g.permissions?.["audit.view"]
+        );
+        if (hasAdminGroupPerm) {
+          if (!isHrManager) isDelegatedHrAdmin = true;
+          isHrManager = true;
+        }
+      }
+    }
+
     const sec = settings.extra_settings?.security_settings;
     if (
       sec?.ip_restriction_enabled &&

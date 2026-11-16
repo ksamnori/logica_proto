@@ -42,6 +42,7 @@ import {
   HqPayrollSettlementSection,
   HqPayrollTaxWorkplaceSection,
 } from "./HqPayrollSettlementWorkplaceSection";
+import HqPermissionSettingsSection from "./HqPermissionSettingsSection";
 import HqRetireeDocSettingsSection from "./HqRetireeDocSettingsSection";
 import {
   HqAuditLogModal,
@@ -73,7 +74,8 @@ export type HqSettingsTab =
   | "payroll-workplace"
   | "retiree-doc"
   | "security-auth"
-  | "login-setting";
+  | "login-setting"
+  | "permission-setting";
 
 interface Props {
   isOpen: boolean;
@@ -1156,6 +1158,25 @@ export default function HqSettingsModal({
               </button>
             </div>
           </div>
+
+          {/* 기타 (권한 설정) */}
+          <div>
+            <div className="px-3 mb-1.5 text-[11px] font-bold text-slate-400">
+              기타
+            </div>
+            <div className="space-y-0.5">
+              <button
+                type="button"
+                onClick={() => setActiveTab("permission-setting")}
+                className={navBtnClass("permission-setting")}
+              >
+                <span className="flex items-center gap-2.5">
+                  <span className="text-slate-400 text-sm">🛡️</span>
+                  <span>권한 설정</span>
+                </span>
+              </button>
+            </div>
+          </div>
         </div>
 
         {/* 좌측 하단 권한 설정 안내 카드 */}
@@ -1163,10 +1184,7 @@ export default function HqSettingsModal({
           <div className="p-3 border-t border-slate-200/70">
             <button
               type="button"
-              onClick={() => {
-                onClose();
-                router.push("/hq/permissions");
-              }}
+              onClick={() => setActiveTab("permission-setting")}
               className="w-full text-left p-3.5 rounded-xl bg-white border border-slate-200 shadow-2xs hover:border-slate-300 transition-colors"
             >
               <div className="text-xs font-bold text-slate-800">
@@ -2432,6 +2450,28 @@ export default function HqSettingsModal({
                 members={members}
                 canEdit={canEdit}
                 saving={saving}
+                onSaveExtra={async (nextExtra, toastMessage) => {
+                  await savePartialSettings(
+                    {
+                      extra_settings: {
+                        ...settings.extra_settings,
+                        ...nextExtra,
+                      },
+                    },
+                    toastMessage
+                  );
+                }}
+                onNavigateTab={(tab) => setActiveTab(tab)}
+              />
+            )}
+
+            {activeTab === "permission-setting" && (
+              <HqPermissionSettingsSection
+                settings={settings}
+                members={members}
+                canEdit={canEdit}
+                saving={saving}
+                onCloseSettings={onClose}
                 onSaveExtra={async (nextExtra, toastMessage) => {
                   await savePartialSettings(
                     {
