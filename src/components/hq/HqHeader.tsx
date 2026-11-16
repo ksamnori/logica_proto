@@ -24,9 +24,13 @@ const PAGE_TITLES: Record<string, { title: string; subtitle: string }> = {
     title: "본부 조직도",
     subtitle: "시점별 부서 트리 · 계약월급/유지율 트렌드 지표 · 조직 구조 설정",
   },
+  "/hq/meetings": {
+    title: "미팅 · 회의록 관리",
+    subtitle: "사내 회의 일정 공유 · 참석 여부(RSVP) · 대화 기록 및 요약 아카이브",
+  },
   "/hq/attendance": {
-    title: "출퇴근 · 유연근무 근태 관리",
-    subtitle: "시차출퇴근 · 재택원고 · 인쇄감리 외근 체크인 및 주 52시간 실시간 관리",
+    title: "근무 · 유연근무 타임라인",
+    subtitle: "내 근무 · 구성원 24h 타임라인 · 시차/원격/외근 체크인 및 주 52시간 관리",
   },
   "/hq/contracts": {
     title: "전자계약 · 저작권/외주 계약 관리",

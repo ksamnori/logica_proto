@@ -161,12 +161,22 @@ export default function HqSidebar() {
             </Link>
 
             <Link
+              href="/hq/meetings"
+              className={navItemClass("/hq/meetings")}
+            >
+              <span className="flex items-center gap-2.5 truncate">
+                <span>💬</span>
+                <span>미팅</span>
+              </span>
+            </Link>
+
+            <Link
               href="/hq/attendance"
               className={navItemClass("/hq/attendance")}
             >
               <span className="flex items-center gap-2.5 truncate">
                 <span>⏱️</span>
-                <span>출퇴근 · 유연근무</span>
+                <span>근무</span>
               </span>
             </Link>
 

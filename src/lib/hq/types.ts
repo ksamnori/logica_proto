@@ -1283,6 +1283,32 @@ export interface HqHrLifecycleState {
   invitations: HqInviteCandidateItem[];
 }
 
+export type HqMeetingRsvpStatus = "ATTENDING" | "MAYBE" | "DECLINED";
+
+export interface HqMeetingAttendee {
+  member_id?: string;
+  name: string;
+  department?: string;
+  rsvp: HqMeetingRsvpStatus;
+}
+
+export interface HqMeetingItem {
+  id: string;
+  title: string;
+  has_schedule: boolean;
+  start_at: string | null;
+  end_at: string | null;
+  location_or_url: string;
+  organizer_id?: string;
+  organizer_name: string;
+  organizer_dept?: string;
+  attendees: HqMeetingAttendee[];
+  agenda: string;
+  summary_notes: string;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface HqCompanyExtraSettings {
   doc_prefix_cert?: string;
   doc_prefix_approval?: string;
