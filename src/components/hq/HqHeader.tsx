@@ -12,9 +12,17 @@ const PAGE_TITLES: Record<string, { title: string; subtitle: string }> = {
     title: "본부 홈 대시보드",
     subtitle: "오늘의 근무 현황 · 우선 결재/전자계약 · 출판 하판 마감 브리핑",
   },
+  "/hq/notices": {
+    title: "사내 공지사항",
+    subtitle: "전사 · 부서별 주요 안내사항 · 게시 예약 및 구성원 댓글 소통",
+  },
   "/hq/members": {
-    title: "구성원 · 조직 관리 (Core HR)",
-    subtitle: "15인 출판 본부 임직원 DB · 시점별 부서 조직도 · 셀프 증명서 발급",
+    title: "구성원 · 인사 정보 관리",
+    subtitle: "본부 임직원 디렉토리 · 입퇴사 온보딩 체크리스트 · 인사 발령 관리",
+  },
+  "/hq/org-chart": {
+    title: "본부 조직도",
+    subtitle: "시점별 부서 트리 · 계약월급/유지율 트렌드 지표 · 조직 구조 설정",
   },
   "/hq/attendance": {
     title: "출퇴근 · 유연근무 근태 관리",

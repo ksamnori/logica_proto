@@ -1219,6 +1219,70 @@ export interface HqIntegrationSettings {
   kt_telecop: HqAccessTerminalConfig;
 }
 
+export interface HqNoticeComment {
+  id: string;
+  author_id?: string;
+  author_name: string;
+  content: string;
+  created_at: string;
+}
+
+export type HqNoticeStatus = "PUBLISHED" | "SCHEDULED" | "HIDDEN" | "EXPIRED";
+
+export interface HqNoticeItem {
+  id: string;
+  category: string;
+  title: string;
+  content: string;
+  author_id?: string;
+  author_name: string;
+  target_scope: "ALL" | "DEPT";
+  target_departments?: string[];
+  target_label: string;
+  status: HqNoticeStatus;
+  scheduled_at?: string | null;
+  expires_at?: string | null;
+  is_pinned?: boolean;
+  reactions: Record<string, string[]>;
+  comments: HqNoticeComment[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface HqPersonnelAppointmentItem {
+  id: string;
+  event_type: "인사 정보 변경" | "정보 생성";
+  status: "완료" | "예약" | "취소";
+  actor_name: string;
+  acted_at: string;
+  effective_date: string;
+  target_member_id?: string;
+  target_member_name: string;
+  appointment_label?: string;
+  memo?: string;
+  summary?: string;
+}
+
+export interface HqInviteCandidateItem {
+  id: string;
+  name: string;
+  email: string;
+  phone?: string;
+  department: string;
+  job_title: string;
+  hire_date: string;
+  status: "초대 전" | "가입 대기 중" | "정보 입력 중";
+  created_at: string;
+}
+
+export interface HqHrLifecycleState {
+  onboarding_templates: string[];
+  offboarding_templates: string[];
+  completed_checks: Record<string, string[]>;
+  appointments: HqPersonnelAppointmentItem[];
+  invitations: HqInviteCandidateItem[];
+}
+
 export interface HqCompanyExtraSettings {
   doc_prefix_cert?: string;
   doc_prefix_approval?: string;
@@ -1261,6 +1325,7 @@ export interface HqCompanyExtraSettings {
   security_settings?: HqSecuritySettings;
   permission_settings?: HqPermissionSettings;
   integration_settings?: HqIntegrationSettings;
+  hr_lifecycle_state?: HqHrLifecycleState;
 }
 
 export interface HqCompanySettings {

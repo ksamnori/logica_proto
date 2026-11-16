@@ -130,16 +130,33 @@ export default function HqSidebar() {
           </div>
         </div>
 
-        {/* 2. 인사(Core HR) · 근태 · 전자계약 */}
+        {/* 2. 공지 · 구성원 · 조직도 · 근태 · 전자계약 */}
         <div>
           <div className="px-3 mb-1 text-[10px] font-bold text-slate-500 uppercase tracking-wider">
             인사(HR) · 근태 · 계약
           </div>
           <div className="space-y-0.5">
+            <Link href="/hq/notices" className={navItemClass("/hq/notices")}>
+              <span className="flex items-center gap-2.5 truncate">
+                <span>📢</span>
+                <span>공지</span>
+              </span>
+            </Link>
+
             <Link href="/hq/members" className={navItemClass("/hq/members")}>
               <span className="flex items-center gap-2.5 truncate">
                 <span>👥</span>
-                <span>구성원 · 조직 관리</span>
+                <span>구성원</span>
+              </span>
+            </Link>
+
+            <Link
+              href="/hq/org-chart"
+              className={navItemClass("/hq/org-chart")}
+            >
+              <span className="flex items-center gap-2.5 truncate">
+                <span>🏢</span>
+                <span>조직도</span>
               </span>
             </Link>
 
@@ -281,7 +298,7 @@ export default function HqSidebar() {
             >
               <span className="flex items-center gap-2.5 truncate">
                 <span>💬</span>
-                <span>사내 메신저 · 조직도</span>
+                <span>사내 메신저</span>
               </span>
               {unreadChatCount > 0 && (
                 <span className="px-2 py-0.5 rounded-full bg-rose-500 text-white text-[11px] font-extrabold shrink-0">
