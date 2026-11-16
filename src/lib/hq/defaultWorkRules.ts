@@ -1,5 +1,10 @@
 // src/lib/hq/defaultWorkRules.ts
-import type { HqWorkRuleItem } from "./types";
+import type {
+  HqOvertimeCompSettings,
+  HqWorkRuleItem,
+  HqWorkplaceLocationItem,
+  HqWorkplaceWifiIpItem,
+} from "./types";
 
 export const ALL_WEEKDAYS = ["월", "화", "수", "목", "금", "토", "일"] as const;
 
@@ -327,3 +332,206 @@ export const DEFAULT_WORK_RULES: HqWorkRuleItem[] = [
     ],
   }),
 ];
+
+/**
+ * 설정 > 근무 > 초과 근무 보상 기본값 (전사 포괄 계약 기본 적용)
+ */
+export const DEFAULT_OVERTIME_COMP_SETTINGS: HqOvertimeCompSettings = {
+  item_count_mode: "7_ITEMS",
+  deduct_within_statutory_from_inclusive: false,
+  policies: [
+    {
+      id: "ot-pol-default",
+      name: "기본 초과 근무 보상 정책",
+      description: "",
+      is_default: true,
+      deduction_cycle_unit: "월 단위",
+      deduction_cycle_period: "매달 1일 ~ 매달 31일 (말일)",
+      apply_all_inclusive_default: true,
+      assigned_members: [
+        {
+          id: "otm-chun",
+          name: "천종현",
+          job_label: "경영",
+          avatar_bg: "#9ba8cf",
+          period_label: "입사일 - 퇴직일까지",
+          status: "ACTIVE",
+        },
+        {
+          id: "otm-kimms",
+          name: "김문수",
+          job_label: "편집",
+          avatar_bg: "#eb7d66",
+          period_label: "입사일 - 퇴직일까지",
+          status: "ACTIVE",
+        },
+        {
+          id: "otm-kimjy",
+          name: "김종열",
+          job_label: "마케팅",
+          avatar_bg: "#b57edc",
+          period_label: "입사일 - 퇴직일까지",
+          status: "ACTIVE",
+        },
+        {
+          id: "otm-kimhw",
+          name: "김형원",
+          job_label: "편집",
+          avatar_bg: "#eb7d66",
+          period_label: "입사일 - 퇴직일까지",
+          status: "ACTIVE",
+        },
+        {
+          id: "otm-yoojs",
+          name: "유종세",
+          job_label: "편집",
+          avatar_bg: "#9ba8cf",
+          period_label: "입사일 - 퇴직일까지",
+          status: "ACTIVE",
+        },
+        {
+          id: "otm-leeha",
+          name: "이현아",
+          job_label: "편집",
+          avatar_bg: "#43c57a",
+          period_label: "입사일 - 퇴직일까지",
+          status: "ACTIVE",
+        },
+        {
+          id: "otm-jowk",
+          name: "조원경",
+          job_label: "인사",
+          avatar_bg: "#eb7d66",
+          period_label: "입사일 - 퇴직일까지",
+          status: "ACTIVE",
+        },
+        {
+          id: "otm-leejh",
+          name: "이정환",
+          job_label: "교재 집필",
+          avatar_bg: "#43c57a",
+          period_label: "입사일 - 퇴직일까지",
+          status: "ACTIVE",
+        },
+        {
+          id: "otm-hwangdh",
+          name: "황다혜",
+          job_label: "교재 집필",
+          avatar_bg: "#f7b299",
+          period_label: "입사일 - 퇴직일까지",
+          status: "ACTIVE",
+        },
+        {
+          id: "otm-kimgs",
+          name: "김근식",
+          job_label: "관리팀",
+          avatar_bg: "#34d399",
+          period_label: "입사일 - 퇴직일까지",
+          status: "ACTIVE",
+        },
+        {
+          id: "otm-kimdh",
+          name: "김동현",
+          job_label: "집필팀",
+          avatar_bg: "#4ade80",
+          period_label: "입사일 - 퇴직일까지",
+          status: "ACTIVE",
+        },
+        {
+          id: "otm-minsr",
+          name: "민세리",
+          job_label: "집필팀",
+          avatar_bg: "#fb7185",
+          period_label: "입사일 - 퇴직일까지",
+          status: "ACTIVE",
+        },
+        {
+          id: "otm-parkjw",
+          name: "박주원",
+          job_label: "",
+          avatar_bg: "#64748b",
+          period_label: "입사일 - 퇴직일까지",
+          status: "ACTIVE",
+        },
+        {
+          id: "otm-baeksy",
+          name: "백시연",
+          job_label: "교재 집필",
+          avatar_bg: "#2dd4bf",
+          period_label: "입사일 - 퇴직일까지",
+          status: "ACTIVE",
+        },
+        {
+          id: "otm-simhy",
+          name: "심혜영",
+          job_label: "디자인",
+          avatar_bg: "#38bdf8",
+          period_label: "입사일 - 퇴직일까지",
+          status: "ACTIVE",
+        },
+        {
+          id: "otm-wonjj",
+          name: "원종준",
+          job_label: "교재 집필",
+          avatar_bg: "#fb923c",
+          period_label: "입사일 - 퇴직일까지",
+          status: "ACTIVE",
+        },
+        {
+          id: "otm-leeuh",
+          name: "이웅행",
+          job_label: "",
+          avatar_bg: "#facc15",
+          period_label: "입사일 - 퇴직일까지",
+          status: "ACTIVE",
+        },
+        {
+          id: "otm-jowh",
+          name: "조원형",
+          job_label: "마케팅",
+          avatar_bg: "#fb923c",
+          period_label: "입사일 - 퇴직일까지",
+          status: "ACTIVE",
+        },
+        {
+          id: "otm-choisy",
+          name: "최수연",
+          job_label: "디자인",
+          avatar_bg: "#fb923c",
+          period_label: "입사일 - 퇴직일까지",
+          status: "ACTIVE",
+        },
+        {
+          id: "otm-hanms",
+          name: "한민서",
+          job_label: "마케팅",
+          avatar_bg: "#a78bfa",
+          period_label: "입사일 - 퇴직일까지",
+          status: "ACTIVE",
+        },
+      ],
+    },
+  ],
+};
+
+/**
+ * 설정 > 근무 > 근무지 기본값 (본사 기본 구성 + GPS는 기본 OFF로 언제든 ON 전환 가능)
+ */
+export const DEFAULT_WORKPLACES: HqWorkplaceLocationItem[] = [
+  {
+    id: "wp-hq-main",
+    name: "(주)천종현수학연구소 본사",
+    address: "서울특별시 송파구 백제고분로34길 11-15",
+    detail_address: "본사 사무실",
+    latitude: 37.5032,
+    longitude: 127.0938,
+    radius_meters: 200,
+    gps_enabled: false,
+    is_primary: true,
+    sync_company_address: true,
+    apply_scope: "ALL",
+    applied_departments: [],
+  },
+];
+
+export const DEFAULT_WORKPLACE_IPS: HqWorkplaceWifiIpItem[] = [];

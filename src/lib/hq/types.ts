@@ -737,6 +737,55 @@ export interface HqWorkFormPolicy {
   reason_required: boolean;
 }
 
+export interface HqOvertimeAssignedMember {
+  id: string;
+  name: string;
+  job_label?: string;
+  avatar_bg?: string;
+  period_label: string; // 예: "입사일 - 퇴직일까지"
+  status: "ACTIVE" | "SCHEDULED" | "PAST";
+}
+
+export interface HqOvertimeCompPolicyItem {
+  id: string;
+  name: string; // 예: "기본 초과 근무 보상 정책"
+  description: string;
+  is_default?: boolean;
+  deduction_cycle_unit: "월 단위" | "주 단위";
+  deduction_cycle_period: string; // 예: "매달 1일 ~ 매달 31일 (말일)"
+  apply_all_inclusive_default?: boolean; // 전사 포괄계약 기본 자동 포함 여부
+  assigned_members: HqOvertimeAssignedMember[];
+}
+
+export interface HqOvertimeCompSettings {
+  item_count_mode: "3_ITEMS" | "7_ITEMS";
+  deduct_within_statutory_from_inclusive: boolean;
+  policies: HqOvertimeCompPolicyItem[];
+}
+
+export interface HqWorkplaceLocationItem {
+  id: string;
+  name: string;
+  address: string;
+  detail_address?: string;
+  latitude: number;
+  longitude: number;
+  radius_meters: number; // 50 | 100 | 200 | 300 | 500 | 1000
+  gps_enabled: boolean;
+  is_primary?: boolean;
+  sync_company_address?: boolean;
+  apply_scope: "ALL" | "DEPARTMENT";
+  applied_departments?: string[];
+}
+
+export interface HqWorkplaceWifiIpItem {
+  id: string;
+  name: string;
+  ip_cidr: string;
+  memo?: string;
+  is_enabled: boolean;
+}
+
 export interface HqCompanyExtraSettings {
   doc_prefix_cert?: string;
   doc_prefix_approval?: string;
@@ -769,6 +818,9 @@ export interface HqCompanyExtraSettings {
   work_rules?: HqWorkRuleItem[];
   work_condition_rules?: HqWorkConditionRule[];
   work_form_policies?: HqWorkFormPolicy[];
+  overtime_comp_settings?: HqOvertimeCompSettings;
+  workplaces?: HqWorkplaceLocationItem[];
+  workplace_ips?: HqWorkplaceWifiIpItem[];
 }
 
 export interface HqCompanySettings {

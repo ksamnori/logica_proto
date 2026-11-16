@@ -118,6 +118,25 @@ export function normalizeCompanySettings(raw: any): HqCompanySettings {
         incomingExtra.work_form_policies.length > 0
           ? incomingExtra.work_form_policies
           : def.extra_settings.work_form_policies,
+      overtime_comp_settings: incomingExtra.overtime_comp_settings
+        ? {
+            ...def.extra_settings.overtime_comp_settings,
+            ...incomingExtra.overtime_comp_settings,
+            policies:
+              Array.isArray(incomingExtra.overtime_comp_settings.policies) &&
+              incomingExtra.overtime_comp_settings.policies.length > 0
+                ? incomingExtra.overtime_comp_settings.policies
+                : def.extra_settings.overtime_comp_settings?.policies || [],
+          }
+        : def.extra_settings.overtime_comp_settings,
+      workplaces:
+        Array.isArray(incomingExtra.workplaces) &&
+        incomingExtra.workplaces.length > 0
+          ? incomingExtra.workplaces
+          : def.extra_settings.workplaces,
+      workplace_ips: Array.isArray(incomingExtra.workplace_ips)
+        ? incomingExtra.workplace_ips
+        : def.extra_settings.workplace_ips,
       info_approval_policy: {
         ...def.extra_settings.info_approval_policy,
         ...(incomingExtra.info_approval_policy || {}),

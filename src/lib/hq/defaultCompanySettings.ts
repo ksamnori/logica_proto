@@ -6,7 +6,12 @@ import {
   DEFAULT_WORK_CONDITION_RULES,
   DEFAULT_WORK_FORM_POLICIES,
 } from "./defaultApprovalPolicies";
-import { DEFAULT_WORK_RULES } from "./defaultWorkRules";
+import {
+  DEFAULT_OVERTIME_COMP_SETTINGS,
+  DEFAULT_WORKPLACES,
+  DEFAULT_WORKPLACE_IPS,
+  DEFAULT_WORK_RULES,
+} from "./defaultWorkRules";
 import type {
   HqCompanySettings,
   HqEmpNoPolicy,
@@ -518,6 +523,9 @@ export const DEFAULT_HQ_COMPANY_SETTINGS: HqCompanySettings = {
     work_rules: DEFAULT_WORK_RULES,
     work_condition_rules: DEFAULT_WORK_CONDITION_RULES,
     work_form_policies: DEFAULT_WORK_FORM_POLICIES,
+    overtime_comp_settings: DEFAULT_OVERTIME_COMP_SETTINGS,
+    workplaces: DEFAULT_WORKPLACES,
+    workplace_ips: DEFAULT_WORKPLACE_IPS,
   },
 };
 

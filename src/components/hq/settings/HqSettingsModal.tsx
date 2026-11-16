@@ -31,8 +31,10 @@ import {
   HqDocBoxSettingsSection,
 } from "./HqCustomInfoDocBoxSection";
 import HqHrInfoSettingsSection from "./HqHrInfoSettingsSection";
+import HqOvertimeCompSettingsSection from "./HqOvertimeCompSettingsSection";
 import HqWorkPolicySettingsSection from "./HqWorkPolicySettingsSection";
 import HqWorkTypeSettingsSection from "./HqWorkTypeSettingsSection";
+import HqWorkplaceSettingsSection from "./HqWorkplaceSettingsSection";
 
 export type HqSettingsTab =
   | "company"
@@ -2076,55 +2078,44 @@ export default function HqSettingsModal({
             )}
 
             {activeTab === "overtime-comp" && (
-              <div className="space-y-6">
-                <div>
-                  <h2 className="text-[22px] font-extrabold text-slate-900">
-                    초과 근무 보상
-                  </h2>
-                  <p className="text-xs text-slate-400 mt-1">
-                    연장·야간·휴일 근무에 대한 수당 정산 및 보상휴가 부여 기준을 관리합니다.
-                  </p>
-                </div>
-                <div className="p-5 rounded-2xl border border-slate-200 text-xs text-slate-500 leading-relaxed">
-                  근로기준법 제56조 및 제57조에 따라 초과 근무 시 가산 수당 지급 또는 보상휴가 부여 정책을 설정할 수 있습니다.
-                </div>
-                <StepNavFooter
-                  prevLabel="근무 정책 · 승인"
-                  onPrev={() => setActiveTab("work-policy")}
-                  nextLabel="근무지"
-                  onNext={() => setActiveTab("work-place")}
-                />
-              </div>
+              <HqOvertimeCompSettingsSection
+                settings={settings}
+                members={members}
+                canEdit={canEdit}
+                saving={saving}
+                onSaveExtra={async (nextExtra, toastMessage) => {
+                  await savePartialSettings(
+                    {
+                      extra_settings: {
+                        ...settings.extra_settings,
+                        ...nextExtra,
+                      },
+                    },
+                    toastMessage
+                  );
+                }}
+                onNavigateTab={(tab) => setActiveTab(tab)}
+              />
             )}
 
             {activeTab === "work-place" && (
-              <div className="space-y-5">
-                <div>
-                  <h2 className="text-[22px] font-extrabold text-slate-900">
-                    근무지
-                  </h2>
-                  <p className="text-xs text-slate-400 mt-1">
-                    본부 주 사업장 주소 정보입니다. ([회사 정보] 주소와 연동)
-                  </p>
-                </div>
-                <div className="p-5 rounded-2xl border border-slate-200 flex items-center justify-between gap-3">
-                  <div>
-                    <div className="text-sm font-extrabold text-slate-900">
-                      📍 {settings.company_name} 본부
-                    </div>
-                    <div className="text-xs text-slate-500 mt-1">
-                      {settings.address}
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setActiveTab("company")}
-                    className="px-3 py-1.5 rounded-lg border border-slate-200 text-xs font-bold text-slate-600 hover:bg-slate-50"
-                  >
-                    주소 수정
-                  </button>
-                </div>
-              </div>
+              <HqWorkplaceSettingsSection
+                settings={settings}
+                canEdit={canEdit}
+                saving={saving}
+                onSaveExtra={async (nextExtra, toastMessage) => {
+                  await savePartialSettings(
+                    {
+                      extra_settings: {
+                        ...settings.extra_settings,
+                        ...nextExtra,
+                      },
+                    },
+                    toastMessage
+                  );
+                }}
+                onNavigateTab={(tab) => setActiveTab(tab)}
+              />
             )}
 
             {activeTab === "leave-setting" && (
