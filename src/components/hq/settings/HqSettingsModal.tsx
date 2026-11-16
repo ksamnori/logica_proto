@@ -42,6 +42,7 @@ import {
   HqPayrollSettlementSection,
   HqPayrollTaxWorkplaceSection,
 } from "./HqPayrollSettlementWorkplaceSection";
+import HqRetireeDocSettingsSection from "./HqRetireeDocSettingsSection";
 import HqWorkPolicySettingsSection from "./HqWorkPolicySettingsSection";
 import HqWorkTypeSettingsSection from "./HqWorkTypeSettingsSection";
 import HqWorkplaceSettingsSection from "./HqWorkplaceSettingsSection";
@@ -64,7 +65,8 @@ export type HqSettingsTab =
   | "payroll-payment"
   | "payroll-deduction"
   | "payroll-settlement"
-  | "payroll-workplace";
+  | "payroll-workplace"
+  | "retiree-doc";
 
 interface Props {
   isOpen: boolean;
@@ -1083,6 +1085,25 @@ export default function HqSettingsModal({
                 <span className="flex items-center gap-2.5">
                   <span className="text-slate-400 text-sm">💼</span>
                   <span>사업장 설정</span>
+                </span>
+              </button>
+            </div>
+          </div>
+
+          {/* 셀프 서비스 */}
+          <div>
+            <div className="px-3 mb-1.5 text-[11px] font-bold text-slate-400">
+              셀프 서비스
+            </div>
+            <div className="space-y-0.5">
+              <button
+                type="button"
+                onClick={() => setActiveTab("retiree-doc")}
+                className={navBtnClass("retiree-doc")}
+              >
+                <span className="flex items-center gap-2.5">
+                  <span className="text-slate-400 text-sm">📑</span>
+                  <span>퇴직자 문서 발급 설정</span>
                 </span>
               </button>
             </div>
@@ -2298,6 +2319,27 @@ export default function HqSettingsModal({
             {activeTab === "payroll-workplace" && (
               <HqPayrollTaxWorkplaceSection
                 settings={settings}
+                canEdit={canEdit}
+                saving={saving}
+                onSaveExtra={async (nextExtra, toastMessage) => {
+                  await savePartialSettings(
+                    {
+                      extra_settings: {
+                        ...settings.extra_settings,
+                        ...nextExtra,
+                      },
+                    },
+                    toastMessage
+                  );
+                }}
+                onNavigateTab={(tab) => setActiveTab(tab)}
+              />
+            )}
+
+            {activeTab === "retiree-doc" && (
+              <HqRetireeDocSettingsSection
+                settings={settings}
+                members={members}
                 canEdit={canEdit}
                 saving={saving}
                 onSaveExtra={async (nextExtra, toastMessage) => {

@@ -4,6 +4,7 @@ import type {
   HqApprovalTemplate,
   HqDocFolderItem,
   HqPolicyAssignee,
+  HqRetireeDocSettingItem,
   HqWorkConditionRule,
   HqWorkFormPolicy,
 } from "./types";
@@ -788,5 +789,101 @@ export const DEFAULT_WORK_FORM_POLICIES: HqWorkFormPolicy[] = [
     allow_night_work: false,
     allow_holiday_work: false,
     reason_required: false,
+  },
+];
+
+// ============================================================================
+// 설정 > 셀프 서비스 > 퇴직자 문서 발급 설정 (스크린샷 162657 ~ 162737 동일)
+// ============================================================================
+export const RETIREE_DOC_PERIOD_OPTIONS: {
+  value: string;
+  subtitle?: string;
+}[] = [
+  { value: "퇴직일로부터 6개월" },
+  { value: "퇴직일로부터 1년" },
+  { value: "퇴직일로부터 2년" },
+  { value: "퇴직일로부터 3년" },
+  { value: "퇴직일로부터 4년" },
+  { value: "퇴직일로부터 5년" },
+  { value: "퇴직일로부터 6년" },
+  { value: "퇴직일로부터 7년" },
+  { value: "퇴직일로부터 8년" },
+  { value: "퇴직일로부터 9년" },
+  { value: "퇴직일로부터 10년" },
+  {
+    value: "제한 없음",
+    subtitle: "퇴직자가 기간 제한 없이 서류를 발급받을 수 있어요.",
+  },
+];
+
+export const DEFAULT_RETIREE_DOC_SETTINGS: HqRetireeDocSettingItem[] = [
+  {
+    id: "retdoc-payslip",
+    title: "급여명세서",
+    description: "근무 기간 중 받은 급여 항목과 공제 내역을 확인할 수 있어요.",
+    supports_approval: false,
+    allow_issue: true,
+    issue_period: "퇴직일로부터 5년",
+    use_approval: false,
+  },
+  {
+    id: "retdoc-withholding-book",
+    policy_id: "rd-withholding-book",
+    title: "근로소득 원천징수부",
+    description: "근로소득의 월별 원천징수 내역을 정리한 서류예요.",
+    supports_approval: true,
+    allow_issue: true,
+    issue_period: "퇴직일로부터 5년",
+    use_approval: false,
+  },
+  {
+    id: "retdoc-class-a-tax",
+    policy_id: "rd-class-a-tax",
+    title: "갑종근로소득에 대한 소득세 원천징수확인서",
+    description: "갑종 근로소득세 납부 내역을 확인할 수 있어요.",
+    supports_approval: true,
+    allow_issue: true,
+    issue_period: "퇴직일로부터 5년",
+    use_approval: false,
+  },
+  {
+    id: "retdoc-withholding-receipt",
+    policy_id: "rd-withholding-receipt",
+    title: "근로소득 원천징수영수증",
+    description: "근무 기간 동안 발생한 근로소득과 원천징수액을 증명해요.",
+    supports_approval: true,
+    allow_issue: true,
+    issue_period: "퇴직일로부터 5년",
+    use_approval: false,
+  },
+  {
+    id: "retdoc-retire-withholding",
+    policy_id: "rd-retire-withholding",
+    title: "퇴직소득 원천징수영수증",
+    description: "퇴직 소득과 원천징수액을 증명하는 서류예요.",
+    supports_approval: true,
+    allow_issue: true,
+    issue_period: "퇴직일로부터 5년",
+    use_approval: false,
+  },
+  {
+    id: "retdoc-severance-statement",
+    policy_id: "rd-severance-statement",
+    title: "퇴직금 정산내역서",
+    description: "퇴직금 계산 항목과 산정 내역을 정리한 서류예요.",
+    supports_approval: true,
+    allow_issue: true,
+    issue_period: "퇴직일로부터 5년",
+    use_approval: false,
+  },
+  {
+    id: "retdoc-career-cert",
+    policy_id: "rd-career-cert",
+    title: "경력증명서",
+    description: "재직 기간·직위·담당 업무를 증명하는 서류예요.",
+    supports_approval: true,
+    allow_issue: true,
+    issue_period: "퇴직일로부터 5년",
+    use_approval: false,
   },
 ];

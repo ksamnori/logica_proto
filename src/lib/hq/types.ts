@@ -1069,6 +1069,17 @@ export interface HqPayrollSettings {
   tax_workplaces: HqPayrollTaxWorkplaceItem[];
 }
 
+export interface HqRetireeDocSettingItem {
+  id: string;
+  policy_id?: string; // approval_policies 내 retiree_doc 카테고리 id 매칭 (급여명세서 제외 6종)
+  title: string;
+  description: string;
+  supports_approval: boolean; // 급여명세서는 false, 나머지 6종은 true
+  allow_issue: boolean; // 문서 발급 허용 (기본 true)
+  issue_period: string; // 예: "퇴직일로부터 5년" | "제한 없음" 등 12종
+  use_approval: boolean; // 승인 사용 여부 (기본 false = 즉시 발급)
+}
+
 export interface HqCompanyExtraSettings {
   doc_prefix_cert?: string;
   doc_prefix_approval?: string;
@@ -1107,6 +1118,7 @@ export interface HqCompanyExtraSettings {
   annual_leave_settings?: HqAnnualLeaveGlobalSettings;
   custom_leaves?: HqCustomLeaveItem[];
   payroll_settings?: HqPayrollSettings;
+  retiree_doc_settings?: HqRetireeDocSettingItem[];
 }
 
 export interface HqCompanySettings {

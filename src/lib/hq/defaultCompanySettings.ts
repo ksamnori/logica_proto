@@ -3,6 +3,7 @@ import {
   DEFAULT_APPROVAL_POLICIES,
   DEFAULT_APPROVAL_TEMPLATES,
   DEFAULT_DOC_FOLDERS,
+  DEFAULT_RETIREE_DOC_SETTINGS,
   DEFAULT_WORK_CONDITION_RULES,
   DEFAULT_WORK_FORM_POLICIES,
 } from "./defaultApprovalPolicies";
@@ -534,6 +535,7 @@ export const DEFAULT_HQ_COMPANY_SETTINGS: HqCompanySettings = {
     annual_leave_settings: DEFAULT_ANNUAL_LEAVE_SETTINGS,
     custom_leaves: DEFAULT_CUSTOM_LEAVES,
     payroll_settings: DEFAULT_PAYROLL_SETTINGS,
+    retiree_doc_settings: DEFAULT_RETIREE_DOC_SETTINGS,
   },
 };
 

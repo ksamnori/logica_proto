@@ -179,6 +179,11 @@ export function normalizeCompanySettings(raw: any): HqCompanySettings {
               : [],
           }
         : def.extra_settings.payroll_settings,
+      retiree_doc_settings:
+        Array.isArray(incomingExtra.retiree_doc_settings) &&
+        incomingExtra.retiree_doc_settings.length > 0
+          ? incomingExtra.retiree_doc_settings
+          : def.extra_settings.retiree_doc_settings,
       info_approval_policy: {
         ...def.extra_settings.info_approval_policy,
         ...(incomingExtra.info_approval_policy || {}),
