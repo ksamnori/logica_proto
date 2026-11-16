@@ -79,6 +79,136 @@ export type HqPubStage =
 
 export type HqPubPriority = "HIGH" | "NORMAL" | "LOW";
 
+// ============================================================================
+// Flex 스타일 구성원 상세 프로필 확장 항목 (hq_member_profile.profile_extra)
+// ============================================================================
+
+export interface HqCareerItem {
+  id: string;
+  company_name: string;
+  start_ym: string;
+  end_ym: string;
+  contract_type: string;
+  department?: string;
+  job_title?: string;
+}
+
+export interface HqEducationItem {
+  id: string;
+  school_name: string;
+  degree_type: string;
+  graduation_status: string;
+  major?: string;
+  start_ym: string;
+  end_ym: string;
+}
+
+export interface HqFamilyItem {
+  id: string;
+  relation: string;
+  name: string;
+  birth_date?: string;
+  basic_deduction: boolean;
+  health_dependent: boolean;
+}
+
+export interface HqLeaveHistoryItem {
+  id: string;
+  leave_kind: string;
+  start_date: string;
+  end_date: string;
+  reason?: string;
+}
+
+export interface HqAwardItem {
+  id: string;
+  title: string;
+  awarded_date: string;
+  issuer?: string;
+  note?: string;
+}
+
+export interface HqDisciplineItem {
+  id: string;
+  kind: string;
+  action_date: string;
+  reason?: string;
+}
+
+export interface HqGrowthItem {
+  id: string;
+  period: string;
+  title: string;
+  progress: number;
+  status: string;
+  note?: string;
+}
+
+export interface HqTrainingItem {
+  id: string;
+  title: string;
+  completed_date: string;
+  hours: number;
+  institution?: string;
+  status: string;
+}
+
+export interface HqLaborContractInfo {
+  contract_type?: string;
+  start_date?: string;
+  end_date?: string;
+  probation_end_date?: string;
+  work_place?: string;
+  note?: string;
+}
+
+export interface HqWageContractInfo {
+  wage_type?: string;
+  annual_salary?: number;
+  monthly_base?: number;
+  pay_day?: string;
+  effective_date?: string;
+  meal_allowance?: number;
+  note?: string;
+}
+
+export interface HqProfileChangeLog {
+  at: string;
+  actor_name: string;
+  summary: string;
+}
+
+export interface HqProfileExtra {
+  nickname?: string;
+  bio?: string;
+  personal_email?: string;
+  group_hire_date?: string;
+  hire_type?: string;
+  rrn_front?: string;
+  gender?: "남" | "여" | "";
+  nationality?: string;
+  postal_code?: string;
+  work_schedule_type?: string;
+  work_schedule_mode?: string;
+  weekly_work_hours?: number;
+  leave_policy_name?: string;
+  leave_policy_tags?: string[];
+  holiday_policy_name?: string;
+  holiday_summary?: string;
+  special_notes?: string;
+  labor_contract?: HqLaborContractInfo;
+  wage_contract?: HqWageContractInfo;
+  leave_histories?: HqLeaveHistoryItem[];
+  awards?: HqAwardItem[];
+  disciplines?: HqDisciplineItem[];
+  careers?: HqCareerItem[];
+  educations?: HqEducationItem[];
+  families?: HqFamilyItem[];
+  growth_goals?: HqGrowthItem[];
+  trainings?: HqTrainingItem[];
+  change_logs?: HqProfileChangeLog[];
+}
+
 export interface HqMember {
   instructor_id: string;
   name: string;
@@ -88,6 +218,10 @@ export interface HqMember {
   tenant_id: string | null;
   tenant_name: string;
   is_hq_tenant: boolean;
+  auto_reply_active?: boolean;
+  chat_allow_start?: string | null;
+  chat_allow_end?: string | null;
+  auto_reply_message?: string | null;
   // Core HR 프로필 (hq_member_profile)
   employee_no: string;
   department: string;
@@ -112,6 +246,8 @@ export interface HqMember {
   address: string;
   job_description: string;
   hr_memo: string;
+  profile_extra?: HqProfileExtra;
+  can_view_private?: boolean;
   has_profile_row: boolean;
 }
 

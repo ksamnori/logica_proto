@@ -4,6 +4,7 @@
 import React, { useMemo, useState } from "react";
 import { useHqShell } from "@/components/hq/HqShellContext";
 import CertificatePrintModal from "@/components/hq/members/CertificatePrintModal";
+import HqMemberProfileModal from "@/components/hq/members/HqMemberProfileModal";
 import MemberFormModal from "@/components/hq/members/MemberFormModal";
 import {
   getRankLevel,
@@ -29,7 +30,7 @@ function getApprovalRoleHint(rankCode: HqRankCode, isDeptHead: boolean): string 
 }
 
 export default function HqMembersPage() {
-  const { me, members, isHrManager, schemaMissing, refreshMembers } =
+  const { instId, me, members, isHrManager, schemaMissing, refreshMembers } =
     useHqShell();
 
   const [viewMode, setViewMode] = useState<"roster" | "org">("roster");
@@ -44,7 +45,13 @@ export default function HqMembersPage() {
   const [formOpen, setFormOpen] = useState(false);
   const [formMode, setFormMode] = useState<"create" | "edit">("create");
   const [editingMember, setEditingMember] = useState<HqMember | null>(null);
+  const [profileTargetId, setProfileTargetId] = useState<string | null>(null);
   const [certMember, setCertMember] = useState<HqMember | null>(null);
+
+  const activeProfileMember = useMemo(
+    () => members.find((m) => m.instructor_id === profileTargetId) || null,
+    [members, profileTargetId]
+  );
 
   const existingDepartments = useMemo(() => {
     const set = new Set<string>();
@@ -251,10 +258,10 @@ export default function HqMembersPage() {
                   </button>
                   <button
                     type="button"
-                    onClick={() => openEditModal(me)}
-                    className="px-3.5 py-2 rounded-xl bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 text-xs font-bold transition-colors"
+                    onClick={() => setProfileTargetId(me.instructor_id)}
+                    className="px-3.5 py-2 rounded-xl bg-white border border-slate-300 hover:bg-slate-50 text-slate-800 text-xs font-bold transition-colors"
                   >
-                    ✏️ 내 인사정보 수정
+                    👤 내 상세 프로필
                   </button>
                 </>
               )}
@@ -405,7 +412,8 @@ export default function HqMembersPage() {
                       return (
                         <tr
                           key={m.instructor_id}
-                          className="hover:bg-slate-50/80 transition-colors"
+                          onClick={() => setProfileTargetId(m.instructor_id)}
+                          className="hover:bg-blue-50/40 cursor-pointer transition-colors"
                         >
                           <td className="px-5 py-3.5">
                             <div className="flex items-center gap-3">
@@ -517,7 +525,10 @@ export default function HqMembersPage() {
                             </div>
                           </td>
 
-                          <td className="px-5 py-3.5 text-right">
+                          <td
+                            className="px-5 py-3.5 text-right"
+                            onClick={(e) => e.stopPropagation()}
+                          >
                             <div className="inline-flex items-center gap-1.5">
                               {canCert && (
                                 <button
@@ -529,13 +540,20 @@ export default function HqMembersPage() {
                                   증명서
                                 </button>
                               )}
+                              <button
+                                type="button"
+                                onClick={() => setProfileTargetId(m.instructor_id)}
+                                className="px-2.5 py-1.5 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-800 font-extrabold text-[11px]"
+                              >
+                                상세 프로필
+                              </button>
                               {canEdit && (
                                 <button
                                   type="button"
                                   onClick={() => openEditModal(m)}
                                   className="px-2.5 py-1.5 rounded-lg bg-blue-50 hover:bg-blue-100 text-brand font-extrabold text-[11px]"
                                 >
-                                  {isHrManager ? "인사·직급 수정" : "내 정보 수정"}
+                                  {isHrManager ? "인사·직급" : "빠른수정"}
                                 </button>
                               )}
                             </div>
@@ -563,11 +581,7 @@ export default function HqMembersPage() {
                     return (
                       <div
                         key={ex.instructor_id}
-                        onClick={() =>
-                          (isHrManager ||
-                            ex.instructor_id === me?.instructor_id) &&
-                          openEditModal(ex)
-                        }
+                        onClick={() => setProfileTargetId(ex.instructor_id)}
                         className="rounded-xl bg-white/10 border border-white/15 p-3.5 flex items-center justify-between gap-2 cursor-pointer hover:bg-white/15 transition-colors"
                       >
                         <div>
@@ -617,17 +631,15 @@ export default function HqMembersPage() {
                   <div className="p-4 space-y-2 flex-1">
                     {group.members.map((m) => {
                       const rk = getRankMeta(m.rank_code);
-                      const canClick =
-                        isHrManager || m.instructor_id === me?.instructor_id;
                       return (
                         <div
                           key={m.instructor_id}
-                          onClick={() => canClick && openEditModal(m)}
-                          className={`p-2.5 rounded-xl border flex items-center justify-between gap-2 ${
+                          onClick={() => setProfileTargetId(m.instructor_id)}
+                          className={`p-2.5 rounded-xl border flex items-center justify-between gap-2 cursor-pointer hover:border-brand/40 ${
                             m.is_dept_head
                               ? "border-amber-200 bg-amber-50/40"
                               : "border-slate-100 bg-slate-50/50"
-                          } ${canClick ? "cursor-pointer hover:border-brand/40" : ""}`}
+                          }`}
                         >
                           <div className="min-w-0">
                             <div className="text-xs font-extrabold text-slate-800 flex items-center gap-1.5">
@@ -669,6 +681,17 @@ export default function HqMembersPage() {
         isHrManager={isHrManager}
         existingDepartments={existingDepartments}
         onClose={() => setFormOpen(false)}
+        onSaved={refreshMembers}
+      />
+
+      {/* Flex 스타일 상세 인사 프로필 모달 */}
+      <HqMemberProfileModal
+        isOpen={Boolean(activeProfileMember)}
+        member={activeProfileMember}
+        meId={instId}
+        isHrManager={isHrManager}
+        existingDepartments={existingDepartments}
+        onClose={() => setProfileTargetId(null)}
         onSaved={refreshMembers}
       />
 

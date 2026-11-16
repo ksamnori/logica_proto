@@ -1,13 +1,13 @@
 // src/app/hq/layout.tsx
 "use client";
 
-import React, { useState } from "react";
+import React, { useMemo, useState } from "react";
 import { usePathname } from "next/navigation";
-import ProfileModal from "@/components/ProfileModal";
 import HqHeader from "@/components/hq/HqHeader";
 import HqSchemaSetupBanner from "@/components/hq/HqSchemaSetupBanner";
 import { HqShellProvider, useHqShell } from "@/components/hq/HqShellContext";
 import HqSidebar from "@/components/hq/HqSidebar";
+import HqMemberProfileModal from "@/components/hq/members/HqMemberProfileModal";
 
 function HqWorkspaceFrame({
   children,
@@ -18,7 +18,13 @@ function HqWorkspaceFrame({
   isProfileOpen: boolean;
   onCloseProfile: () => void;
 }) {
-  const { instId, me, isBooting, refreshMembers } = useHqShell();
+  const { instId, me, members, isHrManager, isBooting, refreshMembers } =
+    useHqShell();
+
+  const existingDepts = useMemo(
+    () => Array.from(new Set(members.map((m) => m.department).filter(Boolean))),
+    [members]
+  );
 
   return (
     <div className="h-screen flex overflow-hidden bg-[#F5F7FA] text-slate-800 print:h-auto print:overflow-visible print:bg-white">
@@ -42,18 +48,16 @@ function HqWorkspaceFrame({
         </main>
       </div>
 
-      {isProfileOpen && instId && (
-        <ProfileModal
-          isOpen={isProfileOpen}
-          onClose={() => {
-            onCloseProfile();
-            refreshMembers();
-          }}
-          instId={instId}
-          instructorName={me?.name || "본부 구성원"}
-          isHQ={true}
-        />
-      )}
+      {/* 상단 헤더 또는 좌측 사이드바 [내 프로필] 클릭 시 Flex 스타일 인사 프로필 모달 오픈 */}
+      <HqMemberProfileModal
+        isOpen={isProfileOpen}
+        member={me}
+        meId={instId}
+        isHrManager={isHrManager}
+        existingDepartments={existingDepts}
+        onClose={onCloseProfile}
+        onSaved={refreshMembers}
+      />
     </div>
   );
 }

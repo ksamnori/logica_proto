@@ -13,9 +13,69 @@ import {
   isMissingHqTableError,
   requireHqCaller,
 } from "@/lib/hq/serverAuth";
-import type { HqMember, HqRankCode, HqWorkStatus } from "@/lib/hq/types";
+import type {
+  HqMember,
+  HqProfileExtra,
+  HqRankCode,
+  HqWorkStatus,
+} from "@/lib/hq/types";
 
 export const runtime = "nodejs";
+
+function sanitizeExtraForViewer(
+  raw: any,
+  canSeePrivate: boolean
+): HqProfileExtra {
+  const src: HqProfileExtra =
+    raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
+
+  if (!canSeePrivate) {
+    return {
+      nickname: src.nickname || "",
+      bio: src.bio || "",
+      work_schedule_type: src.work_schedule_type || "기본 9시",
+      work_schedule_mode: src.work_schedule_mode || "고정",
+      weekly_work_hours: Number(src.weekly_work_hours ?? 40),
+    };
+  }
+
+  return {
+    nickname: src.nickname || "",
+    bio: src.bio || "",
+    personal_email: src.personal_email || "",
+    group_hire_date: src.group_hire_date || "",
+    hire_type: src.hire_type || "",
+    rrn_front: src.rrn_front
+      ? String(src.rrn_front).replace(/[^0-9]/g, "").slice(0, 6)
+      : "",
+    gender: src.gender === "남" || src.gender === "여" ? src.gender : "",
+    nationality: src.nationality || "대한민국(KOR)",
+    postal_code: src.postal_code || "",
+    work_schedule_type: src.work_schedule_type || "기본 9시",
+    work_schedule_mode: src.work_schedule_mode || "고정",
+    weekly_work_hours: Number(src.weekly_work_hours ?? 40),
+    leave_policy_name: src.leave_policy_name || "기본 연차 정책",
+    leave_policy_tags: Array.isArray(src.leave_policy_tags)
+      ? src.leave_policy_tags
+      : ["회계일 기준 부여", "시간 단위 사용", "연차 촉진 사용"],
+    holiday_policy_name: src.holiday_policy_name || "기본 (14일)",
+    holiday_summary:
+      src.holiday_summary ||
+      "1월 1일, 설날, 3·1절, 부처님 오신 날, 노동절, 어린이날, 현충일, 제헌절, 광복절, 추석, 개천절, 한글날, 성탄절...",
+    special_notes: src.special_notes || "",
+    labor_contract: src.labor_contract || {},
+    wage_contract: src.wage_contract || {},
+    leave_histories: Array.isArray(src.leave_histories) ? src.leave_histories : [],
+    awards: Array.isArray(src.awards) ? src.awards : [],
+    disciplines: Array.isArray(src.disciplines) ? src.disciplines : [],
+    careers: Array.isArray(src.careers) ? src.careers : [],
+    educations: Array.isArray(src.educations) ? src.educations : [],
+    families: Array.isArray(src.families) ? src.families : [],
+    growth_goals: Array.isArray(src.growth_goals) ? src.growth_goals : [],
+    trainings: Array.isArray(src.trainings) ? src.trainings : [],
+    change_logs: Array.isArray(src.change_logs) ? src.change_logs : [],
+  };
+}
 
 export async function GET(req: NextRequest) {
   try {
@@ -25,7 +85,6 @@ export async function GET(req: NextRequest) {
     const supabaseAdmin = getSupabaseAdmin();
     const hqIds = Array.from(caller.hqTenantIds);
 
-    // HQ 테넌트 소속 임직원 전체 조회 (+ 타 테넌트 소속 최고관리자가 접속한 경우 본인 포함)
     const { data: instRows, error: instErr } = await supabaseAdmin
       .from("instructor")
       .select("*")
@@ -40,7 +99,7 @@ export async function GET(req: NextRequest) {
       return false;
     });
 
-    let profileMap = new Map<string, any>();
+    const profileMap = new Map<string, any>();
     let schemaMissing = caller.schemaMissing;
 
     if (!schemaMissing) {
@@ -59,7 +118,6 @@ export async function GET(req: NextRequest) {
           profileMap.set(String(p.instructor_id), p);
         });
 
-        // 아직 hq_member_profile에 행이 없는 기존 본부 구성원 자동 초기화
         const missingRows = hqInstructors
           .filter((inst: any) => !profileMap.has(String(inst.instructor_id)))
           .map((inst: any, idx: number) => {
@@ -77,7 +135,10 @@ export async function GET(req: NextRequest) {
               rank_code: inf.rankCode,
               job_title: inf.jobTitle,
               is_dept_head: inf.isDeptHead,
-              employment_type: inf.rankCode === "CEO" || inf.rankCode === "DIRECTOR" ? "임원" : "정규직",
+              employment_type:
+                inf.rankCode === "CEO" || inf.rankCode === "DIRECTOR"
+                  ? "임원"
+                  : "정규직",
               work_status: workStatus,
               hire_date: inst.created_at ? String(inst.created_at).slice(0, 10) : null,
               annual_leave_total: 15.0,
@@ -127,9 +188,14 @@ export async function GET(req: NextRequest) {
           (tId && caller.tenantNames[tId]) ||
           (hqIds.includes(tId || "") ? "본사" : "본사 겸직"),
         is_hq_tenant: Boolean(tId && caller.hqTenantIds.has(tId)),
+        auto_reply_active: Boolean(inst.auto_reply_active),
+        chat_allow_start: inst.chat_allow_start || "09:00",
+        chat_allow_end: inst.chat_allow_end || "18:00",
+        auto_reply_message: inst.auto_reply_message || "",
         employee_no:
           prof?.employee_no || `HQ-TEMP-${String(idx + 1).padStart(3, "0")}`,
-        department: (prof?.department || inst.department || "미지정").trim() || "미지정",
+        department:
+          (prof?.department || inst.department || "미지정").trim() || "미지정",
         rank_code: rankCode,
         rank_level: getRankLevel(rankCode),
         rank_label: rankMeta.shortLabel,
@@ -137,12 +203,17 @@ export async function GET(req: NextRequest) {
         is_dept_head: Boolean(prof?.is_dept_head ?? inf.isDeptHead),
         employment_type: prof?.employment_type || "정규직",
         work_status: workStatus,
-        hire_date: prof?.hire_date || (inst.created_at ? String(inst.created_at).slice(0, 10) : null),
+        hire_date:
+          prof?.hire_date ||
+          (inst.created_at ? String(inst.created_at).slice(0, 10) : null),
         resign_date: prof?.resign_date || null,
         birth_date: canSeePrivate ? prof?.birth_date || null : null,
         annual_leave_total: totalLeave,
         annual_leave_used: usedLeave,
-        annual_leave_remain: Math.max(0, Number((totalLeave - usedLeave).toFixed(1))),
+        annual_leave_remain: Math.max(
+          0,
+          Number((totalLeave - usedLeave).toFixed(1))
+        ),
         bank_name: canSeePrivate ? prof?.bank_name || "" : "",
         bank_account: canSeePrivate ? prof?.bank_account || "" : "",
         account_holder: canSeePrivate ? prof?.account_holder || "" : "",
@@ -151,6 +222,8 @@ export async function GET(req: NextRequest) {
         address: canSeePrivate ? prof?.address || "" : "",
         job_description: prof?.job_description || "",
         hr_memo: caller.isHrManager ? prof?.hr_memo || "" : "",
+        profile_extra: sanitizeExtraForViewer(prof?.profile_extra, canSeePrivate),
+        can_view_private: canSeePrivate,
         has_profile_row: Boolean(prof),
       };
     });
@@ -187,10 +260,16 @@ export async function POST(req: NextRequest) {
     const caller = await requireHqCaller(req);
     if (caller instanceof NextResponse) return caller;
     if (!caller.isHrManager) {
-      return apiFail("인사 관리 권한(임원·경영지원·권한관리자)이 필요합니다.", 403);
+      return apiFail(
+        "인사 관리 권한(임원·경영지원·권한관리자)이 필요합니다.",
+        403
+      );
     }
     if (caller.schemaMissing) {
-      return apiFail("먼저 본부 전용 DB 테이블(hq_schema.sql)을 생성해 주세요.", 400);
+      return apiFail(
+        "먼저 본부 전용 DB 테이블(hq_schema.sql)을 생성해 주세요.",
+        400
+      );
     }
 
     const body = await req.json();
@@ -224,7 +303,6 @@ export async function POST(req: NextRequest) {
     const hqTenantId =
       Array.from(caller.hqTenantIds)[0] || FALLBACK_HQ_TENANT_ID;
 
-    // 1. Supabase Auth 계정 생성 (현재 로그인된 관리자 세션을 덮어쓰지 않음!)
     const { data: createdAuth, error: authErr } =
       await supabaseAdmin.auth.admin.createUser({
         email: authEmail,
@@ -247,7 +325,6 @@ export async function POST(req: NextRequest) {
       String(body?.employee_no || "").trim() ||
       `HQ-${year}-${newUid.slice(0, 4).toUpperCase()}`;
 
-    // 2. 메신저·공통 인증 호환용 instructor 행 생성 (HQ 테넌트 지정)
     const { error: instErr } = await supabaseAdmin.from("instructor").insert({
       instructor_id: newUid,
       login_id: cleanPhone,
@@ -267,7 +344,8 @@ export async function POST(req: NextRequest) {
       return apiFail(`구성원 기본 등록 실패: ${instErr.message}`, 500);
     }
 
-    // 3. 본부 전용 Core HR 프로필 저장
+    const nowIso = new Date().toISOString();
+
     const { error: profErr } = await supabaseAdmin
       .from("hq_member_profile")
       .upsert(
@@ -291,7 +369,7 @@ export async function POST(req: NextRequest) {
           address: body?.address || null,
           job_description: body?.job_description || null,
           hr_memo: body?.hr_memo || null,
-          updated_at: new Date().toISOString(),
+          updated_at: nowIso,
         },
         { onConflict: "instructor_id" }
       );
@@ -314,9 +392,6 @@ export async function PATCH(req: NextRequest) {
   try {
     const caller = await requireHqCaller(req);
     if (caller instanceof NextResponse) return caller;
-    if (caller.schemaMissing) {
-      return apiFail("먼저 본부 전용 DB 테이블(hq_schema.sql)을 생성해 주세요.", 400);
-    }
 
     const body = await req.json();
     const targetId = String(body?.instructor_id || "").trim();
@@ -330,63 +405,49 @@ export async function PATCH(req: NextRequest) {
     const supabaseAdmin = getSupabaseAdmin();
     const nowIso = new Date().toISOString();
 
-    const profilePatch: Record<string, any> = { updated_at: nowIso };
     const instPatch: Record<string, any> = {};
+    const changedLabels: string[] = [];
 
-    // 본인도 수정 가능한 셀프서비스 필드
-    if (body.extension_no !== undefined) profilePatch.extension_no = body.extension_no || null;
-    if (body.emergency_contact !== undefined) profilePatch.emergency_contact = body.emergency_contact || null;
-    if (body.address !== undefined) profilePatch.address = body.address || null;
-    if (body.birth_date !== undefined) profilePatch.birth_date = body.birth_date || null;
-    if (body.bank_name !== undefined) profilePatch.bank_name = body.bank_name || null;
-    if (body.bank_account !== undefined) profilePatch.bank_account = body.bank_account || null;
-    if (body.account_holder !== undefined) profilePatch.account_holder = body.account_holder || null;
-    if (body.job_description !== undefined) profilePatch.job_description = body.job_description || null;
-    if (body.phone !== undefined) instPatch.phone = body.phone || null;
-    if (body.email !== undefined) instPatch.email = body.email || null;
+    if (body.phone !== undefined) {
+      instPatch.phone = body.phone || null;
+      changedLabels.push("휴대전화");
+    }
+    if (body.email !== undefined) {
+      instPatch.email = body.email || null;
+      changedLabels.push("이메일");
+    }
+    if (body.profile_image_url !== undefined) {
+      instPatch.profile_image_url = body.profile_image_url || null;
+      changedLabels.push("프로필 사진");
+    }
+    if (body.auto_reply_active !== undefined) {
+      instPatch.auto_reply_active = Boolean(body.auto_reply_active);
+      changedLabels.push("부재중 자동응답");
+    }
+    if (body.chat_allow_start !== undefined) {
+      instPatch.chat_allow_start = body.chat_allow_start || null;
+    }
+    if (body.chat_allow_end !== undefined) {
+      instPatch.chat_allow_end = body.chat_allow_end || null;
+    }
+    if (body.auto_reply_message !== undefined) {
+      instPatch.auto_reply_message = body.auto_reply_message || null;
+    }
 
-    // 인사관리자 전용 인사 발령/직급/연차/계약 필드
     if (caller.isHrManager) {
       if (body.name !== undefined && String(body.name).trim()) {
         instPatch.name = String(body.name).trim();
-      }
-      if (body.employee_no !== undefined) {
-        profilePatch.employee_no = String(body.employee_no).trim() || null;
+        changedLabels.push("이름");
       }
       if (body.department !== undefined) {
-        const dept = String(body.department).trim() || "미지정";
-        profilePatch.department = dept;
-        instPatch.department = dept;
-      }
-      if (body.rank_code !== undefined && body.rank_code in HQ_RANKS) {
-        profilePatch.rank_code = body.rank_code;
+        instPatch.department = String(body.department).trim() || "미지정";
       }
       if (body.job_title !== undefined) {
-        const jt = String(body.job_title).trim() || "사원";
-        profilePatch.job_title = jt;
-        instPatch.chat_position = jt;
-      }
-      if (body.is_dept_head !== undefined) {
-        profilePatch.is_dept_head = Boolean(body.is_dept_head);
-      }
-      if (body.employment_type !== undefined) {
-        profilePatch.employment_type = String(body.employment_type);
+        instPatch.chat_position = String(body.job_title).trim() || "사원";
       }
       if (body.work_status !== undefined) {
         const ws = String(body.work_status) as HqWorkStatus;
-        profilePatch.work_status = ws;
         instPatch.status = ws === "퇴직" ? "퇴사" : "재직";
-      }
-      if (body.hire_date !== undefined) profilePatch.hire_date = body.hire_date || null;
-      if (body.resign_date !== undefined) profilePatch.resign_date = body.resign_date || null;
-      if (body.annual_leave_total !== undefined) {
-        profilePatch.annual_leave_total = Number(body.annual_leave_total);
-      }
-      if (body.annual_leave_used !== undefined) {
-        profilePatch.annual_leave_used = Number(body.annual_leave_used);
-      }
-      if (body.hr_memo !== undefined) {
-        profilePatch.hr_memo = body.hr_memo || null;
       }
     }
 
@@ -398,13 +459,229 @@ export async function PATCH(req: NextRequest) {
       if (instErr) return apiFail(`기본 정보 수정 실패: ${instErr.message}`, 500);
     }
 
+    if (caller.schemaMissing) {
+      if (
+        body.profile_extra === undefined &&
+        body.bank_name === undefined &&
+        body.address === undefined &&
+        body.rank_code === undefined &&
+        Object.keys(instPatch).length > 0
+      ) {
+        return NextResponse.json({ success: true, data: { instructor_id: targetId } });
+      }
+      return apiFail(
+        "본부 상세 인사 프로필을 저장하려면 먼저 상단 안내 배너에서 DB 스키마(hq_schema.sql)를 실행해 주세요.",
+        400
+      );
+    }
+
+    const { data: existingProf } = await supabaseAdmin
+      .from("hq_member_profile")
+      .select("*")
+      .eq("instructor_id", targetId)
+      .maybeSingle();
+
+    const profilePatch: Record<string, any> = { updated_at: nowIso };
+
+    if (body.extension_no !== undefined) {
+      profilePatch.extension_no = body.extension_no || null;
+      changedLabels.push("내선번호");
+    }
+    if (body.emergency_contact !== undefined) {
+      profilePatch.emergency_contact = body.emergency_contact || null;
+      changedLabels.push("비상연락망");
+    }
+    if (body.address !== undefined) {
+      profilePatch.address = body.address || null;
+      changedLabels.push("주소");
+    }
+    if (body.birth_date !== undefined) {
+      profilePatch.birth_date = body.birth_date || null;
+      changedLabels.push("생년월일");
+    }
+    if (body.bank_name !== undefined) {
+      profilePatch.bank_name = body.bank_name || null;
+      changedLabels.push("급여계좌");
+    }
+    if (body.bank_account !== undefined) {
+      profilePatch.bank_account = body.bank_account || null;
+    }
+    if (body.account_holder !== undefined) {
+      profilePatch.account_holder = body.account_holder || null;
+    }
+    if (body.job_description !== undefined) {
+      profilePatch.job_description = body.job_description || null;
+      changedLabels.push("담당 직무");
+    }
+
+    if (caller.isHrManager) {
+      if (body.employee_no !== undefined) {
+        profilePatch.employee_no = String(body.employee_no).trim() || null;
+        changedLabels.push("사번");
+      }
+      if (body.department !== undefined) {
+        profilePatch.department = String(body.department).trim() || "미지정";
+        changedLabels.push("소속 부서");
+      }
+      if (body.rank_code !== undefined && body.rank_code in HQ_RANKS) {
+        profilePatch.rank_code = body.rank_code;
+        changedLabels.push("직급");
+      }
+      if (body.job_title !== undefined) {
+        profilePatch.job_title = String(body.job_title).trim() || "사원";
+        changedLabels.push("직책");
+      }
+      if (body.is_dept_head !== undefined) {
+        profilePatch.is_dept_head = Boolean(body.is_dept_head);
+      }
+      if (body.employment_type !== undefined) {
+        profilePatch.employment_type = String(body.employment_type);
+        changedLabels.push("고용형태");
+      }
+      if (body.work_status !== undefined) {
+        profilePatch.work_status = String(body.work_status) as HqWorkStatus;
+        changedLabels.push("재직상태");
+      }
+      if (body.hire_date !== undefined) {
+        profilePatch.hire_date = body.hire_date || null;
+        changedLabels.push("입사일");
+      }
+      if (body.resign_date !== undefined) {
+        profilePatch.resign_date = body.resign_date || null;
+      }
+      if (body.annual_leave_total !== undefined) {
+        profilePatch.annual_leave_total = Number(body.annual_leave_total);
+        changedLabels.push("부여 연차");
+      }
+      if (body.annual_leave_used !== undefined) {
+        profilePatch.annual_leave_used = Number(body.annual_leave_used);
+        changedLabels.push("사용 연차");
+      }
+      if (body.hr_memo !== undefined) {
+        profilePatch.hr_memo = body.hr_memo || null;
+        changedLabels.push("인사 메모");
+      }
+    }
+
+    const prevExtra: HqProfileExtra =
+      existingProf?.profile_extra &&
+      typeof existingProf.profile_extra === "object" &&
+      !Array.isArray(existingProf.profile_extra)
+        ? { ...existingProf.profile_extra }
+        : {};
+
+    const incomingExtra =
+      body.profile_extra &&
+      typeof body.profile_extra === "object" &&
+      !Array.isArray(body.profile_extra)
+        ? (body.profile_extra as Partial<HqProfileExtra>)
+        : null;
+
+    const shouldTouchExtra = incomingExtra !== null || existingProf?.profile_extra !== undefined;
+
+    if (incomingExtra) {
+      const selfEditableKeys: (keyof HqProfileExtra)[] = [
+        "nickname",
+        "bio",
+        "personal_email",
+        "rrn_front",
+        "gender",
+        "nationality",
+        "postal_code",
+        "special_notes",
+        "careers",
+        "educations",
+        "families",
+        "awards",
+        "growth_goals",
+        "trainings",
+      ];
+
+      for (const key of selfEditableKeys) {
+        if (incomingExtra[key] !== undefined) {
+          if (key === "rrn_front") {
+            prevExtra.rrn_front = String(incomingExtra.rrn_front || "")
+              .replace(/[^0-9]/g, "")
+              .slice(0, 6);
+          } else {
+            (prevExtra as any)[key] = incomingExtra[key];
+          }
+        }
+      }
+
+      if (caller.isHrManager) {
+        const hrOnlyKeys: (keyof HqProfileExtra)[] = [
+          "group_hire_date",
+          "hire_type",
+          "work_schedule_type",
+          "work_schedule_mode",
+          "weekly_work_hours",
+          "leave_policy_name",
+          "leave_policy_tags",
+          "holiday_policy_name",
+          "holiday_summary",
+          "labor_contract",
+          "wage_contract",
+          "leave_histories",
+          "disciplines",
+        ];
+        for (const key of hrOnlyKeys) {
+          if (incomingExtra[key] !== undefined) {
+            (prevExtra as any)[key] = incomingExtra[key];
+          }
+        }
+      }
+
+      if (body.change_summary) {
+        changedLabels.push(String(body.change_summary));
+      } else {
+        changedLabels.push("상세 프로필");
+      }
+    }
+
+    if (shouldTouchExtra) {
+      const summaryText =
+        String(body.change_summary || "").trim() ||
+        (changedLabels.length > 0
+          ? `${Array.from(new Set(changedLabels)).join(", ")} 수정`
+          : "인사 정보 업데이트");
+
+      const prevLogs = Array.isArray(prevExtra.change_logs)
+        ? prevExtra.change_logs
+        : [];
+      prevExtra.change_logs = [
+        {
+          at: nowIso,
+          actor_name: `${caller.name} (${caller.jobTitle})`,
+          summary: summaryText,
+        },
+        ...prevLogs,
+      ].slice(0, 50);
+
+      profilePatch.profile_extra = prevExtra;
+    }
+
     const { error: profErr } = await supabaseAdmin
       .from("hq_member_profile")
-      .upsert({ instructor_id: targetId, ...profilePatch }, { onConflict: "instructor_id" });
+      .upsert(
+        { instructor_id: targetId, ...profilePatch },
+        { onConflict: "instructor_id" }
+      );
 
-    if (profErr) return apiFail(`인사 프로필 수정 실패: ${profErr.message}`, 500);
+    if (profErr) {
+      if (/profile_extra/i.test(profErr.message || "")) {
+        return apiFail(
+          "DB에 profile_extra 컬럼이 아직 없습니다. Supabase SQL Editor에서 최신 supabase/hq_schema.sql을 한 번 실행해 주세요.",
+          400
+        );
+      }
+      return apiFail(`인사 프로필 수정 실패: ${profErr.message}`, 500);
+    }
 
-    return NextResponse.json({ success: true, data: { instructor_id: targetId } });
+    return NextResponse.json({
+      success: true,
+      data: { instructor_id: targetId },
+    });
   } catch (e: any) {
     console.error("HQ members PATCH error:", e);
     return apiFail(String(e?.message || e), 500);

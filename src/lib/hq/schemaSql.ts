@@ -26,6 +26,7 @@ CREATE TABLE IF NOT EXISTS public.hq_member_profile (
   address text,
   job_description text,
   hr_memo text,
+  profile_extra jsonb NOT NULL DEFAULT '{}'::jsonb,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now()
 );
@@ -33,6 +34,7 @@ CREATE TABLE IF NOT EXISTS public.hq_member_profile (
 CREATE INDEX IF NOT EXISTS idx_hq_member_dept ON public.hq_member_profile(department);
 CREATE INDEX IF NOT EXISTS idx_hq_member_rank ON public.hq_member_profile(rank_code);
 ALTER TABLE public.hq_member_profile ADD COLUMN IF NOT EXISTS is_hr_admin boolean NOT NULL DEFAULT false;
+ALTER TABLE public.hq_member_profile ADD COLUMN IF NOT EXISTS profile_extra jsonb NOT NULL DEFAULT '{}'::jsonb;
 
 CREATE TABLE IF NOT EXISTS public.hq_approval_doc (
   approval_id uuid PRIMARY KEY DEFAULT gen_random_uuid(),

@@ -19,6 +19,7 @@ export default function HqSidebar() {
     unsignedContractCount,
     unreadChatCount,
     sessionExpired,
+    openProfileModal,
     logout,
   } = useHqShell();
 
@@ -103,6 +104,16 @@ export default function HqSidebar() {
                 <span>본부 홈 대시보드</span>
               </span>
             </Link>
+            <button
+              type="button"
+              onClick={openProfileModal}
+              className="w-full flex items-center justify-between px-3.5 py-2 rounded-xl font-bold text-[13px] text-slate-300 hover:bg-slate-800 hover:text-white transition-all"
+            >
+              <span className="flex items-center gap-2.5 truncate">
+                <span>👤</span>
+                <span>내 프로필</span>
+              </span>
+            </button>
           </div>
         </div>
 
