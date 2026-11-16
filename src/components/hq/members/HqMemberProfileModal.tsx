@@ -360,12 +360,37 @@ export default function HqMemberProfileModal({
     setBioDraft(member.profile_extra?.bio || "");
   }, [isOpen, member?.instructor_id]);
 
-  const deptOptions = useMemo(
+  const companyExtra = shell?.companySettings?.extra_settings;
+  const empNoLocked = Boolean(companyExtra?.emp_no_locked);
+
+  const deptOptions = useMemo(() => {
+    const orgNames = (companyExtra?.org_chart_nodes || [])
+      .filter((n) => !n.is_hidden && n.name !== "퇴직")
+      .sort((a, b) => a.order - b.order)
+      .map((n) => n.name);
+    return Array.from(
+      new Set([
+        ...orgNames,
+        ...HQ_DEFAULT_DEPARTMENTS,
+        ...existingDepartments.filter(Boolean),
+      ])
+    );
+  }, [companyExtra?.org_chart_nodes, existingDepartments]);
+
+  const titleSuggestions = useMemo(
     () =>
       Array.from(
-        new Set([...HQ_DEFAULT_DEPARTMENTS, ...existingDepartments.filter(Boolean)])
+        new Set([
+          ...(companyExtra?.hr_positions || []),
+          ...(companyExtra?.hr_titles || []),
+        ])
       ),
-    [existingDepartments]
+    [companyExtra?.hr_positions, companyExtra?.hr_titles]
+  );
+
+  const jobSuggestions = useMemo(
+    () => companyExtra?.hr_jobs || [],
+    [companyExtra?.hr_jobs]
   );
 
   if (!isOpen || !member) return null;
@@ -2467,34 +2492,57 @@ export default function HqMemberProfileModal({
 
             <Field label="직책 · 호칭">
               <input
+                list="hq-profile-title-suggestions"
                 value={hrForm.job_title}
                 onChange={(e) =>
                   setHrForm({ ...hrForm, job_title: e.target.value })
                 }
                 className="w-full px-3 py-2 rounded-xl border border-slate-300 font-bold"
               />
+              {titleSuggestions.length > 0 && (
+                <datalist id="hq-profile-title-suggestions">
+                  {titleSuggestions.map((t) => (
+                    <option key={t} value={t} />
+                  ))}
+                </datalist>
+              )}
             </Field>
 
-            <Field label="사번">
+            <Field
+              label={
+                empNoLocked && Boolean(member.employee_no)
+                  ? "사번 (🔒 사번 수정 잠금 중)"
+                  : "사번"
+              }
+            >
               <input
+                disabled={empNoLocked && Boolean(member.employee_no)}
                 value={hrForm.employee_no}
                 onChange={(e) =>
                   setHrForm({ ...hrForm, employee_no: e.target.value })
                 }
-                className="w-full px-3 py-2 rounded-xl border border-slate-300"
+                className="w-full px-3 py-2 rounded-xl border border-slate-300 disabled:bg-slate-100 disabled:text-slate-500"
               />
             </Field>
 
             <div className="sm:col-span-2">
               <Field label="담당 직무 설명">
                 <input
+                  list="hq-profile-job-suggestions"
                   value={hrForm.job_description}
                   onChange={(e) =>
                     setHrForm({ ...hrForm, job_description: e.target.value })
                   }
-                  placeholder="예: 초·중등 사고력 수학 교재 기획 및 연구"
+                  placeholder="예: 교재 집필, 편집, 디자인, 마케팅"
                   className="w-full px-3 py-2 rounded-xl border border-slate-300"
                 />
+                {jobSuggestions.length > 0 && (
+                  <datalist id="hq-profile-job-suggestions">
+                    {jobSuggestions.map((j) => (
+                      <option key={j} value={j} />
+                    ))}
+                  </datalist>
+                )}
               </Field>
             </div>
           </div>
@@ -2551,7 +2599,9 @@ export default function HqMemberProfileModal({
             };
             if (isHrManager) {
               payload.name = basicForm.name;
-              payload.employee_no = basicForm.employee_no;
+              if (!(empNoLocked && member.employee_no)) {
+                payload.employee_no = basicForm.employee_no;
+              }
               payload.hire_date = basicForm.hire_date || null;
             }
             patchMember(payload, "기본 정보 변경");

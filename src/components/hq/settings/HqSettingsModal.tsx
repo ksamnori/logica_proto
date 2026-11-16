@@ -20,7 +20,9 @@ import type {
   HqCompanySettings,
   HqHolidayGroup,
   HqHolidayItem,
+  HqInfoApprovalPolicy,
 } from "@/lib/hq/types";
+import HqHrInfoSettingsSection from "./HqHrInfoSettingsSection";
 
 export type HqSettingsTab =
   | "company"
@@ -211,6 +213,7 @@ export default function HqSettingsModal({
   const [tenantBranches, setTenantBranches] = useState<TenantBranchOption[]>([]);
   const [saving, setSaving] = useState(false);
   const [toastMsg, setToastMsg] = useState<string | null>(null);
+  const rightPaneRef = useRef<HTMLDivElement>(null);
 
   // 1) 회사 정보 로컬 폼 상태
   const [editingName, setEditingName] = useState(false);
@@ -302,6 +305,10 @@ export default function HqSettingsModal({
   useEffect(() => {
     if (initialTab) setActiveTab(initialTab as HqSettingsTab);
   }, [initialTab]);
+
+  useEffect(() => {
+    rightPaneRef.current?.scrollTo({ top: 0, behavior: "smooth" });
+  }, [activeTab]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -1012,7 +1019,10 @@ export default function HqSettingsModal({
           &times;
         </button>
 
-        <div className="flex-1 overflow-y-auto px-8 sm:px-14 py-10 custom-scroll">
+        <div
+          ref={rightPaneRef}
+          className="flex-1 overflow-y-auto px-8 sm:px-14 py-10 custom-scroll"
+        >
           <div className="max-w-[660px] mx-auto space-y-8 pb-12">
             {!canEdit && (
               <div className="px-4 py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-500">
@@ -1895,41 +1905,25 @@ export default function HqSettingsModal({
             {/* 부가 설정 탭들 (인사·문서함·승인정책·근무유형·근무지·연차설정)   */}
             {/* =========================================================== */}
             {activeTab === "hr-info" && (
-              <div className="space-y-6">
-                <div>
-                  <h2 className="text-[22px] font-extrabold text-slate-900">
-                    인사 · 구성원 정보 설정
-                  </h2>
-                  <p className="text-xs text-slate-400 mt-1">
-                    구성원 프로필 공개 범위 및 기본 사번 규칙을 관리합니다.
-                  </p>
-                </div>
-                <div className="p-5 rounded-2xl border border-slate-200 space-y-3 text-xs">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <div className="font-bold text-slate-900 text-sm">
-                        민감 인사정보(주민번호·계좌·연봉·가족) 열람 제한
-                      </div>
-                      <p className="text-slate-500 mt-0.5">
-                        본인 및 인사관리자(대표·임원·경영지원 팀장·위임 담당자)에게만 노출됩니다.
-                      </p>
-                    </div>
-                    <span className="px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 font-bold">
-                      보호 적용중
-                    </span>
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    onClose();
-                    router.push("/hq/members");
-                  }}
-                  className="px-4 py-2.5 rounded-xl bg-slate-900 text-white text-xs font-bold"
-                >
-                  구성원 · 조직 관리 화면으로 이동 →
-                </button>
-              </div>
+              <HqHrInfoSettingsSection
+                settings={settings}
+                members={members}
+                canEdit={canEdit}
+                saving={saving}
+                onSaveExtra={async (nextExtra, toastMessage) => {
+                  await savePartialSettings(
+                    {
+                      extra_settings: {
+                        ...settings.extra_settings,
+                        ...nextExtra,
+                      },
+                    },
+                    toastMessage
+                  );
+                }}
+                onNavigateTab={(tab) => setActiveTab(tab)}
+                onCloseSettings={onClose}
+              />
             )}
 
             {activeTab === "doc-box" && (
@@ -1998,104 +1992,286 @@ export default function HqSettingsModal({
                     저장하기
                   </button>
                 )}
+
+                <StepNavFooter
+                  prevLabel="인사 · 구성원 정보"
+                  onPrev={() => setActiveTab("hr-info")}
+                  nextLabel="승인 정책 관리"
+                  onNext={() => setActiveTab("approval-policy")}
+                />
               </div>
             )}
 
-            {activeTab === "approval-policy" && (
-              <div className="space-y-6">
-                <div>
-                  <h2 className="text-[22px] font-extrabold text-slate-900">
-                    승인 · 직급별 전결 정책 관리
-                  </h2>
-                  <p className="text-xs text-slate-400 mt-1">
-                    전자결재 상신 시 금액·휴가일수에 따라 적용되는 직급별 전결 기준입니다.
-                  </p>
+            {activeTab === "approval-policy" && (() => {
+              const infoPol: HqInfoApprovalPolicy = {
+                require_approval_basic:
+                  settings.extra_settings?.info_approval_policy
+                    ?.require_approval_basic ?? false,
+                require_approval_bank:
+                  settings.extra_settings?.info_approval_policy
+                    ?.require_approval_bank ?? true,
+                require_approval_career:
+                  settings.extra_settings?.info_approval_policy
+                    ?.require_approval_career ?? false,
+                require_approval_family:
+                  settings.extra_settings?.info_approval_policy
+                    ?.require_approval_family ?? false,
+                approver_role:
+                  settings.extra_settings?.info_approval_policy
+                    ?.approver_role || "HR_MANAGER",
+              };
+
+              const updateInfoPol = (
+                patch: Partial<HqInfoApprovalPolicy>,
+                autoToast?: string
+              ) => {
+                const nextExtra = {
+                  ...settings.extra_settings,
+                  info_approval_policy: {
+                    ...infoPol,
+                    ...patch,
+                  },
+                };
+                setSettings({ ...settings, extra_settings: nextExtra });
+                if (canEdit && autoToast) {
+                  savePartialSettings({ extra_settings: nextExtra }, autoToast);
+                }
+              };
+
+              return (
+                <div className="space-y-8">
+                  <div>
+                    <h2 className="text-[22px] font-extrabold text-slate-900 tracking-tight">
+                      승인 정책 관리
+                    </h2>
+                    <p className="text-xs text-slate-400 mt-1">
+                      구성원 정보 변경 승인 절차와 전자결재(지출·휴가) 직급별 전결 기준을 통합 관리합니다.
+                    </p>
+                  </div>
+
+                  {/* 1. 구성원 정보 변경 승인 설정 (인사·구성원 정보 > 설정하기 연동) */}
+                  <section className="space-y-3.5">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div>
+                        <h3 className="text-[15px] font-extrabold text-slate-900">
+                          구성원 정보 변경 승인 설정
+                        </h3>
+                        <p className="text-xs text-slate-400 mt-0.5">
+                          구성원이 본인 프로필 정보를 수정할 때 관리자 승인을 거쳐 반영할 항목을 선택하세요.
+                        </p>
+                      </div>
+
+                      <div className="flex items-center gap-2 text-xs">
+                        <span className="font-bold text-slate-500">승인권자</span>
+                        <select
+                          disabled={!canEdit || saving}
+                          value={infoPol.approver_role}
+                          onChange={(e) =>
+                            updateInfoPol(
+                              {
+                                approver_role:
+                                  e.target.value as HqInfoApprovalPolicy["approver_role"],
+                              },
+                              "정보 변경 승인권자가 변경되었습니다."
+                            )
+                          }
+                          className="px-3 py-1.5 rounded-lg border border-slate-200 bg-white font-bold text-slate-800"
+                        >
+                          <option value="HR_MANAGER">인사관리자 (경영지원/HR)</option>
+                          <option value="DEPT_HEAD">소속 조직장 (팀장·실장)</option>
+                          <option value="CEO">대표이사</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    <div className="space-y-2.5">
+                      {(
+                        [
+                          {
+                            key: "require_approval_basic",
+                            icon: "🪪",
+                            title: "기본 개인정보 변경 승인",
+                            desc: "주소, 휴대전화번호, 개인 이메일 변경 시 승인을 거칩니다.",
+                          },
+                          {
+                            key: "require_approval_bank",
+                            icon: "🏦",
+                            title: "급여 계좌 변경 승인",
+                            desc: "급여 이체 은행명·계좌번호 변경 시 인사/급여 담당자 승인을 필수로 거칩니다.",
+                          },
+                          {
+                            key: "require_approval_career",
+                            icon: "🎓",
+                            title: "경력 · 학력 정보 변경 승인",
+                            desc: "이전 직장 경력 및 학력사항 추가·수정 시 승인을 거칩니다.",
+                          },
+                          {
+                            key: "require_approval_family",
+                            icon: "👨‍👩‍👧",
+                            title: "가족 · 공제 대상 정보 변경 승인",
+                            desc: "원천세·연말정산 부양가족 및 건강보험 피부양자 변경 시 승인을 거칩니다.",
+                          },
+                        ] as const
+                      ).map((row) => {
+                        const checked = Boolean(infoPol[row.key]);
+                        return (
+                          <div
+                            key={row.key}
+                            className="px-5 py-4 rounded-2xl border border-slate-200/90 bg-white flex items-center justify-between gap-4 shadow-2xs"
+                          >
+                            <div className="flex items-center gap-3.5 min-w-0">
+                              <span className="w-8 h-8 rounded-lg bg-slate-50 border border-slate-100 flex items-center justify-center text-base shrink-0">
+                                {row.icon}
+                              </span>
+                              <div className="min-w-0">
+                                <div className="text-[13px] font-bold text-slate-900">
+                                  {row.title}
+                                </div>
+                                <div className="text-xs text-slate-400 mt-0.5">
+                                  {row.desc}
+                                </div>
+                              </div>
+                            </div>
+
+                            <button
+                              type="button"
+                              role="switch"
+                              aria-checked={checked}
+                              disabled={!canEdit || saving}
+                              onClick={() =>
+                                updateInfoPol(
+                                  { [row.key]: !checked },
+                                  `${row.title} 설정이 변경되었습니다.`
+                                )
+                              }
+                              className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out disabled:opacity-50 ${
+                                checked ? "bg-emerald-500" : "bg-slate-200"
+                              }`}
+                            >
+                              <span
+                                className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-sm transition duration-200 ease-in-out ${
+                                  checked ? "translate-x-5" : "translate-x-0"
+                                }`}
+                              />
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </section>
+
+                  {/* 2. 전자결재 직급·금액별 전결 기준 */}
+                  <section className="space-y-3.5 pt-2 border-t border-slate-100">
+                    <div>
+                      <h3 className="text-[15px] font-extrabold text-slate-900">
+                        워크플로우 · 직급별 전자결재 전결 기준
+                      </h3>
+                      <p className="text-xs text-slate-400 mt-0.5">
+                        전자결재 상신 시 지출 금액과 휴가 일수에 따라 자동 생성되는 결재선 기준입니다.
+                      </p>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+                      <div className="p-4 rounded-2xl border border-slate-200 space-y-1.5">
+                        <div className="font-bold text-slate-500">
+                          팀장(Lv.3) 지출 전결 한도 (원)
+                        </div>
+                        <input
+                          type="number"
+                          disabled={!canEdit}
+                          value={
+                            settings.extra_settings?.team_lead_max_amount ??
+                            300000
+                          }
+                          onChange={(e) =>
+                            setSettings({
+                              ...settings,
+                              extra_settings: {
+                                ...settings.extra_settings,
+                                team_lead_max_amount: Number(e.target.value),
+                              },
+                            })
+                          }
+                          className="w-full px-3 py-2 rounded-lg bg-[#f5f6f8] font-extrabold text-slate-900"
+                        />
+                      </div>
+                      <div className="p-4 rounded-2xl border border-slate-200 space-y-1.5">
+                        <div className="font-bold text-slate-500">
+                          본부장·실장(Lv.4) 전결 한도 (원)
+                        </div>
+                        <input
+                          type="number"
+                          disabled={!canEdit}
+                          value={
+                            settings.extra_settings?.director_max_amount ??
+                            1000000
+                          }
+                          onChange={(e) =>
+                            setSettings({
+                              ...settings,
+                              extra_settings: {
+                                ...settings.extra_settings,
+                                director_max_amount: Number(e.target.value),
+                              },
+                            })
+                          }
+                          className="w-full px-3 py-2 rounded-lg bg-[#f5f6f8] font-extrabold text-slate-900"
+                        />
+                      </div>
+                      <div className="p-4 rounded-2xl border border-slate-200 space-y-1.5">
+                        <div className="font-bold text-slate-500">
+                          팀장 휴가 전결 일수 (일)
+                        </div>
+                        <input
+                          type="number"
+                          step="0.5"
+                          disabled={!canEdit}
+                          value={
+                            settings.extra_settings?.team_lead_max_leave_days ??
+                            3
+                          }
+                          onChange={(e) =>
+                            setSettings({
+                              ...settings,
+                              extra_settings: {
+                                ...settings.extra_settings,
+                                team_lead_max_leave_days: Number(
+                                  e.target.value
+                                ),
+                              },
+                            })
+                          }
+                          className="w-full px-3 py-2 rounded-lg bg-[#f5f6f8] font-extrabold text-slate-900"
+                        />
+                      </div>
+                    </div>
+
+                    {canEdit && (
+                      <button
+                        type="button"
+                        disabled={saving}
+                        onClick={() =>
+                          savePartialSettings(
+                            { extra_settings: settings.extra_settings },
+                            "승인 정책이 저장되었습니다."
+                          )
+                        }
+                        className="px-5 py-2.5 rounded-xl bg-[#00c458] hover:bg-[#00ad4d] text-white text-xs font-extrabold shadow-xs transition-colors"
+                      >
+                        정책 저장하기
+                      </button>
+                    )}
+                  </section>
+
+                  <StepNavFooter
+                    prevLabel="인사 · 구성원 정보"
+                    onPrev={() => setActiveTab("hr-info")}
+                    nextLabel="근무 유형"
+                    onNext={() => setActiveTab("work-type")}
+                  />
                 </div>
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
-                  <div className="p-4 rounded-2xl border border-slate-200 space-y-1.5">
-                    <div className="font-bold text-slate-500">
-                      팀장(Lv.3) 지출 전결 한도
-                    </div>
-                    <input
-                      type="number"
-                      disabled={!canEdit}
-                      value={
-                        settings.extra_settings?.team_lead_max_amount ?? 300000
-                      }
-                      onChange={(e) =>
-                        setSettings({
-                          ...settings,
-                          extra_settings: {
-                            ...settings.extra_settings,
-                            team_lead_max_amount: Number(e.target.value),
-                          },
-                        })
-                      }
-                      className="w-full px-3 py-2 rounded-lg bg-[#f5f6f8] font-extrabold text-slate-900"
-                    />
-                  </div>
-                  <div className="p-4 rounded-2xl border border-slate-200 space-y-1.5">
-                    <div className="font-bold text-slate-500">
-                      본부장·이사(Lv.4) 전결 한도
-                    </div>
-                    <input
-                      type="number"
-                      disabled={!canEdit}
-                      value={
-                        settings.extra_settings?.director_max_amount ?? 1000000
-                      }
-                      onChange={(e) =>
-                        setSettings({
-                          ...settings,
-                          extra_settings: {
-                            ...settings.extra_settings,
-                            director_max_amount: Number(e.target.value),
-                          },
-                        })
-                      }
-                      className="w-full px-3 py-2 rounded-lg bg-[#f5f6f8] font-extrabold text-slate-900"
-                    />
-                  </div>
-                  <div className="p-4 rounded-2xl border border-slate-200 space-y-1.5">
-                    <div className="font-bold text-slate-500">
-                      팀장 휴가 전결 일수(일)
-                    </div>
-                    <input
-                      type="number"
-                      step="0.5"
-                      disabled={!canEdit}
-                      value={
-                        settings.extra_settings?.team_lead_max_leave_days ?? 3
-                      }
-                      onChange={(e) =>
-                        setSettings({
-                          ...settings,
-                          extra_settings: {
-                            ...settings.extra_settings,
-                            team_lead_max_leave_days: Number(e.target.value),
-                          },
-                        })
-                      }
-                      className="w-full px-3 py-2 rounded-lg bg-[#f5f6f8] font-extrabold text-slate-900"
-                    />
-                  </div>
-                </div>
-                {canEdit && (
-                  <button
-                    type="button"
-                    onClick={() =>
-                      savePartialSettings(
-                        { extra_settings: settings.extra_settings },
-                        "승인 정책이 저장되었습니다."
-                      )
-                    }
-                    className="px-5 py-2.5 rounded-xl bg-slate-900 text-white text-xs font-bold"
-                  >
-                    정책 저장하기
-                  </button>
-                )}
-              </div>
-            )}
+              );
+            })()}
 
             {activeTab === "work-type" && (
               <div className="space-y-5">

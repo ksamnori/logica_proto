@@ -10,6 +10,10 @@ import {
   getSupabaseAdmin,
   isMissingHqTableError,
 } from "@/lib/hq/serverAuth";
+import {
+  generateEmployeeNoByPolicy,
+  readCompanySettingsServer,
+} from "@/lib/hq/companySettingsServer";
 import type { HqRankCode } from "@/lib/hq/types";
 
 export const runtime = "nodejs";
@@ -116,7 +120,17 @@ export async function POST(req: NextRequest) {
 
     const newUid = createdAuth.user.id;
     const today = new Date().toISOString().slice(0, 10);
-    const year = today.slice(0, 4);
+    const empType =
+      rankCode === "CEO" || rankCode === "DIRECTOR" ? "임원" : "정규직";
+    const { settings: companySettings } =
+      await readCompanySettingsServer(supabaseAdmin);
+    const generatedEmpNo = await generateEmployeeNoByPolicy(
+      supabaseAdmin,
+      companySettings,
+      empType,
+      today,
+      newUid
+    );
 
     const { error: instErr } = await supabaseAdmin.from("instructor").insert({
       instructor_id: newUid,
@@ -145,7 +159,7 @@ export async function POST(req: NextRequest) {
       .upsert(
         {
           instructor_id: newUid,
-          employee_no: `HQ-${year}-${newUid.slice(0, 4).toUpperCase()}`,
+          employee_no: generatedEmpNo,
           department,
           rank_code: rankCode,
           job_title: jobTitle,

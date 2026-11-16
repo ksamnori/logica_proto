@@ -1,5 +1,69 @@
 // src/lib/hq/defaultCompanySettings.ts
-import type { HqCompanySettings, HqHolidayItem } from "./types";
+import type {
+  HqCompanySettings,
+  HqEmpNoPolicy,
+  HqHolidayItem,
+  HqOrgChartNode,
+} from "./types";
+
+export const DEFAULT_ORG_CHART_NODES: HqOrgChartNode[] = [
+  {
+    id: "org-root-company",
+    name: "(주)천종현수학연구소",
+    parent_id: null,
+    is_hidden: true,
+    order: 1,
+  },
+  {
+    id: "org-retired",
+    name: "퇴직",
+    parent_id: null,
+    is_hidden: true,
+    order: 2,
+  },
+  {
+    id: "org-ceo",
+    name: "대표",
+    parent_id: null,
+    is_hidden: false,
+    order: 3,
+  },
+  {
+    id: "org-writing",
+    name: "집필팀",
+    parent_id: "org-ceo",
+    is_hidden: false,
+    order: 4,
+  },
+  {
+    id: "org-sales",
+    name: "영업팀",
+    parent_id: "org-ceo",
+    is_hidden: false,
+    order: 5,
+  },
+  {
+    id: "org-mgmt",
+    name: "관리팀",
+    parent_id: "org-ceo",
+    is_hidden: false,
+    order: 6,
+  },
+  {
+    id: "org-design",
+    name: "디자인",
+    parent_id: "org-ceo",
+    is_hidden: false,
+    order: 7,
+  },
+  {
+    id: "org-mkt",
+    name: "마케팅",
+    parent_id: "org-ceo",
+    is_hidden: false,
+    order: 8,
+  },
+];
 
 export const DEFAULT_HOLIDAYS_2025: HqHolidayItem[] = [
   {
@@ -408,5 +472,53 @@ export const DEFAULT_HQ_COMPANY_SETTINGS: HqCompanySettings = {
     default_annual_leave: 15,
     leave_basis: "회계일 기준",
     allow_hourly_leave: true,
+    hr_positions: ["대표", "사원", "실장", "팀장"],
+    hr_titles: ["사원", "실장", "총괄", "팀장"],
+    hr_jobs: [
+      "경영",
+      "교재 집필",
+      "교정",
+      "디자인",
+      "마케팅",
+      "영업",
+      "인사",
+      "주문",
+      "편집",
+      "회계",
+    ],
+    hr_job_groups: [],
+    hr_grades: [],
+    org_chart_nodes: DEFAULT_ORG_CHART_NODES,
+    org_chart_effective_date: "",
+    org_chart_memo: "",
+    emp_no_locked: false,
+    emp_no_policies: [],
+    info_approval_policy: {
+      require_approval_basic: false,
+      require_approval_bank: true,
+      require_approval_career: false,
+      require_approval_family: true,
+      approver_role: "HR_MANAGER",
+    },
   },
 };
+
+export function formatEmpNoPreview(
+  policy: HqEmpNoPolicy,
+  hireDateIso?: string,
+  seq = policy.start_seq || 1
+): string {
+  const dt = hireDateIso || new Date().toISOString().slice(0, 10);
+  const clean = dt.replace(/[^0-9]/g, "");
+  const yyyy = clean.slice(0, 4) || String(new Date().getFullYear());
+  const mm = clean.slice(4, 6) || "01";
+
+  let dateStr = "";
+  if (policy.date_part === "YYYYMM") dateStr = `${yyyy}${mm}`;
+  else if (policy.date_part === "YYYY") dateStr = yyyy;
+  else if (policy.date_part === "YY") dateStr = yyyy.slice(2, 4);
+
+  const digits = Math.min(6, Math.max(2, Number(policy.seq_digits || 2)));
+  const seqStr = String(Math.max(1, seq)).padStart(digits, "0");
+  return `${policy.prefix || ""}${dateStr}${seqStr}`;
+}

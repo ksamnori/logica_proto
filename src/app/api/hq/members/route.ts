@@ -13,6 +13,10 @@ import {
   isMissingHqTableError,
   requireHqCaller,
 } from "@/lib/hq/serverAuth";
+import {
+  generateEmployeeNoByPolicy,
+  readCompanySettingsServer,
+} from "@/lib/hq/companySettingsServer";
 import type {
   HqMember,
   HqProfileExtra,
@@ -320,10 +324,18 @@ export async function POST(req: NextRequest) {
 
     const newUid = createdAuth.user.id;
     const hireDate = body?.hire_date || new Date().toISOString().slice(0, 10);
-    const year = String(hireDate).slice(0, 4) || String(new Date().getFullYear());
+    const employmentType = String(body?.employment_type || "정규직");
+    const { settings: companySettings } =
+      await readCompanySettingsServer(supabaseAdmin);
     const empNo =
       String(body?.employee_no || "").trim() ||
-      `HQ-${year}-${newUid.slice(0, 4).toUpperCase()}`;
+      (await generateEmployeeNoByPolicy(
+        supabaseAdmin,
+        companySettings,
+        employmentType,
+        hireDate,
+        newUid
+      ));
 
     const { error: instErr } = await supabaseAdmin.from("instructor").insert({
       instructor_id: newUid,
@@ -516,8 +528,24 @@ export async function PATCH(req: NextRequest) {
 
     if (caller.isHrManager) {
       if (body.employee_no !== undefined) {
-        profilePatch.employee_no = String(body.employee_no).trim() || null;
-        changedLabels.push("사번");
+        const nextEmpNo = String(body.employee_no).trim() || null;
+        const prevEmpNo = existingProf?.employee_no
+          ? String(existingProf.employee_no).trim()
+          : null;
+        if (prevEmpNo && nextEmpNo !== prevEmpNo) {
+          const { settings: compSettings } =
+            await readCompanySettingsServer(supabaseAdmin);
+          if (compSettings.extra_settings?.emp_no_locked) {
+            return apiFail(
+              "현재 [설정 > 인사·구성원 정보 > 사번 수정 잠금]이 활성화되어 있어 생성된 사번을 변경할 수 없습니다.",
+              400
+            );
+          }
+        }
+        if (nextEmpNo !== prevEmpNo) {
+          profilePatch.employee_no = nextEmpNo;
+          changedLabels.push("사번");
+        }
       }
       if (body.department !== undefined) {
         profilePatch.department = String(body.department).trim() || "미지정";

@@ -30,8 +30,16 @@ function getApprovalRoleHint(rankCode: HqRankCode, isDeptHead: boolean): string 
 }
 
 export default function HqMembersPage() {
-  const { instId, me, members, isHrManager, schemaMissing, refreshMembers } =
-    useHqShell();
+  const {
+    instId,
+    me,
+    members,
+    companySettings,
+    isHrManager,
+    schemaMissing,
+    refreshMembers,
+    openSettingsModal,
+  } = useHqShell();
 
   const [viewMode, setViewMode] = useState<"roster" | "org">("roster");
   const [keyword, setKeyword] = useState("");
@@ -138,9 +146,23 @@ export default function HqMembersPage() {
   );
 
   const orgDepartments = useMemo(() => {
+    const orgNodes = companySettings?.extra_settings?.org_chart_nodes || [];
+    const hiddenNames = new Set(
+      orgNodes.filter((n) => n.is_hidden).map((n) => n.name)
+    );
     const map = new Map<string, HqMember[]>();
+
+    // 조직도 설정에 등록된 활성 하위 부서를 기본 버킷으로 먼저 생성
+    orgNodes
+      .filter((n) => !n.is_hidden && n.parent_id !== null)
+      .sort((a, b) => a.order - b.order)
+      .forEach((n) => {
+        if (!map.has(n.name)) map.set(n.name, []);
+      });
+
     orgSnapshotMembers.forEach((m) => {
       const d = m.department || "미지정";
+      if (hiddenNames.has(d)) return;
       const list = map.get(d) || [];
       list.push(m);
       map.set(d, list);
@@ -156,7 +178,7 @@ export default function HqMembersPage() {
         return { dept, head, members: sorted };
       })
       .sort((a, b) => b.members.length - a.members.length);
-  }, [orgSnapshotMembers]);
+  }, [orgSnapshotMembers, companySettings?.extra_settings?.org_chart_nodes]);
 
   const openCreateModal = () => {
     if (!isHrManager) {
@@ -301,6 +323,13 @@ export default function HqMembersPage() {
                 }`}
               >
                 🏢 시점별 부서 · 직급 조직도
+              </button>
+              <button
+                type="button"
+                onClick={() => openSettingsModal("hr-info")}
+                className="px-3.5 py-1.5 rounded-lg text-xs font-extrabold text-slate-500 hover:text-slate-900 transition-all"
+              >
+                ⚙️ 인사 정보 관리
               </button>
             </div>
 

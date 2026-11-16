@@ -1,7 +1,8 @@
 // src/components/hq/members/MemberFormModal.tsx
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
+import { useOptionalHqShell } from "@/components/hq/HqShellContext";
 import {
   getRankMeta,
   HQ_DEFAULT_DEPARTMENTS,
@@ -57,8 +58,39 @@ export default function MemberFormModal({
   const [jobDescription, setJobDescription] = useState("");
   const [hrMemo, setHrMemo] = useState("");
 
-  const deptOptions = Array.from(
-    new Set([...HQ_DEFAULT_DEPARTMENTS, ...existingDepartments.filter(Boolean)])
+  const shell = useOptionalHqShell();
+  const extraSettings = shell?.companySettings?.extra_settings;
+  const empNoLocked = Boolean(extraSettings?.emp_no_locked);
+  const hasAutoEmpPolicy = (extraSettings?.emp_no_policies?.length || 0) > 0;
+
+  const deptOptions = useMemo(() => {
+    const orgNames = (extraSettings?.org_chart_nodes || [])
+      .filter((n) => !n.is_hidden && n.name !== "퇴직")
+      .sort((a, b) => a.order - b.order)
+      .map((n) => n.name);
+    return Array.from(
+      new Set([
+        ...orgNames,
+        ...HQ_DEFAULT_DEPARTMENTS,
+        ...existingDepartments.filter(Boolean),
+      ])
+    );
+  }, [extraSettings?.org_chart_nodes, existingDepartments]);
+
+  const titleSuggestions = useMemo(
+    () =>
+      Array.from(
+        new Set([
+          ...(extraSettings?.hr_positions || []),
+          ...(extraSettings?.hr_titles || []),
+        ])
+      ),
+    [extraSettings?.hr_positions, extraSettings?.hr_titles]
+  );
+
+  const jobSuggestions = useMemo(
+    () => extraSettings?.hr_jobs || [],
+    [extraSettings?.hr_jobs]
   );
 
   const formatPhone = (val: string) => {
@@ -391,22 +423,44 @@ export default function MemberFormModal({
                     호칭 · 직책명 (화면/결재란 표시)
                   </label>
                   <input
+                    list="hq-member-title-suggestions"
                     value={jobTitle}
                     onChange={(e) => setJobTitle(e.target.value)}
                     className="w-full px-3.5 py-2 rounded-xl border border-slate-300 bg-white font-bold text-slate-800"
                     placeholder="예: 수석연구원, 편집팀장, 대표이사"
                   />
+                  {titleSuggestions.length > 0 && (
+                    <datalist id="hq-member-title-suggestions">
+                      {titleSuggestions.map((t) => (
+                        <option key={t} value={t} />
+                      ))}
+                    </datalist>
+                  )}
                 </div>
 
                 <div>
                   <label className="block text-xs font-bold text-slate-700 mb-1">
-                    사번
+                    사번{" "}
+                    {mode === "edit" && empNoLocked && Boolean(member?.employee_no) && (
+                      <span className="text-[11px] text-amber-600 font-bold">
+                        (🔒 사번 수정 잠금 중)
+                      </span>
+                    )}
                   </label>
                   <input
+                    disabled={
+                      mode === "edit" &&
+                      empNoLocked &&
+                      Boolean(member?.employee_no)
+                    }
                     value={employeeNo}
                     onChange={(e) => setEmployeeNo(e.target.value)}
-                    className="w-full px-3.5 py-2 rounded-xl border border-slate-300 bg-white font-medium text-slate-800"
-                    placeholder="미입력 시 자동 생성 (HQ-2026-...)"
+                    className="w-full px-3.5 py-2 rounded-xl border border-slate-300 bg-white font-medium text-slate-800 disabled:bg-slate-100 disabled:text-slate-500"
+                    placeholder={
+                      hasAutoEmpPolicy
+                        ? "미입력 시 사번 자동 부여 정책으로 생성"
+                        : "미입력 시 자동 생성 (HQ-2026-...)"
+                    }
                   />
                 </div>
 
@@ -562,11 +616,19 @@ export default function MemberFormModal({
                   담당 직무 요약 (증명서 표기용)
                 </label>
                 <input
+                  list="hq-member-job-suggestions"
                   value={jobDescription}
                   onChange={(e) => setJobDescription(e.target.value)}
                   className="w-full px-3.5 py-2 rounded-xl border border-slate-300 font-medium text-slate-800"
-                  placeholder="예: 초·중등 사고력 수학 교재 연구 및 집필"
+                  placeholder="예: 교재 집필, 편집, 디자인, 마케팅"
                 />
+                {jobSuggestions.length > 0 && (
+                  <datalist id="hq-member-job-suggestions">
+                    {jobSuggestions.map((j) => (
+                      <option key={j} value={j} />
+                    ))}
+                  </datalist>
+                )}
               </div>
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1">

@@ -487,6 +487,44 @@ export interface HqAffiliateItem {
   tenant_id?: string | null;
 }
 
+export interface HqOrgChartNode {
+  id: string;
+  name: string;
+  parent_id: string | null;
+  is_hidden?: boolean;
+  order: number;
+}
+
+export interface HqJobGroupItem {
+  id: string;
+  name: string;
+  jobs?: string[];
+}
+
+export interface HqJobGradeItem {
+  id: string;
+  name: string;
+  description?: string;
+}
+
+export interface HqEmpNoPolicy {
+  id: string;
+  name: string;
+  target_employment: string; // "전체" | "정규직" | "계약직" | "수습" | "프리랜서" | "임원"
+  prefix: string;
+  date_part: "YYYYMM" | "YYYY" | "YY" | "NONE";
+  seq_digits: number; // 2 | 3 | 4
+  start_seq: number;
+}
+
+export interface HqInfoApprovalPolicy {
+  require_approval_basic?: boolean;
+  require_approval_bank?: boolean;
+  require_approval_career?: boolean;
+  require_approval_family?: boolean;
+  approver_role?: "HR_MANAGER" | "DEPT_HEAD" | "CEO";
+}
+
 export interface HqCompanyExtraSettings {
   doc_prefix_cert?: string;
   doc_prefix_approval?: string;
@@ -496,6 +534,18 @@ export interface HqCompanyExtraSettings {
   default_annual_leave?: number;
   leave_basis?: "회계일 기준" | "입사일 기준";
   allow_hourly_leave?: boolean;
+  // 인사 · 구성원 정보 체계 설정 (Flex 이식)
+  hr_positions?: string[];
+  hr_titles?: string[];
+  hr_jobs?: string[];
+  hr_job_groups?: HqJobGroupItem[];
+  hr_grades?: HqJobGradeItem[];
+  org_chart_nodes?: HqOrgChartNode[];
+  org_chart_effective_date?: string;
+  org_chart_memo?: string;
+  emp_no_locked?: boolean;
+  emp_no_policies?: HqEmpNoPolicy[];
+  info_approval_policy?: HqInfoApprovalPolicy;
 }
 
 export interface HqCompanySettings {

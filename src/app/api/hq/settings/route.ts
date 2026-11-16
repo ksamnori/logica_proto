@@ -1,7 +1,10 @@
 // src/app/api/hq/settings/route.ts
 import { NextRequest, NextResponse } from "next/server";
-import { SupabaseClient } from "@supabase/supabase-js";
-import { DEFAULT_HQ_COMPANY_SETTINGS } from "@/lib/hq/defaultCompanySettings";
+import {
+  readCompanySettingsServer,
+  SETTINGS_STORAGE_BUCKET,
+  SETTINGS_STORAGE_FALLBACK_PATH,
+} from "@/lib/hq/companySettingsServer";
 import {
   apiFail,
   getSupabaseAdmin,
@@ -12,110 +15,6 @@ import type { HqCompanySettings } from "@/lib/hq/types";
 
 export const runtime = "nodejs";
 
-const STORAGE_BUCKET = "system_images";
-const STORAGE_FALLBACK_PATH = "hq_system_config/company_settings.json";
-
-function normalizeSettings(raw: any): HqCompanySettings {
-  const def = DEFAULT_HQ_COMPANY_SETTINGS;
-  if (!raw || typeof raw !== "object") return def;
-
-  const rawHolidays =
-    raw.holidays_json || raw.holidays_by_year || {};
-  const mergedHolidays: HqCompanySettings["holidays_by_year"] = {
-    "2025": Array.isArray(rawHolidays["2025"])
-      ? rawHolidays["2025"]
-      : def.holidays_by_year["2025"],
-    "2026": Array.isArray(rawHolidays["2026"])
-      ? rawHolidays["2026"]
-      : def.holidays_by_year["2026"],
-    "2027": Array.isArray(rawHolidays["2027"])
-      ? rawHolidays["2027"]
-      : def.holidays_by_year["2027"],
-    ...Object.fromEntries(
-      Object.entries(rawHolidays).filter(
-        ([k, v]) => !["2025", "2026", "2027"].includes(k) && Array.isArray(v)
-      )
-    ),
-  };
-
-  return {
-    company_name: String(raw.company_name || def.company_name),
-    company_code: String(raw.company_code || def.company_code),
-    ceo_names:
-      Array.isArray(raw.ceo_names) && raw.ceo_names.length > 0
-        ? raw.ceo_names.map(String)
-        : def.ceo_names,
-    phone: String(raw.phone ?? def.phone),
-    founded_date: String(raw.founded_date || def.founded_date).slice(0, 10),
-    address: String(raw.address ?? def.address),
-    business_reg_no: String(raw.business_reg_no || ""),
-    corp_reg_no: String(raw.corp_reg_no || ""),
-    cover_image_url: raw.cover_image_url || null,
-    logo_image_url: raw.logo_image_url || null,
-    seals: Array.isArray(raw.seals_json)
-      ? raw.seals_json
-      : Array.isArray(raw.seals)
-        ? raw.seals
-        : [],
-    holidays_by_year: mergedHolidays,
-    holiday_groups: Array.isArray(raw.holiday_groups_json)
-      ? raw.holiday_groups_json
-      : Array.isArray(raw.holiday_groups)
-        ? raw.holiday_groups
-        : [],
-    affiliates: Array.isArray(raw.affiliates_json)
-      ? raw.affiliates_json
-      : Array.isArray(raw.affiliates)
-        ? raw.affiliates
-        : [],
-    extra_settings: {
-      ...def.extra_settings,
-      ...(raw.extra_settings && typeof raw.extra_settings === "object"
-        ? raw.extra_settings
-        : {}),
-    },
-    updated_by: raw.updated_by || null,
-    updated_at: raw.updated_at || null,
-  };
-}
-
-async function readSettingsWithFallback(
-  supabaseAdmin: SupabaseClient
-): Promise<{ settings: HqCompanySettings; usingFallback: boolean }> {
-  const { data, error } = await supabaseAdmin
-    .from("hq_company_settings")
-    .select("*")
-    .eq("setting_key", "MAIN")
-    .maybeSingle();
-
-  if (!error) {
-    if (data) {
-      return { settings: normalizeSettings(data), usingFallback: false };
-    }
-    return { settings: DEFAULT_HQ_COMPANY_SETTINGS, usingFallback: false };
-  }
-
-  if (isMissingHqTableError(error)) {
-    try {
-      const { data: blob } = await supabaseAdmin.storage
-        .from(STORAGE_BUCKET)
-        .download(STORAGE_FALLBACK_PATH);
-      if (blob) {
-        const text = await blob.text();
-        return {
-          settings: normalizeSettings(JSON.parse(text)),
-          usingFallback: true,
-        };
-      }
-    } catch {
-      // ignore missing fallback file
-    }
-    return { settings: DEFAULT_HQ_COMPANY_SETTINGS, usingFallback: true };
-  }
-
-  throw new Error(error.message);
-}
-
 export async function GET(req: NextRequest) {
   try {
     const caller = await requireHqCaller(req);
@@ -123,7 +22,7 @@ export async function GET(req: NextRequest) {
 
     const supabaseAdmin = getSupabaseAdmin();
     const [{ settings, usingFallback }, tenantRes] = await Promise.all([
-      readSettingsWithFallback(supabaseAdmin),
+      readCompanySettingsServer(supabaseAdmin),
       supabaseAdmin
         .from("academy_tenant")
         .select("tenant_id, name, tenant_type")
@@ -168,7 +67,7 @@ export async function PATCH(req: NextRequest) {
     const body = await req.json();
     const supabaseAdmin = getSupabaseAdmin();
     const { settings: current, usingFallback } =
-      await readSettingsWithFallback(supabaseAdmin);
+      await readCompanySettingsServer(supabaseAdmin);
 
     const nowIso = new Date().toISOString();
     const actorLabel = `${caller.name} (${caller.jobTitle})`;
@@ -225,7 +124,14 @@ export async function PATCH(req: NextRequest) {
         : current.affiliates,
       extra_settings:
         body.extra_settings && typeof body.extra_settings === "object"
-          ? { ...current.extra_settings, ...body.extra_settings }
+          ? {
+              ...current.extra_settings,
+              ...body.extra_settings,
+              info_approval_policy: {
+                ...current.extra_settings.info_approval_policy,
+                ...(body.extra_settings.info_approval_policy || {}),
+              },
+            }
           : current.extra_settings,
       updated_by: actorLabel,
       updated_at: nowIso,
@@ -263,11 +169,10 @@ export async function PATCH(req: NextRequest) {
       }
     }
 
-    // 테이블 미생성 상태에서도 즉시 저장되도록 Storage JSON 백업도 함께 기록
     const jsonBytes = new TextEncoder().encode(JSON.stringify(next, null, 2));
     await supabaseAdmin.storage
-      .from(STORAGE_BUCKET)
-      .upload(STORAGE_FALLBACK_PATH, jsonBytes, {
+      .from(SETTINGS_STORAGE_BUCKET)
+      .upload(SETTINGS_STORAGE_FALLBACK_PATH, jsonBytes, {
         contentType: "application/json",
         upsert: true,
       })
