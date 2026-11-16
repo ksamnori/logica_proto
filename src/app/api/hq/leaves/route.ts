@@ -1,8 +1,10 @@
 // src/app/api/hq/leaves/route.ts
 import { NextRequest, NextResponse } from "next/server";
-import type { SupabaseClient } from "@supabase/supabase-js";
 import { appendHqAuditLog } from "@/lib/hq/auditLogServer";
-import { SETTINGS_STORAGE_BUCKET } from "@/lib/hq/companySettingsServer";
+import {
+  readLeavesLedgerServer,
+  writeLeavesLedgerServer,
+} from "@/lib/hq/leavesLedgerServer";
 import {
   apiFail,
   getSupabaseAdmin,
@@ -13,57 +15,13 @@ import type {
   HqAnnualLeavePlanItem,
   HqApprovalDoc,
   HqApprovalStep,
+  HqCustomLeaveGrantItem,
   HqLeaveAdjustmentItem,
-  HqLeavePromotionCampaign,
+  HqLeavePromotionTargetItem,
+  HqPromotionKind,
 } from "@/lib/hq/types";
 
 export const runtime = "nodejs";
-
-const LEAVES_LEDGER_PATH = "hq_system_config/leaves_ledger.json";
-
-interface StoredLeavesLedger {
-  adjustments: HqLeaveAdjustmentItem[];
-  promotions: HqLeavePromotionCampaign[];
-  plans: HqAnnualLeavePlanItem[];
-}
-
-const EMPTY_LEDGER: StoredLeavesLedger = {
-  adjustments: [],
-  promotions: [],
-  plans: [],
-};
-
-async function readLeavesLedger(
-  supabaseAdmin: SupabaseClient
-): Promise<StoredLeavesLedger> {
-  try {
-    const { data: blob, error } = await supabaseAdmin.storage
-      .from(SETTINGS_STORAGE_BUCKET)
-      .download(LEAVES_LEDGER_PATH);
-    if (error || !blob) return EMPTY_LEDGER;
-    const parsed = JSON.parse(await blob.text());
-    return {
-      adjustments: Array.isArray(parsed?.adjustments) ? parsed.adjustments : [],
-      promotions: Array.isArray(parsed?.promotions) ? parsed.promotions : [],
-      plans: Array.isArray(parsed?.plans) ? parsed.plans : [],
-    };
-  } catch {
-    return EMPTY_LEDGER;
-  }
-}
-
-async function writeLeavesLedger(
-  supabaseAdmin: SupabaseClient,
-  ledger: StoredLeavesLedger
-): Promise<void> {
-  const bytes = new TextEncoder().encode(JSON.stringify(ledger, null, 2));
-  await supabaseAdmin.storage
-    .from(SETTINGS_STORAGE_BUCKET)
-    .upload(LEAVES_LEDGER_PATH, bytes, {
-      contentType: "application/json",
-      upsert: true,
-    });
-}
 
 export async function GET(req: NextRequest) {
   try {
@@ -71,8 +29,25 @@ export async function GET(req: NextRequest) {
     if (caller instanceof NextResponse) return caller;
 
     const supabaseAdmin = getSupabaseAdmin();
-    const ledger = await readLeavesLedger(supabaseAdmin);
-    const canManage = caller.isHrManager || caller.isHqAdmin;
+    const ledger = await readLeavesLedgerServer(supabaseAdmin);
+    const canManage =
+      caller.isHrManager || caller.isHqAdmin || caller.rankLevel >= 3;
+
+    // 기한 지난 촉진 요청 상태 자동 갱신
+    const todayYmd = new Date(Date.now() + 9 * 60 * 60 * 1000)
+      .toISOString()
+      .slice(0, 10);
+    let dirty = false;
+    ledger.promotionTargets = ledger.promotionTargets.map((t) => {
+      if (t.status === "PENDING" && t.due_date && t.due_date < todayYmd) {
+        dirty = true;
+        return { ...t, status: "EXPIRED" };
+      }
+      return t;
+    });
+    if (dirty) {
+      await writeLeavesLedgerServer(supabaseAdmin, ledger).catch(() => {});
+    }
 
     let leaveDocs: HqApprovalDoc[] = [];
     if (!caller.schemaMissing) {
@@ -81,7 +56,7 @@ export async function GET(req: NextRequest) {
         .select("*")
         .eq("doc_type", "LEAVE")
         .order("effective_date", { ascending: false })
-        .limit(500);
+        .limit(800);
 
       if (!canManage) {
         query = query.eq("drafter_id", caller.userId);
@@ -163,13 +138,28 @@ export async function GET(req: NextRequest) {
       ? ledger.plans
       : ledger.plans.filter((p) => p.member_id === caller.userId);
 
+    const visibleCustomGrants = canManage
+      ? ledger.customGrants
+      : ledger.customGrants.filter((g) => g.member_id === caller.userId);
+
+    const visibleUploadedMonthly = canManage
+      ? ledger.uploadedMonthly
+      : ledger.uploadedMonthly.filter((u) => u.member_id === caller.userId);
+
+    const visiblePromoTargets = canManage
+      ? ledger.promotionTargets
+      : ledger.promotionTargets.filter((t) => t.member_id === caller.userId);
+
     return NextResponse.json({
       success: true,
       data: {
         canManage,
         adjustments: visibleAdjustments,
         promotions: ledger.promotions,
+        promotionTargets: visiblePromoTargets,
         plans: visiblePlans,
+        customGrants: visibleCustomGrants,
+        uploadedMonthly: visibleUploadedMonthly,
         leaveDocs,
       },
     });
@@ -187,56 +177,55 @@ export async function POST(req: NextRequest) {
     const body = await req.json();
     const action = String(body?.action || "").toUpperCase();
     const supabaseAdmin = getSupabaseAdmin();
-    const ledger = await readLeavesLedger(supabaseAdmin);
+    const ledger = await readLeavesLedgerServer(supabaseAdmin);
     const nowIso = new Date().toISOString();
 
-    if (action === "ADD_ADJUSTMENT") {
+    if (action === "ADD_ADJUSTMENT" || action === "BATCH_ADJUSTMENT") {
       if (!canManage) {
-        return apiFail("연차 수동 조정은 인사담당자·최고관리자만 가능합니다.", 403);
+        return apiFail("연차 조정은 인사담당자·최고관리자만 가능합니다.", 403);
       }
-      const memberId = String(body?.member_id || "").trim();
-      const memberName = String(body?.member_name || "").trim();
+
+      const targets: { member_id: string; member_name: string }[] =
+        action === "BATCH_ADJUSTMENT" && Array.isArray(body?.targets)
+          ? body.targets
+          : [
+              {
+                member_id: String(body?.member_id || "").trim(),
+                member_name: String(body?.member_name || "").trim(),
+              },
+            ];
+
       const yearMonth = String(body?.year_month || "").trim();
       const deltaDays = Number(body?.delta_days || 0);
       const reason = String(body?.reason || "").trim() || "관리자 연차 조정";
 
-      if (!memberId || !/^\d{4}-\d{2}$/.test(yearMonth) || !deltaDays) {
+      if (
+        targets.length === 0 ||
+        !targets[0].member_id ||
+        !/^\d{4}-\d{2}$/.test(yearMonth) ||
+        !deltaDays
+      ) {
         return apiFail("대상자, 적용 연월, 조정 일수를 확인해 주세요.");
       }
 
-      const item: HqLeaveAdjustmentItem = {
-        id: `lvadj-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-        member_id: memberId,
-        member_name: memberName,
-        year_month: yearMonth,
-        delta_days: deltaDays,
-        reason,
-        actor_name: caller.name,
-        created_at: nowIso,
-      };
-      ledger.adjustments.unshift(item);
-      await writeLeavesLedger(supabaseAdmin, ledger);
+      targets.forEach((t, idx) => {
+        if (!t.member_id) return;
+        const item: HqLeaveAdjustmentItem = {
+          id: `lvadj-${Date.now()}-${idx}-${Math.random()
+            .toString(36)
+            .slice(2, 6)}`,
+          member_id: String(t.member_id),
+          member_name: String(t.member_name || ""),
+          year_month: yearMonth,
+          delta_days: deltaDays,
+          reason,
+          actor_name: caller.name,
+          created_at: nowIso,
+        };
+        ledger.adjustments.unshift(item);
+      });
 
-      // hq_member_profile의 총 부여연차에도 동기 반영
-      try {
-        const { data: prof } = await supabaseAdmin
-          .from("hq_member_profile")
-          .select("annual_leave_total")
-          .eq("instructor_id", memberId)
-          .maybeSingle();
-        if (prof) {
-          const nextTotal = Math.max(
-            0,
-            Number((Number(prof.annual_leave_total ?? 15) + deltaDays).toFixed(2))
-          );
-          await supabaseAdmin
-            .from("hq_member_profile")
-            .update({ annual_leave_total: nextTotal, updated_at: nowIso })
-            .eq("instructor_id", memberId);
-        }
-      } catch {
-        // ignore if profile table missing
-      }
+      await writeLeavesLedgerServer(supabaseAdmin, ledger);
 
       await appendHqAuditLog(supabaseAdmin, req, {
         activity_type: "개인정보 접근",
@@ -246,7 +235,9 @@ export async function POST(req: NextRequest) {
         department: caller.department,
         event_type: "수정",
         info_type: "휴가정보",
-        description: `${memberName} 연차 조정 (${deltaDays > 0 ? `+${deltaDays}` : deltaDays}일 · ${reason})`,
+        description: `연차 수동 조정 (${targets.length}명 · ${
+          deltaDays > 0 ? `+${deltaDays}` : deltaDays
+        }일 · ${reason})`,
         delegated: caller.isDelegatedHrAdmin,
       }).catch(() => {});
 
@@ -257,41 +248,184 @@ export async function POST(req: NextRequest) {
     }
 
     if (action === "DELETE_ADJUSTMENT") {
-      if (!canManage) {
-        return apiFail("권한이 없습니다.", 403);
-      }
+      if (!canManage) return apiFail("권한이 없습니다.", 403);
       const id = String(body?.id || "").trim();
-      const target = ledger.adjustments.find((a) => a.id === id);
-      if (!target) return apiFail("조정 내역을 찾을 수 없습니다.", 404);
-
       ledger.adjustments = ledger.adjustments.filter((a) => a.id !== id);
-      await writeLeavesLedger(supabaseAdmin, ledger);
-
-      try {
-        const { data: prof } = await supabaseAdmin
-          .from("hq_member_profile")
-          .select("annual_leave_total")
-          .eq("instructor_id", target.member_id)
-          .maybeSingle();
-        if (prof) {
-          const nextTotal = Math.max(
-            0,
-            Number(
-              (Number(prof.annual_leave_total ?? 15) - target.delta_days).toFixed(2)
-            )
-          );
-          await supabaseAdmin
-            .from("hq_member_profile")
-            .update({ annual_leave_total: nextTotal, updated_at: nowIso })
-            .eq("instructor_id", target.member_id);
-        }
-      } catch {
-        // ignore
-      }
-
+      await writeLeavesLedgerServer(supabaseAdmin, ledger);
       return NextResponse.json({
         success: true,
         data: { adjustments: ledger.adjustments },
+      });
+    }
+
+    if (action === "GRANT_CUSTOM_LEAVE") {
+      if (!canManage) {
+        return apiFail("맞춤 휴가 부여는 인사관리자만 가능합니다.", 403);
+      }
+      const targets: { member_id: string; member_name: string }[] =
+        Array.isArray(body?.targets) ? body.targets : [];
+      const leaveId = String(body?.leave_id || "").trim();
+      const leaveName = String(body?.leave_name || "").trim();
+      const grantedAmount = Number(body?.granted_amount || 0);
+      const reason = String(body?.reason || "").trim() || "맞춤 휴가 직접 부여";
+
+      if (targets.length === 0 || !leaveId || grantedAmount <= 0) {
+        return apiFail("부여 대상자, 맞춤 휴가 항목, 부여 일수를 확인해 주세요.");
+      }
+
+      targets.forEach((t, idx) => {
+        if (!t.member_id) return;
+        const g: HqCustomLeaveGrantItem = {
+          id: `clg-${Date.now()}-${idx}-${Math.random().toString(36).slice(2, 5)}`,
+          member_id: String(t.member_id),
+          member_name: String(t.member_name || ""),
+          leave_id: leaveId,
+          leave_name: leaveName,
+          granted_amount: grantedAmount,
+          reason,
+          actor_name: caller.name,
+          created_at: nowIso,
+        };
+        ledger.customGrants.unshift(g);
+      });
+
+      await writeLeavesLedgerServer(supabaseAdmin, ledger);
+      return NextResponse.json({
+        success: true,
+        data: { customGrants: ledger.customGrants },
+      });
+    }
+
+    if (action === "UPLOAD_MONTHLY_USAGE") {
+      if (!canManage) {
+        return apiFail("연차 사용 내역 업로드는 인사관리자만 가능합니다.", 403);
+      }
+      const year = Number(body?.year || new Date().getFullYear());
+      const rows: { member_id: string; member_name: string; months: number[] }[] =
+        Array.isArray(body?.rows) ? body.rows : [];
+
+      if (rows.length === 0) {
+        return apiFail("업로드할 월별 연차 사용 내역 행이 없습니다.");
+      }
+
+      rows.forEach((r) => {
+        if (!r.member_id) return;
+        const cleanMonths = Array.from({ length: 12 }, (_, idx) =>
+          Math.max(0, Number(r.months?.[idx] || 0))
+        );
+        const existingIdx = ledger.uploadedMonthly.findIndex(
+          (u) => u.member_id === r.member_id && u.year === year
+        );
+        const nextItem = {
+          member_id: String(r.member_id),
+          member_name: String(r.member_name || ""),
+          year,
+          months: cleanMonths,
+          updated_at: nowIso,
+        };
+        if (existingIdx >= 0) {
+          ledger.uploadedMonthly[existingIdx] = nextItem;
+        } else {
+          ledger.uploadedMonthly.push(nextItem);
+        }
+      });
+
+      await writeLeavesLedgerServer(supabaseAdmin, ledger);
+      return NextResponse.json({
+        success: true,
+        data: {
+          count: rows.length,
+          uploadedMonthly: ledger.uploadedMonthly,
+        },
+      });
+    }
+
+    if (action === "REQUEST_PROMOTION_PLANS") {
+      if (!canManage) {
+        return apiFail("연차 사용계획 요청 권한이 없습니다.", 403);
+      }
+      const year = Number(body?.year || new Date().getFullYear());
+      const promoType = (body?.promo_type || "연차") as HqPromotionKind;
+      const dueDate = String(body?.due_date || "").trim();
+      const targets: {
+        member_id: string;
+        member_name: string;
+        department: string;
+        employee_no?: string;
+        expire_date?: string;
+      }[] = Array.isArray(body?.targets) ? body.targets : [];
+
+      if (!dueDate || targets.length === 0) {
+        return apiFail("요청 대상과 작성 기한을 선택해 주세요.");
+      }
+
+      targets.forEach((t, idx) => {
+        const defaultExpire = `${year + 1}-01-01`; // 당해 연말(12.31) 경과 익일 0시 소멸일 표기
+        const existingIdx = ledger.promotionTargets.findIndex(
+          (p) =>
+            p.year === year &&
+            p.member_id === t.member_id &&
+            p.promo_type === promoType
+        );
+        const entry: HqLeavePromotionTargetItem = {
+          id:
+            existingIdx >= 0
+              ? ledger.promotionTargets[existingIdx].id
+              : `prmt-${Date.now()}-${idx}`,
+          year,
+          member_id: String(t.member_id),
+          member_name: String(t.member_name || ""),
+          department: String(t.department || ""),
+          employee_no: t.employee_no || "",
+          promo_type: promoType,
+          expire_date: t.expire_date || defaultExpire,
+          due_date: dueDate,
+          status: "PENDING",
+          requested_by: caller.name,
+          requested_at: nowIso,
+        };
+        if (existingIdx >= 0) {
+          ledger.promotionTargets[existingIdx] = entry;
+        } else {
+          ledger.promotionTargets.unshift(entry);
+        }
+      });
+
+      // 해당 연도 캠페인도 자동 활성화
+      const campIdx = ledger.promotions.findIndex((c) => c.year === year);
+      if (campIdx >= 0) {
+        ledger.promotions[campIdx].is_active = true;
+        ledger.promotions[campIdx].due_date = dueDate;
+      } else {
+        ledger.promotions.push({
+          year,
+          is_active: true,
+          due_date: dueDate,
+          started_by: caller.name,
+          started_at: nowIso,
+        });
+      }
+
+      await writeLeavesLedgerServer(supabaseAdmin, ledger);
+      return NextResponse.json({
+        success: true,
+        data: {
+          promotionTargets: ledger.promotionTargets,
+          promotions: ledger.promotions,
+        },
+      });
+    }
+
+    if (action === "DELETE_PROMOTION_TARGET") {
+      if (!canManage) return apiFail("권한이 없습니다.", 403);
+      const id = String(body?.id || "").trim();
+      ledger.promotionTargets = ledger.promotionTargets.filter(
+        (t) => t.id !== id
+      );
+      await writeLeavesLedgerServer(supabaseAdmin, ledger);
+      return NextResponse.json({
+        success: true,
+        data: { promotionTargets: ledger.promotionTargets },
       });
     }
 
@@ -301,8 +435,7 @@ export async function POST(req: NextRequest) {
       }
       const year = Number(body?.year || new Date().getFullYear());
       const isActive = Boolean(body?.is_active);
-      const dueDate =
-        String(body?.due_date || "").trim() || `${year}-12-15`;
+      const dueDate = String(body?.due_date || "").trim() || `${year}-12-15`;
 
       const idx = ledger.promotions.findIndex((p) => p.year === year);
       if (idx >= 0) {
@@ -323,7 +456,7 @@ export async function POST(req: NextRequest) {
         });
       }
 
-      await writeLeavesLedger(supabaseAdmin, ledger);
+      await writeLeavesLedgerServer(supabaseAdmin, ledger);
       return NextResponse.json({
         success: true,
         data: { promotions: ledger.promotions },
@@ -366,10 +499,20 @@ export async function POST(req: NextRequest) {
         ledger.plans.unshift(planItem);
       }
 
-      await writeLeavesLedger(supabaseAdmin, ledger);
+      // 본인에게 요청된 연차 촉진 항목 상태도 'COMPLETED(완료)'로 자동 전환
+      ledger.promotionTargets = ledger.promotionTargets.map((t) =>
+        t.year === year && t.member_id === caller.userId
+          ? { ...t, status: "COMPLETED" }
+          : t
+      );
+
+      await writeLeavesLedgerServer(supabaseAdmin, ledger);
       return NextResponse.json({
         success: true,
-        data: { plans: ledger.plans },
+        data: {
+          plans: ledger.plans,
+          promotionTargets: ledger.promotionTargets,
+        },
       });
     }
 

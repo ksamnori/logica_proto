@@ -1,7 +1,7 @@
 // src/components/hq/HqSidebar.tsx
 "use client";
 
-import React from "react";
+import React, { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useHqShell } from "./HqShellContext";
@@ -35,6 +35,16 @@ export default function HqSidebar() {
     if (href === "/hq") return pathname === "/hq";
     return pathname === href || pathname.startsWith(`${href}/`);
   };
+
+  const isTimeMgmtRoute =
+    isActive("/hq/work-management") || isActive("/hq/leave-management");
+  const [timeMgmtOpen, setTimeMgmtOpen] = useState(isTimeMgmtRoute);
+
+  useEffect(() => {
+    if (isTimeMgmtRoute) {
+      setTimeMgmtOpen(true);
+    }
+  }, [isTimeMgmtRoute]);
 
   const navItemClass = (href: string) =>
     `w-full flex items-center justify-between px-3.5 py-2 rounded-xl font-bold text-[13px] transition-all ${
@@ -189,6 +199,50 @@ export default function HqSidebar() {
                 <span>휴가</span>
               </span>
             </Link>
+
+            {/* 근태 관리 ▾ (근무 관리 / 휴가 관리) */}
+            <div>
+              <button
+                type="button"
+                onClick={() => setTimeMgmtOpen((v) => !v)}
+                className={`w-full flex items-center justify-between px-3.5 py-2 rounded-xl font-bold text-[13px] transition-all ${
+                  isTimeMgmtRoute && !timeMgmtOpen
+                    ? "bg-slate-800 text-white"
+                    : "text-slate-300 hover:bg-slate-800 hover:text-white"
+                }`}
+              >
+                <span className="flex items-center gap-2.5 truncate">
+                  <span>🧳</span>
+                  <span>근태 관리</span>
+                </span>
+                <span className="text-[10px] text-slate-400">
+                  {timeMgmtOpen ? "▾" : "▸"}
+                </span>
+              </button>
+
+              {timeMgmtOpen && (
+                <div className="mt-0.5 ml-3 pl-2.5 border-l border-slate-800 space-y-0.5">
+                  <Link
+                    href="/hq/work-management"
+                    className={navItemClass("/hq/work-management")}
+                  >
+                    <span className="flex items-center gap-2 truncate">
+                      <span>🕒</span>
+                      <span>근무 관리</span>
+                    </span>
+                  </Link>
+                  <Link
+                    href="/hq/leave-management"
+                    className={navItemClass("/hq/leave-management")}
+                  >
+                    <span className="flex items-center gap-2 truncate">
+                      <span>🏖️</span>
+                      <span>휴가 관리</span>
+                    </span>
+                  </Link>
+                </div>
+              )}
+            </div>
 
             <Link
               href="/hq/contracts"

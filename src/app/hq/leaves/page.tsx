@@ -16,14 +16,18 @@ import {
   DEFAULT_ANNUAL_LEAVE_SETTINGS,
   DEFAULT_CUSTOM_LEAVES,
 } from "@/lib/hq/defaultLeaveSettings";
+import { computeMemberAnnualLeaveLedgerForYear } from "@/lib/hq/leaveBalanceEngine";
 import type {
   HqAnnualLeavePlanItem,
   HqApprovalDoc,
   HqApprovalPolicyItem,
+  HqCustomLeaveGrantItem,
   HqCustomLeaveItem,
   HqHolidayItem,
   HqLeaveAdjustmentItem,
   HqLeavePromotionCampaign,
+  HqLeavePromotionTargetItem,
+  HqUploadedMonthlyUsageItem,
 } from "@/lib/hq/types";
 
 type SubTab = "OVERVIEW" | "DETAIL" | "PLAN";
@@ -187,7 +191,14 @@ export default function HqLeavesPage() {
   const [leaveDocs, setLeaveDocs] = useState<HqApprovalDoc[]>([]);
   const [adjustments, setAdjustments] = useState<HqLeaveAdjustmentItem[]>([]);
   const [promotions, setPromotions] = useState<HqLeavePromotionCampaign[]>([]);
+  const [promotionTargets, setPromotionTargets] = useState<
+    HqLeavePromotionTargetItem[]
+  >([]);
   const [plans, setPlans] = useState<HqAnnualLeavePlanItem[]>([]);
+  const [customGrants, setCustomGrants] = useState<HqCustomLeaveGrantItem[]>([]);
+  const [uploadedMonthly, setUploadedMonthly] = useState<
+    HqUploadedMonthlyUsageItem[]
+  >([]);
 
   // 2개월 달력 휴가 등록 모달 상태 (스크린샷 2)
   const [regModalOpen, setRegModalOpen] = useState(false);
@@ -294,13 +305,19 @@ export default function HqLeavesPage() {
         data: {
           adjustments: HqLeaveAdjustmentItem[];
           promotions: HqLeavePromotionCampaign[];
+          promotionTargets?: HqLeavePromotionTargetItem[];
           plans: HqAnnualLeavePlanItem[];
+          customGrants?: HqCustomLeaveGrantItem[];
+          uploadedMonthly?: HqUploadedMonthlyUsageItem[];
           leaveDocs: HqApprovalDoc[];
         };
       }>("/api/hq/leaves");
       setAdjustments(res.data?.adjustments || []);
       setPromotions(res.data?.promotions || []);
+      setPromotionTargets(res.data?.promotionTargets || []);
       setPlans(res.data?.plans || []);
+      setCustomGrants(res.data?.customGrants || []);
+      setUploadedMonthly(res.data?.uploadedMonthly || []);
       setLeaveDocs(res.data?.leaveDocs || []);
     } catch {
       setLeaveDocs([]);
@@ -356,166 +373,65 @@ export default function HqLeavesPage() {
   }, [customLeaves, me?.profile_extra?.gender, showAllCustomLeaves]);
 
   // ============================================================================
-  // 연차 상세 월별 원장 계산 (스크린샷 4 완벽 대응: 입사월 배지 + 월차/회계연차 + 사용/조정/잔여)
+  // 연차 상세 월별 원장 계산 (공통 엔진: 당해 연말 12월 31일 사용 기준 완벽 반영)
   // ============================================================================
   const detailLedger = useMemo(() => {
-    const target = detailMember;
-    const targetId = target?.instructor_id || "";
-    const hireIso = target?.hire_date || `${detailYear}-05-01`;
-    const [hireY, hireM] = hireIso.split("-").map(Number);
-    const safeHireY = hireY || detailYear;
-    const safeHireM = hireM || 1;
-
-    const startMonth = safeHireY === detailYear ? safeHireM : 1;
-
-    const targetDocs = leaveDocs.filter(
-      (d) =>
-        d.drafter_id === targetId &&
-        (d.status === "APPROVED" ||
-          d.status === "PENDING" ||
-          d.status === "IN_PROGRESS") &&
-        ((d.leave_type || "").includes("연차") ||
-          (d.leave_type || "").includes("반차") ||
-          (d.leave_type || "").includes("시간차"))
-    );
-
-    const targetAdjs = adjustments.filter((a) => a.member_id === targetId);
-
-    const rows: {
-      ym: string;
-      monthNum: number;
-      isHireMonth: boolean;
-      isCurrentMonth: boolean;
-      autoGrant: number;
-      expired: number;
-      used: number;
-      adjusted: number;
-      runningBalance: number;
-      usedItems: HqApprovalDoc[];
-      adjItems: HqLeaveAdjustmentItem[];
-    }[] = [];
-
-    let totalAuto = 0;
-    let totalExpired = 0;
-    let totalUsed = 0;
-    let totalAdjusted = 0;
-    let running = 0;
-
-    if (safeHireY > detailYear) {
-      return {
-        rows: [],
-        totalAuto: 0,
-        totalExpired: 0,
-        totalUsed: 0,
-        totalAdjusted: 0,
-        currentAvailableBalance: target?.annual_leave_remain ?? 0,
-      };
-    }
-
-    for (let m = startMonth; m <= 12; m += 1) {
-      const ym = `${detailYear}-${String(m).padStart(2, "0")}`;
-      const isHireMonth = safeHireY === detailYear && m === safeHireM;
-      const isCurrentMonth =
-        detailYear === currentYear && m === currentMonth;
-
-      // 자동 부여 계산
-      let autoGrant = 0;
-      if (safeHireY === detailYear) {
-        // 입사 당해연도: 매월 개근 시 익월부터 +1일 부여 (스크린샷 4 동일)
-        if (
-          annualPolicy.first_year_monthly_rule === "입사 시 11일 선부여" &&
-          isHireMonth
-        ) {
-          autoGrant = 11;
-        } else if (
-          annualPolicy.first_year_monthly_rule !== "부여 안 함" &&
-          m > safeHireM
-        ) {
-          autoGrant = 1;
-        }
-      } else if (m === 1) {
-        // 2년차 이상 회계일(1월 1일) 부여
-        const yearsWorked = Math.max(1, detailYear - safeHireY);
-        if (yearsWorked === 1 && safeHireM > 1) {
-          // 직전 연도 중도입사자의 첫 회계일 비례연차 + 잔여 월차분
-          const proRata = Math.ceil(((13 - safeHireM) / 12) * 15);
-          autoGrant = Math.max(proRata, target?.annual_leave_total || 15);
-        } else {
-          const extra = Math.max(0, Math.floor((yearsWorked - 1) / 2));
-          autoGrant = Math.min(
-            25,
-            target?.annual_leave_total || 15 + extra
-          );
-        }
-      }
-
-      const monthUsedDocs = targetDocs.filter((d) =>
-        (d.effective_date || "").startsWith(ym)
-      );
-      const used = round4(
-        monthUsedDocs.reduce((acc, d) => acc + Number(d.leave_days || 0), 0)
-      );
-
-      const monthAdjs = targetAdjs.filter((a) => a.year_month === ym);
-      const adjusted = round4(
-        monthAdjs.reduce((acc, a) => acc + Number(a.delta_days || 0), 0)
-      );
-
-      const expired = 0;
-
-      totalAuto = round4(totalAuto + autoGrant);
-      totalExpired = round4(totalExpired + expired);
-      totalUsed = round4(totalUsed + used);
-      totalAdjusted = round4(totalAdjusted + adjusted);
-      running = round4(running + autoGrant - expired - used + adjusted);
-
-      rows.push({
-        ym,
-        monthNum: m,
-        isHireMonth,
-        isCurrentMonth,
-        autoGrant,
-        expired,
-        used,
-        adjusted,
-        runningBalance: running,
-        usedItems: monthUsedDocs,
-        adjItems: monthAdjs,
-      });
-    }
-
-    const currentMonthRow =
-      rows.find((r) => r.ym === `${currentYear}-${String(currentMonth).padStart(2, "0")}`) ||
-      rows[rows.length - 1];
-
+    const summary = computeMemberAnnualLeaveLedgerForYear({
+      memberId: detailMember?.instructor_id || "",
+      hireDate: detailMember?.hire_date || null,
+      groupHireDate: detailMember?.profile_extra?.group_hire_date || null,
+      year: detailYear,
+      currentYear,
+      currentMonth,
+      policy: annualPolicy,
+      leaveDocs,
+      adjustments,
+      uploadedMonthly,
+    });
     return {
-      rows,
-      totalAuto,
-      totalExpired,
-      totalUsed,
-      totalAdjusted,
-      currentAvailableBalance:
-        detailYear === currentYear && currentMonthRow
-          ? Math.max(0, currentMonthRow.runningBalance)
-          : target?.annual_leave_remain ?? 0,
+      rows: summary.rows,
+      isYearEndBasis: summary.isYearEndBasis,
+      totalAuto: summary.totalAutoGrantYearEnd,
+      totalExpired: summary.totalExpired,
+      totalUsed: summary.totalUsedYear,
+      totalAdjusted: summary.totalAdjustedYear,
+      currentAvailableBalance: summary.availableRemainDays,
     };
   }, [
     detailMember,
     detailYear,
-    leaveDocs,
-    adjustments,
     currentYear,
     currentMonth,
-    annualPolicy.first_year_monthly_rule,
+    annualPolicy,
+    leaveDocs,
+    adjustments,
+    uploadedMonthly,
   ]);
 
-  // 내 현재 사용 가능 연차 일수 (올해 원장 기준 우선 표시)
+  // 내 올해 사용 가능 잔여 연차 일수 (당해 연말 12월 31일까지 사용 기준 실시간 반영)
   const myAvailableAnnualDays = useMemo(() => {
-    if (detailMember?.instructor_id === me?.instructor_id && detailYear === currentYear) {
-      return detailLedger.currentAvailableBalance;
-    }
-    return me?.annual_leave_remain ?? 15;
-  }, [detailMember?.instructor_id, me, detailYear, currentYear, detailLedger]);
+    if (!me) return 0;
+    return computeMemberAnnualLeaveLedgerForYear({
+      memberId: me.instructor_id,
+      hireDate: me.hire_date,
+      groupHireDate: me.profile_extra?.group_hire_date || null,
+      year: currentYear,
+      currentYear,
+      currentMonth,
+      policy: annualPolicy,
+      leaveDocs,
+      adjustments,
+      uploadedMonthly,
+    }).availableRemainDays;
+  }, [
+    me,
+    currentYear,
+    currentMonth,
+    annualPolicy,
+    leaveDocs,
+    adjustments,
+    uploadedMonthly,
+  ]);
 
   // 사용한 기록 필터링
   const mapDocToFilterStatus = (doc: HqApprovalDoc): LeaveFilterStatus => {
@@ -801,11 +717,22 @@ export default function HqLeavesPage() {
     }
   };
 
-  // 연차 촉진 상태 및 내 계획 동기화
-  const activePromotion = useMemo(
-    () => promotions.find((p) => p.year === planYear && p.is_active),
-    [promotions, planYear]
-  );
+  // 연차 촉진 상태 및 내 계획 동기화 (전사 촉진 캠페인 또는 개별 요청 대상 모두 지원)
+  const activePromotion = useMemo(() => {
+    const myTarget = promotionTargets.find(
+      (t) => t.year === planYear && t.member_id === me?.instructor_id
+    );
+    if (myTarget) {
+      return {
+        year: planYear,
+        is_active: true,
+        due_date: myTarget.due_date,
+        started_by: myTarget.requested_by,
+        started_at: myTarget.requested_at,
+      };
+    }
+    return promotions.find((p) => p.year === planYear && p.is_active);
+  }, [promotionTargets, promotions, planYear, me?.instructor_id]);
 
   const myPlanForYear = useMemo(
     () =>
@@ -1173,10 +1100,16 @@ export default function HqLeavesPage() {
       {subTab === "DETAIL" && (
         <div className="px-10 py-8 max-w-[1360px] w-full space-y-5">
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="flex items-center gap-3">
+            <div className="flex flex-wrap items-center gap-2.5">
               <h2 className="text-[15px] font-extrabold text-slate-900">
                 연차 상세 현황
               </h2>
+              {detailLedger.isYearEndBasis && (
+                <span className="px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 text-[11px] font-extrabold">
+                  {detailYear}.12.31 연말 사용 기준 · 남은 연차{" "}
+                  {detailLedger.currentAvailableBalance}일
+                </span>
+              )}
               {canManage && (
                 <select
                   value={detailTargetId}

@@ -36,6 +36,14 @@ const PAGE_TITLES: Record<string, { title: string; subtitle: string }> = {
     title: "내 휴가 · 연차 현황",
     subtitle: "연차·맞춤휴가 신청 · 월별 자동부여/사용 상세 원장 · 연차 사용 계획",
   },
+  "/hq/work-management": {
+    title: "근태 관리 · 근무 관리",
+    subtitle: "근태 대시보드 · 초과근무 보상 휴가 부여 · 휴일 대체 · 근태 마감 보호",
+  },
+  "/hq/leave-management": {
+    title: "근태 관리 · 휴가 관리",
+    subtitle: "당해 연말(12.31) 기준 잔여연차 보유현황 · 사용내역 · 월별 원장 · 스마트 연차 촉진",
+  },
   "/hq/contracts": {
     title: "전자계약 · 저작권/외주 계약 관리",
     subtitle: "근로·연봉·비밀유지(NDA) 및 저자 출판권·외주 용역 전자서명",

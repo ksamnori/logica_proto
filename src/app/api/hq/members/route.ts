@@ -18,6 +18,13 @@ import {
   generateEmployeeNoByPolicy,
   readCompanySettingsServer,
 } from "@/lib/hq/companySettingsServer";
+import { DEFAULT_ANNUAL_LEAVE_POLICY } from "@/lib/hq/defaultLeaveSettings";
+import {
+  computeMemberAnnualLeaveLedgerForYear,
+  roundLeave4,
+  type LeaveLedgerDocLite,
+} from "@/lib/hq/leaveBalanceEngine";
+import { readLeavesLedgerServer } from "@/lib/hq/leavesLedgerServer";
 import type {
   HqMember,
   HqProfileExtra,
@@ -163,6 +170,41 @@ export async function GET(req: NextRequest) {
       }
     }
 
+    // 회사 연차 정책(당해 연말 12월 31일 사용 기준 포함)에 맞춰 올해 잔여 연차를 정밀 산정
+    const kstNow = new Date(Date.now() + 9 * 60 * 60 * 1000);
+    const curYear = kstNow.getUTCFullYear();
+    const curMonth = kstNow.getUTCMonth() + 1;
+
+    const [companySettings, leavesLedger, leaveDocsRes] = await Promise.all([
+      readCompanySettingsServer(supabaseAdmin).catch(() => null),
+      readLeavesLedgerServer(supabaseAdmin),
+      !schemaMissing
+        ? supabaseAdmin
+            .from("hq_approval_doc")
+            .select(
+              "approval_id, drafter_id, status, effective_date, end_date, leave_type, leave_days"
+            )
+            .eq("doc_type", "LEAVE")
+            .gte("effective_date", `${curYear}-01-01`)
+            .lte("effective_date", `${curYear}-12-31`)
+        : Promise.resolve({ data: [] as any[] }),
+    ]);
+
+    const activeAnnualPolicy =
+      companySettings?.settings?.extra_settings?.annual_leave_settings
+        ?.policies?.[0] || DEFAULT_ANNUAL_LEAVE_POLICY;
+    const yearLeaveDocs: LeaveLedgerDocLite[] = (
+      leaveDocsRes?.data || []
+    ).map((r: any) => ({
+      approval_id: String(r.approval_id),
+      drafter_id: String(r.drafter_id),
+      status: String(r.status),
+      effective_date: r.effective_date || null,
+      end_date: r.end_date || null,
+      leave_type: r.leave_type || null,
+      leave_days: Number(r.leave_days || 0),
+    }));
+
     const members: HqMember[] = hqInstructors.map((inst: any, idx: number) => {
       const id = String(inst.instructor_id);
       const prof = profileMap.get(id);
@@ -174,8 +216,33 @@ export async function GET(req: NextRequest) {
       const rankMeta = getRankMeta(rankCode);
       const canSeePrivate = caller.isHrManager || id === caller.userId;
 
-      const totalLeave = Number(prof?.annual_leave_total ?? 15);
-      const usedLeave = Number(prof?.annual_leave_used ?? 0);
+      const resolvedHireDate =
+        prof?.hire_date ||
+        (inst.created_at ? String(inst.created_at).slice(0, 10) : null);
+      const rawProfileExtra =
+        prof?.profile_extra && typeof prof.profile_extra === "object"
+          ? prof.profile_extra
+          : {};
+
+      const ledgerSummary = computeMemberAnnualLeaveLedgerForYear({
+        memberId: id,
+        hireDate: resolvedHireDate,
+        groupHireDate: rawProfileExtra.group_hire_date || null,
+        year: curYear,
+        currentYear: curYear,
+        currentMonth: curMonth,
+        policy: activeAnnualPolicy,
+        leaveDocs: yearLeaveDocs,
+        adjustments: leavesLedger.adjustments,
+        uploadedMonthly: leavesLedger.uploadedMonthly,
+      });
+
+      const totalLeave = roundLeave4(
+        ledgerSummary.totalAutoGrantYearEnd + ledgerSummary.totalAdjustedYear
+      );
+      const usedLeave = ledgerSummary.totalUsedYear;
+      const remainLeave = ledgerSummary.availableRemainDays;
+
       const workStatus: HqWorkStatus =
         (prof?.work_status as HqWorkStatus) ||
         (inst.status === "퇴사" || inst.status === "퇴직" ? "퇴직" : "재직");
@@ -208,17 +275,12 @@ export async function GET(req: NextRequest) {
         is_dept_head: Boolean(prof?.is_dept_head ?? inf.isDeptHead),
         employment_type: prof?.employment_type || "정규직",
         work_status: workStatus,
-        hire_date:
-          prof?.hire_date ||
-          (inst.created_at ? String(inst.created_at).slice(0, 10) : null),
+        hire_date: resolvedHireDate,
         resign_date: prof?.resign_date || null,
         birth_date: canSeePrivate ? prof?.birth_date || null : null,
         annual_leave_total: totalLeave,
         annual_leave_used: usedLeave,
-        annual_leave_remain: Math.max(
-          0,
-          Number((totalLeave - usedLeave).toFixed(1))
-        ),
+        annual_leave_remain: remainLeave,
         bank_name: canSeePrivate ? prof?.bank_name || "" : "",
         bank_account: canSeePrivate ? prof?.bank_account || "" : "",
         account_holder: canSeePrivate ? prof?.account_holder || "" : "",

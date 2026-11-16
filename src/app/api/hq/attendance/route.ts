@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { appendHqAuditLog } from "@/lib/hq/auditLogServer";
 import { ATTENDANCE_MODES } from "@/lib/hq/constants";
 import { notifySlackIfEnabled } from "@/lib/hq/integrationServer";
+import { readWorkMgmtStateServer } from "@/lib/hq/leavesLedgerServer";
 import {
   apiFail,
   getSupabaseAdmin,
@@ -385,6 +386,23 @@ export async function POST(req: NextRequest) {
       }
 
       const workDate = String(body?.work_date || todayStr);
+      if (!caller.isHrManager && !caller.isHqAdmin) {
+        const wmState = await readWorkMgmtStateServer(supabaseAdmin);
+        const lockedHit = wmState.attendanceLocks.find(
+          (l) =>
+            workDate >= l.start_date &&
+            workDate <= l.end_date &&
+            (l.target_scope === "ALL" ||
+              (l.target_departments || []).includes(caller.department))
+        );
+        if (lockedHit) {
+          return apiFail(
+            `근태 마감(${lockedHit.title}: ${lockedHit.start_date}~${lockedHit.end_date})된 기간의 기록은 수정할 수 없습니다.`,
+            403
+          );
+        }
+      }
+
       const workMode = (body?.work_mode || "OFFICE") as HqWorkMode;
       const statusOverride = String(body?.status_override || "");
       const inTime = String(body?.check_in_time || "").trim();

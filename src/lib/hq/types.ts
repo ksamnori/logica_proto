@@ -1339,6 +1339,83 @@ export interface HqAnnualLeavePlanItem {
   submitted_at: string;
 }
 
+export interface HqCustomLeaveGrantItem {
+  id: string;
+  member_id: string;
+  member_name: string;
+  leave_id: string; // 예: "cl-reward", "cl-subfertility"
+  leave_name: string;
+  granted_amount: number; // 일수 (시간 단위 부여 시 8시간=1일 환산 또는 일수)
+  reason: string;
+  actor_name: string;
+  created_at: string;
+}
+
+export interface HqUploadedMonthlyUsageItem {
+  member_id: string;
+  member_name: string;
+  year: number;
+  months: number[]; // 길이 12 배열 (1월~12월 업로드 사용일수)
+  updated_at: string;
+}
+
+export type HqPromotionKind = "연차" | "월차 1차" | "월차 2차";
+export type HqPromotionTargetStatus = "PENDING" | "COMPLETED" | "EXPIRED";
+
+export interface HqLeavePromotionTargetItem {
+  id: string;
+  year: number;
+  member_id: string;
+  member_name: string;
+  department: string;
+  employee_no?: string;
+  promo_type: HqPromotionKind;
+  expire_date: string; // 예: "2027-01-01" (2026.12.31 경과 소멸일)
+  due_date: string; // 작성 기한 YYYY-MM-DD
+  status: HqPromotionTargetStatus;
+  requested_by: string;
+  requested_at: string;
+}
+
+export interface HqCompLeaveGrantItem {
+  id: string;
+  member_id: string;
+  member_name: string;
+  department: string;
+  period_start: string;
+  period_end: string;
+  overtime_minutes: number;
+  granted_minutes: number;
+  overtime_category: string; // 예: "법정근로내 연장", "연장근로"
+  actor_name: string;
+  created_at: string;
+}
+
+export interface HqHolidaySubstituteItem {
+  id: string;
+  member_id: string;
+  member_name: string;
+  department: string;
+  holiday_date: string; // 원래 휴일 (예: "2026-11-22")
+  holiday_kind: string; // "주휴일" | "공휴일"
+  substitute_date: string; // 대체 휴무일 (예: "2026-11-24")
+  worked_minutes: number;
+  memo?: string;
+  actor_name: string;
+  created_at: string;
+}
+
+export interface HqAttendanceLockItem {
+  id: string;
+  title: string;
+  start_date: string;
+  end_date: string;
+  target_scope: "ALL" | "DEPT";
+  target_departments?: string[];
+  locked_by: string;
+  locked_at: string;
+}
+
 export interface HqCompanyExtraSettings {
   doc_prefix_cert?: string;
   doc_prefix_approval?: string;
