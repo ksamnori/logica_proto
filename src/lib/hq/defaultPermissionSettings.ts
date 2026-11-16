@@ -693,30 +693,72 @@ export const PERMISSION_CATEGORIES: HqPermissionCatalogCategory[] = [
         key: "security.login_manage",
         title: "로그인 설정",
         description:
-          "로그인 수단 및 실패 잠금, 자동 로그아웃 등 다양한 로그인 관리 기능을 사용할 수 있어요.",
+          "로그인 비밀번호의 옵션을 설정하고 다양한 로그인 관리 기능을 사용할 수 있어요.",
       },
     ],
   },
   {
-    id: "cat-audit-etc",
-    label: "감사 로그 · IT 자산 · 권한",
+    id: "cat-billing",
+    label: "구독 · 결제",
+    items: [
+      {
+        key: "billing.manage",
+        title: "구독 · 결제 관리",
+        description:
+          "구독 서비스 변경, 청구 요금 조회 및 결제 수단 관리를 할 수 있어요.",
+      },
+    ],
+  },
+  {
+    id: "cat-audit",
+    label: "감사 로그",
     items: [
       {
         key: "audit.view",
         title: "감사 로그 조회",
         description:
-          "정보처리 시스템으로써 주요 기록에 대한 조회와 다운로드를 할 수 있어요.",
+          "정보처리 시스템으로써 중요 기록에 대한 조회와 다운로드를 할 수 있어요.",
       },
+    ],
+  },
+  {
+    id: "cat-group-insurance",
+    label: "단체 보험",
+    items: [
+      {
+        key: "insurance.quote_view",
+        title: "예상 견적 조회",
+        description:
+          "단체 보험 상품 정보 및 예상 견적을 조회하고 다운로드 할 수 있어요.",
+      },
+      {
+        key: "insurance.manage",
+        title: "단체 보험 관리",
+        description:
+          "단체 보험 가입자 목록을 관리하고, 가입 시 입력한 개인 정보를 조회하거나 계약을 갱신할 수 있어요.",
+      },
+    ],
+  },
+  {
+    id: "cat-it-asset",
+    label: "IT 자산",
+    items: [
       {
         key: "it_asset.manage",
         title: "IT 자산 관리",
         description: "회사 IT 자산을 등록하고 상태를 관리할 수 있어요.",
       },
+    ],
+  },
+  {
+    id: "cat-permission",
+    label: "권한",
+    items: [
       {
         key: "permission.manage",
         title: "권한 설정",
         description:
-          "권한 그룹을 생성·편집하고 구성원별 권한 그룹을 배정하거나 변경할 수 있어요.",
+          "권한 그룹과 권한 연결을 설정하고 구성원을 할당 할 수 있어요.",
       },
     ],
   },
