@@ -526,6 +526,8 @@ export interface HqInfoApprovalPolicy {
   require_approval_bank?: boolean;
   require_approval_career?: boolean;
   require_approval_family?: boolean;
+  require_approval_doc?: boolean;
+  require_approval_license?: boolean;
   approver_role?: "HR_MANAGER" | "DEPT_HEAD" | "CEO";
 }
 
@@ -562,7 +564,7 @@ export interface HqPolicyAssignee {
   sub_label?: string;
   avatar_bg?: string;
   notify_mode?: HqCcNotifyMode;
-  step_action?: "승인" | "합의" | "검토";
+  step_action?: string;
 }
 
 export interface HqPolicyStep {
@@ -617,9 +619,17 @@ export interface HqSubstituteApprovalRule {
   id: string;
   original_approver_name: string;
   substitute_approver_name: string;
+  absence_type?: string; // "휴가" | "출장" | "휴직" | "기타"
+  absence_label?: string; // 예: "연차", "반차", "외부 출장"
   start_date: string;
   end_date: string;
   reason?: string;
+  per_policy_enabled?: boolean;
+  policy_substitutes?: {
+    policy_id: string;
+    policy_title: string;
+    substitute_name: string;
+  }[];
   is_active: boolean;
 }
 

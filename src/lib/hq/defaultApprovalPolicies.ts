@@ -543,38 +543,15 @@ export const DEFAULT_APPROVAL_POLICIES: HqApprovalPolicyItem[] = [
   },
 
   // =========================================================================
-  // 4. 구성원 정보 탭 (4개 정책 — 인사·구성원 정보 > 설정하기 연동)
+  // 4. 구성원 정보 탭 (5개 정책 — Image 1 동일)
   // =========================================================================
   {
     id: "mi-basic",
     category: "member_info",
     title: "기본 정보 변경",
-    description: "주소, 휴대전화번호, 개인 이메일 변경 시 적용되는 승인·참조 정책입니다.",
-    icon: "🪪",
-    allow_edit: false,
-    per_requester: false,
-    cc_list: [cloneAssignee(PRESET_ASSIGNEES.KIM_GS)],
-    steps: [],
-  },
-  {
-    id: "mi-bank",
-    category: "member_info",
-    title: "급여계좌 변경",
-    description: "급여 이체 은행명·계좌번호 변경 시 인사/관리 담당 승인을 거칩니다.",
-    icon: "🏦",
-    allow_edit: false,
-    per_requester: false,
-    cc_list: [cloneAssignee(PRESET_ASSIGNEES.CHUN)],
-    steps: [
-      { step_order: 1, assignees: [cloneAssignee(PRESET_ASSIGNEES.KIM_GS)] },
-    ],
-  },
-  {
-    id: "mi-career-edu",
-    category: "member_info",
-    title: "경력 · 학력 정보 변경",
-    description: "이전 직장 경력 및 학력사항 추가·수정 시 적용되는 정책입니다.",
-    icon: "🎓",
+    description:
+      "주소, 휴대전화번호 등 구성원이 변경한 정보는 승인을 통해 반영할 수 있어요.",
+    icon: "👤",
     allow_edit: false,
     per_requester: false,
     cc_list: [],
@@ -583,44 +560,113 @@ export const DEFAULT_APPROVAL_POLICIES: HqApprovalPolicyItem[] = [
   {
     id: "mi-family",
     category: "member_info",
-    title: "가족 · 공제 대상 정보 변경",
-    description: "원천세·연말정산 기본공제 및 건강보험 피부양자 변경 시 적용됩니다.",
+    title: "가족 정보 변경",
+    description:
+      "가족 이름, 관계 등 구성원이 변경한 정보는 승인을 통해 반영할 수 있어요.",
     icon: "👨‍👩‍👧",
     allow_edit: false,
     per_requester: false,
     cc_list: [],
-    steps: [
-      { step_order: 1, assignees: [cloneAssignee(PRESET_ASSIGNEES.KIM_GS)] },
-    ],
-  },
-
-  // =========================================================================
-  // 5. 퇴직자 문서 탭 (2개 정책)
-  // =========================================================================
-  {
-    id: "rd-career-cert",
-    category: "retiree_doc",
-    title: "경력증명서 발급 신청",
-    description: "퇴직 구성원이 셀프서비스로 경력증명서 발급을 요청할 때 적용됩니다.",
-    icon: "📜",
-    allow_edit: false,
-    per_requester: false,
-    cc_list: [cloneAssignee(PRESET_ASSIGNEES.CHUN)],
-    steps: [
-      { step_order: 1, assignees: [cloneAssignee(PRESET_ASSIGNEES.KIM_GS)] },
-    ],
+    steps: [],
   },
   {
-    id: "rd-withholding",
-    category: "retiree_doc",
-    title: "근로소득 원천징수영수증 요청",
-    description: "퇴직자 정산 및 원천징수영수증 발급 요청 시 적용됩니다.",
-    icon: "🧾",
+    id: "mi-career-edu",
+    category: "member_info",
+    title: "경력 · 학력 변경",
+    description:
+      "학교 이름, 입학연월 등 구성원이 변경한 정보는 승인을 통해 반영할 수 있어요.",
+    icon: "💼",
     allow_edit: false,
     per_requester: false,
     cc_list: [],
-    steps: [
-      { step_order: 1, assignees: [cloneAssignee(PRESET_ASSIGNEES.KIM_GS)] },
-    ],
+    steps: [],
+  },
+  {
+    id: "mi-document",
+    category: "member_info",
+    title: "문서 변경",
+    description:
+      "주민등록등본, 가족관계증명서 등 구성원이 변경한 정보는 승인을 통해 반영할 수 있어요.",
+    icon: "📁",
+    allow_edit: false,
+    per_requester: false,
+    cc_list: [],
+    steps: [],
+  },
+  {
+    id: "mi-license",
+    category: "member_info",
+    title: "자격증 변경",
+    description:
+      "자격증 이름, 등급 등 구성원이 변경한 정보는 승인을 통해 반영할 수 있어요.",
+    icon: "🪪",
+    allow_edit: false,
+    per_requester: false,
+    cc_list: [],
+    steps: [],
+  },
+
+  // =========================================================================
+  // 5. 퇴직자 문서 탭 (6개 정책 — Image 2 동일)
+  // =========================================================================
+  {
+    id: "rd-withholding-book",
+    category: "retiree_doc",
+    title: "근로소득 원천징수부",
+    icon: "👤",
+    allow_edit: false,
+    per_requester: false,
+    cc_list: [],
+    steps: [],
+  },
+  {
+    id: "rd-class-a-tax",
+    category: "retiree_doc",
+    title: "갑종근로소득에 대한 소득세 원천징수확인서",
+    icon: "👤",
+    allow_edit: false,
+    per_requester: false,
+    cc_list: [],
+    steps: [],
+  },
+  {
+    id: "rd-withholding-receipt",
+    category: "retiree_doc",
+    title: "근로소득 원천징수영수증",
+    icon: "👤",
+    allow_edit: false,
+    per_requester: false,
+    cc_list: [],
+    steps: [],
+  },
+  {
+    id: "rd-retire-withholding",
+    category: "retiree_doc",
+    title: "퇴직소득 원천징수영수증",
+    icon: "👤",
+    allow_edit: false,
+    per_requester: false,
+    cc_list: [],
+    steps: [],
+  },
+  {
+    id: "rd-severance-statement",
+    category: "retiree_doc",
+    title: "퇴직금 정산내역서",
+    icon: "👤",
+    allow_edit: false,
+    per_requester: false,
+    cc_list: [],
+    steps: [],
+  },
+  {
+    id: "rd-career-cert",
+    category: "retiree_doc",
+    title: "경력증명서",
+    icon: "👤",
+    allow_edit: false,
+    per_requester: false,
+    cc_list: [],
+    steps: [],
   },
 ];

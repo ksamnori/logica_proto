@@ -508,10 +508,22 @@ export default function ApprovalCreateModal({
                               : "없음"
                           );
 
-                          // 실제 재직 구성원과 매칭되는 승인자가 있으면 결재선에 즉시 반영
+                          // 실제 재직 구성원과 매칭되는 승인자가 있으면 결재선에 즉시 반영 (+ 대결 설정 반영)
+                          const todayKey = new Date().toISOString().slice(0, 10);
+                          const activeSubRules = (
+                            shell?.companySettings?.extra_settings
+                              ?.substitute_approvals || []
+                          ).filter(
+                            (sr) =>
+                              sr.is_active &&
+                              sr.start_date <= todayKey &&
+                              sr.end_date >= todayKey
+                          );
+
                           const resolvedSteps: RecommendedStepDraft[] = [];
                           targetSteps.forEach((st) => {
                             st.assignees.forEach((asg) => {
+                              let targetName = asg.name;
                               let found: HqMember | undefined;
                               if (
                                 asg.kind === "ROLE" &&
@@ -525,19 +537,43 @@ export default function ApprovalCreateModal({
                                     m.is_dept_head &&
                                     m.instructor_id !== me.instructor_id
                                 );
-                              } else {
+                                if (found) targetName = found.name;
+                              }
+
+                              // 부재 대결자가 설정된 기간이면 대결자로 자동 전환
+                              const subHit = activeSubRules.find(
+                                (sr) => sr.original_approver_name === targetName
+                              );
+                              let isSubbed = false;
+                              if (subHit) {
+                                const polOverride = subHit.per_policy_enabled
+                                  ? subHit.policy_substitutes?.find(
+                                      (po) => po.policy_id === pol.id
+                                    )
+                                  : undefined;
+                                targetName = polOverride
+                                  ? polOverride.substitute_name
+                                  : subHit.substitute_approver_name;
+                                isSubbed = true;
+                                found = undefined;
+                              }
+
+                              if (!found) {
                                 found = members.find(
                                   (m) =>
                                     m.work_status === "재직" &&
-                                    m.name === asg.name &&
+                                    m.name === targetName &&
                                     m.instructor_id !== me?.instructor_id
                                 );
                               }
+
                               if (found) {
                                 resolvedSteps.push({
                                   step_order: resolvedSteps.length + 1,
                                   step_role: "FINAL_APPROVER",
-                                  role_label: `${resolvedSteps.length + 1}단계 승인`,
+                                  role_label: isSubbed
+                                    ? `${resolvedSteps.length + 1}단계 대결승인`
+                                    : `${resolvedSteps.length + 1}단계 승인`,
                                   approver_id: found.instructor_id,
                                   approver_name: found.name,
                                   approver_dept: found.department,

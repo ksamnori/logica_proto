@@ -2,16 +2,18 @@
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
+import { hqFetch } from "@/lib/hq/clientApi";
 import {
   DEFAULT_APPROVAL_POLICIES,
   DEFAULT_APPROVAL_TEMPLATES,
   PRESET_ASSIGNEES,
 } from "@/lib/hq/defaultApprovalPolicies";
 import type {
+  HqApprovalDoc,
   HqApprovalPolicyCategory,
   HqApprovalPolicyItem,
   HqApprovalTemplate,
+  HqAttendanceRecord,
   HqCcNotifyMode,
   HqCompanyExtraSettings,
   HqCompanySettings,
@@ -104,6 +106,7 @@ interface LineEditorProps {
   ccList: HqPolicyAssignee[];
   steps: HqPolicyStep[];
   canEdit: boolean;
+  customLabels?: HqCustomApprovalLabel[];
   onChangeCc: (next: HqPolicyAssignee[]) => void;
   onChangeSteps: (next: HqPolicyStep[]) => void;
   onOpenPicker: (target: { type: "CC" } | { type: "STEP"; stepIndex: number }) => void;
@@ -113,6 +116,7 @@ function ApprovalLineEditor({
   ccList,
   steps,
   canEdit,
+  customLabels = [],
   onChangeCc,
   onChangeSteps,
   onOpenPicker,
@@ -405,8 +409,15 @@ function ApprovalLineEditor({
                       )}
 
                       {openStepActionKey === aKey && (
-                        <div className="absolute right-0 top-8 w-36 rounded-xl bg-white border border-slate-200 shadow-xl py-1.5 z-40 text-xs">
-                          {(["승인", "합의", "검토"] as const).map((act) => (
+                        <div className="absolute right-0 top-8 w-40 rounded-xl bg-white border border-slate-200 shadow-xl py-1.5 z-40 text-xs">
+                          {Array.from(
+                            new Set([
+                              "승인",
+                              "합의",
+                              "검토",
+                              ...customLabels.map((l) => l.name),
+                            ])
+                          ).map((act) => (
                             <button
                               key={act}
                               type="button"
@@ -659,12 +670,14 @@ export default function HqApprovalPolicySection({
         ...ex.info_approval_policy,
         require_approval_basic:
           (byId.get("mi-basic")?.steps.length || 0) > 0,
-        require_approval_bank:
-          (byId.get("mi-bank")?.steps.length || 0) > 0,
-        require_approval_career:
-          (byId.get("mi-career-edu")?.steps.length || 0) > 0,
         require_approval_family:
           (byId.get("mi-family")?.steps.length || 0) > 0,
+        require_approval_career:
+          (byId.get("mi-career-edu")?.steps.length || 0) > 0,
+        require_approval_doc:
+          (byId.get("mi-document")?.steps.length || 0) > 0,
+        require_approval_license:
+          (byId.get("mi-license")?.steps.length || 0) > 0,
       };
     }
 
@@ -1004,9 +1017,21 @@ export default function HqApprovalPolicySection({
                       className="w-4 h-4 rounded border-slate-300 accent-emerald-500 shrink-0 cursor-pointer"
                     />
 
-                    <span className="w-8 h-8 rounded-lg bg-slate-50 border border-slate-100 flex items-center justify-center text-base shrink-0">
-                      {pol.icon}
-                    </span>
+                    {pol.category === "retiree_doc" ? (
+                      <span className="w-8 h-8 rounded-lg bg-violet-50 border border-violet-100/80 text-[#8b5cf6] flex items-center justify-center shrink-0">
+                        <svg
+                          className="w-4 h-4"
+                          fill="currentColor"
+                          viewBox="0 0 20 20"
+                        >
+                          <path d="M11 6a3 3 0 11-6 0 3 3 0 016 0zM14 17a6 6 0 00-12 0h12zM13 8a1 1 0 100 2h4a1 1 0 100-2h-4z" />
+                        </svg>
+                      </span>
+                    ) : (
+                      <span className="w-8 h-8 rounded-lg bg-slate-50 border border-slate-100 flex items-center justify-center text-base shrink-0">
+                        {pol.icon}
+                      </span>
+                    )}
 
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-1.5">
@@ -1218,6 +1243,7 @@ export default function HqApprovalPolicySection({
                   ccList={editingPolicy.cc_list}
                   steps={editingPolicy.steps}
                   canEdit={canEdit}
+                  customLabels={ex.approval_labels || []}
                   onChangeCc={(next) =>
                     setEditingPolicy({ ...editingPolicy, cc_list: next })
                   }
@@ -1263,6 +1289,7 @@ export default function HqApprovalPolicySection({
                           ccList={editingPolicy.cc_list}
                           steps={editingPolicy.steps}
                           canEdit={canEdit}
+                          customLabels={ex.approval_labels || []}
                           onChangeCc={(next) =>
                             setEditingPolicy({
                               ...editingPolicy,
@@ -1434,6 +1461,7 @@ export default function HqApprovalPolicySection({
                               ccList={rule.cc_list}
                               steps={rule.steps}
                               canEdit={canEdit}
+                              customLabels={ex.approval_labels || []}
                               onChangeCc={(nextCc) =>
                                 setEditingPolicy({
                                   ...editingPolicy,
@@ -1814,7 +1842,7 @@ export default function HqApprovalPolicySection({
 }
 
 // ============================================================================
-// 보조 컴포넌트 A: 승인관리 > 커스텀 승인 라벨 섹션
+// 보조 컴포넌트 A: 승인관리 > 커스텀 승인 라벨 섹션 (Image 3 동일)
 // ============================================================================
 export function HqApprovalLabelsSection({
   settings,
@@ -1835,11 +1863,17 @@ export function HqApprovalLabelsSection({
   const labels = settings.extra_settings?.approval_labels || [];
   const [modalOpen, setModalOpen] = useState(false);
   const [name, setName] = useState("");
-  const [color, setColor] = useState("#10b981");
+  const [color, setColor] = useState("#00c458");
   const [desc, setDesc] = useState("");
+
+  const totalCount = 1 + labels.length; // 기본 '승인' 라벨 1개 포함 최대 51개
 
   const handleAdd = async () => {
     if (!name.trim()) return;
+    if (totalCount >= 51) {
+      alert("커스텀 승인 라벨은 기본 라벨 포함 최대 51개까지 등록할 수 있습니다.");
+      return;
+    }
     const item: HqCustomApprovalLabel = {
       id: `lbl-${uid()}`,
       name: name.trim(),
@@ -1857,57 +1891,76 @@ export function HqApprovalLabelsSection({
 
   return (
     <div className="space-y-8">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h2 className="text-[22px] font-extrabold text-slate-900 tracking-tight">
-            커스텀 승인 라벨
-          </h2>
-          <p className="text-xs text-slate-400 mt-1">
-            기본 &apos;승인 / 참조&apos; 외에 회사 고유의 검토·합의·협조 라벨을 만들어 결재 단계에 활용할 수 있어요.
-          </p>
+      <h2 className="text-[22px] font-extrabold text-slate-900 tracking-tight">
+        커스텀 승인 라벨
+      </h2>
+
+      <section className="space-y-4">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h3 className="text-[15px] font-extrabold text-slate-900">
+              라벨 설정
+            </h3>
+            <p className="text-xs text-slate-400 mt-0.5 flex items-center gap-1">
+              <span>승인 정책에 필요한 라벨을 생성해 관리할 수 있어요.</span>
+              <span
+                className="text-slate-300 cursor-help"
+                title="생성한 라벨은 승인 정책의 결재 단계 역할(승인·합의·검토 등) 선택 목록에 자동으로 추가됩니다."
+              >
+                ⓘ
+              </span>
+            </p>
+          </div>
+
+          {canEdit && (
+            <button
+              type="button"
+              onClick={() => setModalOpen(true)}
+              className="px-3.5 py-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-xs font-bold text-slate-800 shadow-2xs flex items-center gap-1.5"
+            >
+              <span className="text-[#00c458] font-extrabold text-sm leading-none">
+                +
+              </span>
+              <span>라벨 추가</span>
+            </button>
+          )}
         </div>
 
-        {canEdit && (
-          <button
-            type="button"
-            onClick={() => setModalOpen(true)}
-            className="px-3.5 py-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-xs font-bold text-slate-800 shadow-2xs flex items-center gap-1.5"
-          >
-            <span className="text-emerald-500 font-extrabold">+</span>
-            <span>라벨 추가</span>
-          </button>
-        )}
-      </div>
-
-      {labels.length === 0 ? (
-        <div className="py-16 flex flex-col items-center justify-center text-center">
-          <div className="w-10 h-10 rounded-xl bg-slate-50 border border-slate-200/80 flex items-center justify-center text-slate-300 text-lg mb-3">
-            🏷️
-          </div>
-          <div className="text-xs font-extrabold text-slate-700">
-            아직 추가한 커스텀 승인 라벨이 없어요.
-          </div>
-          <p className="text-[11px] text-slate-400 mt-1">
-            재무 검토, 법무 합의 등 별도 승인 라벨이 필요할 때 추가해 보세요.
-          </p>
+        {/* 추가된 커스텀 라벨 카운터 (Image 3 동일: 1/51) */}
+        <div className="text-xs font-bold text-slate-600 flex items-center gap-1.5">
+          <span className="text-slate-400">🏷️</span>
+          <span>추가된 커스텀 라벨</span>
+          <span className="text-[#00c458] font-extrabold">{totalCount}/51</span>
         </div>
-      ) : (
+
+        {/* 기본 제공 '승인' 라벨 카드 + 추가된 커스텀 라벨 카드들 */}
         <div className="space-y-2.5">
+          <div className="px-5 py-4 rounded-2xl border border-slate-200/90 bg-white shadow-2xs">
+            <div className="flex items-center gap-2 text-[13px] font-bold text-slate-800">
+              <span className="w-2 h-2 rounded-full bg-[#00c458] shrink-0" />
+              <span>승인</span>
+            </div>
+            <div className="text-xs text-slate-400 mt-1">
+              플렉스에서 제공하는 기본 라벨이에요.
+            </div>
+          </div>
+
           {labels.map((lb) => (
             <div
               key={lb.id}
               className="px-5 py-4 rounded-2xl border border-slate-200/90 bg-white flex items-center justify-between gap-3 shadow-2xs text-xs"
             >
-              <div className="flex items-center gap-3">
-                <span
-                  style={{ backgroundColor: lb.color }}
-                  className="px-2.5 py-1 rounded-full text-white font-bold text-[11px]"
-                >
-                  {lb.name}
-                </span>
-                {lb.description && (
-                  <span className="text-slate-500">{lb.description}</span>
-                )}
+              <div>
+                <div className="flex items-center gap-2 text-[13px] font-bold text-slate-800">
+                  <span
+                    style={{ backgroundColor: lb.color }}
+                    className="w-2 h-2 rounded-full shrink-0"
+                  />
+                  <span>{lb.name}</span>
+                </div>
+                <div className="text-xs text-slate-400 mt-1">
+                  {lb.description || "사용자 지정 커스텀 승인 라벨이에요."}
+                </div>
               </div>
               {canEdit && (
                 <button
@@ -1920,7 +1973,7 @@ export function HqApprovalLabelsSection({
                       "커스텀 승인 라벨이 삭제되었습니다."
                     )
                   }
-                  className="text-slate-400 hover:text-rose-500 font-semibold"
+                  className="text-slate-400 hover:text-rose-500 font-semibold shrink-0"
                 >
                   삭제
                 </button>
@@ -1928,9 +1981,10 @@ export function HqApprovalLabelsSection({
             </div>
           ))}
         </div>
-      )}
+      </section>
 
-      <div className="pt-6 grid grid-cols-1 sm:grid-cols-2 gap-3">
+      {/* 하단 이전/다음 카드 (Image 3 동일: 승인 정책 관리 ← / → 근무 유형) */}
+      <div className="pt-12 grid grid-cols-1 sm:grid-cols-2 gap-3">
         <button
           type="button"
           onClick={() => onNavigateTab("approval-policy")}
@@ -1984,7 +2038,7 @@ export function HqApprovalLabelsSection({
                   autoFocus
                   value={name}
                   onChange={(e) => setName(e.target.value)}
-                  placeholder="예: 회계검토, 합의"
+                  placeholder="예: 회계검토, 합의, 협조"
                   className="w-full px-3 py-2 rounded-xl border border-slate-300 font-bold"
                 />
               </div>
@@ -1994,7 +2048,7 @@ export function HqApprovalLabelsSection({
                 </label>
                 <div className="flex items-center gap-2">
                   {[
-                    "#10b981",
+                    "#00c458",
                     "#3b82f6",
                     "#8b5cf6",
                     "#f59e0b",
@@ -2019,7 +2073,7 @@ export function HqApprovalLabelsSection({
                 <input
                   value={desc}
                   onChange={(e) => setDesc(e.target.value)}
-                  placeholder="용도 안내"
+                  placeholder="승인 단계에서 사용할 라벨 설명"
                   className="w-full px-3 py-2 rounded-xl border border-slate-300"
                 />
               </div>
@@ -2049,8 +2103,71 @@ export function HqApprovalLabelsSection({
 }
 
 // ============================================================================
-// 보조 컴포넌트 B: 승인관리 > 대결 관리 ↗ 오버레이 모달
+// 보조 컴포넌트 B: 승인관리 > 대결 관리 ↗ 모달 & 대결 설정 서브모달 (Images 4 & 5)
 // ============================================================================
+interface AbsenceTableEntry {
+  id: string;
+  member_name: string;
+  avatar_bg: string;
+  badge_type: string; // "휴가" | "출장" | "휴직" | "부재"
+  absence_label: string; // "연차", "반차", "출장" 등
+  start_date: string;
+  end_date: string;
+  linked_rule?: HqSubstituteApprovalRule;
+}
+
+function shiftMonthsIso(baseIso: string, deltaMonths: number): string {
+  const d = new Date(`${baseIso}T00:00:00`);
+  if (Number.isNaN(d.getTime())) return baseIso;
+  d.setMonth(d.getMonth() + deltaMonths);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+function formatDotRange(startIso: string, endIso: string): string {
+  const parse = (iso: string) => {
+    const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso);
+    if (!m) return { y: "", md: iso };
+    return {
+      y: m[1],
+      md: `${Number(m[2])}. ${Number(m[3])}`,
+      full: `${m[1]}. ${Number(m[2])}. ${Number(m[3])}`,
+    };
+  };
+  const s = parse(startIso);
+  const e = parse(endIso || startIso);
+  if (!s.y) return `${startIso} - ${endIso}`;
+  if (s.y === e.y) {
+    return `${s.full} - ${e.md}`;
+  }
+  return `${s.full} - ${e.full}`;
+}
+
+function formatDotSingle(iso: string): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso);
+  if (!m) return iso;
+  return `${m[1]}. ${Number(m[2])}. ${Number(m[3])}`;
+}
+
+function pickAvatarColor(name: string): string {
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) {
+    hash = name.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  const colors = [
+    "#fb923c",
+    "#34d399",
+    "#f87171",
+    "#38bdf8",
+    "#a78bfa",
+    "#4ade80",
+    "#fbbf24",
+  ];
+  return colors[Math.abs(hash) % colors.length];
+}
+
 export function HqSubstituteApprovalModal({
   isOpen,
   settings,
@@ -2059,7 +2176,6 @@ export function HqSubstituteApprovalModal({
   saving,
   onSaveExtra,
   onClose,
-  onCloseSettings,
 }: {
   isOpen: boolean;
   settings: HqCompanySettings;
@@ -2071,236 +2187,963 @@ export function HqSubstituteApprovalModal({
     toastMessage: string
   ) => Promise<void>;
   onClose: () => void;
-  onCloseSettings: () => void;
+  onCloseSettings?: () => void;
 }) {
-  const router = useRouter();
   const rules = settings.extra_settings?.substitute_approvals || [];
-  const today = new Date().toISOString().slice(0, 10);
+  const allPolicies =
+    settings.extra_settings?.approval_policies &&
+    settings.extra_settings.approval_policies.length > 0
+      ? settings.extra_settings.approval_policies
+      : DEFAULT_APPROVAL_POLICIES;
 
-  const [adding, setAdding] = useState(false);
-  const [origName, setOrigName] = useState("천종현");
-  const [subName, setSubName] = useState("김근식");
-  const [startDate, setStartDate] = useState(today);
-  const [endDate, setEndDate] = useState(today);
-  const [reason, setReason] = useState("");
+  const todayIso = new Date().toISOString().slice(0, 10);
+
+  // 메인 탭: "absences" (부재 사항) | "rules" (대결 설정)
+  const [mainTab, setMainTab] = useState<"absences" | "rules">("absences");
+
+  // 상단 필터 칩 (Image 4: 오늘 기준 -3개월 ~ +3개월 기본)
+  const [rangeStart, setRangeStart] = useState(() =>
+    shiftMonthsIso(todayIso, -3)
+  );
+  const [rangeEnd, setRangeEnd] = useState(() => shiftMonthsIso(todayIso, 3));
+  const [dateFilterOpen, setDateFilterOpen] = useState(false);
+  const [typeFilter, setTypeFilter] = useState<string>("ALL");
+  const [memberFilter, setMemberFilter] = useState<string>("ALL");
+  const [pageSize, setPageSize] = useState<number>(100);
+
+  // 실제 DB 휴가·출장 결재 문서 & 근태 휴가 내역 로드
+  const [liveDocs, setLiveDocs] = useState<HqApprovalDoc[]>([]);
+  const [liveAtt, setLiveAtt] = useState<HqAttendanceRecord[]>([]);
+
+  // 대결 설정 등록/수정 서브 모달 상태 (Image 5)
+  const [subModalOpen, setSubModalOpen] = useState(false);
+  const [editingRuleId, setEditingRuleId] = useState<string | null>(null);
+  const [formAbsentee, setFormAbsentee] = useState<string>("");
+  const [formAbsenceItem, setFormAbsenceItem] = useState<string>("");
+  const [formStart, setFormStart] = useState<string>("");
+  const [formEnd, setFormEnd] = useState<string>("");
+  const [formReason, setFormReason] = useState<string>("");
+  const [formSubstitute, setFormSubstitute] = useState<string>("");
+  const [formPerPolicy, setFormPerPolicy] = useState<boolean>(false);
+  const [formPolicyOverrides, setFormPolicyOverrides] = useState<
+    { policy_id: string; policy_title: string; substitute_name: string }[]
+  >([]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    hqFetch<{ success: boolean; data?: { docs?: HqApprovalDoc[] } }>(
+      "/api/hq/approvals"
+    )
+      .then((res) => setLiveDocs(res.data?.docs || []))
+      .catch(() => setLiveDocs([]));
+
+    hqFetch<{ success: boolean; data?: { records?: HqAttendanceRecord[] } }>(
+      "/api/hq/attendance"
+    )
+      .then((res) => setLiveAtt(res.data?.records || []))
+      .catch(() => setLiveAtt([]));
+  }, [isOpen]);
+
+  // 선택 가능한 구성원 풀 (DB 재직 구성원 + Flex 본부 기본 구성원 명단 병합)
+  const memberPool = useMemo(() => {
+    const names = new Set<string>();
+    members
+      .filter((m) => m.work_status !== "퇴직")
+      .forEach((m) => {
+        if (m.name) names.add(m.name);
+      });
+    [
+      "천종현",
+      "김근식",
+      "김동현",
+      "김문수",
+      "민세리",
+      "박주원",
+      "백시연",
+      "심혜영",
+      "원호준",
+      "이웅행",
+      "조원형",
+      "최수연",
+      "한민서",
+    ].forEach((n) => names.add(n));
+    return Array.from(names).sort((a, b) => a.localeCompare(b, "ko"));
+  }, [members]);
+
+  // 부재 사항 통합 테이블 행 생성 (실제 결재·근태 부재 + 등록된 대결 규칙 매칭)
+  const absenceEntries = useMemo(() => {
+    const rows: AbsenceTableEntry[] = [];
+    const seenKeys = new Set<string>();
+
+    // 1) 전자결재 휴가 / 출장 문서 반영
+    liveDocs.forEach((doc) => {
+      if (doc.status === "REJECTED" || doc.status === "CANCELLED") return;
+      const isLeave = doc.doc_type === "LEAVE";
+      const isTrip =
+        doc.title.includes("출장") || doc.title.includes("외근");
+      if (!isLeave && !isTrip) return;
+
+      const sDate = doc.effective_date || doc.submitted_at.slice(0, 10);
+      const eDate = doc.end_date || sDate;
+      const key = `${doc.drafter_name}_${sDate}_${eDate}`;
+      if (seenKeys.has(key)) return;
+      seenKeys.add(key);
+
+      const matchedRule = rules.find(
+        (r) =>
+          r.original_approver_name === doc.drafter_name &&
+          r.start_date <= eDate &&
+          r.end_date >= sDate
+      );
+
+      rows.push({
+        id: `doc-${doc.approval_id}`,
+        member_name: doc.drafter_name,
+        avatar_bg: pickAvatarColor(doc.drafter_name),
+        badge_type: isLeave ? "휴가" : "출장",
+        absence_label: isLeave ? doc.leave_type || "연차" : "출장",
+        start_date: sDate,
+        end_date: eDate,
+        linked_rule: matchedRule,
+      });
+    });
+
+    // 2) 근태 기록상 휴가/반차 반영
+    liveAtt.forEach((att) => {
+      if (att.status !== "LEAVE" && att.status !== "HALF_LEAVE") return;
+      const sDate = att.work_date;
+      const key = `${att.member_name}_${sDate}_${sDate}`;
+      if (seenKeys.has(key)) return;
+      seenKeys.add(key);
+
+      const matchedRule = rules.find(
+        (r) =>
+          r.original_approver_name === att.member_name &&
+          r.start_date <= sDate &&
+          r.end_date >= sDate
+      );
+
+      rows.push({
+        id: `att-${att.attendance_id}`,
+        member_name: att.member_name,
+        avatar_bg: pickAvatarColor(att.member_name),
+        badge_type: "휴가",
+        absence_label: att.status === "HALF_LEAVE" ? "반차" : "연차",
+        start_date: sDate,
+        end_date: sDate,
+        linked_rule: matchedRule,
+      });
+    });
+
+    // 3) 직접 등록한 대결 설정 중 위 일정과 아직 묶이지 않은 항목도 부재 사항에 함께 표시
+    rules.forEach((r) => {
+      const key = `${r.original_approver_name}_${r.start_date}_${r.end_date}`;
+      if (seenKeys.has(key)) return;
+      seenKeys.add(key);
+      rows.push({
+        id: `rule-row-${r.id}`,
+        member_name: r.original_approver_name,
+        avatar_bg: pickAvatarColor(r.original_approver_name),
+        badge_type: r.absence_type || "휴가",
+        absence_label: r.absence_label || "연차",
+        start_date: r.start_date,
+        end_date: r.end_date,
+        linked_rule: r,
+      });
+    });
+
+    return rows
+      .filter((r) => {
+        if (rangeStart && r.end_date < rangeStart) return false;
+        if (rangeEnd && r.start_date > rangeEnd) return false;
+        if (typeFilter !== "ALL" && r.badge_type !== typeFilter) return false;
+        if (memberFilter !== "ALL" && r.member_name !== memberFilter)
+          return false;
+        return true;
+      })
+      .sort((a, b) => b.start_date.localeCompare(a.start_date));
+  }, [
+    liveDocs,
+    liveAtt,
+    rules,
+    rangeStart,
+    rangeEnd,
+    typeFilter,
+    memberFilter,
+  ]);
 
   if (!isOpen) return null;
 
-  const memberNames = Array.from(
-    new Set([
-      "천종현",
-      "김근식",
-      "조원형",
-      "김문수",
-      ...members.filter((m) => m.work_status === "재직").map((m) => m.name),
-    ])
-  );
+  const openCreateSubModal = (prefill?: {
+    memberName?: string;
+    badgeType?: string;
+    absenceLabel?: string;
+    startDate?: string;
+    endDate?: string;
+    existingRule?: HqSubstituteApprovalRule;
+  }) => {
+    if (prefill?.existingRule) {
+      const r = prefill.existingRule;
+      setEditingRuleId(r.id);
+      setFormAbsentee(r.original_approver_name);
+      setFormAbsenceItem(
+        `${r.absence_type || "휴가"}:${r.absence_label || "연차"}`
+      );
+      setFormStart(r.start_date);
+      setFormEnd(r.end_date);
+      setFormReason(r.reason || "");
+      setFormSubstitute(r.substitute_approver_name);
+      setFormPerPolicy(Boolean(r.per_policy_enabled));
+      setFormPolicyOverrides(r.policy_substitutes || []);
+    } else {
+      setEditingRuleId(null);
+      setFormAbsentee(prefill?.memberName || "");
+      setFormAbsenceItem(
+        prefill?.absenceLabel
+          ? `${prefill.badgeType || "휴가"}:${prefill.absenceLabel}`
+          : ""
+      );
+      setFormStart(prefill?.startDate || "");
+      setFormEnd(prefill?.endDate || "");
+      setFormReason("");
+      setFormSubstitute("");
+      setFormPerPolicy(false);
+      setFormPolicyOverrides([]);
+    }
+    setSubModalOpen(true);
+  };
 
-  const handleSaveRule = async () => {
-    if (!origName || !subName || origName === subName) {
-      alert("원 승인자와 대결자를 서로 다르게 선택해주세요.");
+  const isSubFormReady =
+    Boolean(formAbsentee) &&
+    Boolean(formAbsenceItem) &&
+    Boolean(formStart) &&
+    Boolean(formEnd) &&
+    Boolean(formSubstitute) &&
+    formAbsentee !== formSubstitute;
+
+  const handleSaveSubstitute = async () => {
+    if (!isSubFormReady) return;
+    if (formEnd < formStart) {
+      alert("대결 종료일은 시작일 이후여야 합니다.");
       return;
     }
-    const item: HqSubstituteApprovalRule = {
-      id: `sub-${uid()}`,
-      original_approver_name: origName,
-      substitute_approver_name: subName,
-      start_date: startDate,
-      end_date: endDate,
-      reason: reason.trim(),
+    const [absType, absLabel] = formAbsenceItem.includes(":")
+      ? formAbsenceItem.split(":")
+      : ["휴가", formAbsenceItem];
+
+    const nextRule: HqSubstituteApprovalRule = {
+      id: editingRuleId || `sub-${uid()}`,
+      original_approver_name: formAbsentee,
+      substitute_approver_name: formSubstitute,
+      absence_type: absType || "휴가",
+      absence_label: absLabel || "연차",
+      start_date: formStart,
+      end_date: formEnd,
+      reason: formReason.trim(),
+      per_policy_enabled: formPerPolicy,
+      policy_substitutes: formPerPolicy ? formPolicyOverrides : [],
       is_active: true,
     };
+
+    const nextList = editingRuleId
+      ? rules.map((r) => (r.id === editingRuleId ? nextRule : r))
+      : [nextRule, ...rules];
+
     await onSaveExtra(
-      { substitute_approvals: [...rules, item] },
-      "부재 시 대결 설정이 등록되었습니다."
+      { substitute_approvals: nextList },
+      editingRuleId
+        ? "대결 설정이 수정되었습니다."
+        : "새 대결 설정이 저장되었습니다."
     );
-    setAdding(false);
-    setReason("");
+    setSubModalOpen(false);
   };
+
+  const visibleEntries = absenceEntries.slice(0, pageSize);
 
   return (
     <div className="fixed inset-0 bg-slate-900/45 z-[75] flex items-center justify-center p-4">
-      <div className="bg-white w-full max-w-[760px] h-[72vh] max-h-[680px] rounded-2xl shadow-2xl border border-slate-200 flex flex-col overflow-hidden text-xs">
-        <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between shrink-0">
-          <div className="flex items-center gap-2">
-            <h3 className="text-[15px] font-extrabold text-slate-900">
+      <div className="bg-white w-full max-w-[1080px] h-[84vh] max-h-[820px] rounded-2xl shadow-2xl border border-slate-200 flex flex-col overflow-hidden text-xs">
+        {/* 상단 헤더 바: 대결 관리 | 부재 사항 | 대결 설정  +  [+ 대결 설정 추가] ✕ */}
+        <div className="px-6 py-3.5 border-b border-slate-200/80 flex items-center justify-between shrink-0">
+          <div className="flex items-center gap-6">
+            <h3 className="text-[14px] font-extrabold text-slate-900">
               대결 관리
             </h3>
-            <span className="text-slate-400">
-              결재권자 휴가·출장 부재 시 대리 승인자를 지정합니다.
-            </span>
+
+            <div className="flex items-center gap-4 text-[13px] font-bold">
+              <button
+                type="button"
+                onClick={() => setMainTab("absences")}
+                className={`py-1 transition-colors ${
+                  mainTab === "absences"
+                    ? "text-slate-900 font-extrabold"
+                    : "text-slate-400 hover:text-slate-600"
+                }`}
+              >
+                부재 사항
+              </button>
+              <button
+                type="button"
+                onClick={() => setMainTab("rules")}
+                className={`py-1 transition-colors flex items-center gap-1.5 ${
+                  mainTab === "rules"
+                    ? "text-slate-900 font-extrabold"
+                    : "text-slate-400 hover:text-slate-600"
+                }`}
+              >
+                <span>대결 설정</span>
+                {rules.length > 0 && (
+                  <span className="px-1.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 text-[10px] font-extrabold">
+                    {rules.length}
+                  </span>
+                )}
+              </button>
+            </div>
           </div>
 
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => {
-                onClose();
-                onCloseSettings();
-                router.push("/hq/approvals");
-              }}
-              className="px-3 py-1.5 rounded-lg border border-slate-200 hover:bg-slate-50 font-bold text-slate-600"
-            >
-              전자결재함 이동 ↗
-            </button>
+          <div className="flex items-center gap-2.5">
             {canEdit && (
               <button
                 type="button"
-                onClick={() => setAdding(true)}
-                className="px-3.5 py-1.5 rounded-lg bg-[#00c458] hover:bg-[#00ad4d] text-white font-extrabold"
+                onClick={() => openCreateSubModal()}
+                className="px-3.5 py-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 font-bold text-slate-800 shadow-2xs flex items-center gap-1.5"
               >
-                + 대결 추가
+                <span className="text-slate-600 font-extrabold">+</span>
+                <span>대결 설정 추가</span>
               </button>
             )}
             <button
               type="button"
               onClick={onClose}
-              className="w-7 h-7 rounded-lg hover:bg-slate-100 text-slate-400 hover:text-slate-700 text-base"
+              className="w-7 h-7 rounded-lg hover:bg-slate-100 text-slate-400 hover:text-slate-700 flex items-center justify-center text-base"
             >
               ✕
             </button>
           </div>
         </div>
 
-        <div className="flex-1 overflow-y-auto p-6 custom-scroll flex flex-col">
-          {adding && canEdit && (
-            <div className="mb-4 p-4 rounded-2xl bg-slate-50 border border-slate-200 space-y-3">
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
-                <div>
-                  <label className="block font-bold text-slate-600 mb-1">
-                    원 승인자
-                  </label>
-                  <select
-                    value={origName}
-                    onChange={(e) => setOrigName(e.target.value)}
-                    className="w-full px-2.5 py-2 rounded-lg bg-white border border-slate-300 font-bold"
-                  >
-                    {memberNames.map((n) => (
-                      <option key={n} value={n}>
-                        {n}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="block font-bold text-slate-600 mb-1">
-                    대결자 (대리 승인)
-                  </label>
-                  <select
-                    value={subName}
-                    onChange={(e) => setSubName(e.target.value)}
-                    className="w-full px-2.5 py-2 rounded-lg bg-white border border-slate-300 font-bold"
-                  >
-                    {memberNames.map((n) => (
-                      <option key={n} value={n}>
-                        {n}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="block font-bold text-slate-600 mb-1">
-                    시작일
-                  </label>
-                  <input
-                    type="date"
-                    value={startDate}
-                    onChange={(e) => setStartDate(e.target.value)}
-                    className="w-full px-2.5 py-2 rounded-lg bg-white border border-slate-300"
-                  />
-                </div>
-                <div>
-                  <label className="block font-bold text-slate-600 mb-1">
-                    종료일
-                  </label>
-                  <input
-                    type="date"
-                    value={endDate}
-                    onChange={(e) => setEndDate(e.target.value)}
-                    className="w-full px-2.5 py-2 rounded-lg bg-white border border-slate-300"
-                  />
-                </div>
-              </div>
-              <div className="flex items-center gap-2">
-                <input
-                  value={reason}
-                  onChange={(e) => setReason(e.target.value)}
-                  placeholder="대결 사유 (예: 하계 휴가, 해외 출장)"
-                  className="flex-1 px-3 py-2 rounded-lg bg-white border border-slate-300"
-                />
-                <button
-                  type="button"
-                  onClick={() => setAdding(false)}
-                  className="px-3 py-2 rounded-lg border border-slate-300 bg-white font-bold text-slate-600"
-                >
-                  취소
-                </button>
-                <button
-                  type="button"
-                  disabled={saving}
-                  onClick={handleSaveRule}
-                  className="px-4 py-2 rounded-lg bg-slate-900 text-white font-bold"
-                >
-                  저장
-                </button>
-              </div>
+        {/* 필터 칩 바 (Image 4 동일: 부재 기간 / 부재 유형 / 부재자) */}
+        <div className="px-6 py-3 border-b border-slate-100 flex flex-wrap items-center gap-2 shrink-0 relative">
+          <button
+            type="button"
+            onClick={() => setDateFilterOpen((p) => !p)}
+            className="px-3 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 font-semibold flex items-center gap-1.5"
+          >
+            <span className="text-slate-400">📅</span>
+            <span className="text-slate-500">부재 기간</span>
+            <span className="font-bold text-slate-800">
+              {formatDotSingle(rangeStart)} - {formatDotSingle(rangeEnd)}
+            </span>
+            <span className="text-slate-400 text-[10px]">▾</span>
+          </button>
+
+          {dateFilterOpen && (
+            <div className="absolute left-6 top-12 z-30 p-3.5 rounded-xl bg-white border border-slate-200 shadow-xl flex items-center gap-2">
+              <input
+                type="date"
+                value={rangeStart}
+                onChange={(e) => setRangeStart(e.target.value)}
+                className="px-2.5 py-1.5 rounded-lg border border-slate-200 font-semibold"
+              />
+              <span className="text-slate-400">~</span>
+              <input
+                type="date"
+                value={rangeEnd}
+                onChange={(e) => setRangeEnd(e.target.value)}
+                className="px-2.5 py-1.5 rounded-lg border border-slate-200 font-semibold"
+              />
+              <button
+                type="button"
+                onClick={() => setDateFilterOpen(false)}
+                className="px-3 py-1.5 rounded-lg bg-slate-900 text-white font-bold"
+              >
+                적용
+              </button>
             </div>
           )}
 
-          {rules.length === 0 && !adding ? (
-            <div className="flex-1 flex flex-col items-center justify-center text-center">
-              <div className="w-11 h-11 rounded-xl bg-slate-50 border border-slate-200/80 flex items-center justify-center text-slate-400 text-lg mb-3">
-                👥
-              </div>
-              <div className="text-[13px] font-extrabold text-slate-700">
-                진행 중인 대결 설정이 없어요.
-              </div>
-              <p className="text-xs text-slate-400 mt-1">
-                승인권자 부재 기간 동안 대신 승인할 구성원을 지정할 수 있어요.
-              </p>
-            </div>
-          ) : (
-            <div className="space-y-2.5">
-              {rules.map((r) => (
-                <div
-                  key={r.id}
-                  className="px-5 py-4 rounded-2xl border border-slate-200 flex items-center justify-between gap-3"
-                >
-                  <div>
-                    <div className="text-[13px] font-bold text-slate-900">
-                      {r.original_approver_name}{" "}
-                      <span className="text-emerald-600 mx-1">→</span>{" "}
-                      {r.substitute_approver_name} (대결)
-                    </div>
-                    <div className="text-slate-400 mt-0.5">
-                      기간: {r.start_date} ~ {r.end_date}
-                      {r.reason ? ` · ${r.reason}` : ""}
-                    </div>
-                  </div>
-                  {canEdit && (
-                    <button
-                      type="button"
-                      onClick={() =>
-                        onSaveExtra(
-                          {
-                            substitute_approvals: rules.filter(
-                              (x) => x.id !== r.id
-                            ),
-                          },
-                          "대결 설정이 해제되었습니다."
-                        )
-                      }
-                      className="text-rose-500 font-bold hover:underline"
-                    >
-                      해제
-                    </button>
-                  )}
-                </div>
+          <div className="flex items-center rounded-lg border border-slate-200 bg-white px-2.5 py-1">
+            <span className="text-slate-400 mr-1.5">🔖</span>
+            <select
+              value={typeFilter}
+              onChange={(e) => setTypeFilter(e.target.value)}
+              className="bg-transparent font-semibold text-slate-600 focus:outline-none"
+            >
+              <option value="ALL">부재 유형</option>
+              <option value="휴가">휴가</option>
+              <option value="출장">출장 · 외근</option>
+              <option value="휴직">휴직</option>
+            </select>
+          </div>
+
+          <div className="flex items-center rounded-lg border border-slate-200 bg-white px-2.5 py-1">
+            <span className="text-slate-400 mr-1.5">👤</span>
+            <select
+              value={memberFilter}
+              onChange={(e) => setMemberFilter(e.target.value)}
+              className="bg-transparent font-semibold text-slate-600 focus:outline-none"
+            >
+              <option value="ALL">부재자</option>
+              {memberPool.map((n) => (
+                <option key={n} value={n}>
+                  {n}
+                </option>
               ))}
-            </div>
+            </select>
+          </div>
+        </div>
+
+        {/* 테이블 본문 */}
+        <div className="flex-1 overflow-y-auto custom-scroll">
+          {mainTab === "absences" ? (
+            <table className="w-full text-left border-collapse">
+              <thead className="sticky top-0 bg-white border-b border-slate-100 text-[11px] font-bold text-slate-400 z-10">
+                <tr>
+                  <th className="py-3 pl-6 pr-4 w-[24%]">부재자</th>
+                  <th className="py-3 px-4 w-[24%]">부재 사항</th>
+                  <th className="py-3 px-4 w-[26%]">부재 기간</th>
+                  <th className="py-3 pl-4 pr-6 w-[26%]">대결 설정</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {visibleEntries.length === 0 ? (
+                  <tr>
+                    <td
+                      colSpan={4}
+                      className="py-24 text-center text-slate-400"
+                    >
+                      <div className="text-[13px] font-bold text-slate-700 mb-1">
+                        조회된 기간에 등록된 부재 일정이 없어요.
+                      </div>
+                      <p className="text-xs text-slate-400">
+                        구성원이 휴가·출장을 신청하거나 우측 상단{" "}
+                        <strong className="text-slate-600">
+                          [+ 대결 설정 추가]
+                        </strong>
+                        로 대결자를 지정하면 여기에 표시됩니다.
+                      </p>
+                    </td>
+                  </tr>
+                ) : (
+                  visibleEntries.map((row) => {
+                    const isUpcomingOrCurrent = row.end_date >= todayIso;
+                    return (
+                      <tr
+                        key={row.id}
+                        className="hover:bg-slate-50/70 transition-colors"
+                      >
+                        <td className="py-3 pl-6 pr-4">
+                          <div className="flex items-center gap-2.5">
+                            <span
+                              style={{ backgroundColor: row.avatar_bg }}
+                              className="w-7 h-7 rounded-lg text-white text-[10px] font-extrabold flex items-center justify-center shrink-0"
+                            >
+                              {shortAvatarText(row.member_name)}
+                            </span>
+                            <span className="font-bold text-slate-800">
+                              {row.member_name}
+                            </span>
+                          </div>
+                        </td>
+                        <td className="py-3 px-4">
+                          <div className="flex items-center gap-1.5">
+                            <span className="px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 text-[10px] font-bold">
+                              {row.badge_type}
+                            </span>
+                            <span className="font-semibold text-slate-700">
+                              {row.absence_label}
+                            </span>
+                          </div>
+                        </td>
+                        <td className="py-3 px-4 text-slate-600 font-medium">
+                          {formatDotRange(row.start_date, row.end_date)}
+                        </td>
+                        <td className="py-3 pl-4 pr-6">
+                          {row.linked_rule ? (
+                            <div className="flex items-center gap-2">
+                              <button
+                                type="button"
+                                disabled={!canEdit}
+                                onClick={() =>
+                                  openCreateSubModal({
+                                    existingRule: row.linked_rule,
+                                  })
+                                }
+                                className="px-2.5 py-1 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-700 font-bold hover:bg-emerald-100/70"
+                              >
+                                대결: {row.linked_rule.substitute_approver_name}
+                              </button>
+                              {canEdit && (
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    onSaveExtra(
+                                      {
+                                        substitute_approvals: rules.filter(
+                                          (x) => x.id !== row.linked_rule?.id
+                                        ),
+                                      },
+                                      "대결 설정이 해제되었습니다."
+                                    )
+                                  }
+                                  className="text-slate-400 hover:text-rose-500 font-semibold"
+                                >
+                                  해제
+                                </button>
+                              )}
+                            </div>
+                          ) : (
+                            isUpcomingOrCurrent &&
+                            canEdit && (
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  openCreateSubModal({
+                                    memberName: row.member_name,
+                                    badgeType: row.badge_type,
+                                    absenceLabel: row.absence_label,
+                                    startDate: row.start_date,
+                                    endDate: row.end_date,
+                                  })
+                                }
+                                className="px-2.5 py-1 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 font-bold text-slate-700 shadow-2xs"
+                              >
+                                + 추가
+                              </button>
+                            )
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          ) : (
+            /* 탭 2: 등록된 대결 설정 전용 목록 */
+            <table className="w-full text-left border-collapse">
+              <thead className="sticky top-0 bg-white border-b border-slate-100 text-[11px] font-bold text-slate-400 z-10">
+                <tr>
+                  <th className="py-3 pl-6 pr-4">부재자</th>
+                  <th className="py-3 px-4">부재 사항</th>
+                  <th className="py-3 px-4">대결 기간</th>
+                  <th className="py-3 px-4">기본 대결자</th>
+                  <th className="py-3 px-4">사유</th>
+                  <th className="py-3 pl-4 pr-6 text-right">관리</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {rules.length === 0 ? (
+                  <tr>
+                    <td
+                      colSpan={6}
+                      className="py-24 text-center text-slate-400"
+                    >
+                      등록된 대결 설정이 없어요. 우측 상단{" "}
+                      <strong className="text-slate-600">
+                        [+ 대결 설정 추가]
+                      </strong>{" "}
+                      버튼으로 추가해 보세요.
+                    </td>
+                  </tr>
+                ) : (
+                  rules.map((r) => (
+                    <tr key={r.id} className="hover:bg-slate-50/70">
+                      <td className="py-3.5 pl-6 pr-4 font-bold text-slate-900">
+                        {r.original_approver_name}
+                      </td>
+                      <td className="py-3.5 px-4">
+                        <span className="px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 text-[10px] font-bold mr-1.5">
+                          {r.absence_type || "휴가"}
+                        </span>
+                        <span className="font-semibold text-slate-700">
+                          {r.absence_label || "연차"}
+                        </span>
+                      </td>
+                      <td className="py-3.5 px-4 text-slate-600">
+                        {formatDotRange(r.start_date, r.end_date)}
+                      </td>
+                      <td className="py-3.5 px-4">
+                        <span className="font-bold text-emerald-700">
+                          {r.substitute_approver_name}
+                        </span>
+                        {r.per_policy_enabled &&
+                          (r.policy_substitutes?.length || 0) > 0 && (
+                            <span className="ml-1.5 px-1.5 py-0.5 rounded bg-blue-50 text-blue-600 text-[10px] font-bold">
+                              정책별 {r.policy_substitutes?.length}건
+                            </span>
+                          )}
+                      </td>
+                      <td className="py-3.5 px-4 text-slate-500 truncate max-w-[180px]">
+                        {r.reason || "-"}
+                      </td>
+                      <td className="py-3.5 pl-4 pr-6 text-right">
+                        {canEdit && (
+                          <div className="inline-flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() =>
+                                openCreateSubModal({ existingRule: r })
+                              }
+                              className="text-slate-600 hover:text-slate-900 font-bold"
+                            >
+                              수정
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                onSaveExtra(
+                                  {
+                                    substitute_approvals: rules.filter(
+                                      (x) => x.id !== r.id
+                                    ),
+                                  },
+                                  "대결 설정이 삭제되었습니다."
+                                )
+                              }
+                              className="text-rose-500 hover:underline font-bold"
+                            >
+                              삭제
+                            </button>
+                          </div>
+                        )}
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
           )}
         </div>
+
+        {/* 하단 페이지네이션 푸터 (Image 4 동일) */}
+        <div className="px-6 py-3 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-400 shrink-0 bg-white">
+          <span>
+            {mainTab === "absences"
+              ? absenceEntries.length === 0
+                ? "0개 / 총 0개"
+                : `1-${visibleEntries.length}개 / 총 ${absenceEntries.length}개`
+              : rules.length === 0
+                ? "0개 / 총 0개"
+                : `1-${rules.length}개 / 총 ${rules.length}개`}
+          </span>
+
+          <div className="flex items-center gap-4">
+            <select
+              value={pageSize}
+              onChange={(e) => setPageSize(Number(e.target.value))}
+              className="text-slate-600 font-semibold bg-transparent focus:outline-none"
+            >
+              <option value={20}>20개씩 보기</option>
+              <option value={50}>50개씩 보기</option>
+              <option value={100}>100개씩 보기</option>
+            </select>
+            <span className="text-[#00c458] font-extrabold">1</span>
+          </div>
+        </div>
       </div>
+
+      {/* ================================================================= */}
+      {/* 서브 모달: 대결 설정 등록/수정 (Image 5 동일)                       */}
+      {/* ================================================================= */}
+      {subModalOpen && (
+        <div className="fixed inset-0 bg-slate-900/45 z-[85] flex items-center justify-center p-4">
+          <div className="bg-white w-full max-w-[520px] max-h-[90vh] rounded-2xl shadow-2xl border border-slate-200 flex flex-col overflow-hidden text-xs">
+            {/* 헤더 */}
+            <div className="px-6 py-4 flex items-center justify-between shrink-0">
+              <h4 className="text-[15px] font-extrabold text-slate-900">
+                대결 설정
+              </h4>
+              <button
+                type="button"
+                onClick={() => setSubModalOpen(false)}
+                className="text-slate-400 hover:text-slate-700 text-base leading-none"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="px-6 pb-4 overflow-y-auto custom-scroll space-y-1 flex-1">
+              {/* 대결 설정 안내 박스 (Image 5 동일 문구) */}
+              <div className="rounded-xl bg-[#f8f9fa] p-4 text-[11px] text-slate-600 space-y-1.5 mb-2">
+                <div className="font-extrabold text-slate-800 text-xs">
+                  대결 설정 안내
+                </div>
+                <ul className="list-disc pl-4 space-y-1 leading-relaxed text-slate-500">
+                  <li>
+                    진행 중 승인 문서에도 소급 적용돼요. 진행 중이던 문서와 설정 이후 새로 만들어진 문서 모두에 대결자가 승인·참조자로 추가돼요.
+                  </li>
+                  <li>
+                    부재자를 명시적으로 지정했거나, 부재자가 유일한 조직장인 승인 요청에 한해 동작해요. 조직 또는 두 명 이상의 조직장인 승인 대상은 대결자로 대체되지 않아요.
+                  </li>
+                </ul>
+              </div>
+
+              {/* 1. 부재자 * */}
+              <div className="py-3.5 border-b border-slate-100 flex items-center justify-between gap-4">
+                <label className="font-bold text-slate-800">
+                  부재자 <span className="text-rose-500">*</span>
+                </label>
+                <select
+                  value={formAbsentee}
+                  onChange={(e) => setFormAbsentee(e.target.value)}
+                  className="px-3 py-1.5 rounded-lg border border-slate-200 bg-white font-semibold text-slate-700 min-w-[140px]"
+                >
+                  <option value="">선택</option>
+                  {memberPool.map((name) => (
+                    <option key={name} value={name}>
+                      {name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* 2. 부재 사항 * */}
+              <div className="py-3.5 border-b border-slate-100 flex items-center justify-between gap-4">
+                <label className="font-bold text-slate-800">
+                  부재 사항 <span className="text-rose-500">*</span>
+                </label>
+                <select
+                  value={formAbsenceItem}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setFormAbsenceItem(val);
+                    if (val && !formStart) {
+                      setFormStart(todayIso);
+                      setFormEnd(todayIso);
+                    }
+                  }}
+                  className="px-3 py-1.5 rounded-lg border border-slate-200 bg-white font-semibold text-slate-700 min-w-[140px]"
+                >
+                  <option value="">선택</option>
+                  <option value="휴가:연차">휴가 · 연차</option>
+                  <option value="휴가:반차">휴가 · 반차</option>
+                  <option value="출장:출장">출장 · 외근</option>
+                  <option value="휴가:병가">휴가 · 병가</option>
+                  <option value="휴직:휴직">장기 휴직</option>
+                  <option value="부재:기타 부재">기타 부재 (직접 입력)</option>
+                </select>
+              </div>
+
+              {/* 3. 대결 기간 * */}
+              <div className="py-3.5 border-b border-slate-100 flex flex-wrap items-center justify-between gap-3">
+                <label className="font-bold text-slate-800">
+                  대결 기간 <span className="text-rose-500">*</span>
+                </label>
+                <div className="flex items-center gap-1.5">
+                  <input
+                    type="date"
+                    value={formStart}
+                    onChange={(e) => {
+                      setFormStart(e.target.value);
+                      if (!formEnd || formEnd < e.target.value) {
+                        setFormEnd(e.target.value);
+                      }
+                    }}
+                    className="px-2.5 py-1.5 rounded-lg border border-slate-200 bg-white text-slate-700 font-semibold"
+                  />
+                  <span className="text-slate-400">-</span>
+                  <input
+                    type="date"
+                    value={formEnd}
+                    onChange={(e) => setFormEnd(e.target.value)}
+                    className="px-2.5 py-1.5 rounded-lg border border-slate-200 bg-white text-slate-700 font-semibold"
+                  />
+                </div>
+              </div>
+
+              {/* 4. 사유 */}
+              <div className="py-3.5 border-b border-slate-100 space-y-2">
+                <label className="block font-bold text-slate-800">사유</label>
+                <textarea
+                  rows={3}
+                  value={formReason}
+                  onChange={(e) => setFormReason(e.target.value)}
+                  placeholder="입력"
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 text-xs focus:outline-none focus:border-slate-400 resize-none"
+                />
+              </div>
+
+              {/* 5. 기본 대결자 * */}
+              <div className="py-3.5 border-b border-slate-100 flex items-center justify-between gap-4">
+                <label className="font-bold text-slate-800">
+                  기본 대결자 <span className="text-rose-500">*</span>
+                </label>
+                <select
+                  value={formSubstitute}
+                  onChange={(e) => setFormSubstitute(e.target.value)}
+                  className="px-3 py-1.5 rounded-lg border border-slate-200 bg-white font-semibold text-slate-700 min-w-[140px]"
+                >
+                  <option value="">선택</option>
+                  {memberPool
+                    .filter((n) => n !== formAbsentee)
+                    .map((name) => (
+                      <option key={name} value={name}>
+                        {name}
+                      </option>
+                    ))}
+                </select>
+              </div>
+
+              {/* 6. 정책별 대결자 설정 토글 */}
+              <div className="py-3.5 flex items-center justify-between gap-4">
+                <div>
+                  <div className="font-bold text-slate-800">
+                    정책별 대결자 설정
+                  </div>
+                  <div className="text-[11px] text-slate-400 mt-0.5">
+                    승인 정책별로 대결자를 지정할 수 있어요.
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={formPerPolicy}
+                  onClick={() => setFormPerPolicy((p) => !p)}
+                  className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ${
+                    formPerPolicy ? "bg-[#00c458]" : "bg-slate-200"
+                  }`}
+                >
+                  <span
+                    className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-sm transition duration-200 ${
+                      formPerPolicy ? "translate-x-5" : "translate-x-0"
+                    }`}
+                  />
+                </button>
+              </div>
+
+              {/* 정책별 대결자 개별 지정 영역 (토글 ON 시 노출) */}
+              {formPerPolicy && (
+                <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200 space-y-2.5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-bold text-slate-600">
+                      정책별 개별 대결자 예외 지정
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const firstPol = allPolicies[0];
+                        if (!firstPol) return;
+                        setFormPolicyOverrides((prev) => [
+                          ...prev,
+                          {
+                            policy_id: firstPol.id,
+                            policy_title: firstPol.title,
+                            substitute_name:
+                              formSubstitute ||
+                              memberPool.find((n) => n !== formAbsentee) ||
+                              "",
+                          },
+                        ]);
+                      }}
+                      className="text-[11px] font-bold text-emerald-600 hover:underline"
+                    >
+                      + 정책 예외 추가
+                    </button>
+                  </div>
+
+                  {formPolicyOverrides.length === 0 ? (
+                    <div className="text-[11px] text-slate-400">
+                      예외를 추가하지 않은 승인 정책은 모두 기본 대결자가 적용됩니다.
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      {formPolicyOverrides.map((ov, idx) => (
+                        <div
+                          key={`${ov.policy_id}-${idx}`}
+                          className="flex items-center gap-2"
+                        >
+                          <select
+                            value={ov.policy_id}
+                            onChange={(e) => {
+                              const found = allPolicies.find(
+                                (p) => p.id === e.target.value
+                              );
+                              if (!found) return;
+                              setFormPolicyOverrides((prev) =>
+                                prev.map((item, i) =>
+                                  i === idx
+                                    ? {
+                                        ...item,
+                                        policy_id: found.id,
+                                        policy_title: found.title,
+                                      }
+                                    : item
+                                )
+                              );
+                            }}
+                            className="flex-1 min-w-0 px-2.5 py-1.5 rounded-lg bg-white border border-slate-200 font-semibold"
+                          >
+                            {allPolicies.map((p) => (
+                              <option key={p.id} value={p.id}>
+                                {p.title}
+                              </option>
+                            ))}
+                          </select>
+
+                          <select
+                            value={ov.substitute_name}
+                            onChange={(e) =>
+                              setFormPolicyOverrides((prev) =>
+                                prev.map((item, i) =>
+                                  i === idx
+                                    ? {
+                                        ...item,
+                                        substitute_name: e.target.value,
+                                      }
+                                    : item
+                                )
+                              )
+                            }
+                            className="w-28 px-2.5 py-1.5 rounded-lg bg-white border border-slate-200 font-bold"
+                          >
+                            {memberPool
+                              .filter((n) => n !== formAbsentee)
+                              .map((n) => (
+                                <option key={n} value={n}>
+                                  {n}
+                                </option>
+                              ))}
+                          </select>
+
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setFormPolicyOverrides((prev) =>
+                                prev.filter((_, i) => i !== idx)
+                              )
+                            }
+                            className="text-slate-400 hover:text-rose-500 px-1"
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* 하단 저장 푸터 (Image 5 동일) */}
+            <div className="px-6 py-4 border-t border-slate-100 flex justify-end shrink-0 bg-white">
+              <button
+                type="button"
+                disabled={!isSubFormReady || saving}
+                onClick={handleSaveSubstitute}
+                className={`px-4 py-2 rounded-lg text-white font-extrabold transition-colors ${
+                  isSubFormReady
+                    ? "bg-[#00c458] hover:bg-[#00ad4d]"
+                    : "bg-[#8ee2b3] cursor-not-allowed"
+                }`}
+              >
+                {saving ? "저장 중..." : "저장"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

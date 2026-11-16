@@ -76,11 +76,30 @@ export function normalizeCompanySettings(raw: any): HqCompanySettings {
       doc_folders: Array.isArray(incomingExtra.doc_folders)
         ? incomingExtra.doc_folders
         : def.extra_settings.doc_folders,
-      approval_policies:
-        Array.isArray(incomingExtra.approval_policies) &&
-        incomingExtra.approval_policies.length > 0
-          ? incomingExtra.approval_policies
-          : def.extra_settings.approval_policies,
+      approval_policies: (() => {
+        const baseList = def.extra_settings.approval_policies || [];
+        if (
+          !Array.isArray(incomingExtra.approval_policies) ||
+          incomingExtra.approval_policies.length === 0
+        ) {
+          return baseList;
+        }
+        const legacyRemoved = new Set(["mi-bank", "rd-withholding"]);
+        const savedFiltered = incomingExtra.approval_policies.filter(
+          (p: any) => p && !legacyRemoved.has(String(p.id))
+        );
+        const savedById = new Map(
+          savedFiltered.map((p: any) => [String(p.id), p])
+        );
+        const merged = baseList.map((defPol) =>
+          savedById.has(defPol.id) ? savedById.get(defPol.id) : defPol
+        );
+        const defaultIds = new Set(baseList.map((p) => p.id));
+        const customAdded = savedFiltered.filter(
+          (p: any) => !defaultIds.has(String(p.id))
+        );
+        return [...merged, ...customAdded];
+      })(),
       approval_templates: Array.isArray(incomingExtra.approval_templates)
         ? incomingExtra.approval_templates
         : def.extra_settings.approval_templates,
