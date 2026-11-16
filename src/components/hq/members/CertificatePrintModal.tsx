@@ -2,6 +2,8 @@
 "use client";
 
 import React, { useState } from "react";
+import { useOptionalHqShell } from "@/components/hq/HqShellContext";
+import { resolveStoragePublicUrl } from "@/lib/hq/clientApi";
 import type { HqMember } from "@/lib/hq/types";
 
 interface Props {
@@ -11,10 +13,26 @@ interface Props {
 }
 
 export default function CertificatePrintModal({ isOpen, member, onClose }: Props) {
+  const shell = useOptionalHqShell();
   const [certType, setCertType] = useState<"재직증명서" | "경력증명서">("재직증명서");
   const [purpose, setPurpose] = useState("금융기관 제출용");
 
   if (!isOpen || !member) return null;
+
+  const companySettings = shell?.companySettings;
+  const companyName = companySettings?.company_name || "(주)천종현수학연구소";
+  const ceoName =
+    companySettings?.ceo_names && companySettings.ceo_names.length > 0
+      ? companySettings.ceo_names.join(", ")
+      : "천종현";
+  const companyAddress = companySettings?.address || "";
+  const docPrefix = companySettings?.extra_settings?.doc_prefix_cert || "CERT";
+
+  const seals = companySettings?.seals || [];
+  const activeSeal = seals.find((s) => s.is_default) || seals[0] || null;
+  const activeSealUrl = activeSeal
+    ? resolveStoragePublicUrl(activeSeal.image_url)
+    : null;
 
   const todayStr = new Date().toLocaleDateString("ko-KR", {
     year: "numeric",
@@ -22,14 +40,14 @@ export default function CertificatePrintModal({ isOpen, member, onClose }: Props
     day: "numeric",
   });
 
-  const issueNo = `CERT-${new Date().getFullYear()}-${member.employee_no.slice(-4)}`;
+  const issueNo = `${docPrefix}-${new Date().getFullYear()}-${member.employee_no.slice(-4)}`;
   const periodEnd =
     member.work_status === "퇴직" && member.resign_date
       ? member.resign_date
       : "현재 (재직중)";
 
   return (
-    <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm z-50 flex items-center justify-center p-4 print:static print:bg-white print:p-0">
+    <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm z-[70] flex items-center justify-center p-4 print:static print:bg-white print:p-0">
       <div className="bg-white w-full max-w-2xl rounded-2xl shadow-2xl border border-slate-200 flex flex-col max-h-[92vh] overflow-hidden print:shadow-none print:border-none print:max-h-none print:max-w-none">
         {/* 상단 컨트롤 바 (인쇄 시 숨김) */}
         <div className="print:hidden px-6 py-4 bg-slate-900 text-white flex flex-wrap items-center justify-between gap-3 shrink-0">
@@ -174,18 +192,31 @@ export default function CertificatePrintModal({ isOpen, member, onClose }: Props
 
             <div className="flex items-center justify-center gap-4 pt-4">
               <div className="text-right">
+                {companyAddress && (
+                  <div className="text-[11px] text-slate-500 mb-0.5">
+                    {companyAddress}
+                  </div>
+                )}
                 <div className="text-lg font-extrabold text-slate-900 tracking-wide">
-                  천종현수학연구소
+                  {companyName}
                 </div>
-                <div className="text-xs text-slate-500 mt-0.5">
-                  본부 인사총괄팀 직인 생략 (전자발급)
+                <div className="text-xs font-semibold text-slate-700 mt-0.5">
+                  대표이사 {ceoName}
                 </div>
               </div>
-              <div className="w-14 h-14 rounded-full border-2 border-rose-600 text-rose-600 flex items-center justify-center text-[11px] font-extrabold leading-tight text-center rotate-[-8deg] select-none">
-                천종현수학
-                <br />
-                연구소인
-              </div>
+              {activeSealUrl ? (
+                <img
+                  src={activeSealUrl}
+                  alt="회사 직인"
+                  className="w-16 h-16 object-contain select-none -ml-1"
+                />
+              ) : (
+                <div className="w-14 h-14 rounded-full border-2 border-rose-600 text-rose-600 flex items-center justify-center text-[11px] font-extrabold leading-tight text-center rotate-[-8deg] select-none">
+                  천종현수학
+                  <br />
+                  연구소인
+                </div>
+              )}
             </div>
           </div>
         </div>

@@ -256,6 +256,27 @@ CREATE TABLE IF NOT EXISTS public.hq_publication (
 
 CREATE INDEX IF NOT EXISTS idx_hq_publication_stage ON public.hq_publication(stage, press_deadline);
 
+CREATE TABLE IF NOT EXISTS public.hq_company_settings (
+  setting_key text PRIMARY KEY DEFAULT 'MAIN',
+  company_name text NOT NULL DEFAULT '(주)천종현수학연구소',
+  company_code text NOT NULL DEFAULT 'CJH-HQ-2019',
+  ceo_names jsonb NOT NULL DEFAULT '["천종현"]'::jsonb,
+  phone text NOT NULL DEFAULT '031-745-9675',
+  founded_date date DEFAULT '2019-08-01',
+  address text NOT NULL DEFAULT '경기도 성남시 수정구 복정로 121 (복정동) 402호',
+  business_reg_no text,
+  corp_reg_no text,
+  cover_image_url text,
+  logo_image_url text,
+  seals_json jsonb NOT NULL DEFAULT '[]'::jsonb,
+  holidays_json jsonb NOT NULL DEFAULT '{}'::jsonb,
+  holiday_groups_json jsonb NOT NULL DEFAULT '[]'::jsonb,
+  affiliates_json jsonb NOT NULL DEFAULT '[]'::jsonb,
+  extra_settings jsonb NOT NULL DEFAULT '{}'::jsonb,
+  updated_by text,
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
 ALTER TABLE public.hq_member_profile ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.hq_approval_doc ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.hq_approval_step ENABLE ROW LEVEL SECURITY;
@@ -264,4 +285,5 @@ ALTER TABLE public.hq_attendance ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.hq_contract ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.hq_payroll ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.hq_publication ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.hq_company_settings ENABLE ROW LEVEL SECURITY;
 `;

@@ -440,3 +440,80 @@ export interface HqPublication {
   created_at: string;
   updated_at: string;
 }
+
+// ============================================================================
+// 본부 설정 (회사 정보 · 쉬는 날 · 회사 직인 · 계열사 관리)
+// ============================================================================
+
+export interface HqHolidayItem {
+  id: string;
+  name: string;
+  date_text: string;
+  start_date: string;
+  end_date?: string;
+  icon: string;
+  substitute_label?: string;
+  is_mandatory?: boolean;
+  is_annual: boolean;
+  is_custom?: boolean;
+  days_count: number;
+}
+
+export interface HqHolidayGroup {
+  id: string;
+  name: string;
+  description: string;
+  target_dept?: string;
+}
+
+export interface HqCompanySeal {
+  id: string;
+  name: string;
+  image_url: string;
+  seal_type: "UPLOAD" | "GENERATED";
+  is_default: boolean;
+  created_at: string;
+}
+
+export interface HqAffiliateItem {
+  id: string;
+  name: string;
+  relation_type: "계열사" | "자회사" | "직영학원" | "관계사";
+  ceo_name: string;
+  founded_date: string;
+  business_reg_no?: string;
+  company_code?: string;
+  address?: string;
+  tenant_id?: string | null;
+}
+
+export interface HqCompanyExtraSettings {
+  doc_prefix_cert?: string;
+  doc_prefix_approval?: string;
+  team_lead_max_amount?: number;
+  director_max_amount?: number;
+  team_lead_max_leave_days?: number;
+  default_annual_leave?: number;
+  leave_basis?: "회계일 기준" | "입사일 기준";
+  allow_hourly_leave?: boolean;
+}
+
+export interface HqCompanySettings {
+  company_name: string;
+  company_code: string;
+  ceo_names: string[];
+  phone: string;
+  founded_date: string;
+  address: string;
+  business_reg_no: string;
+  corp_reg_no: string;
+  cover_image_url: string | null;
+  logo_image_url: string | null;
+  seals: HqCompanySeal[];
+  holidays_by_year: Record<string, HqHolidayItem[]>;
+  holiday_groups: HqHolidayGroup[];
+  affiliates: HqAffiliateItem[];
+  extra_settings: HqCompanyExtraSettings;
+  updated_by?: string | null;
+  updated_at?: string | null;
+}

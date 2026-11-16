@@ -8,15 +8,22 @@ import HqSchemaSetupBanner from "@/components/hq/HqSchemaSetupBanner";
 import { HqShellProvider, useHqShell } from "@/components/hq/HqShellContext";
 import HqSidebar from "@/components/hq/HqSidebar";
 import HqMemberProfileModal from "@/components/hq/members/HqMemberProfileModal";
+import HqSettingsModal from "@/components/hq/settings/HqSettingsModal";
 
 function HqWorkspaceFrame({
   children,
   isProfileOpen,
   onCloseProfile,
+  settingsModalOpen,
+  settingsInitialTab,
+  onCloseSettings,
 }: {
   children: React.ReactNode;
   isProfileOpen: boolean;
   onCloseProfile: () => void;
+  settingsModalOpen: boolean;
+  settingsInitialTab: string;
+  onCloseSettings: () => void;
 }) {
   const { instId, me, members, isHrManager, isBooting, refreshMembers } =
     useHqShell();
@@ -48,7 +55,7 @@ function HqWorkspaceFrame({
         </main>
       </div>
 
-      {/* 상단 헤더 또는 좌측 사이드바 [내 프로필] 클릭 시 Flex 스타일 인사 프로필 모달 오픈 */}
+      {/* 내 프로필 모달 (Flex 스타일) */}
       <HqMemberProfileModal
         isOpen={isProfileOpen}
         member={me}
@@ -58,6 +65,14 @@ function HqWorkspaceFrame({
         onClose={onCloseProfile}
         onSaved={refreshMembers}
       />
+
+      {/* 본부 환경 설정 모달 (회사 정보 · 쉬는 날 · 회사 직인 · 계열사 관리) */}
+      <HqSettingsModal
+        isOpen={settingsModalOpen}
+        mode="modal"
+        initialTab={settingsInitialTab}
+        onClose={onCloseSettings}
+      />
     </div>
   );
 }
@@ -65,6 +80,8 @@ function HqWorkspaceFrame({
 export default function HqLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const [isProfileOpen, setIsProfileOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsTab, setSettingsTab] = useState("company");
 
   // 로그인·가입 화면은 쉘(사이드바·헤더·세션 가드) 없이 단독 렌더링
   if (pathname === "/hq/login" || pathname === "/hq/signup") {
@@ -72,10 +89,19 @@ export default function HqLayout({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <HqShellProvider onOpenProfile={() => setIsProfileOpen(true)}>
+    <HqShellProvider
+      onOpenProfile={() => setIsProfileOpen(true)}
+      onOpenSettings={(tab) => {
+        setSettingsTab(tab || "company");
+        setSettingsOpen(true);
+      }}
+    >
       <HqWorkspaceFrame
         isProfileOpen={isProfileOpen}
         onCloseProfile={() => setIsProfileOpen(false)}
+        settingsModalOpen={settingsOpen}
+        settingsInitialTab={settingsTab}
+        onCloseSettings={() => setSettingsOpen(false)}
       >
         {children}
       </HqWorkspaceFrame>

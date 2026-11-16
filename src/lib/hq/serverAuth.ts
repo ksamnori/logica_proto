@@ -27,7 +27,7 @@ export function isMissingHqTableError(err: any): boolean {
   const msg = String(err.message || err.details || "");
   if (code === "42P01" || code === "PGRST205") return true;
   return (
-    /hq_(member_profile|approval_doc|approval_step|expense|attendance|contract|payroll|publication)/i.test(
+    /hq_(member_profile|approval_doc|approval_step|expense|attendance|contract|payroll|publication|company_settings)/i.test(
       msg
     ) && /(does not exist|schema cache|Could not find the table)/i.test(msg)
   );

@@ -3,6 +3,7 @@
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
+import { useOptionalHqShell } from "@/components/hq/HqShellContext";
 import {
   HQ_DEFAULT_DEPARTMENTS,
   HQ_EMPLOYMENT_TYPES,
@@ -181,6 +182,7 @@ export default function HqMemberProfileModal({
   onClose,
   onSaved,
 }: Props) {
+  const shell = useOptionalHqShell();
   const [activeTab, setActiveTab] = useState<ProfileTab>("info");
   const [isMaximized, setIsMaximized] = useState(false);
   const [statusMenuOpen, setStatusMenuOpen] = useState(false);
@@ -1242,16 +1244,46 @@ export default function HqMemberProfileModal({
 
                       {/* (7) 쉬는 날 정보 */}
                       <section id="sec-holiday" className="scroll-mt-4">
-                        <SectionHeader title="쉬는 날 정보" />
+                        <SectionHeader
+                          title="쉬는 날 정보"
+                          actionLabel="쉬는 날 보기 ›"
+                          onAction={() => {
+                            onClose();
+                            shell?.openSettingsModal("holidays");
+                          }}
+                        />
                         <div className="border-t border-slate-100">
                           <InfoRow icon="📅" label="쉬는 날">
-                            <span className="font-semibold text-slate-800 mr-2">
-                              {ex.holiday_policy_name || "기본 (14일)"}
-                            </span>
-                            <span className="text-slate-400 text-xs">
-                              {ex.holiday_summary ||
-                                "1월 1일, 설날, 3·1절, 부처님 오신 날, 노동절, 어린이날, 현충일, 제헌절, 광복절, 추석, 개천절, 한글날, 성탄절..."}
-                            </span>
+                            {(() => {
+                              const curYear = String(new Date().getFullYear());
+                              const yrList =
+                                shell?.companySettings?.holidays_by_year?.[
+                                  curYear
+                                ] ||
+                                shell?.companySettings?.holidays_by_year?.[
+                                  "2026"
+                                ];
+                              const totalDays = yrList
+                                ? yrList.reduce(
+                                    (s, h) => s + Number(h.days_count ?? 1),
+                                    0
+                                  )
+                                : 14;
+                              const names = yrList
+                                ? yrList.map((h) => h.name).join(", ")
+                                : ex.holiday_summary ||
+                                  "1월 1일, 설날, 3·1절, 부처님 오신 날, 노동절, 어린이날, 현충일, 제헌절, 광복절, 추석, 개천절, 한글날, 성탄절...";
+                              return (
+                                <>
+                                  <span className="font-semibold text-slate-800 mr-2 shrink-0">
+                                    기본 ({totalDays}일)
+                                  </span>
+                                  <span className="text-slate-400 text-xs truncate max-w-md">
+                                    {names}
+                                  </span>
+                                </>
+                              );
+                            })()}
                           </InfoRow>
                         </div>
                       </section>

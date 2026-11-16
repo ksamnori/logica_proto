@@ -56,6 +56,10 @@ const PAGE_TITLES: Record<string, { title: string; subtitle: string }> = {
     title: "포털 메뉴 권한 관리",
     subtitle: "임직원별 연구 DB · 진단평가 분석 열람 권한 제어",
   },
+  "/hq/settings": {
+    title: "본부 환경 설정",
+    subtitle: "회사 기본 정보 · 쉬는 날(공휴일) · 회사 직인 · 계열사 관리",
+  },
 };
 
 function formatKstTime(iso?: string | null): string {

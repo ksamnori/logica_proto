@@ -17,8 +17,10 @@ import {
 } from "@/app/(dashboard)/contest-db/useContestDb";
 import type { ContestAccessLevel } from "@/app/(dashboard)/contest-db/contestUtils";
 import { hqFetch } from "@/lib/hq/clientApi";
+import { DEFAULT_HQ_COMPANY_SETTINGS } from "@/lib/hq/defaultCompanySettings";
 import type {
   HqAttendanceRecord,
+  HqCompanySettings,
   HqMember,
   HqWorkMode,
 } from "@/lib/hq/types";
@@ -27,6 +29,7 @@ interface HqShellState {
   instId: string;
   me: HqMember | null;
   members: HqMember[];
+  companySettings: HqCompanySettings;
   isHrManager: boolean;
   isHqAdmin: boolean;
   canAccessAnalytics: boolean;
@@ -40,6 +43,7 @@ interface HqShellState {
   sessionExpired: boolean;
   isBooting: boolean;
   refreshMembers: () => Promise<void>;
+  refreshCompanySettings: () => Promise<void>;
   refreshApprovalBadge: () => Promise<void>;
   refreshAttendanceState: () => Promise<void>;
   refreshContractBadge: () => Promise<void>;
@@ -48,6 +52,7 @@ interface HqShellState {
   quickCheckIn: (workMode?: HqWorkMode, locationNote?: string) => Promise<void>;
   quickCheckOut: () => Promise<void>;
   openProfileModal: () => void;
+  openSettingsModal: (initialTab?: string) => void;
   logout: () => Promise<void>;
 }
 
@@ -61,18 +66,27 @@ export function useHqShell(): HqShellState {
   return ctx;
 }
 
+export function useOptionalHqShell(): HqShellState | null {
+  return useContext(HqShellContext);
+}
+
 export function HqShellProvider({
   children,
   onOpenProfile,
+  onOpenSettings,
 }: {
   children: React.ReactNode;
   onOpenProfile: () => void;
+  onOpenSettings?: (initialTab?: string) => void;
 }) {
   const router = useRouter();
 
   const [instId, setInstId] = useState("");
   const [me, setMe] = useState<HqMember | null>(null);
   const [members, setMembers] = useState<HqMember[]>([]);
+  const [companySettings, setCompanySettings] = useState<HqCompanySettings>(
+    DEFAULT_HQ_COMPANY_SETTINGS
+  );
   const [isHrManager, setIsHrManager] = useState(false);
   const [isHqAdmin, setIsHqAdmin] = useState(false);
   const [canAccessAnalytics, setCanAccessAnalytics] = useState(false);
@@ -124,6 +138,10 @@ export function HqShellProvider({
       if (myRow) {
         localStorage.setItem("logica_instructor_name", myRow.name);
         localStorage.setItem("logica_instructor_position", myRow.job_title);
+        if (myRow.tenant_id) {
+          localStorage.setItem("logica_tenant_id", myRow.tenant_id);
+          document.cookie = `logica_tenant_id=${myRow.tenant_id}; path=/; max-age=604800;`;
+        }
       }
     } catch (err: any) {
       const msg = String(err?.message || "");
@@ -135,6 +153,20 @@ export function HqShellProvider({
       }
     }
   }, [router]);
+
+  const refreshCompanySettings = useCallback(async () => {
+    try {
+      const res = await hqFetch<{
+        success: boolean;
+        data: { settings: HqCompanySettings };
+      }>("/api/hq/settings");
+      if (res.data?.settings) {
+        setCompanySettings(res.data.settings);
+      }
+    } catch {
+      // ignore offline/unauth
+    }
+  }, []);
 
   const refreshApprovalBadge = useCallback(async () => {
     try {
@@ -289,7 +321,7 @@ export function HqShellProvider({
       }
 
       if (session?.access_token) {
-        document.cookie = `sb-access-token=${session.access_token}; path=/; max-age=86400;`;
+        document.cookie = `sb-access-token=${session.access_token}; path=/; max-age=604800;`;
         localStorage.setItem("logica_instructor_id", session.user.id);
         uid = session.user.id;
       }
@@ -299,6 +331,7 @@ export function HqShellProvider({
 
       await Promise.all([
         refreshMembers(),
+        refreshCompanySettings(),
         refreshApprovalBadge(),
         refreshAttendanceState(),
         refreshContractBadge(),
@@ -315,6 +348,7 @@ export function HqShellProvider({
   }, [
     router,
     refreshMembers,
+    refreshCompanySettings,
     refreshApprovalBadge,
     refreshAttendanceState,
     refreshContractBadge,
@@ -364,12 +398,26 @@ export function HqShellProvider({
     refreshContractBadge,
   ]);
 
+  const openSettingsModal = useCallback(
+    (initialTab?: string) => {
+      if (onOpenSettings) {
+        onOpenSettings(initialTab);
+      } else {
+        router.push(
+          initialTab ? `/hq/settings?tab=${initialTab}` : "/hq/settings"
+        );
+      }
+    },
+    [onOpenSettings, router]
+  );
+
   return (
     <HqShellContext.Provider
       value={{
         instId,
         me,
         members,
+        companySettings,
         isHrManager,
         isHqAdmin,
         canAccessAnalytics,
@@ -383,6 +431,7 @@ export function HqShellProvider({
         sessionExpired,
         isBooting,
         refreshMembers,
+        refreshCompanySettings,
         refreshApprovalBadge,
         refreshAttendanceState,
         refreshContractBadge,
@@ -391,6 +440,7 @@ export function HqShellProvider({
         quickCheckIn,
         quickCheckOut,
         openProfileModal: onOpenProfile,
+        openSettingsModal,
         logout,
       }}
     >

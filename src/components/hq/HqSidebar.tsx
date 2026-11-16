@@ -6,12 +6,14 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useHqShell } from "./HqShellContext";
 import { getRankMeta } from "@/lib/hq/constants";
+import { resolveStoragePublicUrl } from "@/lib/hq/clientApi";
 
 export default function HqSidebar() {
   const pathname = usePathname();
   const router = useRouter();
   const {
     me,
+    companySettings,
     isHqAdmin,
     canAccessAnalytics,
     contestAccess,
@@ -20,10 +22,14 @@ export default function HqSidebar() {
     unreadChatCount,
     sessionExpired,
     openProfileModal,
+    openSettingsModal,
     logout,
   } = useHqShell();
 
   const rankMeta = getRankMeta(me?.rank_code);
+  const companyLogoUrl = resolveStoragePublicUrl(
+    companySettings?.logo_image_url
+  );
 
   const isActive = (href: string) => {
     if (href === "/hq") return pathname === "/hq";
@@ -45,12 +51,19 @@ export default function HqSidebar() {
         className="px-4 py-4 border-b border-slate-800 cursor-pointer hover:bg-slate-800/40 transition-colors"
       >
         <div className="flex items-center gap-2.5">
-          <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center text-white font-extrabold text-sm shadow-md shrink-0">
-            HQ
+          <div className="relative w-9 h-9 rounded-xl bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center text-white font-extrabold text-sm shadow-md shrink-0 overflow-hidden">
+            <span>HQ</span>
+            {companyLogoUrl && (
+              <img
+                src={companyLogoUrl}
+                alt="logo"
+                className="absolute inset-0 w-full h-full object-cover bg-white"
+              />
+            )}
           </div>
           <div className="min-w-0">
             <h1 className="text-[14px] font-bold text-white leading-tight truncate">
-              천종현수학연구소
+              {companySettings?.company_name || "(주)천종현수학연구소"}
             </h1>
             <p className="text-[11px] font-semibold text-slate-400 mt-0.5 truncate">
               출판 · 연구 본부 올인원 HR
@@ -288,6 +301,17 @@ export default function HqSidebar() {
                 </span>
               </Link>
             )}
+
+            <button
+              type="button"
+              onClick={() => openSettingsModal("company")}
+              className={navItemClass("/hq/settings")}
+            >
+              <span className="flex items-center gap-2.5 truncate">
+                <span>⚙️</span>
+                <span>설정</span>
+              </span>
+            </button>
           </div>
         </div>
       </nav>

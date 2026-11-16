@@ -14,7 +14,7 @@ import {
   CONTRACT_CATEGORIES,
   CONTRACT_TAX_LABELS,
 } from "@/lib/hq/constants";
-import { hqFetch } from "@/lib/hq/clientApi";
+import { hqFetch, resolveStoragePublicUrl } from "@/lib/hq/clientApi";
 import type {
   HqContract,
   HqContractCategory,
@@ -25,7 +25,15 @@ import type {
 type ContractTab = "ALL" | "SENT" | "SIGNED" | "INTERNAL" | "EXTERNAL" | "EXPIRING";
 
 export default function HqContractsPage() {
-  const { me, members, isHrManager, refreshContractBadge } = useHqShell();
+  const { me, members, companySettings, isHrManager, refreshContractBadge } =
+    useHqShell();
+  const activeCompanySeal =
+    companySettings?.seals?.find((s) => s.is_default) ||
+    companySettings?.seals?.[0] ||
+    null;
+  const activeCompanySealUrl = activeCompanySeal
+    ? resolveStoragePublicUrl(activeCompanySeal.image_url)
+    : null;
 
   const [contracts, setContracts] = useState<HqContract[]>([]);
   const [loading, setLoading] = useState(true);
@@ -284,7 +292,9 @@ export default function HqContractsPage() {
           tax_type: taxType,
           body_text: bodyText,
           special_terms: specialTerms,
-          company_signer_name: "천종현수학연구소 대표이사",
+          company_signer_name: `${
+            companySettings?.company_name || "(주)천종현수학연구소"
+          } 대표이사 ${companySettings?.ceo_names?.[0] || "천종현"}`,
         },
       });
       setCreateOpen(false);
@@ -1070,7 +1080,7 @@ export default function HqContractsPage() {
                       갑 (발행처·사용자)
                     </th>
                     <td className="py-2.5 px-3 font-bold border-r border-slate-300">
-                      천종현수학연구소
+                      {companySettings?.company_name || "(주)천종현수학연구소"}
                     </td>
                     <th className="w-28 bg-slate-50 py-2.5 px-3 text-left font-bold border-r border-slate-300">
                       을 (계약상대방)
@@ -1133,10 +1143,18 @@ export default function HqContractsPage() {
                       {selected.company_signed_at?.slice(0, 10) || "-"}
                     </div>
                   </div>
-                  <div className="w-16 h-16 rounded-full border-2 border-rose-600 text-rose-600 flex flex-col items-center justify-center font-black text-[11px] leading-tight rotate-[-6deg] shrink-0">
-                    <span>천종현수학</span>
-                    <span>연구소인</span>
-                  </div>
+                  {activeCompanySealUrl ? (
+                    <img
+                      src={activeCompanySealUrl}
+                      alt="회사 직인"
+                      className="w-16 h-16 object-contain shrink-0 select-none"
+                    />
+                  ) : (
+                    <div className="w-16 h-16 rounded-full border-2 border-rose-600 text-rose-600 flex flex-col items-center justify-center font-black text-[11px] leading-tight rotate-[-6deg] shrink-0">
+                      <span>천종현수학</span>
+                      <span>연구소인</span>
+                    </div>
+                  )}
                 </div>
 
                 <div className="border border-slate-300 rounded-xl p-4 flex items-center justify-between">
