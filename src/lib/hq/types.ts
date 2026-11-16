@@ -1080,6 +1080,72 @@ export interface HqRetireeDocSettingItem {
   use_approval: boolean; // 승인 사용 여부 (기본 false = 즉시 발급)
 }
 
+export interface HqAllowedIpEntry {
+  id: string;
+  label: string; // 예: "본사 사무실 Wi-Fi", "대표 자택"
+  ip_or_cidr: string; // 예: "58.149.52.180" 또는 "121.165.204.0/24"
+  created_at: string;
+}
+
+export interface HqTempAuthCodeEntry {
+  id: string;
+  member_id: string;
+  member_name: string;
+  department?: string;
+  code: string; // 6자리 임시 인증번호
+  expires_at: string;
+  created_at: string;
+  issued_by: string;
+}
+
+export interface HqSecuritySettings {
+  // 1) 보안 · 인증 설정 (181845)
+  two_factor_enabled: boolean;
+  two_factor_exempt_ips: HqAllowedIpEntry[];
+  otp_reset_logs: {
+    id: string;
+    member_name: string;
+    reset_by: string;
+    reset_at: string;
+  }[];
+  ip_restriction_enabled: boolean;
+  allowed_ips: HqAllowedIpEntry[];
+  ip_restriction_scope:
+    | "모든 기능 제한"
+    | "쓰기·다운로드만 제한"
+    | "급여·인사 민감정보만 제한";
+  ip_restrict_super_admin: boolean;
+
+  // 2) 로그인 설정 Beta (181906 ~ 181944)
+  allow_email_login: boolean;
+  allow_phone_login: boolean;
+  allow_passkey_login: boolean;
+  passkey_max_limit: string; // "1개" ~ "5개"
+  login_max_attempts: string; // "3회" | "5회" | "10회"
+  pc_auto_logout: string; // "3시간" | "6시간" | "12시간" | "1일" | "3일" | "7일" | "14일"
+  mobile_auto_logout: string; // "30일" | "90일" | "180일" | "365일"
+  allow_on_leave_login: boolean;
+  temp_auth_codes: HqTempAuthCodeEntry[];
+}
+
+export type HqAuditActivityType = "개인정보 접근" | "인증" | "권한 변경";
+export type HqAuditEventType = "다운로드" | "생성" | "조회" | "수정" | "삭제";
+
+export interface HqAuditLogItem {
+  id: string;
+  activity_type: HqAuditActivityType;
+  user_id?: string;
+  user_name: string;
+  user_email: string;
+  department?: string;
+  event_type: HqAuditEventType;
+  info_type: string; // "-" | "개인정보" | "가족정보" | "근로소득" | "인사정보" | "근무정보" 등
+  description: string;
+  delegated: boolean;
+  ip_address: string;
+  created_at: string;
+}
+
 export interface HqCompanyExtraSettings {
   doc_prefix_cert?: string;
   doc_prefix_approval?: string;
@@ -1119,6 +1185,7 @@ export interface HqCompanyExtraSettings {
   custom_leaves?: HqCustomLeaveItem[];
   payroll_settings?: HqPayrollSettings;
   retiree_doc_settings?: HqRetireeDocSettingItem[];
+  security_settings?: HqSecuritySettings;
 }
 
 export interface HqCompanySettings {

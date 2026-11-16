@@ -184,6 +184,32 @@ export function normalizeCompanySettings(raw: any): HqCompanySettings {
         incomingExtra.retiree_doc_settings.length > 0
           ? incomingExtra.retiree_doc_settings
           : def.extra_settings.retiree_doc_settings,
+      security_settings: incomingExtra.security_settings
+        ? {
+            ...def.extra_settings.security_settings,
+            ...incomingExtra.security_settings,
+            two_factor_exempt_ips: Array.isArray(
+              incomingExtra.security_settings.two_factor_exempt_ips
+            )
+              ? incomingExtra.security_settings.two_factor_exempt_ips
+              : [],
+            otp_reset_logs: Array.isArray(
+              incomingExtra.security_settings.otp_reset_logs
+            )
+              ? incomingExtra.security_settings.otp_reset_logs
+              : [],
+            allowed_ips: Array.isArray(
+              incomingExtra.security_settings.allowed_ips
+            )
+              ? incomingExtra.security_settings.allowed_ips
+              : [],
+            temp_auth_codes: Array.isArray(
+              incomingExtra.security_settings.temp_auth_codes
+            )
+              ? incomingExtra.security_settings.temp_auth_codes
+              : [],
+          }
+        : def.extra_settings.security_settings,
       info_approval_policy: {
         ...def.extra_settings.info_approval_policy,
         ...(incomingExtra.info_approval_policy || {}),

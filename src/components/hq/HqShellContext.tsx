@@ -398,6 +398,20 @@ export function HqShellProvider({
     refreshContractBadge,
   ]);
 
+  // 로그인 설정의 PC/모바일 자동 로그아웃 주기 만료 체크
+  useEffect(() => {
+    if (!instId) return;
+    const checkExpiry = () => {
+      const expStr = localStorage.getItem("hq_session_expires_at");
+      if (expStr && Number(expStr) > 0 && Date.now() > Number(expStr)) {
+        logout();
+      }
+    };
+    checkExpiry();
+    const timer = window.setInterval(checkExpiry, 60000);
+    return () => window.clearInterval(timer);
+  }, [instId, logout]);
+
   const openSettingsModal = useCallback(
     (initialTab?: string) => {
       if (onOpenSettings) {

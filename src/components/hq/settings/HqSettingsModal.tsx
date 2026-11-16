@@ -43,6 +43,11 @@ import {
   HqPayrollTaxWorkplaceSection,
 } from "./HqPayrollSettlementWorkplaceSection";
 import HqRetireeDocSettingsSection from "./HqRetireeDocSettingsSection";
+import {
+  HqAuditLogModal,
+  HqLoginSettingsSection,
+  HqSecurityAuthSection,
+} from "./HqSecuritySettingsSection";
 import HqWorkPolicySettingsSection from "./HqWorkPolicySettingsSection";
 import HqWorkTypeSettingsSection from "./HqWorkTypeSettingsSection";
 import HqWorkplaceSettingsSection from "./HqWorkplaceSettingsSection";
@@ -66,7 +71,9 @@ export type HqSettingsTab =
   | "payroll-deduction"
   | "payroll-settlement"
   | "payroll-workplace"
-  | "retiree-doc";
+  | "retiree-doc"
+  | "security-auth"
+  | "login-setting";
 
 interface Props {
   isOpen: boolean;
@@ -248,6 +255,7 @@ export default function HqSettingsModal({
   const rightPaneRef = useRef<HTMLDivElement>(null);
   const [customInfoModalOpen, setCustomInfoModalOpen] = useState(false);
   const [substituteModalOpen, setSubstituteModalOpen] = useState(false);
+  const [auditLogModalOpen, setAuditLogModalOpen] = useState(false);
   const [approvalPolicySubCat, setApprovalPolicySubCat] =
     useState<HqApprovalPolicyCategory>("workflow");
 
@@ -1105,6 +1113,46 @@ export default function HqSettingsModal({
                   <span className="text-slate-400 text-sm">📑</span>
                   <span>퇴직자 문서 발급 설정</span>
                 </span>
+              </button>
+            </div>
+          </div>
+
+          {/* 보안 · 인증 (Flex 결제·보안 중 구독 제외 이식) */}
+          <div>
+            <div className="px-3 mb-1.5 text-[11px] font-bold text-slate-400">
+              결제·보안
+            </div>
+            <div className="space-y-0.5">
+              <button
+                type="button"
+                onClick={() => setActiveTab("security-auth")}
+                className={navBtnClass("security-auth")}
+              >
+                <span className="flex items-center gap-2.5">
+                  <span className="text-slate-400 text-sm">🔒</span>
+                  <span>보안 · 인증 설정</span>
+                </span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveTab("login-setting")}
+                className={navBtnClass("login-setting")}
+              >
+                <span className="flex items-center gap-2.5">
+                  <span className="text-slate-400 text-sm">🔑</span>
+                  <span>로그인 설정</span>
+                </span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setAuditLogModalOpen(true)}
+                className="w-full flex items-center justify-between px-3 py-2 rounded-lg text-[13px] text-slate-600 hover:bg-slate-200/50 font-medium"
+              >
+                <span className="flex items-center gap-2.5">
+                  <span className="text-slate-400 text-sm">📋</span>
+                  <span>감사 로그</span>
+                </span>
+                <span className="text-[11px] text-slate-400">↗</span>
               </button>
             </div>
           </div>
@@ -2356,6 +2404,48 @@ export default function HqSettingsModal({
                 onNavigateTab={(tab) => setActiveTab(tab)}
               />
             )}
+
+            {activeTab === "security-auth" && (
+              <HqSecurityAuthSection
+                settings={settings}
+                members={members}
+                canEdit={canEdit}
+                saving={saving}
+                onSaveExtra={async (nextExtra, toastMessage) => {
+                  await savePartialSettings(
+                    {
+                      extra_settings: {
+                        ...settings.extra_settings,
+                        ...nextExtra,
+                      },
+                    },
+                    toastMessage
+                  );
+                }}
+                onNavigateTab={(tab) => setActiveTab(tab)}
+              />
+            )}
+
+            {activeTab === "login-setting" && (
+              <HqLoginSettingsSection
+                settings={settings}
+                members={members}
+                canEdit={canEdit}
+                saving={saving}
+                onSaveExtra={async (nextExtra, toastMessage) => {
+                  await savePartialSettings(
+                    {
+                      extra_settings: {
+                        ...settings.extra_settings,
+                        ...nextExtra,
+                      },
+                    },
+                    toastMessage
+                  );
+                }}
+                onNavigateTab={(tab) => setActiveTab(tab)}
+              />
+            )}
           </div>
         </div>
       </div>
@@ -3032,6 +3122,13 @@ export default function HqSettingsModal({
         }}
         onClose={() => setSubstituteModalOpen(false)}
         onCloseSettings={onClose}
+      />
+
+      {/* 7. 감사 로그 오버레이 모달 (182006 ~ 182049) */}
+      <HqAuditLogModal
+        isOpen={auditLogModalOpen}
+        members={members}
+        onClose={() => setAuditLogModalOpen(false)}
       />
     </div>
   );

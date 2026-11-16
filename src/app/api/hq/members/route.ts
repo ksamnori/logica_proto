@@ -1,5 +1,6 @@
 // src/app/api/hq/members/route.ts
 import { NextRequest, NextResponse } from "next/server";
+import { appendHqAuditLog } from "@/lib/hq/auditLogServer";
 import {
   FALLBACK_HQ_TENANT_ID,
   getRankLevel,
@@ -705,6 +706,21 @@ export async function PATCH(req: NextRequest) {
       }
       return apiFail(`인사 프로필 수정 실패: ${profErr.message}`, 500);
     }
+
+    appendHqAuditLog(supabaseAdmin, req, {
+      activity_type: "개인정보 접근",
+      user_id: caller.userId,
+      user_name: caller.name,
+      user_email: caller.email,
+      department: caller.department,
+      event_type: "수정",
+      info_type: "개인정보",
+      description:
+        changedLabels.length > 0
+          ? `구성원 정보 수정 (${Array.from(new Set(changedLabels)).join(", ")})`
+          : "구성원 인사 · 개인정보 수정",
+      delegated: caller.isDelegatedHrAdmin,
+    }).catch(() => {});
 
     return NextResponse.json({
       success: true,

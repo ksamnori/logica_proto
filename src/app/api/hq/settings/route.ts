@@ -1,5 +1,6 @@
 // src/app/api/hq/settings/route.ts
 import { NextRequest, NextResponse } from "next/server";
+import { appendHqAuditLog } from "@/lib/hq/auditLogServer";
 import {
   readCompanySettingsServer,
   SETTINGS_STORAGE_BUCKET,
@@ -177,6 +178,23 @@ export async function PATCH(req: NextRequest) {
         upsert: true,
       })
       .catch(() => {});
+
+    const changedAreas = Object.keys(body?.extra_settings || {});
+    const detailDesc =
+      changedAreas.length > 0
+        ? `회사 설정 수정 (${changedAreas.join(", ")})`
+        : "회사 기본 정보 수정";
+    appendHqAuditLog(supabaseAdmin, req, {
+      activity_type: "권한 변경",
+      user_id: caller.userId,
+      user_name: caller.name,
+      user_email: caller.email,
+      department: caller.department,
+      event_type: "수정",
+      info_type: "인사정보",
+      description: detailDesc,
+      delegated: caller.isDelegatedHrAdmin,
+    }).catch(() => {});
 
     return NextResponse.json({
       success: true,

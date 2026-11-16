@@ -1,12 +1,15 @@
 // src/lib/hq/serverAuth.ts
 import { NextRequest, NextResponse } from "next/server";
 import { createClient, SupabaseClient } from "@supabase/supabase-js";
+import { extractClientIp } from "./auditLogServer";
+import { readCompanySettingsServer } from "./companySettingsServer";
 import {
   FALLBACK_HQ_TENANT_ID,
   FALLBACK_TENANT_NAMES,
   getRankLevel,
   inferRankFromPosition,
 } from "./constants";
+import { isIpMatchedByRule } from "./defaultSecuritySettings";
 import type { HqRankCode } from "./types";
 
 export function getSupabaseAdmin(): SupabaseClient {
@@ -55,6 +58,7 @@ export function extractBearerOrCookieToken(req: NextRequest): string | undefined
 export interface HqCallerInfo {
   userId: string;
   name: string;
+  email: string;
   department: string;
   rankCode: HqRankCode;
   rankLevel: number;
@@ -64,6 +68,7 @@ export interface HqCallerInfo {
   tenantNames: Record<string, string>;
   isHqAdmin: boolean;
   isHrManager: boolean;
+  isDelegatedHrAdmin: boolean;
   schemaMissing: boolean;
   extSchemaMissing: boolean;
 }
@@ -163,15 +168,74 @@ export async function requireHqCaller(
   const isHqAdmin = rpcHqAdmin || isSuperRole || rankCode === "CEO";
 
   // 인사·급여 관리자: 최고관리자, 본부장·이사(Lv.4+), 경영지원 팀장(Lv.3+), 또는 최고관리자가 위임한 인사담당자(is_hr_admin)
+  const isDelegatedHrAdmin = !isHqAdmin && Boolean(prof?.is_hr_admin);
   const isHrManager =
     isHqAdmin ||
     rankLevel >= 4 ||
     Boolean(prof?.is_hr_admin) ||
     (department.includes("경영지원") && rankLevel >= 3);
 
+  // 특정 IP에서만 접근 허용 보안 정책 검증 (로컬 개발환경 및 최고관리자 설정 복구 경로는 안전하게 보장)
+  try {
+    const { settings } = await readCompanySettingsServer(supabaseAdmin);
+    const sec = settings.extra_settings?.security_settings;
+    if (
+      sec?.ip_restriction_enabled &&
+      Array.isArray(sec.allowed_ips) &&
+      sec.allowed_ips.length > 0
+    ) {
+      const clientIp = extractClientIp(req);
+      const isLocalhost =
+        clientIp === "127.0.0.1" ||
+        clientIp === "::1" ||
+        clientIp === "localhost";
+      const pathname = req.nextUrl?.pathname || "";
+      const isAdminRecoveryPath =
+        isHqAdmin &&
+        (pathname.startsWith("/api/hq/settings") ||
+          pathname.startsWith("/api/hq/audit-logs"));
+      const skipForSuperAdmin = isHqAdmin && !sec.ip_restrict_super_admin;
+
+      if (!isLocalhost && !isAdminRecoveryPath && !skipForSuperAdmin) {
+        const matched = sec.allowed_ips.some((entry) =>
+          isIpMatchedByRule(clientIp, entry.ip_or_cidr)
+        );
+        if (!matched) {
+          const scope = sec.ip_restriction_scope || "모든 기능 제한";
+          const method = req.method.toUpperCase();
+          if (scope === "모든 기능 제한") {
+            return apiFail(
+              `허용되지 않은 IP(${clientIp})에서의 HQ 접근이 제한되어 있습니다.`,
+              403
+            );
+          }
+          if (scope === "쓰기·다운로드만 제한" && method !== "GET") {
+            return apiFail(
+              `허용되지 않은 외부 IP(${clientIp})에서는 조회만 가능하며 변경 작업이 제한됩니다.`,
+              403
+            );
+          }
+          if (
+            scope === "급여·인사 민감정보만 제한" &&
+            (pathname.startsWith("/api/hq/payroll") ||
+              pathname.startsWith("/api/hq/contracts"))
+          ) {
+            return apiFail(
+              `허용된 사내 IP 외(${clientIp})에서는 급여·전자계약 민감정보에 접근할 수 없습니다.`,
+              403
+            );
+          }
+        }
+      }
+    }
+  } catch {
+    // 보안 설정 조회 오류 시 기존 인증 흐름 유지
+  }
+
   return {
     userId: user.id,
     name: inst.name || "본부 구성원",
+    email: user.email || "-",
     department,
     rankCode,
     rankLevel,
@@ -181,6 +245,7 @@ export async function requireHqCaller(
     tenantNames,
     isHqAdmin,
     isHrManager,
+    isDelegatedHrAdmin,
     schemaMissing,
     extSchemaMissing,
   };

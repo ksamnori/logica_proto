@@ -40,10 +40,49 @@ export default function HqLoginPage() {
 
     setIsLoading(true);
     try {
+      // 회사 보안·로그인 설정 조회 (실패 시 안전 기본값 유지)
+      const policyRes = await fetch("/api/hq/auth/login-policy")
+        .then((r) => r.json())
+        .catch(() => null);
+      const policy = policyRes?.data || {
+        allow_email_login: true,
+        allow_phone_login: true,
+        pc_auto_logout_seconds: 604800,
+        mobile_auto_logout_seconds: 31536000,
+        allow_on_leave_login: false,
+      };
+
+      const isPhoneInput = /^[0-9-]+$/.test(rawId);
+      if (isPhoneInput && policy.allow_phone_login === false) {
+        throw new Error(
+          "현재 회사 로그인 설정에서 휴대폰 번호 기반 로그인이 비활성화되어 있습니다. 이메일 아이디로 로그인해 주세요."
+        );
+      }
+      if (!isPhoneInput && rawId.includes("@") && policy.allow_email_login === false) {
+        throw new Error(
+          "현재 회사 로그인 설정에서 이메일 로그인이 비활성화되어 있습니다. 휴대폰 번호로 로그인해 주세요."
+        );
+      }
+
+      // 계정 잠금 사전 확인
+      const lockCheck = await fetch("/api/hq/auth/login-policy", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "CHECK", identifier: rawId }),
+      })
+        .then((r) => r.json())
+        .catch(() => null);
+
+      if (lockCheck?.locked) {
+        throw new Error(
+          `로그인 시도 횟수를 초과하여 계정이 잠겼습니다. 약 ${lockCheck.remainMinutes || 15}분 후 다시 시도하거나 인사·최고관리자에게 잠금 해제를 요청해 주세요.`
+        );
+      }
+
       let authEmail = "";
       if (rawId.includes("@")) {
         authEmail = rawId;
-      } else if (/^[0-9-]+$/.test(rawId)) {
+      } else if (isPhoneInput) {
         const cleanPhone = rawId.replace(/[^0-9]/g, "");
         authEmail = `${cleanPhone}@logica.com`;
       } else {
@@ -57,14 +96,33 @@ export default function HqLoginPage() {
         });
 
       if (authError || !authData.user) {
-        throw new Error("계정 정보(연락처·이메일) 또는 비밀번호가 일치하지 않습니다.");
+        const failRes = await fetch("/api/hq/auth/login-policy", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "FAIL", identifier: rawId }),
+        })
+          .then((r) => r.json())
+          .catch(() => null);
+
+        if (failRes?.locked) {
+          throw new Error(
+            `로그인 실패 횟수(${failRes.maxAttempts}회)를 초과하여 계정이 15분간 잠겼습니다.`
+          );
+        }
+        const attemptHint =
+          failRes?.failCount && failRes?.maxAttempts
+            ? ` (실패 ${failRes.failCount}/${failRes.maxAttempts}회)`
+            : "";
+        throw new Error(
+          `계정 정보(연락처·이메일) 또는 비밀번호가 일치하지 않습니다.${attemptHint}`
+        );
       }
 
       const [instRes, adminRpcRes] = await Promise.all([
         supabase
           .from("instructor")
           .select(
-            "instructor_id, name, role, position, chat_position, tenant_id, status, academy_tenant(name, tenant_type)"
+            "instructor_id, name, role, position, chat_position, department, tenant_id, status, academy_tenant(name, tenant_type)"
           )
           .eq("instructor_id", authData.user.id)
           .maybeSingle(),
@@ -80,6 +138,13 @@ export default function HqLoginPage() {
       if (instData.status === "퇴사" || instData.status === "퇴직") {
         await supabase.auth.signOut().catch(() => {});
         throw new Error("퇴직 처리된 계정은 접속할 수 없습니다.");
+      }
+
+      if (instData.status === "휴직" && !policy.allow_on_leave_login) {
+        await supabase.auth.signOut().catch(() => {});
+        throw new Error(
+          "현재 회사 로그인 설정에 따라 휴직 기간 중에는 워크스페이스 접속이 제한되어 있습니다."
+        );
       }
 
       const tenantObj: any = Array.isArray(instData.academy_tenant)
@@ -103,14 +168,25 @@ export default function HqLoginPage() {
         );
       }
 
+      const isMobileUa =
+        typeof navigator !== "undefined" &&
+        /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
+      const maxAgeSec = isMobileUa
+        ? Number(policy.mobile_auto_logout_seconds || 31536000)
+        : Number(policy.pc_auto_logout_seconds || 604800);
+
       if (authData.session?.access_token) {
-        document.cookie = `sb-access-token=${authData.session.access_token}; path=/; max-age=86400;`;
+        document.cookie = `sb-access-token=${authData.session.access_token}; path=/; max-age=${maxAgeSec};`;
       }
       if (instData.tenant_id) {
-        document.cookie = `logica_tenant_id=${instData.tenant_id}; path=/; max-age=86400;`;
+        document.cookie = `logica_tenant_id=${instData.tenant_id}; path=/; max-age=${maxAgeSec};`;
         localStorage.setItem("logica_tenant_id", String(instData.tenant_id));
       }
 
+      localStorage.setItem(
+        "hq_session_expires_at",
+        String(Date.now() + maxAgeSec * 1000)
+      );
       localStorage.setItem("logica_instructor_id", instData.instructor_id);
       localStorage.setItem("logica_instructor_name", instData.name);
       localStorage.setItem(
@@ -121,6 +197,20 @@ export default function HqLoginPage() {
         "logica_instructor_position",
         instData.chat_position || instData.position || "본사 임직원"
       );
+
+      // 감사 로그 적재 및 실패 카운트 초기화
+      fetch("/api/hq/auth/login-policy", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "SUCCESS",
+          identifier: rawId,
+          user_id: authData.user.id,
+          user_name: instData.name,
+          user_email: authData.user.email || authEmail,
+          department: (instData as any).department || "",
+        }),
+      }).catch(() => {});
 
       router.replace("/hq");
     } catch (error: any) {

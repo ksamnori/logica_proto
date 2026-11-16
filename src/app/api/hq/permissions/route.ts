@@ -1,6 +1,7 @@
 // src/app/api/hq/permissions/route.ts
 // 본부(HQ) 포털 "통합 직급 · 관리자 · 연구DB 권한 관리" 전용 API (최고관리자 전용)
 import { NextRequest, NextResponse } from "next/server";
+import { appendHqAuditLog } from "@/lib/hq/auditLogServer";
 import {
   FALLBACK_HQ_TENANT_ID,
   FALLBACK_TENANT_NAMES,
@@ -220,6 +221,18 @@ export async function POST(req: NextRequest) {
               : "ADMIN",
         })
         .eq("instructor_id", instructorId);
+
+      appendHqAuditLog(supabaseAdmin, req, {
+        activity_type: "권한 변경",
+        user_id: caller.userId,
+        user_name: caller.name,
+        user_email: caller.email,
+        department: caller.department,
+        event_type: "수정",
+        info_type: "인사정보",
+        description: `${target.name} 구성원 직급(${nextRank}) · 관리자 권한 변경`,
+        delegated: caller.isDelegatedHrAdmin,
+      }).catch(() => {});
 
       return NextResponse.json({
         success: true,
