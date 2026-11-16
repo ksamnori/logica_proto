@@ -15,6 +15,7 @@ import {
   resolveStoragePublicUrl,
   uploadHqReceiptFile,
 } from "@/lib/hq/clientApi";
+import { DEFAULT_DOC_FOLDERS } from "@/lib/hq/defaultApprovalPolicies";
 import type {
   HqAwardItem,
   HqCareerItem,
@@ -2140,6 +2141,120 @@ export default function HqMemberProfileModal({
                   ) : (
                     <div className="p-6 rounded-xl bg-slate-50 text-xs text-slate-500">
                       증명서 발급은 본인 또는 인사관리자만 가능합니다.
+                    </div>
+                  )}
+
+                  {canSeePrivate && (
+                    <div className="pt-4 border-t border-slate-100 space-y-3">
+                      <div>
+                        <h4 className="text-sm font-extrabold text-slate-900">
+                          📁 구성원 제출 문서함
+                        </h4>
+                        <p className="text-xs text-slate-400 mt-0.5">
+                          설정 &gt; 문서함 설정에서 지정한 인사 수집 서류 목록입니다.
+                        </p>
+                      </div>
+
+                      <div className="space-y-2">
+                        {(companyExtra?.doc_folders &&
+                        companyExtra.doc_folders.length > 0
+                          ? companyExtra.doc_folders
+                          : DEFAULT_DOC_FOLDERS
+                        )
+                          .slice()
+                          .sort((a, b) => a.order - b.order)
+                          .map((folder) => {
+                            const attached = ex.doc_files?.[folder.id];
+                            const fileUrl = attached
+                              ? resolveStoragePublicUrl(attached.url)
+                              : null;
+                            return (
+                              <div
+                                key={folder.id}
+                                className="px-4 py-3.5 rounded-xl border border-slate-200 flex flex-wrap items-center justify-between gap-2 text-xs"
+                              >
+                                <div className="flex items-center gap-2.5">
+                                  <span className="text-slate-400">📄</span>
+                                  <span className="font-bold text-slate-800">
+                                    {folder.name}
+                                  </span>
+                                  {folder.is_required && (
+                                    <span className="px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 text-[10px] font-bold">
+                                      필수
+                                    </span>
+                                  )}
+                                  {attached ? (
+                                    <span className="text-[11px] text-emerald-600 font-semibold">
+                                      ✓ {attached.file_name}
+                                    </span>
+                                  ) : (
+                                    <span className="text-[11px] text-slate-400">
+                                      미제출
+                                    </span>
+                                  )}
+                                </div>
+
+                                <div className="flex items-center gap-2">
+                                  {fileUrl && (
+                                    <a
+                                      href={fileUrl}
+                                      target="_blank"
+                                      rel="noreferrer"
+                                      className="px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 font-bold text-slate-700"
+                                    >
+                                      열람 ↗
+                                    </a>
+                                  )}
+                                  {canEditSelfOrHr && (
+                                    <label className="px-2.5 py-1 rounded-lg border border-slate-200 hover:bg-slate-50 font-bold text-slate-700 cursor-pointer">
+                                      <span>
+                                        {attached ? "재업로드" : "파일 등록"}
+                                      </span>
+                                      <input
+                                        type="file"
+                                        className="hidden"
+                                        onChange={async (e) => {
+                                          const f = e.target.files?.[0];
+                                          if (!f) return;
+                                          try {
+                                            const path =
+                                              await uploadHqReceiptFile(
+                                                f,
+                                                "hq_member_docs"
+                                              );
+                                            const nextFiles = {
+                                              ...(ex.doc_files || {}),
+                                              [folder.id]: {
+                                                url: path,
+                                                file_name: f.name,
+                                                uploaded_at: new Date()
+                                                  .toISOString()
+                                                  .slice(0, 10),
+                                              },
+                                            };
+                                            await patchMember(
+                                              {
+                                                profile_extra: {
+                                                  doc_files: nextFiles,
+                                                },
+                                              },
+                                              `구성원 문서함 '${folder.name}' 파일 등록`
+                                            );
+                                          } catch (err: any) {
+                                            alert(
+                                              err?.message ||
+                                                "문서 업로드에 실패했습니다."
+                                            );
+                                          }
+                                        }}
+                                      />
+                                    </label>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })}
+                      </div>
                     </div>
                   )}
                 </div>

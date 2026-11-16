@@ -73,6 +73,17 @@ export function normalizeCompanySettings(raw: any): HqCompanySettings {
     extra_settings: {
       ...def.extra_settings,
       ...incomingExtra,
+      doc_folders: Array.isArray(incomingExtra.doc_folders)
+        ? incomingExtra.doc_folders
+        : def.extra_settings.doc_folders,
+      approval_policies:
+        Array.isArray(incomingExtra.approval_policies) &&
+        incomingExtra.approval_policies.length > 0
+          ? incomingExtra.approval_policies
+          : def.extra_settings.approval_policies,
+      approval_templates: Array.isArray(incomingExtra.approval_templates)
+        ? incomingExtra.approval_templates
+        : def.extra_settings.approval_templates,
       info_approval_policy: {
         ...def.extra_settings.info_approval_policy,
         ...(incomingExtra.info_approval_policy || {}),

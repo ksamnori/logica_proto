@@ -206,6 +206,10 @@ export interface HqProfileExtra {
   families?: HqFamilyItem[];
   growth_goals?: HqGrowthItem[];
   trainings?: HqTrainingItem[];
+  doc_files?: Record<
+    string,
+    { url: string; file_name: string; uploaded_at: string }
+  >;
   change_logs?: HqProfileChangeLog[];
 }
 
@@ -525,6 +529,100 @@ export interface HqInfoApprovalPolicy {
   approver_role?: "HR_MANAGER" | "DEPT_HEAD" | "CEO";
 }
 
+export interface HqCustomInfoCategory {
+  id: string;
+  name: string;
+}
+
+export interface HqCustomInfoField {
+  id: string;
+  name: string;
+  field_type: "텍스트" | "숫자" | "날짜" | "선택형" | "파일";
+  category_id: string | null;
+  description?: string;
+  required?: boolean;
+}
+
+export interface HqDocFolderItem {
+  id: string;
+  name: string;
+  description?: string;
+  is_required?: boolean;
+  order: number;
+}
+
+export type HqCcNotifyMode = "BOTH" | "COMPLETE_ONLY" | "NONE";
+
+export interface HqPolicyAssignee {
+  id: string;
+  kind: "MEMBER" | "ROLE";
+  role_key?: "ORG_HEAD_1" | "ORG_HEAD_2" | "HR_MANAGER" | "SELF";
+  member_id?: string;
+  name: string;
+  sub_label?: string;
+  avatar_bg?: string;
+  notify_mode?: HqCcNotifyMode;
+  step_action?: "승인" | "합의" | "검토";
+}
+
+export interface HqPolicyStep {
+  step_order: number;
+  assignees: HqPolicyAssignee[];
+}
+
+export interface HqPolicyRequesterRule {
+  id: string;
+  requester_summary: string;
+  requester_names: string[];
+  cc_list: HqPolicyAssignee[];
+  steps: HqPolicyStep[];
+}
+
+export type HqApprovalPolicyCategory =
+  | "workflow"
+  | "work"
+  | "leave"
+  | "member_info"
+  | "retiree_doc";
+
+export interface HqApprovalPolicyItem {
+  id: string;
+  category: HqApprovalPolicyCategory;
+  title: string;
+  description?: string;
+  icon: string;
+  allow_edit: boolean;
+  per_requester: boolean;
+  cc_list: HqPolicyAssignee[];
+  steps: HqPolicyStep[];
+  requester_rules?: HqPolicyRequesterRule[];
+  mapped_doc_type?: HqApprovalDocType;
+}
+
+export interface HqApprovalTemplate {
+  id: string;
+  name: string;
+  cc_list: HqPolicyAssignee[];
+  steps: HqPolicyStep[];
+}
+
+export interface HqCustomApprovalLabel {
+  id: string;
+  name: string;
+  color: string;
+  description?: string;
+}
+
+export interface HqSubstituteApprovalRule {
+  id: string;
+  original_approver_name: string;
+  substitute_approver_name: string;
+  start_date: string;
+  end_date: string;
+  reason?: string;
+  is_active: boolean;
+}
+
 export interface HqCompanyExtraSettings {
   doc_prefix_cert?: string;
   doc_prefix_approval?: string;
@@ -546,6 +644,14 @@ export interface HqCompanyExtraSettings {
   emp_no_locked?: boolean;
   emp_no_policies?: HqEmpNoPolicy[];
   info_approval_policy?: HqInfoApprovalPolicy;
+  // 커스텀 정보 · 문서함 · 승인 정책 관리 (Flex 이식)
+  custom_info_categories?: HqCustomInfoCategory[];
+  custom_info_fields?: HqCustomInfoField[];
+  doc_folders?: HqDocFolderItem[];
+  approval_policies?: HqApprovalPolicyItem[];
+  approval_templates?: HqApprovalTemplate[];
+  approval_labels?: HqCustomApprovalLabel[];
+  substitute_approvals?: HqSubstituteApprovalRule[];
 }
 
 export interface HqCompanySettings {

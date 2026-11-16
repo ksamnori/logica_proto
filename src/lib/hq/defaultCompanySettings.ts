@@ -1,4 +1,9 @@
 // src/lib/hq/defaultCompanySettings.ts
+import {
+  DEFAULT_APPROVAL_POLICIES,
+  DEFAULT_APPROVAL_TEMPLATES,
+  DEFAULT_DOC_FOLDERS,
+} from "./defaultApprovalPolicies";
 import type {
   HqCompanySettings,
   HqEmpNoPolicy,
@@ -500,6 +505,13 @@ export const DEFAULT_HQ_COMPANY_SETTINGS: HqCompanySettings = {
       require_approval_family: true,
       approver_role: "HR_MANAGER",
     },
+    custom_info_categories: [],
+    custom_info_fields: [],
+    doc_folders: DEFAULT_DOC_FOLDERS,
+    approval_policies: DEFAULT_APPROVAL_POLICIES,
+    approval_templates: DEFAULT_APPROVAL_TEMPLATES,
+    approval_labels: [],
+    substitute_approvals: [],
   },
 };
 
