@@ -181,6 +181,16 @@ export default function HqSidebar() {
             </Link>
 
             <Link
+              href="/hq/leaves"
+              className={navItemClass("/hq/leaves")}
+            >
+              <span className="flex items-center gap-2.5 truncate">
+                <span>🏖️</span>
+                <span>휴가</span>
+              </span>
+            </Link>
+
+            <Link
               href="/hq/contracts"
               className={navItemClass("/hq/contracts")}
             >

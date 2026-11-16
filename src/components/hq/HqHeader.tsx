@@ -32,6 +32,10 @@ const PAGE_TITLES: Record<string, { title: string; subtitle: string }> = {
     title: "근무 · 유연근무 타임라인",
     subtitle: "내 근무 · 구성원 24h 타임라인 · 시차/원격/외근 체크인 및 주 52시간 관리",
   },
+  "/hq/leaves": {
+    title: "내 휴가 · 연차 현황",
+    subtitle: "연차·맞춤휴가 신청 · 월별 자동부여/사용 상세 원장 · 연차 사용 계획",
+  },
   "/hq/contracts": {
     title: "전자계약 · 저작권/외주 계약 관리",
     subtitle: "근로·연봉·비밀유지(NDA) 및 저자 출판권·외주 용역 전자서명",

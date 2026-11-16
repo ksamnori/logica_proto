@@ -1309,6 +1309,36 @@ export interface HqMeetingItem {
   updated_at: string;
 }
 
+export interface HqLeaveAdjustmentItem {
+  id: string;
+  member_id: string;
+  member_name: string;
+  year_month: string; // 예: "2026-11"
+  delta_days: number; // 예: +2 또는 -0.5
+  reason: string;
+  actor_name: string;
+  created_at: string;
+}
+
+export interface HqLeavePromotionCampaign {
+  year: number;
+  is_active: boolean;
+  due_date: string;
+  started_by: string;
+  started_at: string;
+}
+
+export interface HqAnnualLeavePlanItem {
+  id: string;
+  year: number;
+  member_id: string;
+  member_name: string;
+  department: string;
+  planned_dates: string[];
+  memo: string;
+  submitted_at: string;
+}
+
 export interface HqCompanyExtraSettings {
   doc_prefix_cert?: string;
   doc_prefix_approval?: string;

@@ -186,7 +186,7 @@ export const DEFAULT_CUSTOM_LEAVES: HqCustomLeaveItem[] = [
     is_mandatory: true,
     grant_method: "신청 시 부여",
     grant_unit: "일 단위 부여",
-    grant_amount: 3,
+    grant_amount: 5,
     usage_unit: "한번에 모두 사용",
     pay_type: "유급",
     request_on_register: true,
