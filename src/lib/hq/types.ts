@@ -902,6 +902,173 @@ export interface HqCustomLeaveItem {
   apply_to_existing_granted?: boolean; // 기존 부여된 휴가에도 반영하기
 }
 
+export type HqPayrollRoundingMode = "올림" | "반올림" | "버림";
+
+export interface HqPayrollPayItem {
+  id: string;
+  section: "FIXED" | "HOURLY" | "VARIABLE";
+  code?: string; // 예: "A001", "A002", "A003", "H001"
+  name: string;
+  icon: string;
+  description: string;
+  tip_text?: string;
+  is_system_default?: boolean; // '기본' 배지 (삭제 불가)
+  is_monthly_every: boolean; // 매월 지급 여부
+  selected_months?: number[]; // 매월 지급이 아닐 때 선택 월(1~12)
+  amount_mode: "PER_PERSON" | "UNIFORM" | "SETTLEMENT_INPUT";
+  uniform_amount?: number; // 모두에게 동일 지급할 금액
+  include_in_annual_salary: boolean; // 연봉포함 여부
+  is_tax_free: boolean; // 비과세 여부
+  taxable_category: string; // 과세 시 유형 (예: "급여", "기타수당", "초과근무수당", "기타상여금")
+  non_taxable_code?: string; // 비과세 시 코드 (예: "P01", "H03", "H10", "Q02")
+  include_in_ordinary_wage: boolean; // 통상임금 포함 여부
+  include_in_average_wage: boolean; // 평균임금 포함 여부
+  prorate_policy: string; // 예: "입사·휴직·퇴직원 모두 일할 지급"
+  // 주휴수당 전용 주중 일부 근무 정책
+  hire_week_policy?: "전액 지급" | "근무일에 비례하여 지급" | "지급하지 않음";
+  leave_week_policy?: "전액 지급" | "근무일에 비례하여 지급" | "지급하지 않음";
+  resign_week_policy?: "전액 지급" | "근무일에 비례하여 지급" | "지급하지 않음";
+  unit_precision: string; // "100의 단위" | "10의 단위" | "1의 단위" | "소수점 첫째 자리"
+  rounding_mode: HqPayrollRoundingMode;
+  payslip_note: string; // 급여명세서 표기란
+}
+
+export interface HqPayrollDeductionItem {
+  id: string;
+  name: string;
+  description: string;
+  deduction_type: string; // "기타" | "국민연금" | "건강보험" ... (15종)
+  cycle_mode: "매 월" | "직접 선택";
+  selected_months?: number[];
+  target_scope:
+    | "대상자 전체"
+    | "대상자 선택"
+    | "대상자 조건 설정"
+    | "정산할 때 대상자 선택";
+  selected_member_names?: string[];
+  target_departments?: string[];
+  amount_mode: "정산 시 입력" | "금액 일괄 설정" | "대상자별로 다른 금액 설정";
+  uniform_amount?: number;
+  payslip_note: string;
+}
+
+export interface HqWithholdingAgentInfo {
+  is_configured: boolean;
+  submitter_type: "법인" | "개인";
+  business_reg_no: string;
+  // 법인 전용
+  corp_name: string;
+  corp_type: string;
+  ceo_name: string;
+  corp_reg_no: string;
+  // 개인 전용
+  trade_name: string;
+  owner_name: string;
+  resident_reg_no: string;
+  // 공통
+  location_address: string;
+  tax_office: string;
+  hometax_id: string;
+  english_info_enabled: boolean;
+  english_corp_name?: string;
+  english_ceo_name?: string;
+  english_address?: string;
+  unit_taxpayer_enabled: boolean; // 사업자 단위 과세자
+  sub_business_seq_no?: string; // 종사업장 일련번호 (4자리)
+}
+
+export interface HqSeveranceCalcSettings {
+  avg_wage_period: "3개월" | "90일";
+  calc_basis: "높은 금액 적용" | "평균임금" | "통상임금";
+  severance_unit: string;
+  severance_rounding: HqPayrollRoundingMode;
+  avg_wage_unit: string;
+  avg_wage_rounding: HqPayrollRoundingMode;
+  avg_wage_first_decimal_rounding: HqPayrollRoundingMode;
+  ordinary_wage_unit: string;
+  ordinary_wage_rounding: HqPayrollRoundingMode;
+}
+
+export interface HqPayslipBasisSettings {
+  // 1) 기본근무 산출근거
+  base_work_enabled: boolean;
+  base_work_days: boolean;
+  base_standard_days: boolean;
+  base_standard_days_desc: boolean;
+  base_ordinary_hourly: boolean;
+  base_hours_and_hourly: boolean;
+  base_hours_desc: boolean;
+  base_shortage_hours: boolean;
+  base_unpaid_leave_hours: boolean;
+  // 2) 주휴수당 산출근거
+  weekly_holiday_enabled: boolean;
+  weekly_holiday_period: boolean;
+  weekly_holiday_hours: boolean;
+  weekly_holiday_hourly: boolean;
+  // 3) 고정초과근무 산출근거
+  fixed_ot_enabled: boolean;
+  fixed_ot_contract_hours: boolean;
+  fixed_ot_hourly: boolean;
+  fixed_ot_amount: boolean;
+  // 4) 초과근무 산출근거
+  variable_ot_enabled: boolean;
+  variable_ot_9types: boolean;
+  variable_ot_hourly: boolean;
+  // 5) 재직자 연차수당 산출근거
+  active_leave_pay_enabled: boolean;
+  active_leave_unused_days: boolean;
+  active_leave_daily_hours: boolean;
+  active_leave_hourly: boolean;
+  // 6) 퇴직자 연차수당 산출근거
+  retiree_leave_pay_enabled: boolean;
+  retiree_leave_unused_days: boolean;
+  retiree_leave_daily_hours: boolean;
+  retiree_leave_hourly: boolean;
+}
+
+export interface HqPayrollCertificateItem {
+  id: string;
+  name: string;
+  cert_type: "법인" | "개인";
+  file_name: string;
+  registered_at: string;
+}
+
+export interface HqPayrollTaxWorkplaceItem {
+  id: string;
+  name: string;
+  business_reg_no: string;
+  sub_business_seq_no?: string;
+  local_gov_name: string; // 특별징수 관할 시·군·구청 (예: 서울특별시 송파구청)
+  address: string;
+  is_primary: boolean;
+}
+
+export interface HqPayrollSettings {
+  auto_fill_meal_allowance: boolean;
+  auto_fill_meal_amount: number;
+  pay_items: HqPayrollPayItem[];
+  deduction_items: HqPayrollDeductionItem[];
+  withholding_agent: HqWithholdingAgentInfo;
+  social_insurance_mgmt_no: string;
+  social_insurance_phone: string;
+  company_size_tier:
+    | "150인 미만 기업"
+    | "150인 이상 우선지원 대상기업"
+    | "150인 이상 ~ 1000인 미만 기업"
+    | "1000인 이상 기업 및 국가, 지방단체가 직접 행하는 사업";
+  severance_calc: HqSeveranceCalcSettings;
+  payslip_basis: HqPayslipBasisSettings;
+  exclude_emp_ins_on_mid_settlement: boolean;
+  deduction_decimal_rounding: HqPayrollRoundingMode;
+  withholding_ledger_month_rule:
+    | "귀속연월"
+    | "마지막 지급연월 기준 표기"
+    | "지급연월별 분리 표기";
+  certificates: HqPayrollCertificateItem[];
+  tax_workplaces: HqPayrollTaxWorkplaceItem[];
+}
+
 export interface HqCompanyExtraSettings {
   doc_prefix_cert?: string;
   doc_prefix_approval?: string;
@@ -939,6 +1106,7 @@ export interface HqCompanyExtraSettings {
   workplace_ips?: HqWorkplaceWifiIpItem[];
   annual_leave_settings?: HqAnnualLeaveGlobalSettings;
   custom_leaves?: HqCustomLeaveItem[];
+  payroll_settings?: HqPayrollSettings;
 }
 
 export interface HqCompanySettings {

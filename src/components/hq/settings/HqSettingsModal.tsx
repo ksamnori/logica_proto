@@ -34,6 +34,14 @@ import {
 import HqCustomLeaveSettingsSection from "./HqCustomLeaveSettingsSection";
 import HqHrInfoSettingsSection from "./HqHrInfoSettingsSection";
 import HqOvertimeCompSettingsSection from "./HqOvertimeCompSettingsSection";
+import {
+  HqPayrollDeductionSection,
+  HqPayrollPaymentSection,
+} from "./HqPayrollPayDeductionSection";
+import {
+  HqPayrollSettlementSection,
+  HqPayrollTaxWorkplaceSection,
+} from "./HqPayrollSettlementWorkplaceSection";
 import HqWorkPolicySettingsSection from "./HqWorkPolicySettingsSection";
 import HqWorkTypeSettingsSection from "./HqWorkTypeSettingsSection";
 import HqWorkplaceSettingsSection from "./HqWorkplaceSettingsSection";
@@ -52,7 +60,11 @@ export type HqSettingsTab =
   | "overtime-comp"
   | "work-place"
   | "leave-setting"
-  | "custom-leave";
+  | "custom-leave"
+  | "payroll-payment"
+  | "payroll-deduction"
+  | "payroll-settlement"
+  | "payroll-workplace";
 
 interface Props {
   isOpen: boolean;
@@ -1022,6 +1034,55 @@ export default function HqSettingsModal({
                 <span className="flex items-center gap-2.5">
                   <span className="text-slate-400 text-sm">🌴</span>
                   <span>맞춤 휴가</span>
+                </span>
+              </button>
+            </div>
+          </div>
+
+          {/* 급여·정산 */}
+          <div>
+            <div className="px-3 mb-1.5 text-[11px] font-bold text-slate-400">
+              급여·정산
+            </div>
+            <div className="space-y-0.5">
+              <button
+                type="button"
+                onClick={() => setActiveTab("payroll-payment")}
+                className={navBtnClass("payroll-payment")}
+              >
+                <span className="flex items-center gap-2.5">
+                  <span className="text-slate-400 text-sm">💰</span>
+                  <span>지급 항목</span>
+                </span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveTab("payroll-deduction")}
+                className={navBtnClass("payroll-deduction")}
+              >
+                <span className="flex items-center gap-2.5">
+                  <span className="text-slate-400 text-sm">🧾</span>
+                  <span>공제 항목</span>
+                </span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveTab("payroll-settlement")}
+                className={navBtnClass("payroll-settlement")}
+              >
+                <span className="flex items-center gap-2.5">
+                  <span className="text-slate-400 text-sm">⚖️</span>
+                  <span>정산 설정</span>
+                </span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveTab("payroll-workplace")}
+                className={navBtnClass("payroll-workplace")}
+              >
+                <span className="flex items-center gap-2.5">
+                  <span className="text-slate-400 text-sm">💼</span>
+                  <span>사업장 설정</span>
                 </span>
               </button>
             </div>
@@ -2156,6 +2217,87 @@ export default function HqSettingsModal({
               <HqCustomLeaveSettingsSection
                 settings={settings}
                 members={members}
+                canEdit={canEdit}
+                saving={saving}
+                onSaveExtra={async (nextExtra, toastMessage) => {
+                  await savePartialSettings(
+                    {
+                      extra_settings: {
+                        ...settings.extra_settings,
+                        ...nextExtra,
+                      },
+                    },
+                    toastMessage
+                  );
+                }}
+                onNavigateTab={(tab) => setActiveTab(tab)}
+              />
+            )}
+
+            {activeTab === "payroll-payment" && (
+              <HqPayrollPaymentSection
+                settings={settings}
+                canEdit={canEdit}
+                saving={saving}
+                onSaveExtra={async (nextExtra, toastMessage) => {
+                  await savePartialSettings(
+                    {
+                      extra_settings: {
+                        ...settings.extra_settings,
+                        ...nextExtra,
+                      },
+                    },
+                    toastMessage
+                  );
+                }}
+                onNavigateTab={(tab) => setActiveTab(tab)}
+              />
+            )}
+
+            {activeTab === "payroll-deduction" && (
+              <HqPayrollDeductionSection
+                settings={settings}
+                members={members}
+                canEdit={canEdit}
+                saving={saving}
+                onSaveExtra={async (nextExtra, toastMessage) => {
+                  await savePartialSettings(
+                    {
+                      extra_settings: {
+                        ...settings.extra_settings,
+                        ...nextExtra,
+                      },
+                    },
+                    toastMessage
+                  );
+                }}
+                onNavigateTab={(tab) => setActiveTab(tab)}
+              />
+            )}
+
+            {activeTab === "payroll-settlement" && (
+              <HqPayrollSettlementSection
+                settings={settings}
+                canEdit={canEdit}
+                saving={saving}
+                onSaveExtra={async (nextExtra, toastMessage) => {
+                  await savePartialSettings(
+                    {
+                      extra_settings: {
+                        ...settings.extra_settings,
+                        ...nextExtra,
+                      },
+                    },
+                    toastMessage
+                  );
+                }}
+                onNavigateTab={(tab) => setActiveTab(tab)}
+              />
+            )}
+
+            {activeTab === "payroll-workplace" && (
+              <HqPayrollTaxWorkplaceSection
+                settings={settings}
                 canEdit={canEdit}
                 saving={saving}
                 onSaveExtra={async (nextExtra, toastMessage) => {

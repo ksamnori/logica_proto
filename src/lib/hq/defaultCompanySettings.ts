@@ -10,6 +10,7 @@ import {
   DEFAULT_ANNUAL_LEAVE_SETTINGS,
   DEFAULT_CUSTOM_LEAVES,
 } from "./defaultLeaveSettings";
+import { DEFAULT_PAYROLL_SETTINGS } from "./defaultPayrollSettings";
 import {
   DEFAULT_OVERTIME_COMP_SETTINGS,
   DEFAULT_WORKPLACES,
@@ -532,6 +533,7 @@ export const DEFAULT_HQ_COMPANY_SETTINGS: HqCompanySettings = {
     workplace_ips: DEFAULT_WORKPLACE_IPS,
     annual_leave_settings: DEFAULT_ANNUAL_LEAVE_SETTINGS,
     custom_leaves: DEFAULT_CUSTOM_LEAVES,
+    payroll_settings: DEFAULT_PAYROLL_SETTINGS,
   },
 };
 

@@ -661,14 +661,14 @@ export default function HqCustomLeaveSettingsSection({
 
           <button
             type="button"
-            onClick={() => onNavigateTab("company")}
+            onClick={() => onNavigateTab("payroll-payment")}
             className="px-5 py-4 rounded-2xl bg-[#f8f9fa] hover:bg-slate-100 border border-slate-200/60 flex items-center justify-between transition-colors text-left"
           >
             <div>
               <div className="text-xs font-extrabold text-slate-800">
-                회사 정보
+                지급 항목
               </div>
-              <div className="text-[11px] text-slate-400 mt-0.5">처음으로</div>
+              <div className="text-[11px] text-slate-400 mt-0.5">다음으로</div>
             </div>
             <span className="text-slate-400 text-base">→</span>
           </button>

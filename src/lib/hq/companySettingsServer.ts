@@ -153,6 +153,32 @@ export function normalizeCompanySettings(raw: any): HqCompanySettings {
         incomingExtra.custom_leaves.length > 0
           ? incomingExtra.custom_leaves
           : def.extra_settings.custom_leaves,
+      payroll_settings: incomingExtra.payroll_settings
+        ? {
+            ...def.extra_settings.payroll_settings,
+            ...incomingExtra.payroll_settings,
+            pay_items:
+              Array.isArray(incomingExtra.payroll_settings.pay_items) &&
+              incomingExtra.payroll_settings.pay_items.length > 0
+                ? incomingExtra.payroll_settings.pay_items
+                : def.extra_settings.payroll_settings?.pay_items || [],
+            deduction_items: Array.isArray(
+              incomingExtra.payroll_settings.deduction_items
+            )
+              ? incomingExtra.payroll_settings.deduction_items
+              : [],
+            certificates: Array.isArray(
+              incomingExtra.payroll_settings.certificates
+            )
+              ? incomingExtra.payroll_settings.certificates
+              : [],
+            tax_workplaces: Array.isArray(
+              incomingExtra.payroll_settings.tax_workplaces
+            )
+              ? incomingExtra.payroll_settings.tax_workplaces
+              : [],
+          }
+        : def.extra_settings.payroll_settings,
       info_approval_policy: {
         ...def.extra_settings.info_approval_policy,
         ...(incomingExtra.info_approval_policy || {}),
