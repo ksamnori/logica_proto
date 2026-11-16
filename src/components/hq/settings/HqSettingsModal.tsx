@@ -31,6 +31,7 @@ import {
   HqDocBoxSettingsSection,
 } from "./HqCustomInfoDocBoxSection";
 import HqHrInfoSettingsSection from "./HqHrInfoSettingsSection";
+import HqWorkTypeSettingsSection from "./HqWorkTypeSettingsSection";
 
 export type HqSettingsTab =
   | "company"
@@ -42,6 +43,8 @@ export type HqSettingsTab =
   | "approval-policy"
   | "approval-labels"
   | "work-type"
+  | "work-policy"
+  | "overtime-comp"
   | "work-place"
   | "leave-setting";
 
@@ -958,17 +961,23 @@ export default function HqSettingsModal({
               </button>
               <button
                 type="button"
-                onClick={() => {
-                  onClose();
-                  router.push("/hq/attendance");
-                }}
-                className="w-full flex items-center justify-between px-3 py-2 rounded-lg text-[13px] text-slate-600 hover:bg-slate-200/50 font-medium"
+                onClick={() => setActiveTab("work-policy")}
+                className={navBtnClass("work-policy")}
               >
                 <span className="flex items-center gap-2.5">
-                  <span className="text-slate-400 text-sm">⚡</span>
+                  <span className="text-slate-400 text-sm">⚙️</span>
                   <span>근무 정책 · 승인</span>
                 </span>
-                <span className="text-[11px] text-slate-400">↗</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveTab("overtime-comp")}
+                className={navBtnClass("overtime-comp")}
+              >
+                <span className="flex items-center gap-2.5">
+                  <span className="text-slate-400 text-sm">🔥</span>
+                  <span>초과 근무 보상</span>
+                </span>
               </button>
               <button
                 type="button"
@@ -2024,49 +2033,84 @@ export default function HqSettingsModal({
             )}
 
             {activeTab === "work-type" && (
-              <div className="space-y-5">
+              <HqWorkTypeSettingsSection
+                settings={settings}
+                members={members}
+                canEdit={canEdit}
+                saving={saving}
+                onSaveExtra={async (nextExtra, toastMessage) => {
+                  await savePartialSettings(
+                    {
+                      extra_settings: {
+                        ...settings.extra_settings,
+                        ...nextExtra,
+                      },
+                    },
+                    toastMessage
+                  );
+                }}
+                onNavigateTab={(tab) => setActiveTab(tab)}
+              />
+            )}
+
+            {activeTab === "work-policy" && (
+              <div className="space-y-6">
                 <div>
                   <h2 className="text-[22px] font-extrabold text-slate-900">
-                    근무 유형
+                    근무 정책 · 승인
                   </h2>
                   <p className="text-xs text-slate-400 mt-1">
-                    출판·연구 본부에서 운영 중인 표준 및 유연 근무 유형입니다.
+                    출장·외근·원격·연장·휴일·야간 근무 등 근무 항목별 승인 정책을 관리합니다.
                   </p>
                 </div>
-                <div className="space-y-2.5 text-xs">
-                  {[
-                    {
-                      title: "기본 9시 (고정 출퇴근)",
-                      desc: "09:00 ~ 18:00 (휴게 1시간 · 주 40시간 기본)",
-                      badge: "기본",
-                    },
-                    {
-                      title: "시차출퇴근제 (8시 / 10시 / 11시)",
-                      desc: "출근 시각 선택 후 일 8시간 소정근로 수행",
-                      badge: "유연근무",
-                    },
-                    {
-                      title: "재택 원고 집필 · 외부 인쇄소 감리",
-                      desc: "사전 승인 또는 출퇴근 체크 시 위치 메모 기록",
-                      badge: "원격/외근",
-                    },
-                  ].map((w) => (
-                    <div
-                      key={w.title}
-                      className="p-4 rounded-2xl border border-slate-200 flex items-center justify-between"
-                    >
-                      <div>
-                        <div className="font-bold text-slate-900 text-[13px]">
-                          {w.title}
-                        </div>
-                        <div className="text-slate-400 mt-0.5">{w.desc}</div>
-                      </div>
-                      <span className="px-2.5 py-1 rounded bg-slate-100 text-slate-700 font-bold">
-                        {w.badge}
-                      </span>
+                <div className="p-5 rounded-2xl border border-slate-200 flex flex-wrap items-center justify-between gap-3 text-xs">
+                  <div>
+                    <div className="font-bold text-slate-900 text-sm">
+                      근무 항목별 승인 · 참조 결재선 설정
                     </div>
-                  ))}
+                    <p className="text-slate-500 mt-0.5">
+                      승인 정책 관리 &gt; [근무] 탭의 11개 정책과 실시간으로 연동됩니다.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setApprovalPolicySubCat("work");
+                      setActiveTab("approval-policy");
+                    }}
+                    className="px-4 py-2 rounded-xl bg-slate-900 text-white font-bold"
+                  >
+                    근무 승인 정책 열기 →
+                  </button>
                 </div>
+                <StepNavFooter
+                  prevLabel="근무 유형"
+                  onPrev={() => setActiveTab("work-type")}
+                  nextLabel="초과 근무 보상"
+                  onNext={() => setActiveTab("overtime-comp")}
+                />
+              </div>
+            )}
+
+            {activeTab === "overtime-comp" && (
+              <div className="space-y-6">
+                <div>
+                  <h2 className="text-[22px] font-extrabold text-slate-900">
+                    초과 근무 보상
+                  </h2>
+                  <p className="text-xs text-slate-400 mt-1">
+                    연장·야간·휴일 근무에 대한 수당 정산 및 보상휴가 부여 기준을 관리합니다.
+                  </p>
+                </div>
+                <div className="p-5 rounded-2xl border border-slate-200 text-xs text-slate-500 leading-relaxed">
+                  근로기준법 제56조 및 제57조에 따라 초과 근무 시 가산 수당 지급 또는 보상휴가 부여 정책을 설정할 수 있습니다.
+                </div>
+                <StepNavFooter
+                  prevLabel="근무 정책 · 승인"
+                  onPrev={() => setActiveTab("work-policy")}
+                  nextLabel="근무지"
+                  onNext={() => setActiveTab("work-place")}
+                />
               </div>
             )}
 

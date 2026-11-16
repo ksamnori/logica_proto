@@ -16,6 +16,12 @@ import {
   uploadHqReceiptFile,
 } from "@/lib/hq/clientApi";
 import { DEFAULT_DOC_FOLDERS } from "@/lib/hq/defaultApprovalPolicies";
+import {
+  calcWeeklyWorkHours,
+  DEFAULT_WORK_RULES,
+  formatHmToKoreanAmPm,
+  patternShortBadge,
+} from "@/lib/hq/defaultWorkRules";
 import type {
   HqAwardItem,
   HqCareerItem,
@@ -3216,19 +3222,39 @@ export default function HqMemberProfileModal({
             <Field label="근무 스케줄 명칭">
               <select
                 value={workForm.work_schedule_type}
-                onChange={(e) =>
+                onChange={(e) => {
+                  const nextName = e.target.value;
+                  const activeRules = (
+                    companyExtra?.work_rules &&
+                    companyExtra.work_rules.length > 0
+                      ? companyExtra.work_rules
+                      : DEFAULT_WORK_RULES
+                  ).filter((r) => !r.is_hidden);
+                  const matched = activeRules.find((r) => r.name === nextName);
                   setWorkForm({
                     ...workForm,
-                    work_schedule_type: e.target.value,
-                  })
-                }
+                    work_schedule_type: nextName,
+                    work_schedule_mode: matched
+                      ? patternShortBadge(matched.pattern_type)
+                      : workForm.work_schedule_mode,
+                    weekly_work_hours: matched
+                      ? String(calcWeeklyWorkHours(matched))
+                      : workForm.weekly_work_hours,
+                  });
+                }}
                 className="w-full px-3 py-2 rounded-xl border border-slate-300 font-bold"
               >
-                <option value="기본 9시">기본 9시 (09:00 ~ 18:00)</option>
-                <option value="기본 10시">기본 10시 (10:00 ~ 19:00)</option>
-                <option value="시차출퇴근제">시차출퇴근제 (08~10시 자율출근)</option>
-                <option value="선택적 근로시간제">선택적 근로시간제</option>
-                <option value="재택·원격 혼합근무">재택·원격 혼합근무</option>
+                {(companyExtra?.work_rules && companyExtra.work_rules.length > 0
+                  ? companyExtra.work_rules
+                  : DEFAULT_WORK_RULES
+                )
+                  .filter((r) => !r.is_hidden)
+                  .map((r) => (
+                    <option key={r.id} value={r.name}>
+                      {r.name} (출근 {formatHmToKoreanAmPm(r.start_time)} · 주{" "}
+                      {calcWeeklyWorkHours(r)}시간)
+                    </option>
+                  ))}
               </select>
             </Field>
             <div className="grid grid-cols-2 gap-3">

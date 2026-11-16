@@ -4,6 +4,7 @@ import {
   DEFAULT_APPROVAL_TEMPLATES,
   DEFAULT_DOC_FOLDERS,
 } from "./defaultApprovalPolicies";
+import { DEFAULT_WORK_RULES } from "./defaultWorkRules";
 import type {
   HqCompanySettings,
   HqEmpNoPolicy,
@@ -512,6 +513,7 @@ export const DEFAULT_HQ_COMPANY_SETTINGS: HqCompanySettings = {
     approval_templates: DEFAULT_APPROVAL_TEMPLATES,
     approval_labels: [],
     substitute_approvals: [],
+    work_rules: DEFAULT_WORK_RULES,
   },
 };
 

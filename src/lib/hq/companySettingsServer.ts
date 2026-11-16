@@ -103,6 +103,11 @@ export function normalizeCompanySettings(raw: any): HqCompanySettings {
       approval_templates: Array.isArray(incomingExtra.approval_templates)
         ? incomingExtra.approval_templates
         : def.extra_settings.approval_templates,
+      work_rules:
+        Array.isArray(incomingExtra.work_rules) &&
+        incomingExtra.work_rules.length > 0
+          ? incomingExtra.work_rules
+          : def.extra_settings.work_rules,
       info_approval_policy: {
         ...def.extra_settings.info_approval_policy,
         ...(incomingExtra.info_approval_policy || {}),

@@ -633,6 +633,78 @@ export interface HqSubstituteApprovalRule {
   is_active: boolean;
 }
 
+export interface HqWorkRuleAssignedMember {
+  id: string;
+  name: string;
+  job_label?: string;
+  avatar_bg?: string;
+  applied_from_label: string; // 예: "2023년 1월 1일 부터 적용 중" | "입사일 부터 적용 중"
+  status: "ACTIVE" | "SCHEDULED" | "PAST";
+}
+
+export interface HqWorkRuleItem {
+  id: string;
+  name: string;
+  is_default?: boolean;
+  is_hidden?: boolean;
+  // 1) 기본 설정
+  pattern_type: "고정 근무 유형" | "시차 출퇴근 유형" | "선택적 근로시간 유형";
+  worker_type: "통상 근로자" | "단시간 근로자";
+  cycle_start_day: "월요일" | "일요일";
+  work_days: string[]; // ["월", "화", "수", "목", "금"]
+  paid_rest_days: string[]; // ["일"]
+  start_time: string; // "08:30" | "09:00" | "09:30" | "10:00" 등 24시간 표기
+  daily_work_hours: number; // 예: 4 또는 8
+  daily_work_minutes: number; // 예: 0 또는 30
+  break_start_1?: string; // "12:00" | "13:00"
+  break_end_1?: string; // "13:00" | "14:00"
+  break_start_2?: string;
+  break_end_2?: string;
+  custom_leave_day_hours?: boolean;
+  leave_include_break_mode:
+    | "구성원이 사용 시 선택"
+    | "휴게 시간 제외"
+    | "휴게 시간 포함";
+  leave_break_duration: "30분" | "1시간" | "1시간 30분" | "2시간";
+  // 2) 적용 구성원
+  assigned_members: HqWorkRuleAssignedMember[];
+  past_assigned_count?: number;
+  // 3) 초과 근무
+  overtime_cycle_unit: "월 단위" | "주 단위";
+  overtime_cycle_day: string; // "매월 1일" 등
+  overtime_allow_mode:
+    | "한도 없이 허용"
+    | "주 12시간 한도 내 허용"
+    | "허용 안 함";
+  split_within_statutory_overtime: boolean;
+  overtime_input_unit: "제한 안 함" | "10분 단위" | "30분 단위" | "1시간 단위";
+  overtime_min_duration: "제한 안 함" | "30분 이상" | "1시간 이상";
+  night_work_allow_mode: "한도 없이 허용" | "허용 안 함";
+  holiday_work_allow_mode: "한도 없이 허용" | "허용 안 함";
+  // 4) 실시간 근무 기록
+  realtime_enabled: boolean;
+  grace_minutes: number; // 0 | 5 | 10 | 15 | 30
+  reflect_checkin_on_checkout: boolean;
+  allow_early_checkin: boolean;
+  allow_manual_break_log: boolean;
+  missing_checkout_policy:
+    | "출근 기록만 남김"
+    | "정시 퇴근 시각으로 자동 기록"
+    | "기록 삭제";
+  default_checkout_mode:
+    | "현재 시각으로 퇴근을 우선"
+    | "정시 퇴근 시각을 우선";
+  checkout_confirm_mode:
+    | "항상 확인 후 퇴근하도록 제한"
+    | "확인 없이 즉시 퇴근";
+  // 5) 자동 근무 기록
+  auto_record_enabled: boolean;
+  // 6) 고급 설정
+  reflect_realtime_to_work_hours: boolean;
+  allow_exceed_max_52h: boolean;
+  allow_insufficient_break: boolean;
+}
+
 export interface HqCompanyExtraSettings {
   doc_prefix_cert?: string;
   doc_prefix_approval?: string;
@@ -662,6 +734,7 @@ export interface HqCompanyExtraSettings {
   approval_templates?: HqApprovalTemplate[];
   approval_labels?: HqCustomApprovalLabel[];
   substitute_approvals?: HqSubstituteApprovalRule[];
+  work_rules?: HqWorkRuleItem[];
 }
 
 export interface HqCompanySettings {
