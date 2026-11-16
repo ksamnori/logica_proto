@@ -14,7 +14,7 @@ import ViewerSidebar from "@/components/exam/ViewerSidebar";
 import ViewerToolbar from "@/components/exam/ViewerToolbar";
 
 import {
-  ADMISSION_HEADER_URL, LOGO_FOOTER_LEFT_URL, LOGO_FOOTER_RIGHT_URL,
+  ADMISSION_HEADER_URL, QUARTERLY_HEADER_URL, LOGO_FOOTER_LEFT_URL, LOGO_FOOTER_RIGHT_URL,
   formatExamDate, getCleanUrl, formatQText, buildHeaderHtml, buildFooterHtml
 } from "@/utils/examRenderUtils";
 
@@ -60,8 +60,8 @@ const normalizeHiddenImgKey = (raw: any): string => {
   return getRealId(s);
 };
 
-// 🌟 진단평가 문항/제목에서 학년·학기(예: "초등 5-2", "중등 1-1") 자동 추출 헬퍼
-const extractDiagnosticBadge = (questionsList: any[], fallbackTitle: string = ""): string => {
+// 🌟 진단평가·분기평가 문항/제목에서 학년·학기(예: "초등 5-2", "초등 4-1 MAX", "중등 1-1") 자동 추출 헬퍼
+const extractDiagnosticBadge = (questionsList: any[], fallbackTitle: string = "", includeQuarterlyLevel: boolean = false): string => {
   const sources: string[] = [];
   if (fallbackTitle) sources.push(fallbackTitle);
   (questionsList || []).forEach((q: any) => {
@@ -70,19 +70,28 @@ const extractDiagnosticBadge = (questionsList: any[], fallbackTitle: string = ""
     if (q.source_book_name) sources.push(String(q.source_book_name));
     if (q.book_name) sources.push(String(q.book_name));
   });
+  let baseBadge = "";
   for (const s of sources) {
     const mMid = s.match(/중(?:등)?\s*([1-3]-[1-2])/);
-    if (mMid) return `중등 ${mMid[1]}`;
+    if (mMid) { baseBadge = `중등 ${mMid[1]}`; break; }
     const mMidCompact = s.match(/중(?:등)?\s*([1-3])([1-2])(?:[^0-9]|$)/);
-    if (mMidCompact) return `중등 ${mMidCompact[1]}-${mMidCompact[2]}`;
+    if (mMidCompact) { baseBadge = `중등 ${mMidCompact[1]}-${mMidCompact[2]}`; break; }
     const mMid7 = s.match(/(?:^|[^0-9])7-([1-2])(?:[^0-9]|$)/);
-    if (mMid7) return `중등 1-${mMid7[1]}`;
+    if (mMid7) { baseBadge = `중등 1-${mMid7[1]}`; break; }
+    const mElemKor = s.match(/([1-6])\s*학년\s*([1-2])\s*학기/);
+    if (mElemKor) { baseBadge = `초등 ${mElemKor[1]}-${mElemKor[2]}`; break; }
     const mElem = s.match(/([1-6]-[1-2])/);
-    if (mElem) return `초등 ${mElem[1]}`;
+    if (mElem) { baseBadge = `초등 ${mElem[1]}`; break; }
     const mLevelCompact = s.match(/(?:^|[^0-9A-Za-z])(?:[UMATHumath]|초(?:등)?)\s*([1-6])([1-2])(?:[^0-9]|$)/);
-    if (mLevelCompact) return `초등 ${mLevelCompact[1]}-${mLevelCompact[2]}`;
+    if (mLevelCompact) { baseBadge = `초등 ${mLevelCompact[1]}-${mLevelCompact[2]}`; break; }
   }
-  return "";
+  if (includeQuarterlyLevel && baseBadge) {
+    for (const s of sources) {
+      if (/(?:^|[^a-zA-Z])max(?:[^a-zA-Z]|$)|맥스/i.test(s)) return `${baseBadge} MAX`;
+      if (/(?:^|[^a-zA-Z])pro(?:[^a-zA-Z]|$)|프로/i.test(s)) return `${baseBadge} PRO`;
+    }
+  }
+  return baseBadge;
 };
 
 // 🌟 시험지 저장 시 모든 문항의 taxonomy_id를 기반으로 주요 학년·학기(major_grade)와
@@ -721,6 +730,7 @@ export default function ExamViewerPage() {
         let cNum = '#175b6a', cTit = '#002864', cLin = '#94a3b8', eDate = '';
         let userMergedTextQuestions: any[][] = [];
 
+        let isBulkQuarterlyLockedInDb = false;
         if (item.type === 'hw') {
           title = item.examTitle || '과제 프린트';
           badge = item.examSubTitle || '';
@@ -752,6 +762,7 @@ export default function ExamViewerPage() {
             if (s.lineColor) cLin = s.lineColor;
             if (s.examDate) eDate = s.examDate;
             if (s.userMergedTextQuestions) userMergedTextQuestions = s.userMergedTextQuestions;
+            if (s.isQuarterlyLock) isBulkQuarterlyLockedInDb = true;
             if (Array.isArray(s.hiddenImageQuestions)) {
               hiddenImageSetRef.current = new Set(s.hiddenImageQuestions.map(normalizeHiddenImgKey));
             } else {
@@ -854,52 +865,70 @@ export default function ExamViewerPage() {
           targetCols = chunkColumnsByHeight(groups, availableHeightFirst - SAFETY_MARGIN_PX, maxPerColumn, bulkColGapPx, initialCol);
         }
 
+        const isBulkDiag = lType === '입학테스트' || lType === '진단평가';
+        const isBulkQuarterly = (lType === '분기평가' || lType === '분기테스트') && (isBulkQuarterlyLockedInDb || groups.length === 30);
+        const isBulkSpecial = isBulkDiag || isBulkQuarterly;
+        const bulkHeaderLogoUrl = isBulkQuarterly ? QUARTERLY_HEADER_URL : ADMISSION_HEADER_URL;
+        const bulkExamKindLabel = isBulkQuarterly ? '분기평가' : '진단평가';
+
         const pages = [];
-        if (initialCol === 1) {
+        if (isBulkSpecial) {
+          const specialCols = [];
+          let si = 0, sqNum = 1;
+          while (si < groups.length) {
+            if ((sqNum >= 1 && sqNum <= 6) || (sqNum >= 8 && sqNum <= 9) || (sqNum >= 22 && sqNum <= 25)) {
+              if (si + 1 < groups.length) { specialCols.push([groups[si], groups[si + 1]]); si += 2; sqNum += 2; }
+              else { specialCols.push([groups[si]]); si += 1; sqNum += 1; }
+            } else {
+              specialCols.push([groups[si]]); si += 1; sqNum += 1;
+            }
+          }
+          for (let j = 0; j < specialCols.length; j += 2) pages.push({ left: specialCols[j], right: specialCols[j + 1] || [] });
+        } else if (initialCol === 1) {
           targetCols.forEach(c => pages.push({ left: c, right: null }));
         } else {
           for (let j = 0; j < targetCols.length; j += 2) pages.push({ left: targetCols[j], right: targetCols[j+1] || [] });
         }
 
-        const isBulkDiag = lType === '입학테스트' || lType === '진단평가';
-        if (isBulkDiag && (!badge || badge === '공통 과정')) {
-          badge = extractDiagnosticBadge(orderedQuestions, title) || badge;
+        if (isBulkSpecial && (!badge || badge === '공통 과정')) {
+          badge = extractDiagnosticBadge(orderedQuestions, title, isBulkQuarterly) || badge;
         }
 
         pages.forEach((pageCols, pIdx) => {
           const showTitle = !(initialTitleMode === 'first' && pIdx > 0);
-          const hHtml = isBulkDiag ? `
+          const hHtml = isBulkSpecial ? `
             <div class="flex justify-between items-end border-b-[2px] border-slate-400 pb-3 shrink-0 w-full relative z-10 bg-white">
-                <img src="${ADMISSION_HEADER_URL}" class="h-[104px] object-contain -mt-5" onerror="this.outerHTML='<h1 class=\\'text-4xl font-bold text-brand -mt-2\\'>진단평가</h1>'">
+                <img src="${bulkHeaderLogoUrl}" class="h-[104px] object-contain -mt-5" onerror="this.outerHTML='<h1 class=\\'text-4xl font-bold text-brand -mt-2\\'>${bulkExamKindLabel}</h1>'">
                 <div class="mb-1"><div class="flex flex-col items-end gap-1">${eDate ? `<div class="text-[13px] font-bold text-slate-500">${formatExamDate(eDate)}</div>` : ''}${badge ? `<div class="text-slate-700 font-bold text-[14px] px-3 py-1 rounded-[4px] border border-slate-400 bg-white leading-tight">${badge}</div>` : ''}</div></div>
             </div>` : buildHeaderHtml(badge, title, showTitle, initialTmpl, eDate, {
               isFirstPage: pIdx === 0,
               depth5Scope: bulkDepth5Scope,
               questionCount: groups.length,
             });
-          const fHtml = isBulkDiag ? `
+          const fHtml = isBulkSpecial ? `
             <div class="border-t-[2px] border-slate-400 pt-4 flex justify-between items-end h-[40px] shrink-0 bg-white w-full relative z-20">
                 <img src="${LOGO_FOOTER_LEFT_URL}" class="h-[16px] object-contain absolute left-0 bottom-0" onerror="this.outerHTML='<span class=\\'font-lexend font-black text-black text-sm absolute left-0 bottom-0\\'>LOGICA</span>'">
                 <div class="absolute left-0 right-0 bottom-0 flex justify-center items-baseline gap-6 pb-[1px] pointer-events-none">
                     <div class="w-[150px] text-right text-[14px] font-semibold text-slate-800 whitespace-nowrap">${badge}</div>
                     <div class="text-[18px] text-slate-900 font-semibold whitespace-nowrap text-center tracking-wide">${pIdx + 1} / ${pages.length}</div>
-                    <div class="w-[150px] text-left text-[14px] font-semibold text-slate-800 whitespace-nowrap">진단평가</div>
+                    <div class="w-[150px] text-left text-[14px] font-semibold text-slate-800 whitespace-nowrap">${bulkExamKindLabel}</div>
                 </div>
                 <img src="${LOGO_FOOTER_RIGHT_URL}" class="h-[22px] object-contain absolute right-0 bottom-0" onerror="this.outerHTML='<span class=\\'font-bold text-[#006699] text-sm absolute right-0 bottom-0\\'>천종현수학연구소</span>'">
             </div>` : buildFooterHtml(badge, pIdx, pages.length, title, initialTmpl, eDate);
           
           const pageAvailH = (pIdx === 0 ? availableHeightFirst : availableHeightOther) - SAFETY_MARGIN_PX;
+          const activeBulkGridClass = isBulkSpecial ? 'exam-grid-admission' : bulkGridClass;
           let rHtml = '';
-          if (isBulkSingleColumn) {
+          if (!isBulkSpecial && isBulkSingleColumn) {
             rHtml = '';
           } else if (pageCols.right === null) {
             const h = showTitle ? availableHeightFirst : availableHeightOther;
             const lines = Array.from({ length: Math.ceil((h || 1587)/28) + 1 }).map(() => `<div style="height: 28px; border-bottom: 1px solid #e2e8f0; box-sizing: border-box;"></div>`).join('');
             rHtml = `<div class="w-full h-full min-w-0 flex flex-col pl-6" style="border-left: 1px dashed #cbd5e1; overflow: hidden;"><div class="text-[13px] font-bold text-slate-400 mb-2 tracking-widest">풀 이</div><div class="flex-1" style="overflow: hidden;">${lines}</div></div>`;
           } else {
-            rHtml = generateLocalColHtml(pageCols.right, cNum, isBulkDiag, initialCol, initialSplit, pageAvailH);
+            rHtml = generateLocalColHtml(pageCols.right, cNum, isBulkSpecial, isBulkSpecial ? 2 : initialCol, isBulkSpecial ? 4 : initialSplit, pageAvailH);
           }
-          finalBulkHtml += `<div class="a3-page" style="--color-num:${cNum}; --color-title:${cTit}; --color-line:${cLin};">${hHtml}<div class="${bulkGridClass} pt-6 pb-6">${generateLocalColHtml(pageCols.left, cNum, isBulkDiag, initialCol, initialSplit, pageAvailH)}${rHtml}</div>${fHtml}</div>`;
+          finalBulkHtml += `<div class="a3-page" style="--color-num:${cNum}; --color-title:${cTit}; --color-line:${cLin};">${hHtml}<div class="${activeBulkGridClass} pt-6 pb-6">${generateLocalColHtml(pageCols.left, cNum, isBulkSpecial, isBulkSpecial ? 2 : initialCol, isBulkSpecial ? 4 : initialSplit, pageAvailH)}${rHtml}</div>${fHtml}</div>`;
         });
 
         if (pages.length % 2 !== 0) {
@@ -1033,8 +1062,14 @@ export default function ExamViewerPage() {
         });
 
         let groups = Array.from(groupMap.values());
+        const parsedDbSettingsObj = dbLayoutSettings
+          ? (typeof dbLayoutSettings === 'string' ? (() => { try { return JSON.parse(dbLayoutSettings); } catch { return null; } })() : dbLayoutSettings)
+          : null;
         const isDiag = lType === "입학테스트" || lType === "진단평가";
-        if (isDiag && userMergedTextQuestions.length === 0 && orderedQuestions.length > 0) {
+        const isQuarterlyCandidate =
+          (lType === "분기평가" || lType === "분기테스트") &&
+          (Boolean(parsedDbSettingsObj?.isQuarterlyLock) || groups.length === 30 || orderedQuestions.length >= 30);
+        if ((isDiag || isQuarterlyCandidate) && userMergedTextQuestions.length === 0 && orderedQuestions.length > 0) {
           const mergedBuilt = buildMergedQuestionGroups(orderedQuestions, true, true);
           groups = mergedBuilt.map((mg: any, idx: number) => ({
             id: mg.id,
@@ -1059,8 +1094,8 @@ export default function ExamViewerPage() {
         let initialCol = 2, initialSplit = 4, initialTitleMode = 'all', initialTmpl = 'basic1';
         let cNum = '#175b6a', cTit = '#002864', cLin = '#94a3b8', eDate = '';
 
-        if (dbLayoutSettings) {
-          const s = typeof dbLayoutSettings === 'string' ? JSON.parse(dbLayoutSettings) : dbLayoutSettings;
+        if (parsedDbSettingsObj) {
+          const s = parsedDbSettingsObj;
           if (s.column) initialCol = parseInt(s.column);
           if (s.split) initialSplit = parseInt(s.split);
           if (s.titleMode) initialTitleMode = s.titleMode;
@@ -1079,17 +1114,27 @@ export default function ExamViewerPage() {
         }
 
         const isDiagExam = lType === '입학테스트' || lType === '진단평가';
+        const isQuarterlySpecialExam =
+          (lType === '분기평가' || lType === '분기테스트') &&
+          (Boolean(parsedDbSettingsObj?.isQuarterlyLock) || groups.length === 30);
+        const isSpecialLockExam = isDiagExam || isQuarterlySpecialExam;
+
         if (isDiagExam) {
           lType = '입학테스트';
           if (!badge || badge === '공통 과정') {
-            badge = extractDiagnosticBadge(orderedQuestions, title) || badge;
+            badge = extractDiagnosticBadge(orderedQuestions, title, false) || badge;
+          }
+        } else if (isQuarterlySpecialExam) {
+          lType = '분기평가';
+          if (!badge || badge === '공통 과정') {
+            badge = extractDiagnosticBadge(orderedQuestions, title, true) || badge;
           }
         }
 
         setExamTitle(title);
         setDisplayBadge(badge);
         setLayoutType(lType);
-        setIsAdmissionLock(isDiagExam);
+        setIsAdmissionLock(isSpecialLockExam);
         if (wWeek) setTestWeek(wWeek);
         if (wGrade) setWeeklyTargetGrade(wGrade);
 
@@ -1099,16 +1144,16 @@ export default function ExamViewerPage() {
         hasUnsavedChangesRef.current = false; 
 
         // 비동기 단원 범위 계산 중에도 문항 배열(groups)이 즉시 참조되도록 먼저 할당하여 빈 배열 저장 사고 원천 차단
-        examStateRef.current = { groups, examTitle: title, displayBadge: badge, depth5Scope: "" };
+        examStateRef.current = { groups, examTitle: title, displayBadge: badge, layoutType: lType, examDate: eDate, depth5Scope: "" };
         const depth5Scope = await computeHeaderDepth5Scope(groups);
-        examStateRef.current = { groups, examTitle: title, displayBadge: badge, depth5Scope };
+        examStateRef.current = { groups, examTitle: title, displayBadge: badge, layoutType: lType, examDate: eDate, depth5Scope };
 
         Promise.all([
           document.fonts.load("400 17px 'NanumSquare'"),
           document.fonts.load("700 17px 'NanumSquare'"),
           document.fonts.load("normal 42px 'CJU_Medium'")
         ]).catch(() => {}).finally(() => {
-          if (isDiagExam) renderAdmissionTestPages();
+          if (isSpecialLockExam) renderAdmissionTestPages(eDate, lType);
           else remeasureAndRender(initialCol, initialSplit, initialTitleMode, initialTmpl, eDate, title, badge);
         });
 
@@ -1229,8 +1274,11 @@ export default function ExamViewerPage() {
         let initialCol = 2, initialSplit = 4, initialTitleMode = 'all', initialTmpl = 'basic1';
         let cNum = '#175b6a', cTit = '#002864', cLin = '#94a3b8', eDate = '';
 
-        if (dbLayoutSettings) {
-          const s = typeof dbLayoutSettings === 'string' ? JSON.parse(dbLayoutSettings) : dbLayoutSettings;
+        const parsedNewDbSettings = dbLayoutSettings
+          ? (typeof dbLayoutSettings === 'string' ? (() => { try { return JSON.parse(dbLayoutSettings); } catch { return null; } })() : dbLayoutSettings)
+          : null;
+        if (parsedNewDbSettings) {
+          const s = parsedNewDbSettings;
           if (s.column) initialCol = parseInt(s.column);
           if (s.split) initialSplit = parseInt(s.split);
           if (s.titleMode) initialTitleMode = s.titleMode;
@@ -1261,6 +1309,15 @@ export default function ExamViewerPage() {
             title = '새로운 테스트';
           }
         }
+        const sessionTestCat = sessionStorage.getItem('testCategory') || '';
+        const isQuarterlySpecialExam =
+          (lType === '분기평가' || lType === '분기테스트') &&
+          (sessionTestCat === '분기평가' ||
+            sessionTestCat === '분기테스트' ||
+            Boolean(parsedNewDbSettings?.isQuarterlyLock) ||
+            groups.length === 30);
+        const isSpecialLockExam = isDiagExam || isQuarterlySpecialExam;
+
         if (isDiagExam) {
           lType = '입학테스트';
           if (!title || title === '새로운 테스트' || title === '시험지') {
@@ -1270,14 +1327,26 @@ export default function ExamViewerPage() {
             const majorGradeSession = sessionStorage.getItem('majorGrade') || '';
             badge = (majorGradeSession && majorGradeSession !== '공통 과정')
               ? majorGradeSession
-              : (extractDiagnosticBadge(questions || [], title) || badge);
+              : (extractDiagnosticBadge(questions || [], title, false) || badge);
+          }
+        } else if (isQuarterlySpecialExam) {
+          lType = '분기평가';
+          if (!title || title === '새로운 테스트' || title === '시험지') {
+            title = '분기평가';
+          }
+          if (!badge || badge === '공통 과정') {
+            badge =
+              extractDiagnosticBadge(questions || [], title, true) ||
+              (sessionStorage.getItem('majorGrade') && sessionStorage.getItem('majorGrade') !== '공통 과정'
+                ? sessionStorage.getItem('majorGrade')!
+                : badge);
           }
         }
 
         setExamTitle(title);
         setDisplayBadge(badge);
         setLayoutType(lType);
-        setIsAdmissionLock(isDiagExam);
+        setIsAdmissionLock(isSpecialLockExam);
         if (wWeek) setTestWeek(wWeek);
         if (wGrade) setWeeklyTargetGrade(wGrade);
 
@@ -1286,16 +1355,16 @@ export default function ExamViewerPage() {
 
         hasUnsavedChangesRef.current = isNew;
 
-        examStateRef.current = { groups, examTitle: title, displayBadge: badge, depth5Scope: "" };
+        examStateRef.current = { groups, examTitle: title, displayBadge: badge, layoutType: lType, examDate: eDate, depth5Scope: "" };
         const depth5Scope = await computeHeaderDepth5Scope(groups);
-        examStateRef.current = { groups, examTitle: title, displayBadge: badge, depth5Scope };
+        examStateRef.current = { groups, examTitle: title, displayBadge: badge, layoutType: lType, examDate: eDate, depth5Scope };
 
         Promise.all([
           document.fonts.load("400 17px 'NanumSquare'"),
           document.fonts.load("700 17px 'NanumSquare'"),
           document.fonts.load("normal 42px 'CJU_Medium'")
         ]).catch(() => {}).finally(() => {
-          if (isDiagExam) renderAdmissionTestPages();
+          if (isSpecialLockExam) renderAdmissionTestPages(eDate, lType);
           else remeasureAndRender(initialCol, initialSplit, initialTitleMode, initialTmpl, eDate, title, badge);
         });
 
@@ -1429,7 +1498,7 @@ export default function ExamViewerPage() {
             subHtml += `<div class="w-full min-w-0 math-protect ${isCompactSingleCol ? 'mb-1.5' : 'mb-3'}"><div class="text-[17px] leading-[1.9] text-black tracking-wide w-full font-semibold text-justify">${formatQText(common)}</div></div>`;
         }
 
-        const finalScore = g.questions[0].assigned_score || (isAdmissionLock ? getDiagnosticMainScore(g.displayNum ? g.displayNum - 1 : 0) : null);
+        const finalScore = g.questions[0].assigned_score || (isAdmCol ? getDiagnosticMainScore(g.displayNum ? g.displayNum - 1 : 0) : null);
         g.questions.forEach((q: any, sIdx: number) => {
             const textToRender = (isGroupMerged && common && remainders[sIdx] !== undefined) ? remainders[sIdx] : (q.question || q.text_question || '');
             subHtml += buildSubQuestionItemHtml(q, sIdx, textToRender, hiddenImageSetRef.current, isAdmCol, col, split, isGroupMerged);
@@ -1611,10 +1680,14 @@ export default function ExamViewerPage() {
     (window as any).__examRenderReady = true;
   };
 
-  const renderAdmissionTestPages = async (eDateOverride?: string) => {
+  const renderAdmissionTestPages = async (eDateOverride?: string, examTypeOverride?: string) => {
     if (!examStateRef.current || !examContainerRef.current) return;
     (window as any).__examRenderReady = false;
-    const { groups, examTitle, displayBadge } = examStateRef.current;
+    const { groups, displayBadge } = examStateRef.current;
+    const effectiveType = examTypeOverride || examStateRef.current.layoutType || layoutType;
+    const isQuarterly = effectiveType === '분기평가' || effectiveType === '분기테스트';
+    const headerLogoUrl = isQuarterly ? QUARTERLY_HEADER_URL : ADMISSION_HEADER_URL;
+    const examKindLabel = isQuarterly ? '분기평가' : '진단평가';
     
     const cols = [];
     let i = 0, qNum = 1;
@@ -1635,12 +1708,12 @@ export default function ExamViewerPage() {
 
     pages.forEach((pageCols, pIdx) => {
         const courseBadge = displayBadge ? `<div class="text-slate-700 font-bold text-[14px] px-3 py-1 rounded-[4px] border border-slate-400 bg-white leading-tight">${displayBadge}</div>` : '';
-        const effectiveDate = eDateOverride !== undefined ? eDateOverride : examDate;
+        const effectiveDate = eDateOverride !== undefined ? eDateOverride : (examStateRef.current.examDate ?? examDate);
         const dateHtml = effectiveDate ? `<div class="text-[13px] font-bold text-slate-500">${formatExamDate(effectiveDate)}</div>` : '';
         const topRightStack = (dateHtml || courseBadge) ? `<div class="flex flex-col items-end gap-1">${dateHtml}${courseBadge}</div>` : '';
         const hHtml = `
             <div class="flex justify-between items-end border-b-[2px] border-slate-400 pb-3 shrink-0 w-full relative z-10 bg-white">
-                <img src="${ADMISSION_HEADER_URL}" class="h-[104px] object-contain -mt-5" onerror="this.outerHTML='<h1 class=\\'text-4xl font-bold text-brand -mt-2\\'>진단평가</h1>'">
+                <img src="${headerLogoUrl}" class="h-[104px] object-contain -mt-5" onerror="this.outerHTML='<h1 class=\\'text-4xl font-bold text-brand -mt-2\\'>${examKindLabel}</h1>'">
                 <div class="mb-1">${topRightStack}</div>
             </div>`;
 
@@ -1650,7 +1723,7 @@ export default function ExamViewerPage() {
                 <div class="absolute left-0 right-0 bottom-0 flex justify-center items-baseline gap-6 pb-[1px] pointer-events-none">
                     <div class="w-[150px] text-right text-[14px] font-semibold text-slate-800 whitespace-nowrap">${displayBadge}</div>
                     <div class="text-[18px] text-slate-900 font-semibold whitespace-nowrap text-center tracking-wide">${pIdx + 1} / ${pages.length}</div>
-                    <div class="w-[150px] text-left text-[14px] font-semibold text-slate-800 whitespace-nowrap">진단평가</div>
+                    <div class="w-[150px] text-left text-[14px] font-semibold text-slate-800 whitespace-nowrap">${examKindLabel}</div>
                 </div>
                 <img src="${LOGO_FOOTER_RIGHT_URL}" class="h-[22px] object-contain absolute right-0 bottom-0" onerror="this.outerHTML='<span class=\\'font-bold text-[#006699] text-sm absolute right-0 bottom-0\\'>천종현수학연구소</span>'">
             </div>`;
@@ -1668,7 +1741,7 @@ export default function ExamViewerPage() {
                     subHtml += `<div class="w-full min-w-0 math-protect mb-3"><div class="text-[17px] leading-[1.9] text-black tracking-wide w-full font-semibold text-justify">${formatQText(common)}</div></div>`;
                 }
 
-                const finalScore = g.questions[0].assigned_score || (isAdmissionLock ? getDiagnosticMainScore(g.displayNum ? g.displayNum - 1 : 0) : null);
+                const finalScore = g.questions[0].assigned_score || getDiagnosticMainScore(globalQNum - 1);
                 g.questions.forEach((q: any, sIdx: number) => {
                     const textToRender = (isGroupMerged && common && remainders[sIdx] !== undefined) ? remainders[sIdx] : (q.question || q.text_question || '');
                     subHtml += buildSubQuestionItemHtml(q, sIdx, textToRender, hiddenImageSetRef.current, true, 2, 4, isGroupMerged);
@@ -1873,32 +1946,32 @@ export default function ExamViewerPage() {
     if (field === 'examTitle') {
       setExamTitle(val);
       if (examStateRef.current) examStateRef.current.examTitle = val;
-      if (layoutType !== '입학테스트') remeasureAndRender(columns, splits, titleMode, template, examDate, val, displayBadge);
-      else renderAdmissionTestPages();
+      if (!isAdmissionLock) remeasureAndRender(columns, splits, titleMode, template, examDate, val, displayBadge);
+      else renderAdmissionTestPages(undefined, layoutType);
     }
     if (field === 'displayBadge') {
       setDisplayBadge(val);
       if (examStateRef.current) examStateRef.current.displayBadge = val;
-      if (layoutType !== '입학테스트') remeasureAndRender(columns, splits, titleMode, template, examDate, examTitle, val);
-      else renderAdmissionTestPages();
+      if (!isAdmissionLock) remeasureAndRender(columns, splits, titleMode, template, examDate, examTitle, val);
+      else renderAdmissionTestPages(undefined, layoutType);
     }
     if (field === 'examDate') {
       setExamDate(val);
       if (examStateRef.current) examStateRef.current.examDate = val;
-      if (layoutType !== '입학테스트') remeasureAndRender(columns, splits, titleMode, template, val, examTitle, displayBadge);
-      else renderAdmissionTestPages(val);
+      if (!isAdmissionLock) remeasureAndRender(columns, splits, titleMode, template, val, examTitle, displayBadge);
+      else renderAdmissionTestPages(val, layoutType);
     }
     
     if (field === 'layoutType') {
-      setLayoutType(val);
-      setIsAdmissionLock(val === '입학테스트');
-
       let newExamTitle = examTitle;
       if (val === '주간테스트') {
         newExamTitle = getISOWeekKST(new Date(testDate + 'T00:00:00Z')) + "주차 평가";
         setExamTitle(newExamTitle);
       } else if (val === '오답유사') {
         newExamTitle = examTitle === '시험지' ? '오답 유사 클리닉' : examTitle;
+        setExamTitle(newExamTitle);
+      } else if (val === '분기평가' && (examTitle === '시험지' || examTitle === '새로운 테스트')) {
+        newExamTitle = '분기평가';
         setExamTitle(newExamTitle);
       }
 
@@ -1909,8 +1982,25 @@ export default function ExamViewerPage() {
           setIsAdmissionLock(false);
           return;
         }
-        renderAdmissionTestPages();
+        setLayoutType(val);
+        setIsAdmissionLock(true);
+        if (examStateRef.current) examStateRef.current.layoutType = val;
+        renderAdmissionTestPages(undefined, val);
+      } else if (val === '분기평가' && examStateRef.current?.groups.length === 30) {
+        setLayoutType(val);
+        setIsAdmissionLock(true);
+        if (examStateRef.current) {
+          examStateRef.current.layoutType = val;
+          examStateRef.current.examTitle = newExamTitle;
+        }
+        renderAdmissionTestPages(undefined, val);
       } else {
+        setLayoutType(val);
+        setIsAdmissionLock(false);
+        if (examStateRef.current) {
+          examStateRef.current.layoutType = val;
+          examStateRef.current.examTitle = newExamTitle;
+        }
         remeasureAndRender(columns, splits, titleMode, template, examDate, newExamTitle, displayBadge);
       }
     }
@@ -1961,10 +2051,12 @@ export default function ExamViewerPage() {
       }
 
       const hiddenImageQuestions = Array.from(hiddenImageSetRef.current || []);
+      const isQuarterlyLocked = (layoutType === '분기평가' || layoutType === '분기테스트') && isAdmissionLock;
       const finalLayoutSettings = { 
          column: columns, split: splits, titleMode, numberColor: colorNum, 
          titleColor: colorTitle, lineColor: colorLine, examDate: examDate || null, 
-         template, userMergedTextQuestions, hiddenImageQuestions 
+         template, userMergedTextQuestions, hiddenImageQuestions,
+         ...(isQuarterlyLocked ? { isQuarterlyLock: true } : {})
       };
 
       const isWeeklyTest = layoutType === '주간테스트';
@@ -1996,7 +2088,7 @@ export default function ExamViewerPage() {
         const preItems: { question_id: any; sort_order: number; assigned_score: number | null }[] = [];
         let fIdx = 1;
         examStateRef.current?.groups.forEach((g: any, gIdx: number) => {
-          const score = layoutType === '입학테스트' ? [2,3,4,5][(gIdx < 4 ? 0 : gIdx < 13 ? 1 : gIdx < 20 ? 2 : gIdx === 20 ? 3 : gIdx < 23 ? 0 : gIdx < 25 ? 1 : gIdx < 28 ? 2 : 3)] : null;
+          const score = (layoutType === '입학테스트' || isQuarterlyLocked) ? getDiagnosticMainScore(gIdx) : null;
           (g.questions || []).forEach((q: any) => preItems.push({
             question_id: getRealId(q.question_id),
             sort_order: fIdx++,
@@ -2061,7 +2153,7 @@ export default function ExamViewerPage() {
       setSavedExamId(examId); 
       
       const keysToRemove = [
-        'restoreExamQuestions', 'examQuestions', 'examTitle', 'examSubTitle', 'examType', 'examMode', 'testCategory', 'testSourceFilter', 'diagnosticQuestionIds', 'majorGrade', 'avgDifficulty', 'scopeStart', 'scopeEnd',
+        'restoreExamQuestions', 'examQuestions', 'examTitle', 'examSubTitle', 'examType', 'examMode', 'testCategory', 'testSourceFilter', 'diagnosticQuestionIds', 'quarterlyQuestionIds', 'majorGrade', 'avgDifficulty', 'scopeStart', 'scopeEnd',
         'editOriginalType', 'editOriginalId', 'editStudentId', 'editClassId', 'editMasterId',
         'examUserMergedTextQuestions', 'examHiddenImageQuestions', 'clinicTargetStudentId', 'clinicTargetClassId', 'clinicTargetStudentIds',
         'editHomeworkId', 'editExamId', 'duplicateExamId', 'splitHomeworkIds', 'splitCommonTqIds', 'isClinicMode'

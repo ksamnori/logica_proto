@@ -10,12 +10,17 @@ export const getCleanUrl = (url: string) => {
       if (Array.isArray(parsed) && parsed.length > 0) validUrl = String(parsed[0] || '').trim();
     } catch(e) {} 
   }
-  validUrl = validUrl.replace(/^["']|["']$/g, '').trim();
+  validUrl = validUrl
+    .replace(/^["']|["']$/g, '')
+    .trim()
+    .replace(/\/storage\/v1\/object\/public\/system_images\/questions\//g, '/storage/v1/object/public/question_images/');
   const lower = validUrl.toLowerCase();
   if (!validUrl || lower === 'null' || lower === 'undefined') return '';
   if (!lower.startsWith('http') && !lower.startsWith('data:image') && !lower.startsWith('blob:')) {
     const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://kfwlmbwornivkrvoeqdh.supabase.co';
-    const cleanPath = validUrl.replace(/^\/+/, '').replace(/^question_images\/+/, '');
+    const cleanPath = validUrl
+      .replace(/^\/+/, '')
+      .replace(/^(?:system_images\/questions\/|question_images\/|questions\/)/, '');
     validUrl = `${SUPABASE_URL}/storage/v1/object/public/question_images/${cleanPath}`;
   }
   return validUrl;
@@ -992,12 +997,23 @@ export const compareQuestionsBySource = (a: any, b: any): number => {
   const bookB = getBook(b);
   if (bookA !== bookB) return bookA.localeCompare(bookB, "ko", { numeric: true });
 
+  const qA = parseQuestionNumberParts(a.question_number);
+  const qB = parseQuestionNumberParts(b.question_number);
+
+  // 진단평가·분기평가 문제지는 전체가 1~30번 일련번호 체계이므로, 인쇄 페이지 오인식(예: "4 / 12" -> 412)에 영향받지 않도록 문항 번호 순을 우선 정렬
+  const isSequentialExamBook = /(?:입학\s*테스트|진단\s*평가|분기\s*평가)/i.test(bookA);
+  if (isSequentialExamBook) {
+    if (qA.prefix !== qB.prefix) return qA.prefix.localeCompare(qB.prefix, "ko", { numeric: true });
+    if (qA.main !== qB.main) return qA.main - qB.main;
+    if (qA.dash !== qB.dash) return qA.dash - qB.dash;
+    if (qA.paren !== qB.paren) return qA.paren - qB.paren;
+    return compareSubQuestions(a, b);
+  }
+
   const pageA = getPage(a);
   const pageB = getPage(b);
   if (pageA !== pageB) return pageA - pageB;
 
-  const qA = parseQuestionNumberParts(a.question_number);
-  const qB = parseQuestionNumberParts(b.question_number);
   if (qA.prefix !== qB.prefix) return qA.prefix.localeCompare(qB.prefix, "ko", { numeric: true });
   if (qA.main !== qB.main) return qA.main - qB.main;
   if (qA.dash !== qB.dash) return qA.dash - qB.dash;

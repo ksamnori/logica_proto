@@ -546,7 +546,11 @@ function buildExamQuestionScoreMap(
   const groupCount = groups.length || 1;
   const baseGroupScore = 100 / groupCount;
   const isAdmissionExam = Boolean(
-    examType && (examType.includes("입학테스트") || examType.includes("진단평가"))
+    examType &&
+      (examType.includes("입학테스트") ||
+        examType.includes("진단평가") ||
+        examType.includes("분기평가") ||
+        examType.includes("분기테스트"))
   );
 
   groups.forEach((g) => {
@@ -1012,10 +1016,15 @@ function ReviewContent() {
         const parsedQNum = match ? parseInt(match[0], 10) : (index + 1);
         const logicalQNum = metaScores[index + 1] !== undefined ? (index + 1) : parsedQNum;
         
+        const explicitAssignedMax = Math.max(...g.items.map((i: any) => parseFloat(i.assigned_score) || 0));
+        const isQuarterlyWeighted =
+          (exType.includes('분기평가') || exType.includes('분기테스트')) && explicitAssignedMax > 0;
         let maxScore = merged
           ? (metaScores[logicalQNum] !== undefined 
               ? parseFloat(metaScores[logicalQNum]) 
-              : Math.max(...g.items.map((i:any) => parseFloat(i.assigned_score) || 0)))
+              : explicitAssignedMax)
+          : isQuarterlyWeighted
+          ? explicitAssignedMax
           : baseScorePerQuestion;
 
         if (!maxScore || isNaN(maxScore) || maxScore === 0) {

@@ -3,6 +3,7 @@
 export const LOGO_FOOTER_LEFT_URL = "https://kfwlmbwornivkrvoeqdh.supabase.co/storage/v1/object/public/system_images/logo_footer_left.png";
 export const LOGO_FOOTER_RIGHT_URL = "https://kfwlmbwornivkrvoeqdh.supabase.co/storage/v1/object/public/system_images/logo_footer_right.png";
 export const ADMISSION_HEADER_URL = "https://kfwlmbwornivkrvoeqdh.supabase.co/storage/v1/object/public/system_images/logica_logo_original.png";
+export const QUARTERLY_HEADER_URL = "https://kfwlmbwornivkrvoeqdh.supabase.co/storage/v1/object/public/system_images/logica_logo_original2.png";
 
 export interface HeaderExtraMeta {
   isFirstPage?: boolean;
@@ -26,11 +27,16 @@ export const getCleanUrl = (url: string) => {
       if (Array.isArray(parsed) && parsed.length > 0) validUrl = String(parsed[0] || '').trim();
     } catch (e) {}
   }
-  validUrl = validUrl.replace(/^["']|["']$/g, '').trim();
+  validUrl = validUrl
+    .replace(/^["']|["']$/g, '')
+    .trim()
+    .replace(/\/storage\/v1\/object\/public\/system_images\/questions\//g, '/storage/v1/object/public/question_images/');
   const lower = validUrl.toLowerCase();
   if (!validUrl || lower === 'null' || lower === 'undefined') return '';
   if (!lower.startsWith('http') && !lower.startsWith('data:image') && !lower.startsWith('blob:')) {
-    const cleanPath = validUrl.replace(/^\/+/, '').replace(/^question_images\/+/, '');
+    const cleanPath = validUrl
+      .replace(/^\/+/, '')
+      .replace(/^(?:system_images\/questions\/|question_images\/|questions\/)/, '');
     validUrl = `https://kfwlmbwornivkrvoeqdh.supabase.co/storage/v1/object/public/question_images/${cleanPath}`;
   }
   return validUrl;

@@ -17,7 +17,7 @@ export const getAllIds = (node: any): string[] => {
       Object.values(n.children).forEach(traverse);
     } else {
       for (const k in n) {
-        if (k !== 'itemId' && k !== 'itemIds' && k !== 'categoryId' && k !== 'sortOrder' && k !== 'defaultOpen' && k !== '_allIds' && k !== '_repId' && typeof n[k] === 'object') traverse(n[k]);
+        if (k !== 'itemId' && k !== 'itemIds' && k !== 'categoryId' && k !== 'sortOrder' && k !== 'defaultOpen' && k !== 'hideCheckbox' && k !== 'showBranchMark' && k !== '_allIds' && k !== '_repId' && typeof n[k] === 'object') traverse(n[k]);
       }
     }
   };
@@ -56,7 +56,7 @@ const getRepresentativeId = (n: any): string => {
     }
   } else {
     for (const k in n) {
-      if (k !== 'itemId' && k !== 'itemIds' && k !== 'categoryId' && k !== 'sortOrder' && k !== 'defaultOpen' && k !== '_allIds' && k !== '_repId' && typeof n[k] === 'object') {
+      if (k !== 'itemId' && k !== 'itemIds' && k !== 'categoryId' && k !== 'sortOrder' && k !== 'defaultOpen' && k !== 'hideCheckbox' && k !== 'showBranchMark' && k !== '_allIds' && k !== '_repId' && typeof n[k] === 'object') {
         const id = getRepresentativeId(n[k]);
         if (id) { resolved = id; break; }
       }
@@ -126,7 +126,9 @@ const TreeNode = React.memo(({ nodeKey, node, depth, selectedItemIds, toggleItem
       <details open={isOpen} onToggle={(e: any) => setIsOpen(e.currentTarget.open)} className={depth === 4 ? "mb-2" : depth === 5 ? "mb-1.5 pl-2 border-l-2 border-slate-200 ml-1.5" : "mb-0.5 pl-1.5 border-l border-slate-100 ml-2.5"}>
         <summary className={summaryClass}>
           <svg className="w-3.5 h-3.5 text-slate-400 group-hover:text-blue-500 transition-transform details-arrow shrink-0" style={{ transform: isOpen ? 'rotate(90deg)' : 'none' }} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5l7 7-7 7"></path></svg>
-          <input type="checkbox" ref={el => { if (el) el.indeterminate = isIndeterminate; }} checked={isChecked} onChange={e => toggleFolder(node, e.target.checked)} onClick={e => e.stopPropagation()} className="w-3.5 h-3.5 rounded border-slate-300 accent-brand cursor-pointer shrink-0" />
+          {!node.hideCheckbox && (
+            <input type="checkbox" ref={el => { if (el) el.indeterminate = isIndeterminate; }} checked={isChecked} onChange={e => toggleFolder(node, e.target.checked)} onClick={e => e.stopPropagation()} className="w-3.5 h-3.5 rounded border-slate-300 accent-brand cursor-pointer shrink-0" />
+          )}
           <span className={labelClass}>{nodeKey}</span>
         </summary>
         {isOpen && (
@@ -142,6 +144,15 @@ const TreeNode = React.memo(({ nodeKey, node, depth, selectedItemIds, toggleItem
     // 가장 마지막 리프 노드 (항상 데이터 원본의 올바른 이름(nodeKey)이 출력됩니다)
     const leafIds: string[] = Array.isArray(node.itemIds) && node.itemIds.length > 0 ? node.itemIds : [node.itemId];
     const isLeafChecked = leafIds.some((id: string) => selectedItemIds.has(id));
+    if (node.showBranchMark) {
+      return (
+        <label className={`flex items-center space-x-2 py-1.5 px-2.5 ml-2 rounded-md transition-colors cursor-pointer ${isLeafChecked ? "bg-emerald-50 border border-emerald-200" : "hover:bg-emerald-50 border border-transparent"}`}>
+          <span className="text-slate-400 font-bold text-[12px] select-none shrink-0">ㄴ</span>
+          <input type="checkbox" checked={isLeafChecked} onChange={e => toggleItem(leafIds, e.target.checked)} className="w-3.5 h-3.5 text-emerald-600 rounded border-slate-300 accent-emerald-600 cursor-pointer shrink-0" />
+          <span className={`text-[12.5px] font-bold flex-1 break-keep leading-snug ${isLeafChecked ? "text-emerald-700" : "text-slate-700"}`}>{nodeKey}</span>
+        </label>
+      );
+    }
     return (
       <label className="flex items-center space-x-2 py-1 px-1.5 hover:bg-emerald-50 rounded-md transition-colors cursor-pointer">
         <input type="checkbox" checked={isLeafChecked} onChange={e => toggleItem(leafIds, e.target.checked)} className="w-3.5 h-3.5 text-emerald-600 rounded border-slate-300 accent-emerald-600 cursor-pointer shrink-0" />
@@ -168,7 +179,7 @@ export default function LeftPanel({ step1Data }: { step1Data: any }) {
     } else if (currentMode === "thinking") {
       targetData = thinkingData[currentD1];
     } else if (currentMode === "test") {
-      if (['주간테스트', '중간테스트', '분기테스트'].includes(currentTestGroup)) {
+      if (['주간테스트', '중간평가', '중간테스트'].includes(currentTestGroup)) {
          targetData = masterData[currentD1]?.[currentD2];
       } else {
          const activeTestData = testData || TEST_DATA;
@@ -233,7 +244,7 @@ export default function LeftPanel({ step1Data }: { step1Data: any }) {
 
                 return (
                   <li key={i} style={{ marginLeft: `${depth * 24}px` }} 
-                      onClick={() => setSelectedItemIds((prev:any) => { const next = new Set(prev); ids.forEach(id => !isChecked ? next.add(id) : next.delete(id)); return next; })} 
+                      onClick={() => toggleItem(ids, !isChecked)} 
                       className={`p-3 bg-white border rounded-lg cursor-pointer flex items-start gap-3 transition-colors ${isChecked ? 'border-emerald-400 bg-emerald-50/30' : 'border-slate-200 hover:border-blue-300 hover:bg-blue-50'}`}>
                     <input type="checkbox" readOnly checked={isChecked} ref={el => { if(el) el.indeterminate = isIndeterminate; }} className="mt-1 w-4 h-4 rounded border-slate-300 accent-emerald-600 cursor-pointer pointer-events-none shrink-0" />
                     <div className="flex-1 min-w-0">
@@ -269,7 +280,7 @@ export default function LeftPanel({ step1Data }: { step1Data: any }) {
               </div>
             )}
 
-            {currentMode === 'test' && ['주간테스트', '중간테스트', '분기테스트'].includes(currentTestGroup) && (
+            {currentMode === 'test' && ['주간테스트', '중간평가', '중간테스트'].includes(currentTestGroup) && (
               <div className="flex flex-col bg-slate-50 border-b border-slate-100">
                  <div className="flex px-4 py-2.5 gap-3 overflow-x-auto no-scrollbar border-b border-slate-100">
                    {Object.keys(masterData).sort(sortD1).map(d1 => (

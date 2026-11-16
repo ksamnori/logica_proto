@@ -752,6 +752,17 @@ export function normalizeRecordForQuestionDb(raw: any, fallbackBookTitle = ""): 
   rec.answer_image_type = clampVarchar(rec.answer_image_type, 20, null);
   rec.engine_ver = clampVarchar(rec.engine_ver, 20, null);
 
+  for (const imgField of ["image_url", "image_2_url", "answer_image_url", "answer_image_2_url"] as const) {
+    if (rec[imgField] && typeof rec[imgField] === "string") {
+      rec[imgField] = rec[imgField]
+        .replace(
+          /\/storage\/v1\/object\/public\/system_images\/questions\//g,
+          "/storage/v1/object/public/question_images/"
+        )
+        .replace(/^(?:system_images\/questions\/|questions\/)/, "");
+    }
+  }
+
   const verified = Boolean(
     rec.is_human_verified || rec.human_verified || rec.verification_status === "APPROVED"
   );

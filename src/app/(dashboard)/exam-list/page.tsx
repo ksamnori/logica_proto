@@ -467,7 +467,16 @@ export default function ExamListPage() {
 
       let groupedList: { items: any[] }[] = [];
       const lType = masterRow?.exam_type || '';
-      const isDiag = lType === '입학테스트' || lType === '진단평가';
+      const parsedMasterSettings = rawSettings
+        ? (typeof rawSettings === 'string'
+            ? (() => { try { return JSON.parse(rawSettings); } catch { return null; } })()
+            : rawSettings)
+        : null;
+      const isDiag =
+        lType === '입학테스트' ||
+        lType === '진단평가' ||
+        ((lType === '분기평가' || lType === '분기테스트') &&
+          (parsedMasterSettings?.isQuarterlyLock || orderedQuestions.length >= 30));
       if (isDiag && userMergedTextQuestions.length === 0 && orderedQuestions.length > 0) {
         const mergedBuilt = buildMergedQuestionGroups(orderedQuestions, true, true);
         groupedList = mergedBuilt.map((mg: any) => ({ items: mg.items || [] }));

@@ -871,7 +871,14 @@ export default function RightPreview({ examData }: { examData: any }) {
 
            const isGroupMerged = g.items.length > 1;
            const { common, remainders } = isGroupMerged ? processGroupText(g.items) : { common: "", remainders: [] };
-           const isDiagPreview = typeof window !== "undefined" && (sessionStorage.getItem("testCategory") === "진단평가" || sessionStorage.getItem("testCategory") === "입학테스트" || sessionStorage.getItem("examType") === "입학테스트");
+           const isDiagPreview =
+             typeof window !== "undefined" &&
+             (sessionStorage.getItem("testCategory") === "진단평가" ||
+               sessionStorage.getItem("testCategory") === "입학테스트" ||
+               sessionStorage.getItem("examType") === "입학테스트" ||
+               ((sessionStorage.getItem("testCategory") === "분기평가" ||
+                 sessionStorage.getItem("examType") === "분기평가") &&
+                 questions.length === 30));
            const mainScoreVal = isDiagPreview ? getDiagnosticMainScore(idx) : Math.round((100 / (questions.length || 1)) * 10) / 10;
            const subScoreVal = Math.round((mainScoreVal / (g.items.length || 1)) * 100) / 100;
 

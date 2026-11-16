@@ -77,6 +77,109 @@ export const matchDiagnosticSemester = (
   }
 };
 
+export const QUARTERLY_SEMESTERS: {
+  label: string;
+  grade: number;
+  semester: number;
+  gradeCode: string;
+  order: number;
+}[] = [
+  { label: "1학년 1학기", grade: 1, semester: 1, gradeCode: "1-1", order: 1 },
+  { label: "1학년 2학기", grade: 1, semester: 2, gradeCode: "1-2", order: 2 },
+  { label: "2학년 1학기", grade: 2, semester: 1, gradeCode: "2-1", order: 3 },
+  { label: "2학년 2학기", grade: 2, semester: 2, gradeCode: "2-2", order: 4 },
+  { label: "3학년 1학기", grade: 3, semester: 1, gradeCode: "3-1", order: 5 },
+  { label: "3학년 2학기", grade: 3, semester: 2, gradeCode: "3-2", order: 6 },
+  { label: "4학년 1학기", grade: 4, semester: 1, gradeCode: "4-1", order: 7 },
+  { label: "4학년 2학기", grade: 4, semester: 2, gradeCode: "4-2", order: 8 },
+  { label: "5학년 1학기", grade: 5, semester: 1, gradeCode: "5-1", order: 9 },
+  { label: "5학년 2학기", grade: 5, semester: 2, gradeCode: "5-2", order: 10 },
+  { label: "6학년 1학기", grade: 6, semester: 1, gradeCode: "6-1", order: 11 },
+  { label: "6학년 2학기", grade: 6, semester: 2, gradeCode: "6-2", order: 12 },
+];
+
+export const hasQuarterlyLevelKeyword = (text: string, level: "MAX" | "PRO"): boolean => {
+  if (!text) return false;
+  if (level === "MAX") return /(?:^|[^a-zA-Z])max(?:[^a-zA-Z]|$)|맥스/i.test(text);
+  return /(?:^|[^a-zA-Z])pro(?:[^a-zA-Z]|$)|프로/i.test(text);
+};
+
+export const matchQuarterlySemester = (
+  q: {
+    pdf_source?: string | null;
+    source_book_name?: string | null;
+    book_name?: string | null;
+    derivation_type?: string | null;
+  },
+  sem: { label: string; grade: number; semester: number; gradeCode: string },
+  level?: "MAX" | "PRO" | null
+): boolean => {
+  const bookName = String(q.book_name || "").normalize("NFC").trim();
+  const sourceBookName = String(q.source_book_name || "").normalize("NFC").trim();
+  const pdfSource = String(q.pdf_source || "").normalize("NFC").trim();
+  const bookText = `${bookName} ${sourceBookName} ${pdfSource}`.trim();
+  if (!bookText) return false;
+
+  // 쌍둥이/유사 파생 문항은 분기평가 원본 시험지 자동 구성에서 제외
+  const deriv = String(q.derivation_type || "").trim().toUpperCase();
+  if (deriv === "TWIN" || deriv === "쌍둥이" || deriv === "유사" || deriv === "SIMILAR") {
+    return false;
+  }
+  if (/(?:쌍둥이|유사)\s*$/i.test(bookName) || /(?:쌍둥이|유사)\s*$/i.test(sourceBookName)) {
+    return false;
+  }
+
+  // '분기평가' 또는 '분기 평가' 포함 필수
+  if (!/분기\s*평가/i.test(bookText)) return false;
+
+  // 중등 과정 문항 제외
+  if (/중등|중학교|중\s*[1-3]/.test(bookText)) return false;
+
+  // 'x학년 x학기' 또는 'x-x' 학년·학기 매칭
+  const korSemRegex = new RegExp(`${sem.grade}\\s*학년\\s*${sem.semester}\\s*학기`);
+  const codeRegex = new RegExp(`(?:^|[^0-9])${sem.grade}-${sem.semester}(?:[^0-9]|$)`);
+  if (!korSemRegex.test(bookText) && !codeRegex.test(bookText)) return false;
+
+  if (level) {
+    const primaryBookText = `${bookName} ${sourceBookName}`.trim() || bookText;
+    const hasMax = hasQuarterlyLevelKeyword(primaryBookText, "MAX");
+    const hasPro = hasQuarterlyLevelKeyword(primaryBookText, "PRO");
+    if (level === "MAX") {
+      if (hasPro && !hasMax) return false;
+      return true;
+    }
+    if (level === "PRO") {
+      if (hasMax && !hasPro) return false;
+      return true;
+    }
+  }
+  return true;
+};
+
+export const filterQuarterlyQuestionsByLevel = <
+  T extends {
+    pdf_source?: string | null;
+    source_book_name?: string | null;
+    book_name?: string | null;
+    derivation_type?: string | null;
+  }
+>(
+  rows: T[],
+  sem: { label: string; grade: number; semester: number; gradeCode: string },
+  level: "MAX" | "PRO" | null
+): T[] => {
+  const candidates = (rows || []).filter((q) => matchQuarterlySemester(q, sem, level));
+  if (!level || candidates.length === 0) return candidates;
+
+  const explicitMatches = candidates.filter((q) => {
+    const primaryBookText =
+      `${q.book_name || ""} ${q.source_book_name || ""}`.normalize("NFC").trim() ||
+      String(q.pdf_source || "").normalize("NFC").trim();
+    return hasQuarterlyLevelKeyword(primaryBookText, level);
+  });
+  return explicitMatches.length > 0 ? explicitMatches : candidates;
+};
+
 const buildDefaultDiagnosticTree = () => {
   const tree: Record<string, any> = {};
   DIAGNOSTIC_SEMESTERS.forEach((sem) => {
@@ -91,7 +194,32 @@ const buildDefaultDiagnosticTree = () => {
   return tree;
 };
 
+const buildDefaultQuarterlyTree = () => {
+  const tree: Record<string, any> = {};
+  QUARTERLY_SEMESTERS.forEach((sem) => {
+    tree[sem.label] = {
+      sortOrder: sem.order,
+      defaultOpen: true,
+      hideCheckbox: true,
+      children: {
+        MAX: {
+          itemId: `분기평가__${sem.gradeCode}__MAX`,
+          sortOrder: 1,
+          showBranchMark: true,
+        },
+        PRO: {
+          itemId: `분기평가__${sem.gradeCode}__PRO`,
+          sortOrder: 2,
+          showBranchMark: true,
+        },
+      },
+    };
+  });
+  return tree;
+};
+
 export const TEST_DATA: Record<string, any> = {
+  "분기평가": buildDefaultQuarterlyTree(),
   "단원테스트": {
     "초등 단원평가": { itemId: "테스트_단원_초등", sortOrder: 1 },
     "중등 단원평가": { itemId: "테스트_단원_중등", sortOrder: 2 },
@@ -99,7 +227,7 @@ export const TEST_DATA: Record<string, any> = {
   "진단평가": buildDefaultDiagnosticTree(),
 };
 
-export const TEST_GROUPS = ["주간테스트", "중간테스트", "분기테스트", "단원테스트", "진단평가"];
+export const TEST_GROUPS = ["주간테스트", "중간평가", "분기평가", "단원테스트", "진단평가"];
 
 // 🌟 모듈 레벨 메모리 캐시: Step 1 재진입 시 네트워크/DB 대기 없이 0ms 즉시 렌더링
 let cachedStep1Taxonomy: {
@@ -187,33 +315,49 @@ export function useStep1Data() {
       }
     };
 
-    // 1) 진단평가 버전 트리는 백그라운드에서 비동기로 로드하여 초기 단원 트리 렌더링을 전혀 블로킹하지 않음
+    // 1) 진단평가·분기평가 문항 매핑은 백그라운드에서 비동기로 로드하여 초기 단원 트리 렌더링을 전혀 블로킹하지 않음
     const loadDiagInBackground = async (baseFlatIndex: any[]) => {
       try {
+        const quarterlyTree = buildDefaultQuarterlyTree();
         if (cachedStep1Diag && Date.now() - cachedStep1Diag.timestamp < 5 * 60 * 1000) {
           setDiagQuestionIdsMap(cachedStep1Diag.qIdsByItemId);
-          setTestData({ ...TEST_DATA, "진단평가": cachedStep1Diag.diagTree });
+          setTestData({
+            ...TEST_DATA,
+            "분기평가": quarterlyTree,
+            "진단평가": cachedStep1Diag.diagTree,
+          });
           return;
         }
 
-        let allRows: any[] = [];
-        let from = 0;
-        const step = 1000;
-        while (true) {
-          const { data, error } = await supabase
-            .from("question_db")
-            .select("question_id, pdf_source, source_book_name, book_name, created_at, is_hidden")
-            .or("pdf_source.ilike.%입학테스트%,pdf_source.ilike.%진단평가%,source_book_name.ilike.%입학테스트%,source_book_name.ilike.%진단평가%,book_name.ilike.%입학테스트%,book_name.ilike.%진단평가%")
-            .order("question_id", { ascending: true })
-            .range(from, from + step - 1);
-          if (error || !data || data.length === 0) break;
-          allRows = allRows.concat(data);
-          if (data.length < step) break;
-          from += step;
-        }
-        const diagRows = allRows.filter(
-          (q) => q.is_hidden !== true && q.is_hidden !== "Y" && q.is_hidden !== "true"
-        );
+        const fetchAllPaged = async (orFilter: string) => {
+          let rows: any[] = [];
+          let from = 0;
+          const step = 1000;
+          while (true) {
+            const { data, error } = await supabase
+              .from("question_db")
+              .select("question_id, pdf_source, source_book_name, book_name, created_at, is_hidden, derivation_type")
+              .or(orFilter)
+              .order("question_id", { ascending: true })
+              .range(from, from + step - 1);
+            if (error || !data || data.length === 0) break;
+            rows = rows.concat(data);
+            if (data.length < step) break;
+            from += step;
+          }
+          return rows.filter(
+            (q) => q.is_hidden !== true && q.is_hidden !== "Y" && q.is_hidden !== "true"
+          );
+        };
+
+        const [diagRows, quarterlyRows] = await Promise.all([
+          fetchAllPaged(
+            "pdf_source.ilike.%입학테스트%,pdf_source.ilike.%진단평가%,source_book_name.ilike.%입학테스트%,source_book_name.ilike.%진단평가%,book_name.ilike.%입학테스트%,book_name.ilike.%진단평가%"
+          ),
+          fetchAllPaged(
+            "book_name.ilike.%분기%평가%,source_book_name.ilike.%분기%평가%,pdf_source.ilike.%분기%평가%"
+          ),
+        ]);
 
         const diagTree: Record<string, any> = {};
         const qIdsMap: Record<string, string[]> = {};
@@ -262,6 +406,14 @@ export function useStep1Data() {
           }
         });
 
+        QUARTERLY_SEMESTERS.forEach((sem) => {
+          (["MAX", "PRO"] as const).forEach((lvl) => {
+            const itemId = `분기평가__${sem.gradeCode}__${lvl}`;
+            const matched = filterQuarterlyQuestionsByLevel(quarterlyRows || [], sem, lvl);
+            qIdsMap[itemId] = matched.map((q: any) => String(q.question_id)).filter(Boolean);
+          });
+        });
+
         cachedStep1Diag = {
           diagTree,
           qIdsByItemId: qIdsMap,
@@ -270,6 +422,7 @@ export function useStep1Data() {
         setDiagQuestionIdsMap(qIdsMap);
         const builtTestData: Record<string, any> = {
           ...TEST_DATA,
+          "분기평가": quarterlyTree,
           "진단평가": diagTree,
         };
         setTestData(builtTestData);
@@ -396,7 +549,10 @@ export function useStep1Data() {
   }, []);
 
   const switchMainTab = (mode: string, mData = masterData, tData = thinkingData) => {
-    setCurrentMode(mode);
+    setCurrentMode(prev => {
+      if (prev !== mode) setSelectedItemIds(new Set());
+      return mode;
+    });
     setSearchKeyword(""); 
     if (mode === "regular") {
       setIsSettingsDisabled(false);
@@ -412,18 +568,21 @@ export function useStep1Data() {
       const d1Keys = Object.keys(tData).sort();
       if (d1Keys.length > 0) setCurrentD1(d1Keys[0]);
     } else if (mode === "test") {
-      updateTestGroup(currentTestGroup, mData);
+      updateTestGroup(currentTestGroup, mData, false);
     }
   };
 
-  const updateTestGroup = (group: string, mData = masterData) => {
-    setCurrentTestGroup(group);
-    if (group === "진단평가" || group === "입학테스트") {
+  const updateTestGroup = (group: string, mData = masterData, clearSelection = true) => {
+    setCurrentTestGroup(prev => {
+      if (clearSelection && prev !== group) setSelectedItemIds(new Set());
+      return group;
+    });
+    if (group === "진단평가" || group === "입학테스트" || group === "분기평가" || group === "분기테스트") {
       setIsSettingsDisabled(true);
       setQCount(30); 
     } else {
       setIsSettingsDisabled(false);
-      if (['주간테스트', '중간테스트', '분기테스트'].includes(group)) {
+      if (['주간테스트', '중간평가', '중간테스트'].includes(group)) {
         const d1Keys = Object.keys(mData).sort();
         if (d1Keys.length > 0) {
           const d1 = d1Keys.includes("초등학교") ? "초등학교" : d1Keys[0];
@@ -437,8 +596,13 @@ export function useStep1Data() {
 
   const toggleItem = (idOrIds: string | string[], checked: boolean) => {
     const targetIds = Array.isArray(idOrIds) ? idOrIds : [idOrIds];
+    const isQuarterlySingleSelect =
+      currentMode === "test" &&
+      (currentTestGroup === "분기평가" || currentTestGroup === "분기테스트") &&
+      targetIds.some((id) => String(id).startsWith("분기평가__"));
+
     setSelectedItemIds(prev => {
-      const next = new Set(prev);
+      const next = isQuarterlySingleSelect && checked ? new Set<string>() : new Set(prev);
       targetIds.forEach(id => {
         if (!id) return;
         if (checked) next.add(id); else next.delete(id);
@@ -502,7 +666,7 @@ export function useStep1Data() {
     
     if (currentMode === 'test') {
       sessionStorage.setItem("testCategory", currentTestGroup);
-      if (['주간테스트', '중간테스트', '분기테스트'].includes(currentTestGroup)) {
+      if (['주간테스트', '중간평가', '중간테스트'].includes(currentTestGroup)) {
         sessionStorage.setItem("testSourceFilter", currentTestGroup);
       } else {
         sessionStorage.removeItem("testSourceFilter");
@@ -511,9 +675,9 @@ export function useStep1Data() {
         sessionStorage.setItem("examType", "입학테스트");
       } else if (currentTestGroup === '주간테스트') {
         sessionStorage.setItem("examType", "주간테스트");
-      } else if (currentTestGroup === '중간테스트') {
+      } else if (currentTestGroup === '중간평가' || currentTestGroup === '중간테스트') {
         sessionStorage.setItem("examType", "중간평가");
-      } else if (currentTestGroup === '분기테스트') {
+      } else if (currentTestGroup === '분기평가' || currentTestGroup === '분기테스트') {
         sessionStorage.setItem("examType", "분기평가");
       } else if (currentTestGroup === '단원테스트') {
         sessionStorage.setItem("examType", "단원평가");
@@ -546,12 +710,36 @@ export function useStep1Data() {
         }
       });
       sessionStorage.setItem("diagnosticQuestionIds", JSON.stringify(Array.from(diagQIds)));
+      sessionStorage.removeItem("quarterlyQuestionIds");
       if (diagBadges.size > 0) {
         sessionStorage.setItem("examSubTitle", Array.from(diagBadges)[0]);
       }
       sessionStorage.setItem("examTitle", "진단평가");
+    } else if (currentMode === "test" && (currentTestGroup === "분기평가" || currentTestGroup === "분기테스트")) {
+      const quarterlyQIds = new Set<string>();
+      const quarterlyBadges = new Set<string>();
+      selectedArr.forEach((itemId) => {
+        const mapped = diagQuestionIdsMap[itemId];
+        if (Array.isArray(mapped)) {
+          mapped.forEach((qid) => quarterlyQIds.add(String(qid)));
+        }
+        const parts = String(itemId).split("__");
+        if (parts[0] === "분기평가" && parts[1]) {
+          const gradeCode = parts[1];
+          const lvl = parts[2] || "";
+          const badgeLabel = lvl ? `초등 ${gradeCode} ${lvl}` : `초등 ${gradeCode}`;
+          quarterlyBadges.add(badgeLabel);
+        }
+      });
+      sessionStorage.setItem("quarterlyQuestionIds", JSON.stringify(Array.from(quarterlyQIds)));
+      sessionStorage.removeItem("diagnosticQuestionIds");
+      if (quarterlyBadges.size > 0) {
+        sessionStorage.setItem("examSubTitle", Array.from(quarterlyBadges)[0]);
+      }
+      sessionStorage.setItem("examTitle", "분기평가");
     } else {
       sessionStorage.removeItem("diagnosticQuestionIds");
+      sessionStorage.removeItem("quarterlyQuestionIds");
     }
 
     sessionStorage.setItem("qCount", String(qCount));

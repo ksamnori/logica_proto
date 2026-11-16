@@ -188,14 +188,16 @@ export const getCleanUrl = (url: string) => {
     } catch(e) {}
   }
   
-  validUrl = validUrl.replace(/^["']|["']$/g, '').trim();
+  validUrl = validUrl
+    .replace(/^["']|["']$/g, '')
+    .trim()
+    .replace(/\/storage\/v1\/object\/public\/system_images\/questions\//g, '/storage/v1/object/public/question_images/');
   const lowerUrl = validUrl.toLowerCase();
   
   if (validUrl && validUrl !== 'null' && !lowerUrl.startsWith('http') && !lowerUrl.startsWith('data:image') && !lowerUrl.startsWith('blob:')) {
-    if (validUrl.startsWith('/')) validUrl = validUrl.substring(1);
-    
+    const cleanPath = validUrl.replace(/^\/+/, '').replace(/^(?:system_images\/questions\/|question_images\/|questions\/)/, '');
     const baseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "https://kfwlmbwornivkrvoeqdh.supabase.co";
-    validUrl = `${baseUrl}/storage/v1/object/public/question_images/${validUrl}`;
+    validUrl = `${baseUrl}/storage/v1/object/public/question_images/${cleanPath}`;
   }
   
   return validUrl;

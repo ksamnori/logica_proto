@@ -36,13 +36,18 @@ export const formatMathTextForWeb = (text: string) => {
 };
 
 export const getCleanUrl = (url: string) => {
-  if (!url || url === 'null') return '';
-  let validUrl = url;
-  if (typeof validUrl === 'string' && validUrl.trim().startsWith('[')) { 
-    try { validUrl = JSON.parse(validUrl)[0]; } catch(e) {} 
+  if (!url || url === 'null' || url === 'undefined') return '';
+  let validUrl = String(url).trim();
+  if (validUrl.startsWith('[')) { 
+    try { validUrl = String(JSON.parse(validUrl)[0] || '').trim(); } catch(e) {} 
   }
-  if (validUrl && validUrl !== 'null' && !validUrl.startsWith('http') && !validUrl.startsWith('data:image')) { 
-    validUrl = SUPABASE_URL + '/storage/v1/object/public/question_images/' + validUrl; 
+  validUrl = validUrl
+    .replace(/^["']|["']$/g, '')
+    .trim()
+    .replace(/\/storage\/v1\/object\/public\/system_images\/questions\//g, '/storage/v1/object/public/question_images/');
+  if (validUrl && validUrl !== 'null' && !validUrl.startsWith('http') && !validUrl.startsWith('data:image') && !validUrl.startsWith('blob:')) { 
+    const cleanPath = validUrl.replace(/^\/+/, '').replace(/^(?:system_images\/questions\/|question_images\/|questions\/)/, '');
+    validUrl = SUPABASE_URL + '/storage/v1/object/public/question_images/' + cleanPath; 
   }
   return validUrl;
 };

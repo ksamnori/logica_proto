@@ -3,7 +3,7 @@ import { useState, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { supabase } from "../../../lib/supabase";
 import { getDiffLabelByRate, smartSplitTaxonomy, getDepth5Name, getDepth6Name, extractParentIds, parseQuestionNumberParts, compareSubQuestions, compareQuestionsBySource, buildMergedQuestionGroups, fetchMainTextbookExclusionSet, isMainTextbookQuestion, isWorkbookQuestion, hydrateMissingQuestionImages, matchesSourceCategoryFilter, ensureCompleteSubQuestionBundles } from "./examUtils";
-import { DIAGNOSTIC_SEMESTERS, getDiagnosticQuarterInfo, matchDiagnosticSemester } from "../step1/useStep1Data";
+import { DIAGNOSTIC_SEMESTERS, QUARTERLY_SEMESTERS, getDiagnosticQuarterInfo, matchDiagnosticSemester, filterQuarterlyQuestionsByLevel } from "../step1/useStep1Data";
 import { normalizeMasterCategories, normalizeMasterCategoryRow } from "../../../lib/normalize";
 
 const URL_MASTER_CAT = "https://kfwlmbwornivkrvoeqdh.supabase.co/storage/v1/object/public/system_data/Master_Category.json";
@@ -318,6 +318,7 @@ export function useExamData() {
         sessionStorage.removeItem('testCategory');
         sessionStorage.removeItem('testSourceFilter');
         sessionStorage.removeItem('diagnosticQuestionIds');
+        sessionStorage.removeItem('quarterlyQuestionIds');
         if (examData) {
             if (examData.title) {
                 const isDuplicate = !!(duplicateUrlId || duplicateSessionId);
@@ -395,7 +396,11 @@ export function useExamData() {
           }
         });
         allGroups.sort((a, b) => a.sort_order - b.sort_order);
-        const isLoadedDiag = examData?.exam_type === '입학테스트' || examData?.exam_type === '진단평가';
+        const isLoadedDiag =
+          examData?.exam_type === '입학테스트' ||
+          examData?.exam_type === '진단평가' ||
+          ((examData?.exam_type === '분기평가' || examData?.exam_type === '분기테스트') &&
+            (parsedLayout?.isQuarterlyLock || orderedQuestions.length >= 30));
         if (isLoadedDiag && userMergedTextQuestions.length === 0 && orderedQuestions.length > 0) {
           allGroups = buildMergedQuestionGroups(orderedQuestions, true, true);
         }
@@ -453,10 +458,24 @@ export function useExamData() {
       let allData: any[] = [];
       const searchIds = new Set<string>();
       const diagSelections: { sem: (typeof DIAGNOSTIC_SEMESTERS)[number]; quarterKey: string | null }[] = [];
+      const quarterlySelections: { sem: (typeof QUARTERLY_SEMESTERS)[number]; level: "MAX" | "PRO" | null }[] = [];
       const isDiagnosticMode = examMode === "test" && (testCategory === "진단평가" || testCategory === "입학테스트");
+      const isQuarterlyMode = examMode === "test" && (testCategory === "분기평가" || testCategory === "분기테스트");
+      const isFixedPresetExamMode = isDiagnosticMode || isQuarterlyMode;
 
       selectedItemIdsArray.forEach((rawId: string) => {
         const id = String(rawId || "");
+        if (id.startsWith("분기평가__")) {
+          const [, gradeCode, lvlRaw] = id.split("__");
+          const sem = QUARTERLY_SEMESTERS.find((s) => s.gradeCode === gradeCode);
+          if (sem) {
+            const level: "MAX" | "PRO" | null =
+              lvlRaw === "MAX" ? "MAX" : lvlRaw === "PRO" ? "PRO" : null;
+            quarterlySelections.push({ sem, level });
+          }
+          return;
+        }
+
         if (id.includes("__QTR__")) {
           const [baseSrc, qtrKey] = id.split("__QTR__");
           const sem = DIAGNOSTIC_SEMESTERS.find((s) => s.baseSource === baseSrc);
@@ -520,6 +539,42 @@ export function useExamData() {
         }
       }
 
+      // 🌟 1-2) 분기평가 모드일 때: Step 1에서 전달된 정확한 question_id 목록 또는 분기평가 전용 페이지네이션 쿼리로 조회
+      if (isQuarterlyMode || quarterlySelections.length > 0) {
+        let preMatchedQuarterlyIds: string[] = [];
+        try {
+          preMatchedQuarterlyIds = JSON.parse(sessionStorage.getItem("quarterlyQuestionIds") || "[]");
+        } catch (e) {}
+
+        if (Array.isArray(preMatchedQuarterlyIds) && preMatchedQuarterlyIds.length > 0) {
+          for (let i = 0; i < preMatchedQuarterlyIds.length; i += 100) {
+            const idChunk = preMatchedQuarterlyIds.slice(i, i + 100);
+            const { data, error } = await supabase
+              .from("question_db")
+              .select("*")
+              .in("question_id", idChunk);
+            if (error) throw error;
+            if (data) allData = allData.concat(data);
+          }
+        } else {
+          let from = 0;
+          const step = 1000;
+          while (true) {
+            const { data, error } = await supabase
+              .from("question_db")
+              .select("*")
+              .or("book_name.ilike.%분기%평가%,source_book_name.ilike.%분기%평가%,pdf_source.ilike.%분기%평가%")
+              .order("question_id", { ascending: true })
+              .range(from, from + step - 1);
+            if (error) throw error;
+            if (!data || data.length === 0) break;
+            allData = allData.concat(data);
+            if (data.length < step) break;
+            from += step;
+          }
+        }
+      }
+
       // 🌟 2) 일반/사고력/기타 테스트 검색 (sub_taxonomy_id 포함하여 단원 검색 범위 확장)
       const chunk = Array.from(searchIds);
       for (let i = 0; i < chunk.length; i += 50) {
@@ -535,7 +590,11 @@ export function useExamData() {
         const testSourceFilter = sessionStorage.getItem("testSourceFilter");
         
         if (testSourceFilter) {
-            finalQuery = finalQuery.eq("source_book_name", testSourceFilter);
+            if (testSourceFilter === "중간평가" || testSourceFilter === "중간테스트") {
+              finalQuery = finalQuery.in("source_book_name", ["중간평가", "중간테스트"]);
+            } else {
+              finalQuery = finalQuery.eq("source_book_name", testSourceFilter);
+            }
         }
 
         const { data, error } = await finalQuery.limit(2000);
@@ -550,18 +609,34 @@ export function useExamData() {
       });
       allData = Array.from(uniqueDataMap.values());
 
-      const mainExclusion = !isDiagnosticMode ? await fetchMainTextbookExclusionSet(supabase) : null;
-      const isPageFilterActive = !isDiagnosticMode && (pageStart !== "" || pageEnd !== "");
+      const mainExclusion = !isFixedPresetExamMode ? await fetchMainTextbookExclusionSet(supabase) : null;
+      const isPageFilterActive = !isFixedPresetExamMode && (pageStart !== "" || pageEnd !== "");
       const minPage = pageStart ? parseInt(pageStart, 10) : 0;
       const maxPage = pageEnd ? parseInt(pageEnd, 10) : 999999;
-      const kwBook1 = !isDiagnosticMode ? bookName1.trim().toLowerCase() : "";
-      const kwBook2 = !isDiagnosticMode ? bookName2.trim().toLowerCase() : "";
+      const kwBook1 = !isFixedPresetExamMode ? bookName1.trim().toLowerCase() : "";
+      const kwBook2 = !isFixedPresetExamMode ? bookName2.trim().toLowerCase() : "";
+
+      const quarterlyAllowedIdSet: Set<string> | null =
+        quarterlySelections.length > 0
+          ? (() => {
+              const s = new Set<string>();
+              quarterlySelections.forEach(({ sem, level }) => {
+                const visiblePool = allData.filter(
+                  (q: any) => q.is_hidden !== true && q.is_hidden !== "Y" && q.is_hidden !== "true"
+                );
+                filterQuarterlyQuestionsByLevel(visiblePool, sem, level).forEach((q: any) => {
+                  if (q?.question_id) s.add(String(q.question_id));
+                });
+              });
+              return s;
+            })()
+          : null;
 
       const isRateFilterActive = (rateMax < 100 || rateMin > 0) && examMode !== "test";
       const filteredData = allData.filter(q => {
         if (q.is_hidden === true || q.is_hidden === 'Y' || q.is_hidden === 'true') return false;
         // 🌟 주교재 제외 / 워크북 제외 / 추가문제 / 쌍둥이·유사 필터 적용
-        if (!isDiagnosticMode) {
+        if (!isFixedPresetExamMode) {
           if ((sourceCategories.excludeMain ?? true) && isMainTextbookQuestion(q, mainExclusion)) return false;
           if ((sourceCategories.excludeWorkbook ?? true) && isWorkbookQuestion(q, mainExclusion)) return false;
           if (examMode !== "test" && !matchesSourceCategoryFilter(q, sourceCategories, mainExclusion)) return false;
@@ -580,6 +655,10 @@ export function useExamData() {
             return getDiagnosticQuarterInfo(q.created_at).key === quarterKey;
           });
           if (!matchesDiag) return false;
+        }
+
+        if (quarterlyAllowedIdSet) {
+          if (!quarterlyAllowedIdSet.has(String(q.question_id))) return false;
         }
         
         if (examMode !== "test") {
@@ -615,15 +694,18 @@ export function useExamData() {
         supabase,
         filteredData,
         allData,
-        isDiagnosticMode
+        isFixedPresetExamMode
       );
 
       // 🌟 2) 서브문항 자동 병합: 동일 묶음의 서브문항들은 하나의 그룹(g.items)으로 함께 유지
-      let allGroups = buildMergedQuestionGroups(completeFilteredData, isDiagnosticMode);
+      let allGroups = buildMergedQuestionGroups(completeFilteredData, isFixedPresetExamMode);
 
       let selectedGroups: any[] = [];
-      if (examMode === 'test' && (testCategory === '진단평가' || testCategory === '입학테스트')) {
-        selectedGroups = diagSelections.length > 0 ? allGroups : allGroups.slice(0, qCountReq);
+      if (isFixedPresetExamMode) {
+        selectedGroups =
+          diagSelections.length > 0 || quarterlySelections.length > 0
+            ? allGroups
+            : allGroups.slice(0, qCountReq);
       } else {
         // 🌟 3) 총 출제 문항 수(qCountReq)는 '병합되지 않은 상태의 개별 문항 수(g.items.length 합계)'를 기준으로 선발하되,
         // 서브문항 묶음(g.items)은 절대 쪼개지 않고 통째로 포함합니다.

@@ -177,7 +177,11 @@ function buildExamQuestionScoreMap(
   const groupCount = groups.length || 1;
   const baseGroupScore = 100 / groupCount;
   const isAdmissionExam = Boolean(
-    examType && (examType.includes("입학테스트") || examType.includes("진단평가"))
+    examType &&
+      (examType.includes("입학테스트") ||
+        examType.includes("진단평가") ||
+        examType.includes("분기평가") ||
+        examType.includes("분기테스트"))
   );
 
   groups.forEach((g) => {

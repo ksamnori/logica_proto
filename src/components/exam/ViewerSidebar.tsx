@@ -86,13 +86,14 @@ export default function ViewerSidebar({
                       </div>
                       <div>
                           <label className="block text-xs font-bold text-slate-500 mb-1.5">디자인 템플릿</label>
-                          <select value={isAdmissionLock ? '입학테스트' : template} onChange={e => handleSettingChange('template', e.target.value)} className={`w-full border border-slate-300 rounded px-2 py-1.5 text-xs font-bold text-slate-700 bg-white focus:outline-none focus:border-brand ${isAdmissionLock ? 'opacity-40 pointer-events-none' : ''}`}>
+                          <select value={isAdmissionLock ? (layoutType === '분기평가' ? '분기평가' : '입학테스트') : template} onChange={e => handleSettingChange('template', e.target.value)} className={`w-full border border-slate-300 rounded px-2 py-1.5 text-xs font-bold text-slate-700 bg-white focus:outline-none focus:border-brand ${isAdmissionLock ? 'opacity-40 pointer-events-none' : ''}`}>
                               <option value="basic1">기본1 (좌측 여백 활용)</option>
                               <option value="basic2">기본2 (슬림 헤더, 하단 라벨)</option>
                               <option value="academy_standard">⭐ 추천1: 학원 표준 평가형 (1P Depth5 범위 + 반·이름·점수란)</option>
                               <option value="summary_bar">⭐ 추천2: 모던 요약바형 (1P 상단 범위·이름 통합바)</option>
                               <option value="clinic_note">⭐ 추천3: 클리닉·과제 노트형 (1P 단원표시 + 이름·확인란)</option>
-                              {isAdmissionLock && <option value="입학테스트">진단평가 (입학테스트) 전용</option>}
+                              {isAdmissionLock && layoutType === '분기평가' && <option value="분기평가">분기평가 전용</option>}
+                              {isAdmissionLock && layoutType !== '분기평가' && <option value="입학테스트">진단평가 (입학테스트) 전용</option>}
                           </select>
                       </div>
                       <div className={isAdmissionLock ? 'opacity-40 pointer-events-none' : ''}>

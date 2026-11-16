@@ -848,6 +848,17 @@ export function normalizeRecordForQuestionDb(raw: any, fallbackBookTitle = ""): 
   rec.answer_image_type = clampVarchar(rec.answer_image_type, 20, null);
   rec.engine_ver = clampVarchar(rec.engine_ver, 20, null);
 
+  for (const imgField of ["image_url", "image_2_url", "answer_image_url", "answer_image_2_url"] as const) {
+    if (rec[imgField] && typeof rec[imgField] === "string") {
+      rec[imgField] = rec[imgField]
+        .replace(
+          /\/storage\/v1\/object\/public\/system_images\/questions\//g,
+          "/storage/v1/object/public/question_images/"
+        )
+        .replace(/^(?:system_images\/questions\/|questions\/)/, "");
+    }
+  }
+
   const verified = Boolean(rec.is_human_verified || rec.human_verified || rec.verification_status === "APPROVED");
   rec.is_human_verified = verified;
   rec.human_verified = verified;
@@ -3224,20 +3235,51 @@ export default function PdfParserPage() {
       }
 
       if (imageUploadTasks.length > 0) {
-        addLog(`🖼️ 신규 크롭 이미지 ${imageUploadTasks.length}개 Storage 업로드 중...`);
+        addLog(`🖼️ 신규 크롭 이미지 ${imageUploadTasks.length}개 Storage(question_images) 업로드 중...`);
         const imgBatchSize = 5;
+        const blobToDataUrl = (b: Blob) =>
+          new Promise<string>((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onloadend = () => resolve(String(reader.result || ""));
+            reader.onerror = reject;
+            reader.readAsDataURL(b);
+          });
+
         for (let i = 0; i < imageUploadTasks.length; i += imgBatchSize) {
           const batch = imageUploadTasks.slice(i, i + imgBatchSize);
           await Promise.all(
             batch.map(async ({ qId, field, suffix, blob }) => {
-              const storagePath = `questions/${qId}_${suffix}_${Date.now()}.png`;
+              const fileName = `${qId}_${suffix}_${Date.now()}.png`;
               const { error: upErr } = await supabase.storage
-                .from("system_images")
-                .upload(storagePath, blob, { upsert: true });
+                .from("question_images")
+                .upload(fileName, blob, { contentType: "image/png", upsert: true });
               if (!upErr) {
                 uploadedUrlsByQId[qId][field] = supabase.storage
-                  .from("system_images")
-                  .getPublicUrl(storagePath).data.publicUrl;
+                  .from("question_images")
+                  .getPublicUrl(fileName).data.publicUrl;
+              } else {
+                // RLS 제한 환경 대비 서버 라우트(SERVICE_ROLE_KEY) 폴백 업로드
+                try {
+                  const imageBase64 = await blobToDataUrl(blob);
+                  const srvRes = await fetch("/api/gemini-twin", {
+                    method: "PUT",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                      action: "upload_image",
+                      imageBase64,
+                      fileName,
+                      contentType: "image/png",
+                    }),
+                  });
+                  const srvJson = await srvRes.json().catch(() => ({}));
+                  if (srvRes.ok && srvJson?.success && srvJson?.publicUrl) {
+                    uploadedUrlsByQId[qId][field] = srvJson.publicUrl;
+                  } else {
+                    throw new Error(srvJson?.error || upErr.message);
+                  }
+                } catch (fallbackErr: any) {
+                  addLog(`⚠️ 이미지 업로드 실패 (${fileName}): ${fallbackErr?.message || upErr.message}`);
+                }
               }
             })
           );
@@ -3266,6 +3308,14 @@ export default function PdfParserPage() {
               );
               const safeDiff = normalizeDifficultyForDb(item.difficulty);
 
+              const uploadedUrls = uploadedUrlsByQId[qId] || {};
+              const newlyUploadedPatch: Record<string, string> = {};
+              for (const { field } of slotConfigs) {
+                if (imageAssets[`${qId}_${field}`]?.blob && uploadedUrls[field]) {
+                  newlyUploadedPatch[field] = uploadedUrls[field]!;
+                }
+              }
+
               const metaPatch: any = {
                 taxonomy_id: safeTaxId,
                 taxonomy_name: item.taxonomy_name || null,
@@ -3277,6 +3327,7 @@ export default function PdfParserPage() {
                 solving_probability: item.solving_probability ?? 50,
                 cognitive_level: safeCogLevel,
                 problem_type: safeProbType,
+                ...newlyUploadedPatch,
                 ...(finalBookName
                   ? { book_name: finalBookName, source_book_name: finalBookName }
                   : {}),
@@ -3416,21 +3467,26 @@ export default function PdfParserPage() {
     const assetKey = `${qId}_${field}`;
     const asset = imageAssets[assetKey];
     const rawVal = currentProblem[field];
+    const normalizedRawVal = rawVal
+      ? String(rawVal).replace(
+          /\/storage\/v1\/object\/public\/system_images\/questions\//g,
+          "/storage/v1/object/public/question_images/"
+        )
+      : "";
     const displayUrl =
       asset?.previewUrl ||
-      (rawVal &&
-      (String(rawVal).startsWith("http") ||
-        String(rawVal).startsWith("data:") ||
-        String(rawVal).startsWith("blob:"))
-        ? String(rawVal)
-        : rawVal
+      (normalizedRawVal &&
+      (normalizedRawVal.startsWith("http") ||
+        normalizedRawVal.startsWith("data:") ||
+        normalizedRawVal.startsWith("blob:"))
+        ? normalizedRawVal
+        : normalizedRawVal
         ? `${
             process.env.NEXT_PUBLIC_SUPABASE_URL ||
             "https://kfwlmbwornivkrvoeqdh.supabase.co"
-          }/storage/v1/object/public/question_images/${String(rawVal).replace(
-            /^\/+/,
-            ""
-          )}`
+          }/storage/v1/object/public/question_images/${normalizedRawVal
+            .replace(/^\/+/, "")
+            .replace(/^(?:system_images\/questions\/|question_images\/|questions\/)/, "")}`
         : "");
 
     const isTargeted =

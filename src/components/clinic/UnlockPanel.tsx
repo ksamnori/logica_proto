@@ -178,6 +178,13 @@ function buildExamQuestionScoreMap(
     String(examType || "").trim()
   );
 
+  const isWeightedGroupExam = Boolean(
+    examType &&
+      (examType.includes("분기평가") ||
+        examType.includes("분기테스트") ||
+        examType.includes("진단평가"))
+  );
+
   let rawAssignedTotal = 0;
   let allHaveExplicitScore = true;
   sortedItems.forEach((it) => {
@@ -185,11 +192,30 @@ function buildExamQuestionScoreMap(
     if (Number.isFinite(sc) && sc > 0) rawAssignedTotal += sc;
     else allHaveExplicitScore = false;
   });
+
+  let rawGroupMaxTotal = 0;
+  let allGroupsHaveExplicit = true;
+  groups.forEach((g) => {
+    const gMax = Math.max(...g.items.map((it: any) => Number(it.assigned_score) || 0));
+    if (Number.isFinite(gMax) && gMax > 0) rawGroupMaxTotal += gMax;
+    else allGroupsHaveExplicit = false;
+  });
+
+  const canUseGroupMaxScores =
+    isWeightedGroupExam && allGroupsHaveExplicit && Math.abs(rawGroupMaxTotal - 100) < 0.5;
   const canUseExplicitScores =
-    !forceEqualGroupScore && allHaveExplicitScore && Math.abs(rawAssignedTotal - 100) < 0.5;
+    !canUseGroupMaxScores && !forceEqualGroupScore && allHaveExplicitScore && Math.abs(rawAssignedTotal - 100) < 0.5;
 
   groups.forEach((g) => {
-    if (canUseExplicitScores) {
+    if (canUseGroupMaxScores) {
+      const gMax = Math.max(...g.items.map((it: any) => Number(it.assigned_score) || 0)) || equalGroupScore;
+      const subSc = gMax / (g.items.length || 1);
+      g.groupScore = gMax;
+      g.subScore = subSc;
+      g.items.forEach((it: any) => {
+        scoreByQuestionId.set(String(it.question_id), subSc);
+      });
+    } else if (canUseExplicitScores) {
       let gSum = 0;
       g.items.forEach((it) => {
         const sc = Number(it.assigned_score) || equalGroupScore / (g.items.length || 1);
