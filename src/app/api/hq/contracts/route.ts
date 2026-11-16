@@ -86,6 +86,83 @@ export async function POST(req: NextRequest) {
     if (caller instanceof NextResponse) return caller;
 
     const body = await req.json();
+
+    // 서식 기반 다수 구성원 일괄 발송 (연봉재계약 / 보안서약서 등 전사 동시 발송)
+    if (String(body?.action || "").toUpperCase() === "BATCH_CREATE") {
+      if (!caller.isHrManager && !caller.isHqAdmin) {
+        return apiFail(
+          "다수 구성원 일괄 계약 발송은 인사관리자·최고관리자만 실행할 수 있습니다.",
+          403
+        );
+      }
+      const rawItems: any[] = Array.isArray(body?.items) ? body.items : [];
+      if (rawItems.length === 0) {
+        return apiFail("일괄 발송할 대상 계약 항목이 없습니다.");
+      }
+
+      const nowIso = new Date().toISOString();
+      const supabaseAdmin = getSupabaseAdmin();
+      const rowsToInsert = rawItems.slice(0, 100).map((it) => {
+        const cat = (it.category || "SALARY") as HqContractCategory;
+        const tType: HqContractTargetType =
+          it.target_type === "EXTERNAL" ? "EXTERNAL" : "INTERNAL";
+        const txType: HqContractTaxType =
+          it.tax_type || CONTRACT_CATEGORIES[cat]?.taxDefault || "FOUR_INSURANCE";
+        const isDraft = it.status === "DRAFT";
+        return {
+          contract_no: generateContractNo(),
+          category: cat,
+          target_type: tType,
+          target_member_id:
+            tType === "INTERNAL" && it.target_member_id
+              ? String(it.target_member_id)
+              : null,
+          counterparty_name: String(it.counterparty_name || "").trim(),
+          counterparty_role: String(it.counterparty_role || "").trim(),
+          counterparty_phone: String(it.counterparty_phone || "").trim() || null,
+          counterparty_email: String(it.counterparty_email || "").trim() || null,
+          department: String(it.department || "").trim(),
+          title: String(it.title || "").trim(),
+          book_title: String(it.book_title || "").trim() || null,
+          start_date: it.start_date || null,
+          end_date: it.end_date || null,
+          contract_amount: Math.max(
+            0,
+            Math.round(Number(it.contract_amount || 0))
+          ),
+          royalty_rate:
+            it.royalty_rate !== undefined && it.royalty_rate !== null
+              ? Number(it.royalty_rate)
+              : null,
+          tax_type: txType,
+          body_text: String(it.body_text || "").trim(),
+          special_terms: String(it.special_terms || "").trim() || null,
+          status: (isDraft ? "DRAFT" : "SENT") as HqContractStatus,
+          company_signer_name:
+            String(it.company_signer_name || "").trim() ||
+            "(주)천종현수학연구소 대표이사 천종현",
+          company_signed_at: isDraft ? null : nowIso,
+          created_by: caller.userId,
+          created_at: nowIso,
+          updated_at: nowIso,
+        };
+      });
+
+      const { data: inserted, error: batchErr } = await supabaseAdmin
+        .from("hq_contract")
+        .insert(rowsToInsert)
+        .select("*");
+
+      if (batchErr) {
+        return apiFail(`일괄 계약 발송 실패: ${batchErr.message}`, 500);
+      }
+
+      return NextResponse.json({
+        success: true,
+        data: { count: inserted?.length || 0, contracts: inserted || [] },
+      });
+    }
+
     const category = String(body?.category || "LABOR") as HqContractCategory;
     if (!(category in CONTRACT_CATEGORIES)) {
       return apiFail("유효하지 않은 계약서 유형입니다.");
@@ -266,6 +343,62 @@ export async function PATCH(req: NextRequest) {
         }
       }
 
+      return NextResponse.json({ success: true, data: updated });
+    }
+
+    if (action === "UPDATE_DRAFT") {
+      if (!caller.isHrManager && existing.created_by !== caller.userId) {
+        return apiFail("임시저장 계약 수정 권한이 없습니다.", 403);
+      }
+      const nextStatus: HqContractStatus =
+        body?.next_status === "SENT" ? "SENT" : "DRAFT";
+      const { data: updated, error: updErr } = await supabaseAdmin
+        .from("hq_contract")
+        .update({
+          category: body?.category || existing.category,
+          target_type: body?.target_type || existing.target_type,
+          target_member_id:
+            body?.target_type === "INTERNAL"
+              ? body?.target_member_id || null
+              : null,
+          counterparty_name:
+            String(body?.counterparty_name || existing.counterparty_name).trim(),
+          counterparty_role:
+            String(body?.counterparty_role ?? existing.counterparty_role).trim(),
+          counterparty_phone:
+            String(body?.counterparty_phone ?? "").trim() || null,
+          counterparty_email:
+            String(body?.counterparty_email ?? "").trim() || null,
+          department: String(body?.department ?? existing.department).trim(),
+          title: String(body?.title || existing.title).trim(),
+          book_title: String(body?.book_title ?? "").trim() || null,
+          start_date: body?.start_date || null,
+          end_date: body?.end_date || null,
+          contract_amount: Math.max(
+            0,
+            Math.round(Number(body?.contract_amount ?? existing.contract_amount))
+          ),
+          royalty_rate:
+            body?.royalty_rate !== undefined &&
+            body?.royalty_rate !== null &&
+            body?.royalty_rate !== ""
+              ? Number(body.royalty_rate)
+              : null,
+          tax_type: body?.tax_type || existing.tax_type,
+          body_text: String(body?.body_text || existing.body_text).trim(),
+          special_terms: String(body?.special_terms ?? "").trim() || null,
+          status: nextStatus,
+          company_signed_at:
+            nextStatus === "SENT"
+              ? nowIso
+              : existing.company_signed_at || null,
+          updated_at: nowIso,
+        })
+        .eq("contract_id", contractId)
+        .select("*")
+        .single();
+
+      if (updErr) return apiFail(`임시저장 수정 실패: ${updErr.message}`, 500);
       return NextResponse.json({ success: true, data: updated });
     }
 

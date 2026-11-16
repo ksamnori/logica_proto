@@ -1416,6 +1416,28 @@ export interface HqAttendanceLockItem {
   locked_at: string;
 }
 
+export interface HqContractCustomField {
+  id: string;
+  label: string;
+  token: string; // 예: "{{원고매수}}"
+  default_value?: string;
+}
+
+export interface HqContractTemplateItem {
+  id: string;
+  name: string;
+  description: string;
+  category_name: string; // 예: "자동계약서", "인사·서약서", "출판·외주 계약서"
+  mapped_category: HqContractCategory;
+  tags: string[];
+  body_text: string;
+  is_archived: boolean;
+  is_system_seed?: boolean;
+  updated_by: string;
+  updated_at: string;
+  created_at: string;
+}
+
 export interface HqCompanyExtraSettings {
   doc_prefix_cert?: string;
   doc_prefix_approval?: string;
