@@ -227,6 +227,45 @@ export function normalizeCompanySettings(raw: any): HqCompanySettings {
               : def.extra_settings.permission_settings?.groups || [],
           }
         : def.extra_settings.permission_settings,
+      integration_settings: incomingExtra.integration_settings
+        ? {
+            slack: {
+              ...def.extra_settings.integration_settings!.slack,
+              ...(incomingExtra.integration_settings.slack || {}),
+            },
+            google_calendar: {
+              ...def.extra_settings.integration_settings!.google_calendar,
+              ...(incomingExtra.integration_settings.google_calendar || {}),
+            },
+            secom: {
+              ...def.extra_settings.integration_settings!.secom,
+              ...(incomingExtra.integration_settings.secom || {}),
+              member_mappings: Array.isArray(
+                incomingExtra.integration_settings.secom?.member_mappings
+              )
+                ? incomingExtra.integration_settings.secom.member_mappings
+                : [],
+            },
+            adt_caps: {
+              ...def.extra_settings.integration_settings!.adt_caps,
+              ...(incomingExtra.integration_settings.adt_caps || {}),
+              member_mappings: Array.isArray(
+                incomingExtra.integration_settings.adt_caps?.member_mappings
+              )
+                ? incomingExtra.integration_settings.adt_caps.member_mappings
+                : [],
+            },
+            kt_telecop: {
+              ...def.extra_settings.integration_settings!.kt_telecop,
+              ...(incomingExtra.integration_settings.kt_telecop || {}),
+              member_mappings: Array.isArray(
+                incomingExtra.integration_settings.kt_telecop?.member_mappings
+              )
+                ? incomingExtra.integration_settings.kt_telecop.member_mappings
+                : [],
+            },
+          }
+        : def.extra_settings.integration_settings,
       info_approval_policy: {
         ...def.extra_settings.info_approval_policy,
         ...(incomingExtra.info_approval_policy || {}),

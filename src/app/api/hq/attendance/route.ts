@@ -1,6 +1,7 @@
 // src/app/api/hq/attendance/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import { ATTENDANCE_MODES } from "@/lib/hq/constants";
+import { notifySlackIfEnabled } from "@/lib/hq/integrationServer";
 import {
   apiFail,
   getSupabaseAdmin,
@@ -215,6 +216,11 @@ export async function POST(req: NextRequest) {
         .single();
 
       if (saveErr) return apiFail(`출근 기록 실패: ${saveErr.message}`, 500);
+      notifySlackIfEnabled(
+        supabaseAdmin,
+        "ATTENDANCE",
+        `🟢 *[출근]* ${caller.name} (${caller.department}) — ${modeMeta.label} (${locationNote})`
+      ).catch(() => {});
       return NextResponse.json({ success: true, data: saved });
     }
 
@@ -258,6 +264,11 @@ export async function POST(req: NextRequest) {
         .single();
 
       if (saveErr) return apiFail(`퇴근 기록 실패: ${saveErr.message}`, 500);
+      notifySlackIfEnabled(
+        supabaseAdmin,
+        "ATTENDANCE",
+        `🔵 *[퇴근]* ${caller.name} (${caller.department}) — 총 근무 ${Math.floor(workedMinutes / 60)}시간 ${workedMinutes % 60}분`
+      ).catch(() => {});
       return NextResponse.json({ success: true, data: saved });
     }
 

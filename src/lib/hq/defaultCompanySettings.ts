@@ -11,6 +11,7 @@ import {
   DEFAULT_ANNUAL_LEAVE_SETTINGS,
   DEFAULT_CUSTOM_LEAVES,
 } from "./defaultLeaveSettings";
+import { DEFAULT_INTEGRATION_SETTINGS } from "./defaultIntegrationSettings";
 import { DEFAULT_PAYROLL_SETTINGS } from "./defaultPayrollSettings";
 import { DEFAULT_PERMISSION_SETTINGS } from "./defaultPermissionSettings";
 import { DEFAULT_SECURITY_SETTINGS } from "./defaultSecuritySettings";
@@ -540,6 +541,7 @@ export const DEFAULT_HQ_COMPANY_SETTINGS: HqCompanySettings = {
     retiree_doc_settings: DEFAULT_RETIREE_DOC_SETTINGS,
     security_settings: DEFAULT_SECURITY_SETTINGS,
     permission_settings: DEFAULT_PERMISSION_SETTINGS,
+    integration_settings: DEFAULT_INTEGRATION_SETTINGS,
   },
 };
 

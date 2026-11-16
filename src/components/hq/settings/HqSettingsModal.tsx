@@ -33,6 +33,7 @@ import {
 } from "./HqCustomInfoDocBoxSection";
 import HqCustomLeaveSettingsSection from "./HqCustomLeaveSettingsSection";
 import HqHrInfoSettingsSection from "./HqHrInfoSettingsSection";
+import HqIntegrationSettingsSection from "./HqIntegrationSettingsSection";
 import HqOvertimeCompSettingsSection from "./HqOvertimeCompSettingsSection";
 import {
   HqPayrollDeductionSection,
@@ -75,7 +76,8 @@ export type HqSettingsTab =
   | "retiree-doc"
   | "security-auth"
   | "login-setting"
-  | "permission-setting";
+  | "permission-setting"
+  | "integration-setting";
 
 interface Props {
   isOpen: boolean;
@@ -1159,7 +1161,7 @@ export default function HqSettingsModal({
             </div>
           </div>
 
-          {/* 기타 (권한 설정) */}
+          {/* 기타 (권한 설정 · 연결 설정) */}
           <div>
             <div className="px-3 mb-1.5 text-[11px] font-bold text-slate-400">
               기타
@@ -1173,6 +1175,16 @@ export default function HqSettingsModal({
                 <span className="flex items-center gap-2.5">
                   <span className="text-slate-400 text-sm">🛡️</span>
                   <span>권한 설정</span>
+                </span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveTab("integration-setting")}
+                className={navBtnClass("integration-setting")}
+              >
+                <span className="flex items-center gap-2.5">
+                  <span className="text-slate-400 text-sm">⊞</span>
+                  <span>연결 설정</span>
                 </span>
               </button>
             </div>
@@ -2472,6 +2484,27 @@ export default function HqSettingsModal({
                 canEdit={canEdit}
                 saving={saving}
                 onCloseSettings={onClose}
+                onSaveExtra={async (nextExtra, toastMessage) => {
+                  await savePartialSettings(
+                    {
+                      extra_settings: {
+                        ...settings.extra_settings,
+                        ...nextExtra,
+                      },
+                    },
+                    toastMessage
+                  );
+                }}
+                onNavigateTab={(tab) => setActiveTab(tab)}
+              />
+            )}
+
+            {activeTab === "integration-setting" && (
+              <HqIntegrationSettingsSection
+                settings={settings}
+                members={members}
+                canEdit={canEdit}
+                saving={saving}
                 onSaveExtra={async (nextExtra, toastMessage) => {
                   await savePartialSettings(
                     {

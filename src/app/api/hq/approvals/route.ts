@@ -3,6 +3,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { SupabaseClient } from "@supabase/supabase-js";
 import { LEAVE_TYPES } from "@/lib/hq/constants";
 import {
+  notifySlackIfEnabled,
+  syncApprovalDocToGoogleCalendar,
+} from "@/lib/hq/integrationServer";
+import {
   apiFail,
   getSupabaseAdmin,
   isMissingHqTableError,
@@ -132,6 +136,14 @@ async function applyPostApprovalSideEffects(
       { onConflict: "approval_id" }
     );
   }
+
+  // 3) 외부 서비스 연동: Google Calendar 자동 일정 등록 & Slack 알림 (비동기 안전 처리)
+  syncApprovalDocToGoogleCalendar(supabaseAdmin, doc).catch(() => {});
+  notifySlackIfEnabled(
+    supabaseAdmin,
+    doc.doc_type === "LEAVE" ? "LEAVE" : "APPROVAL",
+    `📌 *[전자결재 승인완료]* ${doc.drafter_name}(${doc.drafter_dept || "본부"}) — ${doc.title} (${doc.effective_date || ""}${doc.end_date && doc.end_date !== doc.effective_date ? ` ~ ${doc.end_date}` : ""})`
+  ).catch(() => {});
 }
 
 export async function GET(req: NextRequest) {

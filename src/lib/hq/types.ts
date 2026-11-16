@@ -1170,6 +1170,55 @@ export interface HqPermissionSettings {
   groups: HqPermissionGroupItem[];
 }
 
+export type HqAccessTerminalProvider = "secom" | "adt_caps" | "kt_telecop";
+
+export interface HqTerminalCardMapping {
+  member_id?: string;
+  member_name: string;
+  department?: string;
+  terminal_user_no: string; // 캡스/세콤 카드번호, 지문ID 또는 단말기 사번
+}
+
+export interface HqAccessTerminalConfig {
+  enabled: boolean;
+  terminal_name: string; // 예: "본사 402호 출입문 캡스 리더기"
+  contract_no: string; // 고객번호/계약번호 (선택)
+  webhook_secret: string; // 실시간 브릿지 웹훅 인증키
+  punch_rule: "FIRST_IN_LAST_OUT" | "EXPLICIT_MODE";
+  member_mappings: HqTerminalCardMapping[];
+  last_synced_at?: string | null;
+  last_synced_summary?: string | null;
+}
+
+export interface HqGoogleCalendarIntegrationConfig {
+  enabled: boolean;
+  calendar_id: string; // 비워두면 서버 환경변수 TARGET_CALENDAR_ID 사용
+  event_prefix: string; // 예: "[HQ]"
+  sync_leaves: boolean; // 연차·반차·맞춤휴가 승인 시 자동 등록
+  sync_work_forms: boolean; // 외근·출장·원격근무 승인 시 자동 등록
+  sync_company_holidays: boolean; // 회사 지정 쉬는날 일괄 동기화
+  last_synced_at?: string | null;
+  verified_calendar_title?: string | null;
+}
+
+export interface HqSlackIntegrationConfig {
+  enabled: boolean;
+  webhook_url: string;
+  channel_name: string; // 예: "#본사-근태-결재"
+  notify_attendance: boolean;
+  notify_leave: boolean;
+  notify_approval: boolean;
+  last_tested_at?: string | null;
+}
+
+export interface HqIntegrationSettings {
+  slack: HqSlackIntegrationConfig;
+  google_calendar: HqGoogleCalendarIntegrationConfig;
+  secom: HqAccessTerminalConfig;
+  adt_caps: HqAccessTerminalConfig;
+  kt_telecop: HqAccessTerminalConfig;
+}
+
 export interface HqCompanyExtraSettings {
   doc_prefix_cert?: string;
   doc_prefix_approval?: string;
@@ -1211,6 +1260,7 @@ export interface HqCompanyExtraSettings {
   retiree_doc_settings?: HqRetireeDocSettingItem[];
   security_settings?: HqSecuritySettings;
   permission_settings?: HqPermissionSettings;
+  integration_settings?: HqIntegrationSettings;
 }
 
 export interface HqCompanySettings {
