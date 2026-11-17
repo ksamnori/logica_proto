@@ -13,6 +13,7 @@ export interface QuestionDeleteImpact {
   examItemCount: number;
   studentAnswerCount: number;
   homeworkAnswerCount: number;
+  questionStatisticsCount: number;
   hasStudentHistory: boolean;
 }
 
@@ -229,19 +230,23 @@ async function collectInternalImpact(
     [questionId]
   );
 
-  const [childTwinCount, childTqCount] = await Promise.all([
-    safeCountByFilter(supabaseAdmin, "question_db", "parent_question_id", [
-      questionId,
-    ]),
-    tqIds.length > 0
-      ? safeCountByFilter(
-          supabaseAdmin,
-          "textbook_question",
-          "parent_tq_id",
-          tqIds
-        )
-      : Promise.resolve(0),
-  ]);
+  const [childTwinCount, childTqCount, questionStatisticsCount] =
+    await Promise.all([
+      safeCountByFilter(supabaseAdmin, "question_db", "parent_question_id", [
+        questionId,
+      ]),
+      tqIds.length > 0
+        ? safeCountByFilter(
+            supabaseAdmin,
+            "textbook_question",
+            "parent_tq_id",
+            tqIds
+          )
+        : Promise.resolve(0),
+      safeCountByFilter(supabaseAdmin, "question_statistics", "question_id", [
+        questionId,
+      ]),
+    ]);
 
   // 1) student_incorrect_record (question_id 및 tq_id 양쪽 모두 수집하여 중복 제거)
   const [incByQid, incByTq] = await Promise.all([
@@ -375,6 +380,7 @@ async function collectInternalImpact(
     examItemCount,
     studentAnswerCount,
     homeworkAnswerCount,
+    questionStatisticsCount,
     hasStudentHistory,
     tqIds,
     incorrectRecordIds,
@@ -426,9 +432,6 @@ export async function hideQuestionInMasterDb(
 
 /**
  * 23503 외래키 위반 및 textbook_question 반쪽 삭제를 원천 방지하는 안전 삭제 엔진
- * - 학생 학습 이력이 있고 forceCascade=false 이면 어떤 테이블도 건드리지 않고 HAS_HISTORY 를 반환합니다.
- * - 삭제 실행 시에는 하위 참조(clinic_task -> student_incorrect_record -> 답안 -> exam_item -> 쌍둥이 자기참조 해제 -> textbook_question -> question_db) 순서로 정리합니다.
- * - 만일 최종 question_db 삭제 단계에서 예기치 않은 DB 제약 오류가 나면 백업해 둔 textbook_question 및 쌍둥이 링크를 즉시 롤백 복구합니다.
  */
 export async function deleteQuestionSafely(
   supabaseAdmin: SupabaseClient,
@@ -497,7 +500,6 @@ export async function deleteQuestionSafely(
   try {
     // 1. 강제 연쇄 정리 모드일 때 학생 학습·오답·시험 문항 하위 참조부터 순서대로 제거
     if (forceCascade && details.hasStudentHistory) {
-      // (1) clinic_task (student_incorrect_record.record_id / question_id / tq_id 하위 참조)
       if (incorrectRecordIds.length > 0) {
         await safeDeleteByFilter(
           supabaseAdmin,
@@ -513,7 +515,6 @@ export async function deleteQuestionSafely(
         await safeDeleteByFilter(supabaseAdmin, "clinic_task", "tq_id", tqIds);
       }
 
-      // (2) student_incorrect_record (23503 student_incorrect_record_question_id_fkey 핵심 원인 테이블)
       if (incorrectRecordIds.length > 0) {
         await safeDeleteByFilter(
           supabaseAdmin,
@@ -537,7 +538,6 @@ export async function deleteQuestionSafely(
         );
       }
 
-      // (3) student_answer 및 student_homework_answer
       await safeDeleteByFilter(supabaseAdmin, "student_answer", "question_id", [
         cleanId,
       ]);
@@ -565,7 +565,6 @@ export async function deleteQuestionSafely(
         );
       }
 
-      // (4) exam_item 정리 및 영향을 받은 시험지(exam_master) 문항 수 동기화
       await safeUnlinkColumn(
         supabaseAdmin,
         "exam_item",
@@ -589,7 +588,6 @@ export async function deleteQuestionSafely(
           .eq("exam_id", examId);
       }
     } else {
-      // 이력이 0건이더라도 exam_item.parent_question_id 에만 참조된 경우가 있으면 안전하게 NULL 해제
       await safeUnlinkColumn(
         supabaseAdmin,
         "exam_item",
@@ -598,7 +596,14 @@ export async function deleteQuestionSafely(
       );
     }
 
-    // 2. 쌍둥이·유사 파생 문항의 자기참조(parent_question_id / parent_tq_id) 안전 해제 (자식 문항 보존)
+    // 2. 문항 통계(question_statistics) 및 쌍둥이 자기참조(parent_question_id / parent_tq_id) 정리
+    await safeDeleteByFilter(
+      supabaseAdmin,
+      "question_statistics",
+      "question_id",
+      [cleanId]
+    );
+
     if (childTqIds.length > 0) {
       await safeUnlinkColumn(
         supabaseAdmin,
@@ -632,7 +637,6 @@ export async function deleteQuestionSafely(
       .eq("question_id", cleanId);
 
     if (qDelErr) {
-      // 보상 롤백: 이미 지워진 textbook_question 및 부모 링크를 원상 복구하여 반쪽 삭제 방지
       if (tqSnapshotRows.length > 0) {
         await supabaseAdmin
           .from("textbook_question")
