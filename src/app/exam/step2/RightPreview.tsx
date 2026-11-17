@@ -318,7 +318,7 @@ export default function RightPreview({ examData }: { examData: any }) {
         ...g, items: g.items.map((item: any) => (item.question_id === editingId || item.question_id === realId) ? { ...item, ...updateData } : item)
       })));
       setEditingId(null);
-      setTimeout(() => forceMathJaxRender(), 60);
+      setTimeout(() => forceMathRefresh(), 60);
       alert("✅ 문제·4단계 해설 및 이미지 배율이 데이터베이스에 반영되었습니다!");
     } catch(e: any) { alert("❌ 저장 실패: " + e.message); }
   };
