@@ -9,7 +9,7 @@ import { HqShellProvider, useHqShell } from "@/components/hq/HqShellContext";
 import HqSidebar from "@/components/hq/HqSidebar";
 import HqMemberProfileModal from "@/components/hq/members/HqMemberProfileModal";
 import HqSettingsModal from "@/components/hq/settings/HqSettingsModal";
-import { HQ_ROUTE_TAB_TITLES, toCanonicalHqPath } from "@/lib/hq/hqRoutes";
+import { HQ_ROUTE_TAB_TITLES, toCanonicalHqPath } from "@/lib/hq/hqRouteUtils";
 
 function HqWorkspaceFrame({
   children,

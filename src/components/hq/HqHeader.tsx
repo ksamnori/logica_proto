@@ -6,7 +6,8 @@ import { usePathname, useRouter } from "next/navigation";
 import { useHqShell } from "./HqShellContext";
 import { ATTENDANCE_MODES, getRankMeta } from "@/lib/hq/constants";
 import { resolveStoragePublicUrl } from "@/lib/hq/clientApi";
-import { toCanonicalHqPath, useHqHref } from "@/lib/hq/hqRoutes";
+import { useHqHref } from "@/lib/hq/hqRoutes";
+import { toCanonicalHqPath } from "@/lib/hq/hqRouteUtils";
 
 const PAGE_TITLES: Record<string, { title: string; subtitle: string }> = {
   "/hq": {

@@ -2,7 +2,8 @@
 import React from "react";
 import type { Metadata } from "next";
 import { headers } from "next/headers";
-import { HqHostProvider, isHqSubdomainHost } from "@/lib/hq/hqRoutes";
+import { HqHostProvider } from "@/lib/hq/hqRoutes";
+import { isHqSubdomainHost } from "@/lib/hq/hqRouteUtils";
 
 export const metadata: Metadata = {
   title: {

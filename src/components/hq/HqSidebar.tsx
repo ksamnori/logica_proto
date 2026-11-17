@@ -7,7 +7,8 @@ import { usePathname, useRouter } from "next/navigation";
 import { useHqShell } from "./HqShellContext";
 import { getRankMeta } from "@/lib/hq/constants";
 import { resolveStoragePublicUrl } from "@/lib/hq/clientApi";
-import { toCanonicalHqPath, useHqHref } from "@/lib/hq/hqRoutes";
+import { useHqHref } from "@/lib/hq/hqRoutes";
+import { toCanonicalHqPath } from "@/lib/hq/hqRouteUtils";
 
 export default function HqSidebar() {
   const pathname = usePathname();

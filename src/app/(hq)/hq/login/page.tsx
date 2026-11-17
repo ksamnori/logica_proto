@@ -5,7 +5,8 @@ import React, { useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { FALLBACK_HQ_TENANT_ID } from "@/lib/hq/constants";
-import { isHqSubdomainHost, useHqHref } from "@/lib/hq/hqRoutes";
+import { useHqHref } from "@/lib/hq/hqRoutes";
+import { isHqSubdomainHost } from "@/lib/hq/hqRouteUtils";
 
 export default function HqLoginPage() {
   const router = useRouter();
