@@ -2,6 +2,7 @@
 import React, { useState, useEffect, useRef, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
+import { executeInteractiveQuestionDelete } from "@/lib/questionSafeDeleteClient";
 import { taxSort, generateUUID, sortQuestionsList, fetchAllRows, getCleanUrl } from "./taxonomyUtils";
 import { hydrateMissingQuestionImages } from "../../exam/step2/examUtils";
 
@@ -879,16 +880,58 @@ export function useTaxonomy() {
 
   const deleteQuestion = async () => {
     if (!selectedQuestion) return;
-    if (!confirm("⚠️ 정말 이 문항을 DB에서 완전히 삭제하시겠습니까? (연결된 자식 쌍둥이 문항도 함께 영향을 받을 수 있습니다.)")) return;
+    const targetId = String(selectedQuestion.question_id || "").trim();
+    if (!targetId) return;
+
     setIsLoading(true);
     try {
-      await supabase.from('textbook_question').delete().eq('question_id', selectedQuestion.question_id);
-      const { error } = await supabase.from('question_db').delete().eq('question_id', selectedQuestion.question_id);
-      if (error) throw error;
-      setQuestions(prev => prev.filter(q => q.question_id !== selectedQuestion.question_id));
-      setSelectedQuestion(null); setIsEditingContent(false);
-      alert("✅ 문항이 삭제되었습니다.");
-    } catch (e: any) { alert("삭제 실패: " + e.message); } finally { setIsLoading(false); }
+      const res = await executeInteractiveQuestionDelete({
+        questionId: targetId,
+        supabaseClient: supabase,
+      });
+
+      if (res.outcome === "CANCELLED") return;
+
+      if (res.outcome === "ERROR") {
+        alert("삭제 실패: " + res.error);
+        return;
+      }
+
+      if (res.outcome === "HIDDEN") {
+        setQuestions((prev) =>
+          prev.map((q) =>
+            q.question_id === targetId ? { ...q, is_hidden: true } : q
+          )
+        );
+        setSelectedQuestion((prev: any) =>
+          prev && prev.question_id === targetId
+            ? { ...prev, is_hidden: true }
+            : prev
+        );
+        alert(
+          "📦 학생 오답·성적 이력을 보존한 채 시험지 출제 숨김(보관) 처리되었습니다."
+        );
+        return;
+      }
+
+      // res.outcome === "DELETED"
+      setQuestions((prev) =>
+        prev
+          .filter((q) => q.question_id !== targetId)
+          .map((q) =>
+            q.parent_question_id === targetId
+              ? { ...q, parent_question_id: null }
+              : q
+          )
+      );
+      setSelectedQuestion(null);
+      setIsEditingContent(false);
+      alert("✅ 문항이 안전하게 삭제되었습니다.");
+    } catch (e: any) {
+      alert("삭제 실패: " + (e?.message || String(e)));
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const executeClone = async () => {

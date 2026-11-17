@@ -2,6 +2,12 @@
 import { GoogleGenerativeAI, SchemaType } from "@google/generative-ai";
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import {
+  deleteQuestionSafely,
+  hideQuestionInMasterDb,
+  inspectQuestionDeleteImpact,
+  verifyQuestionMutationCaller,
+} from "@/lib/questionSafeDeleteServer";
 
 async function fetchImageAsInlinePart(url?: string | null) {
   if (!url || typeof url !== "string" || url === "null" || url === "undefined") return null;
@@ -281,6 +287,77 @@ export async function PUT(req: NextRequest) {
 
     const body = await req.json();
     const { action } = body;
+
+    if (action === "inspect_delete_question") {
+      const authCheck = await verifyQuestionMutationCaller(
+        supabaseAdmin,
+        userToken,
+        hasServiceRoleKey
+      );
+      if (!authCheck.ok) {
+        return NextResponse.json(
+          { success: false, error: authCheck.error },
+          { status: authCheck.status }
+        );
+      }
+
+      const { questionId } = body;
+      if (!questionId) {
+        return NextResponse.json({
+          success: false,
+          error: "문항 ID가 없습니다.",
+        });
+      }
+
+      const impact = await inspectQuestionDeleteImpact(
+        supabaseAdmin,
+        String(questionId)
+      );
+      return NextResponse.json({ success: true, impact });
+    }
+
+    if (action === "hide_question") {
+      const authCheck = await verifyQuestionMutationCaller(
+        supabaseAdmin,
+        userToken,
+        hasServiceRoleKey
+      );
+      if (!authCheck.ok) {
+        return NextResponse.json(
+          { success: false, error: authCheck.error },
+          { status: authCheck.status }
+        );
+      }
+
+      const { questionId } = body;
+      const result = await hideQuestionInMasterDb(
+        supabaseAdmin,
+        String(questionId || "")
+      );
+      return NextResponse.json(result);
+    }
+
+    if (action === "delete_question") {
+      const authCheck = await verifyQuestionMutationCaller(
+        supabaseAdmin,
+        userToken,
+        hasServiceRoleKey
+      );
+      if (!authCheck.ok) {
+        return NextResponse.json(
+          { success: false, error: authCheck.error },
+          { status: authCheck.status }
+        );
+      }
+
+      const { questionId, forceCascade } = body;
+      const result = await deleteQuestionSafely(
+        supabaseAdmin,
+        String(questionId || ""),
+        { forceCascade: Boolean(forceCascade) }
+      );
+      return NextResponse.json(result);
+    }
 
     if (action === "upload_image") {
       const { imageBase64, fileName, contentType = "image/png" } = body;

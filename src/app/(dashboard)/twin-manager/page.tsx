@@ -3,6 +3,7 @@
 
 import React, { useState, useEffect, useRef } from "react";
 import { supabase } from "@/lib/supabase";
+import { executeInteractiveQuestionDelete } from "@/lib/questionSafeDeleteClient";
 
 // ==========================================
 // 1. 코어 유틸리티
@@ -508,22 +509,61 @@ export default function TwinManagerPage() {
 
   const deleteQuestion = async () => {
     if (!editingQ) return;
-    if (!confirm("🚨 정말 이 문항을 마스터 DB에서 완전히 삭제하시겠습니까?\n이 작업은 복구할 수 없으며, 연결된 자식 문항들이 고아 상태가 됩니다.")) return;
-    
+    const targetId = String(editingQ.question_id || "").trim();
+    if (!targetId) return;
+
     setIsLoading(true);
     try {
-      await supabase.from('textbook_question').delete().eq('question_id', editingQ.question_id);
-      const { error } = await supabase.from('question_db').delete().eq('question_id', editingQ.question_id);
-      if (error) throw error;
+      const res = await executeInteractiveQuestionDelete({
+        questionId: targetId,
+        supabaseClient: supabase,
+      });
 
-      setColumns(prev => prev.map(col => ({
-        ...col,
-        questions: col.questions.filter(q => q.question_id !== editingQ.question_id)
-      })));
+      if (res.outcome === "CANCELLED") return;
+
+      if (res.outcome === "ERROR") {
+        alert("삭제 실패: " + res.error);
+        return;
+      }
+
+      if (res.outcome === "HIDDEN") {
+        setColumns((prev) =>
+          prev.map((col) => ({
+            ...col,
+            questions: col.questions.map((q) =>
+              q.question_id === targetId ? { ...q, is_hidden: true } : q
+            ),
+          }))
+        );
+        setEditingQ((prev: any) =>
+          prev && prev.question_id === targetId
+            ? { ...prev, is_hidden: true }
+            : prev
+        );
+        alert(
+          "📦 학생 오답·성적 이력을 보존한 채 시험지 출제 숨김(보관) 처리되었습니다."
+        );
+        return;
+      }
+
+      // res.outcome === "DELETED"
+      setColumns((prev) =>
+        prev.map((col) => ({
+          ...col,
+          questions: col.questions
+            .filter((q) => q.question_id !== targetId)
+            .map((q) =>
+              q.parent_question_id === targetId
+                ? { ...q, parent_question_id: null }
+                : q
+            ),
+        }))
+      );
+      setSelectedQIds((prev) => prev.filter((id) => id !== targetId));
       setEditingQ(null);
-      alert("🗑️ 문항이 영구 삭제되었습니다.");
-    } catch(e: any) {
-      alert("삭제 실패: " + e.message);
+      alert("🗑️ 문항이 안전하게 삭제되었습니다.");
+    } catch (e: any) {
+      alert("삭제 실패: " + (e?.message || String(e)));
     } finally {
       setIsLoading(false);
     }
