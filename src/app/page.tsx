@@ -120,7 +120,11 @@ export default function LoginPage() {
         if (isHQ) {
           alert("🏢 본사 임직원 계정은 학원(가맹점) 시스템에 접근할 수 없습니다.\n본사 전용 워크스페이스로 이동합니다.");
           await supabase.auth.signOut();
-          router.replace('/hq-login');
+          if (typeof window !== "undefined" && window.location.hostname.endsWith("logicaclass.com")) {
+            window.location.href = "https://hq.logicaclass.com/login";
+          } else {
+            router.replace("/hq/login");
+          }
           return;
         }
         if (!instructorData.tenant_id) {
@@ -249,7 +253,11 @@ export default function LoginPage() {
         if (isHQ) {
           alert("🏢 본사 임직원 계정은 학원(가맹점) 시스템에 접근할 수 없습니다.\n본사 전용 워크스페이스로 이동합니다.");
           await supabase.auth.signOut();
-          router.replace('/hq-login');
+          if (typeof window !== "undefined" && window.location.hostname.endsWith("logicaclass.com")) {
+            window.location.href = "https://hq.logicaclass.com/login";
+          } else {
+            router.replace("/hq/login");
+          }
           return;
         }
         if (!instructorData.tenant_id) {
@@ -460,7 +468,13 @@ export default function LoginPage() {
             <div className="p-5 space-y-2.5 bg-slate-50">
               {isSuperAdminChoice && (
                 <button 
-                  onClick={() => router.replace("/hq-login")}
+                  onClick={() => {
+                    if (typeof window !== "undefined" && window.location.hostname.endsWith("logicaclass.com")) {
+                      window.location.href = "https://hq.logicaclass.com/login";
+                    } else {
+                      router.replace("/hq/login");
+                    }
+                  }}
                   className="w-full flex items-center gap-4 bg-white p-3 rounded-xl border border-slate-200 shadow-sm hover:border-purple-600 hover:shadow-md transition-all group"
                 >
                   <div className="w-10 h-10 bg-purple-50 rounded-full flex items-center justify-center text-xl group-hover:bg-purple-600 transition-colors shrink-0">

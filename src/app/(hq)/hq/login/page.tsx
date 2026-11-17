@@ -5,9 +5,11 @@ import React, { useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { FALLBACK_HQ_TENANT_ID } from "@/lib/hq/constants";
+import { isHqSubdomainHost, useHqHref } from "@/lib/hq/hqRoutes";
 
 export default function HqLoginPage() {
   const router = useRouter();
+  const hqHref = useHqHref();
   const [formData, setFormData] = useState({ loginId: "", password: "" });
   const [isLoading, setIsLoading] = useState(false);
 
@@ -212,7 +214,7 @@ export default function HqLoginPage() {
         }),
       }).catch(() => {});
 
-      router.replace("/hq");
+      router.replace(hqHref("/hq"));
     } catch (error: any) {
       alert(`로그인 실패: ${error?.message || "오류가 발생했습니다."}`);
     } finally {
@@ -281,7 +283,7 @@ export default function HqLoginPage() {
             신규 입사 임직원이신가요?{" "}
             <button
               type="button"
-              onClick={() => router.push("/hq/signup")}
+              onClick={() => router.push(hqHref("/hq/signup"))}
               className="text-brand font-bold hover:underline ml-1"
             >
               본부 구성원 계정 등록
@@ -289,7 +291,16 @@ export default function HqLoginPage() {
           </p>
           <button
             type="button"
-            onClick={() => router.push("/")}
+            onClick={() => {
+              if (
+                typeof window !== "undefined" &&
+                isHqSubdomainHost(window.location.hostname)
+              ) {
+                window.location.href = "https://logicaclass.com";
+                return;
+              }
+              router.push("/");
+            }}
             className="text-[11px] text-slate-400 hover:text-slate-600 font-semibold"
           >
             ← 학원(가맹점) 관리 포털 로그인으로 이동

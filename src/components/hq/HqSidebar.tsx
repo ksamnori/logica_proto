@@ -7,10 +7,13 @@ import { usePathname, useRouter } from "next/navigation";
 import { useHqShell } from "./HqShellContext";
 import { getRankMeta } from "@/lib/hq/constants";
 import { resolveStoragePublicUrl } from "@/lib/hq/clientApi";
+import { toCanonicalHqPath, useHqHref } from "@/lib/hq/hqRoutes";
 
 export default function HqSidebar() {
   const pathname = usePathname();
+  const canonicalPath = toCanonicalHqPath(pathname);
   const router = useRouter();
+  const hqHref = useHqHref();
   const {
     me,
     companySettings,
@@ -34,8 +37,8 @@ export default function HqSidebar() {
   );
 
   const isActive = (href: string) => {
-    if (href === "/hq") return pathname === "/hq";
-    return pathname === href || pathname.startsWith(`${href}/`);
+    if (href === "/hq") return canonicalPath === "/hq";
+    return canonicalPath === href || canonicalPath.startsWith(`${href}/`);
   };
 
   const isTimeMgmtRoute =
@@ -88,7 +91,7 @@ export default function HqSidebar() {
           {compactLinks.map((item) => (
             <Link
               key={item.href}
-              href={item.href}
+              href={hqHref(item.href)}
               title={item.label}
               className={`w-10 h-10 rounded-xl flex items-center justify-center text-base transition-all shrink-0 ${
                 isActive(item.href)
@@ -116,7 +119,7 @@ export default function HqSidebar() {
     <aside className="print:hidden w-[244px] bg-slate-900 text-slate-200 flex flex-col border-r border-slate-800 shrink-0 z-20 select-none">
       {/* 상단 브랜드 로고 영역 */}
       <div
-        onClick={() => router.push("/hq")}
+        onClick={() => router.push(hqHref("/hq"))}
         className="px-4 py-4 border-b border-slate-800 cursor-pointer hover:bg-slate-800/40 transition-colors"
       >
         <div className="flex items-center justify-between gap-2">
@@ -193,7 +196,7 @@ export default function HqSidebar() {
             워크스페이스
           </div>
           <div className="space-y-0.5">
-            <Link href="/hq" className={navItemClass("/hq")}>
+            <Link href={hqHref("/hq")} className={navItemClass("/hq")}>
               <span className="flex items-center gap-2.5 truncate">
                 <span>🏠</span>
                 <span>본부 홈 대시보드</span>
@@ -218,14 +221,14 @@ export default function HqSidebar() {
             인사(HR) · 근태 · 워크플로우
           </div>
           <div className="space-y-0.5">
-            <Link href="/hq/notices" className={navItemClass("/hq/notices")}>
+            <Link href={hqHref("/hq/notices")} className={navItemClass("/hq/notices")}>
               <span className="flex items-center gap-2.5 truncate">
                 <span>📢</span>
                 <span>공지</span>
               </span>
             </Link>
 
-            <Link href="/hq/members" className={navItemClass("/hq/members")}>
+            <Link href={hqHref("/hq/members")} className={navItemClass("/hq/members")}>
               <span className="flex items-center gap-2.5 truncate">
                 <span>👥</span>
                 <span>구성원</span>
@@ -233,7 +236,7 @@ export default function HqSidebar() {
             </Link>
 
             <Link
-              href="/hq/org-chart"
+              href={hqHref("/hq/org-chart")}
               className={navItemClass("/hq/org-chart")}
             >
               <span className="flex items-center gap-2.5 truncate">
@@ -243,7 +246,7 @@ export default function HqSidebar() {
             </Link>
 
             <Link
-              href="/hq/meetings"
+              href={hqHref("/hq/meetings")}
               className={navItemClass("/hq/meetings")}
             >
               <span className="flex items-center gap-2.5 truncate">
@@ -253,7 +256,7 @@ export default function HqSidebar() {
             </Link>
 
             <Link
-              href="/hq/attendance"
+              href={hqHref("/hq/attendance")}
               className={navItemClass("/hq/attendance")}
             >
               <span className="flex items-center gap-2.5 truncate">
@@ -263,7 +266,7 @@ export default function HqSidebar() {
             </Link>
 
             <Link
-              href="/hq/leaves"
+              href={hqHref("/hq/leaves")}
               className={navItemClass("/hq/leaves")}
             >
               <span className="flex items-center gap-2.5 truncate">
@@ -295,7 +298,7 @@ export default function HqSidebar() {
               {timeMgmtOpen && (
                 <div className="mt-0.5 ml-3 pl-2.5 border-l border-slate-800 space-y-0.5">
                   <Link
-                    href="/hq/work-management"
+                    href={hqHref("/hq/work-management")}
                     className={navItemClass("/hq/work-management")}
                   >
                     <span className="flex items-center gap-2 truncate">
@@ -304,7 +307,7 @@ export default function HqSidebar() {
                     </span>
                   </Link>
                   <Link
-                    href="/hq/leave-management"
+                    href={hqHref("/hq/leave-management")}
                     className={navItemClass("/hq/leave-management")}
                   >
                     <span className="flex items-center gap-2 truncate">
@@ -317,7 +320,7 @@ export default function HqSidebar() {
             </div>
 
             <Link
-              href="/hq/approvals"
+              href={hqHref("/hq/approvals")}
               className={navItemClass("/hq/approvals")}
             >
               <span className="flex items-center gap-2.5 truncate">
@@ -332,7 +335,7 @@ export default function HqSidebar() {
             </Link>
 
             <Link
-              href="/hq/contracts"
+              href={hqHref("/hq/contracts")}
               className={navItemClass("/hq/contracts")}
             >
               <span className="flex items-center gap-2.5 truncate">
@@ -354,14 +357,14 @@ export default function HqSidebar() {
             경비 · 급여 정산
           </div>
           <div className="space-y-0.5">
-            <Link href="/hq/expenses" className={navItemClass("/hq/expenses")}>
+            <Link href={hqHref("/hq/expenses")} className={navItemClass("/hq/expenses")}>
               <span className="flex items-center gap-2.5 truncate">
                 <span>💳</span>
                 <span>비용 · 경비 정산</span>
               </span>
             </Link>
 
-            <Link href="/hq/payroll" className={navItemClass("/hq/payroll")}>
+            <Link href={hqHref("/hq/payroll")} className={navItemClass("/hq/payroll")}>
               <span className="flex items-center gap-2.5 truncate">
                 <span>💰</span>
                 <span>급여 · 인세 · 원천세</span>
@@ -377,7 +380,7 @@ export default function HqSidebar() {
           </div>
           <div className="space-y-0.5">
             <Link
-              href="/hq/publishing"
+              href={hqHref("/hq/publishing")}
               className={navItemClass("/hq/publishing")}
             >
               <span className="flex items-center gap-2.5 truncate">
@@ -395,7 +398,7 @@ export default function HqSidebar() {
                   );
                   return;
                 }
-                router.push("/hq/analytics");
+                router.push(hqHref("/hq/analytics"));
               }}
               className={navItemClass("/hq/analytics")}
             >
@@ -417,7 +420,7 @@ export default function HqSidebar() {
                   );
                   return;
                 }
-                router.push("/hq/contest-db");
+                router.push(hqHref("/hq/contest-db"));
               }}
               className={navItemClass("/hq/contest-db")}
             >
@@ -439,7 +442,7 @@ export default function HqSidebar() {
           </div>
           <div className="space-y-0.5">
             <Link
-              href="/hq/messenger"
+              href={hqHref("/hq/messenger")}
               className={navItemClass("/hq/messenger")}
             >
               <span className="flex items-center gap-2.5 truncate">
@@ -455,7 +458,7 @@ export default function HqSidebar() {
 
             {isHqAdmin && (
               <Link
-                href="/hq/permissions"
+                href={hqHref("/hq/permissions")}
                 className={navItemClass("/hq/permissions")}
               >
                 <span className="flex items-center gap-2.5 truncate">

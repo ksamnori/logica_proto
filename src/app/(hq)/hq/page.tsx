@@ -15,6 +15,7 @@ import {
   HQ_RANK_LIST,
 } from "@/lib/hq/constants";
 import { hqFetch, resolveStoragePublicUrl } from "@/lib/hq/clientApi";
+import { useHqHref } from "@/lib/hq/hqRoutes";
 import type {
   HqApprovalDoc,
   HqApprovalDocType,
@@ -24,6 +25,11 @@ import type {
 
 export default function HqHomeDashboardPage() {
   const router = useRouter();
+  const hqHref = useHqHref();
+  const goHq = useCallback(
+    (path: string) => router.push(hqHref(path)),
+    [hqHref, router]
+  );
   const {
     me,
     members,
@@ -181,7 +187,7 @@ export default function HqHomeDashboardPage() {
         badge: urgentCnt > 0 ? `긴급 ${urgentCnt}건` : "결재 대기",
         text: `${me?.name || ""} ${me?.job_title || ""}님의 승인을 기다리는 결재 문서가 ${myTurnDocs.length}건 있습니다.`,
         actionLabel: "결재함 열기 →",
-        onClick: () => router.push("/hq/approvals"),
+        onClick: () => goHq("/hq/approvals"),
       });
     }
 
@@ -195,7 +201,7 @@ export default function HqHomeDashboardPage() {
         badge: "조직 설정 필요",
         text: "아직 팀장(Lv.3)·본부장(Lv.4)·대표(Lv.5) 결재 직급자가 지정되지 않았습니다. 구성원 관리에서 직급과 부서장을 배정하면 3단계 결재선이 자동 완성됩니다.",
         actionLabel: "직급 설정하기 →",
-        onClick: () => router.push("/hq/members"),
+        onClick: () => goHq("/hq/members"),
       });
     }
 
@@ -206,7 +212,7 @@ export default function HqHomeDashboardPage() {
         badge: "경비 정산",
         text: `이번 달 정산 대기 중인 경비 전표가 ${expenseStats.pendingCount}건 (${expenseStats.pendingAmount.toLocaleString()}원) 있습니다.`,
         actionLabel: "정산 관리 →",
-        onClick: () => router.push("/hq/expenses"),
+        onClick: () => goHq("/hq/expenses"),
       });
     }
 
@@ -229,7 +235,7 @@ export default function HqHomeDashboardPage() {
             myLevel >= 4 || isHrManager ? "본부 전체" : `${me?.department} 내`
           } 연차 소진율 20% 미만 구성원이 ${lowLeaveUsage.length}명 있습니다. 분기 휴가 계획을 독려해 주세요.`,
           actionLabel: "구성원 연차 확인 →",
-          onClick: () => router.push("/hq/members"),
+          onClick: () => goHq("/hq/members"),
         });
       }
     }
@@ -241,7 +247,7 @@ export default function HqHomeDashboardPage() {
         badge: "근태 · 유연근무",
         text: "오늘 아직 출근 체크인 전입니다. 정규출근·시차출퇴근·재택원고·인쇄감리 외근 중 오늘의 근무 형태를 등록해 주세요.",
         actionLabel: "출근 · 유연근무 선택 →",
-        onClick: () => router.push("/hq/attendance"),
+        onClick: () => goHq("/hq/attendance"),
       });
     } else if (myWeeklyMinutes >= 45 * 60) {
       items.push({
@@ -250,7 +256,7 @@ export default function HqHomeDashboardPage() {
         badge: "주 52시간 주의",
         text: `이번 주 누적 근무시간이 ${Math.floor(myWeeklyMinutes / 60)}시간을 넘었습니다. 마감 후 대체휴무 활용을 권장합니다.`,
         actionLabel: "근로시간 확인 →",
-        onClick: () => router.push("/hq/attendance"),
+        onClick: () => goHq("/hq/attendance"),
       });
     }
 
@@ -261,7 +267,7 @@ export default function HqHomeDashboardPage() {
         badge: `전자서명 ${unsignedContractCount}건`,
         text: `서명 대기 중인 전자계약서(근로·연봉·출판외주/인세)가 ${unsignedContractCount}건 있습니다.`,
         actionLabel: "전자서명하기 →",
-        onClick: () => router.push("/hq/contracts"),
+        onClick: () => goHq("/hq/contracts"),
       });
     }
 
@@ -280,7 +286,7 @@ export default function HqHomeDashboardPage() {
         badge: `하판 임박 ${urgentBooks.length}종`,
         text: `7일 이내 인쇄 하판 마감 예정인 도서가 ${urgentBooks.length}종(「${urgentBooks[0].title}」 등) 있습니다.`,
         actionLabel: "출판 공정 보드 →",
-        onClick: () => router.push("/hq/publishing"),
+        onClick: () => goHq("/hq/publishing"),
       });
     }
 
@@ -291,7 +297,7 @@ export default function HqHomeDashboardPage() {
         badge: "사내 메신저",
         text: `읽지 않은 전사 메신저 대화가 ${unreadChatCount}건 도착해 있습니다.`,
         actionLabel: "메신저 열기 →",
-        onClick: () => router.push("/hq/messenger"),
+        onClick: () => goHq("/hq/messenger"),
       });
     }
 
@@ -318,7 +324,7 @@ export default function HqHomeDashboardPage() {
     unsignedContractCount,
     books,
     unreadChatCount,
-    router,
+    goHq,
   ]);
 
   const openQuickDraft = (docType: HqApprovalDocType) => {
@@ -364,21 +370,21 @@ export default function HqHomeDashboardPage() {
             <div className="flex flex-wrap items-center gap-2">
               <button
                 type="button"
-                onClick={() => router.push("/hq/attendance")}
+                onClick={() => goHq("/hq/attendance")}
                 className="px-3.5 py-2.5 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-300/30 text-emerald-100 text-xs font-extrabold transition-colors whitespace-nowrap"
               >
                 ⏱️ 출퇴근·유연근무
               </button>
               <button
                 type="button"
-                onClick={() => router.push("/hq/contracts")}
+                onClick={() => goHq("/hq/contracts")}
                 className="px-3.5 py-2.5 rounded-xl bg-white/10 hover:bg-white/20 border border-white/15 text-white text-xs font-bold transition-colors whitespace-nowrap"
               >
                 📑 전자계약·저작권
               </button>
               <button
                 type="button"
-                onClick={() => router.push("/hq/publishing")}
+                onClick={() => goHq("/hq/publishing")}
                 className="px-3.5 py-2.5 rounded-xl bg-white/10 hover:bg-white/20 border border-white/15 text-white text-xs font-bold transition-colors whitespace-nowrap"
               >
                 📚 출판 공정 보드
@@ -455,7 +461,7 @@ export default function HqHomeDashboardPage() {
         {/* 2. 핵심 HR · 결재 · 비용 KPI 요약 카드 4종 */}
         <section className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
           <div
-            onClick={() => router.push("/hq/approvals")}
+            onClick={() => goHq("/hq/approvals")}
             className="bg-white rounded-2xl p-5 border border-slate-200 shadow-xs hover:border-brand/40 cursor-pointer transition-all"
           >
             <div className="flex items-center justify-between">
@@ -480,7 +486,7 @@ export default function HqHomeDashboardPage() {
           </div>
 
           <div
-            onClick={() => router.push("/hq/members")}
+            onClick={() => goHq("/hq/members")}
             className="bg-white rounded-2xl p-5 border border-slate-200 shadow-xs hover:border-brand/40 cursor-pointer transition-all"
           >
             <div className="flex items-center justify-between">
@@ -529,7 +535,7 @@ export default function HqHomeDashboardPage() {
           </div>
 
           <div
-            onClick={() => router.push("/hq/expenses")}
+            onClick={() => goHq("/hq/expenses")}
             className="bg-white rounded-2xl p-5 border border-slate-200 shadow-xs hover:border-brand/40 cursor-pointer transition-all"
           >
             <div className="flex items-center justify-between">
@@ -567,7 +573,7 @@ export default function HqHomeDashboardPage() {
                 </div>
                 <button
                   type="button"
-                  onClick={() => router.push("/hq/approvals")}
+                  onClick={() => goHq("/hq/approvals")}
                   className="text-xs font-bold text-brand hover:underline"
                 >
                   전자결재 전체보기 →
@@ -725,7 +731,7 @@ export default function HqHomeDashboardPage() {
                 </h3>
                 <button
                   type="button"
-                  onClick={() => router.push("/hq/members")}
+                  onClick={() => goHq("/hq/members")}
                   className="text-xs font-bold text-brand hover:underline"
                 >
                   구성원 관리 →
@@ -803,7 +809,7 @@ export default function HqHomeDashboardPage() {
                   {deptSummary.map((d) => (
                     <div
                       key={d.dept}
-                      onClick={() => router.push("/hq/members")}
+                      onClick={() => goHq("/hq/members")}
                       className="px-3.5 py-2.5 rounded-xl border border-slate-200 hover:border-slate-300 bg-white flex items-center justify-between cursor-pointer transition-colors"
                     >
                       <div>
@@ -850,7 +856,7 @@ export default function HqHomeDashboardPage() {
                   </div>
                   <button
                     type="button"
-                    onClick={() => router.push("/hq/messenger")}
+                    onClick={() => goHq("/hq/messenger")}
                     className="text-xs font-bold text-slate-600 hover:text-brand"
                   >
                     💬 사내 메신저 열기

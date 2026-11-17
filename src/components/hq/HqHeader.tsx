@@ -6,6 +6,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useHqShell } from "./HqShellContext";
 import { ATTENDANCE_MODES, getRankMeta } from "@/lib/hq/constants";
 import { resolveStoragePublicUrl } from "@/lib/hq/clientApi";
+import { toCanonicalHqPath, useHqHref } from "@/lib/hq/hqRoutes";
 
 const PAGE_TITLES: Record<string, { title: string; subtitle: string }> = {
   "/hq": {
@@ -99,7 +100,9 @@ function formatKstTime(iso?: string | null): string {
 
 export default function HqHeader() {
   const pathname = usePathname();
+  const canonicalPath = toCanonicalHqPath(pathname);
   const router = useRouter();
+  const hqHref = useHqHref();
   const {
     me,
     pendingApprovalCount,
@@ -114,7 +117,7 @@ export default function HqHeader() {
 
   const [clockBusy, setClockBusy] = useState(false);
 
-  const meta = PAGE_TITLES[pathname] || {
+  const meta = PAGE_TITLES[canonicalPath] || {
     title: "본부 워크스페이스",
     subtitle: "천종현수학연구소 HQ 통합 시스템",
   };
@@ -192,7 +195,7 @@ export default function HqHeader() {
             </button>
             <button
               type="button"
-              onClick={() => router.push("/hq/attendance")}
+              onClick={() => router.push(hqHref("/hq/attendance"))}
               className="px-2 py-1.5 text-[11px] font-bold text-emerald-800 hover:underline"
               title="시차출퇴근 · 재택 · 외근 선택"
             >
@@ -203,7 +206,7 @@ export default function HqHeader() {
           <div className="hidden lg:flex items-center gap-1.5 rounded-xl border border-blue-200 bg-blue-50 px-2.5 py-1">
             <button
               type="button"
-              onClick={() => router.push("/hq/attendance")}
+              onClick={() => router.push(hqHref("/hq/attendance"))}
               className="text-xs font-bold text-blue-800 hover:underline flex items-center gap-1"
             >
               <span>{modeMeta?.icon || "🏢"}</span>
@@ -224,7 +227,7 @@ export default function HqHeader() {
         ) : (
           <button
             type="button"
-            onClick={() => router.push("/hq/attendance")}
+            onClick={() => router.push(hqHref("/hq/attendance"))}
             className="hidden lg:flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs font-bold transition-colors"
           >
             <span>
@@ -238,10 +241,10 @@ export default function HqHeader() {
           </button>
         )}
 
-        {pendingApprovalCount > 0 && pathname !== "/hq/approvals" && (
+        {pendingApprovalCount > 0 && canonicalPath !== "/hq/approvals" && (
           <button
             type="button"
-            onClick={() => router.push("/hq/approvals")}
+            onClick={() => router.push(hqHref("/hq/approvals"))}
             className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-rose-50 hover:bg-rose-100 border border-rose-200 text-rose-700 text-xs font-bold transition-colors"
           >
             <span>🔔 결재 대기</span>
@@ -253,7 +256,7 @@ export default function HqHeader() {
 
         <button
           type="button"
-          onClick={() => router.push("/hq/approvals?new=1")}
+          onClick={() => router.push(hqHref("/hq/approvals?new=1"))}
           className="px-3.5 py-2 rounded-xl bg-brand hover:bg-brand-hover text-white text-xs font-bold shadow-sm transition-colors flex items-center gap-1.5"
         >
           <span>✍️</span>

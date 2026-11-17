@@ -4,6 +4,7 @@
 import React, { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { HQ_DEFAULT_DEPARTMENTS } from "@/lib/hq/constants";
+import { useHqHref } from "@/lib/hq/hqRoutes";
 import { inferRankCodeFromHrSelection } from "@/lib/hq/orgTreeHelper";
 
 interface SignupOrgOption {
@@ -14,6 +15,7 @@ interface SignupOrgOption {
 
 export default function HqSignupPage() {
   const router = useRouter();
+  const hqHref = useHqHref();
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
   const [password, setPassword] = useState("");
@@ -117,7 +119,7 @@ export default function HqSignupPage() {
       alert(
         "🏢 본부 구성원 계정 생성이 완료되었습니다.\n로그인 화면으로 이동합니다."
       );
-      router.replace("/hq/login");
+      router.replace(hqHref("/hq/login"));
     } catch (error: any) {
       alert(`가입 실패: ${error?.message || "오류가 발생했습니다."}`);
     } finally {
@@ -260,7 +262,7 @@ export default function HqSignupPage() {
             이미 계정이 있으신가요?{" "}
             <button
               type="button"
-              onClick={() => router.push("/hq/login")}
+              onClick={() => router.push(hqHref("/hq/login"))}
               className="text-brand font-bold hover:underline ml-1"
             >
               로그인하기

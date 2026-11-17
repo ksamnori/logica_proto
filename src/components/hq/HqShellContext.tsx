@@ -18,6 +18,7 @@ import {
 import type { ContestAccessLevel } from "@/app/(dashboard)/contest-db/contestUtils";
 import { hqFetch } from "@/lib/hq/clientApi";
 import { DEFAULT_HQ_COMPANY_SETTINGS } from "@/lib/hq/defaultCompanySettings";
+import { useHqHref } from "@/lib/hq/hqRoutes";
 import type {
   HqAttendanceRecord,
   HqCompanySettings,
@@ -82,6 +83,7 @@ export function HqShellProvider({
   onOpenSettings?: (initialTab?: string) => void;
 }) {
   const router = useRouter();
+  const hqHref = useHqHref();
 
   const [instId, setInstId] = useState("");
   const [me, setMe] = useState<HqMember | null>(null);
@@ -134,8 +136,8 @@ export function HqShellProvider({
     localStorage.clear();
     sessionStorage.clear();
     await supabase.auth.signOut().catch(() => {});
-    router.replace("/hq/login");
-  }, [router]);
+    router.replace(hqHref("/hq/login"));
+  }, [hqHref, router]);
 
   const refreshMembers = useCallback(async () => {
     try {
@@ -172,12 +174,12 @@ export function HqShellProvider({
       const msg = String(err?.message || "");
       if (/403|본부\(HQ\) 소속/.test(msg)) {
         alert("🏢 본부(HQ) 임직원 전용 워크스페이스입니다.");
-        router.replace("/home");
+        await logout();
       } else if (/401|만료|로그인/.test(msg)) {
         setSessionExpired(true);
       }
     }
-  }, [router]);
+  }, [logout]);
 
   const refreshCompanySettings = useCallback(async () => {
     try {
@@ -341,7 +343,7 @@ export function HqShellProvider({
       let uid =
         session?.user?.id || localStorage.getItem("logica_instructor_id") || "";
       if (!uid) {
-        router.replace("/hq/login");
+        router.replace(hqHref("/hq/login"));
         return;
       }
 
@@ -371,6 +373,7 @@ export function HqShellProvider({
       mounted = false;
     };
   }, [
+    hqHref,
     router,
     refreshMembers,
     refreshCompanySettings,
@@ -443,11 +446,13 @@ export function HqShellProvider({
         onOpenSettings(initialTab);
       } else {
         router.push(
-          initialTab ? `/hq/settings?tab=${initialTab}` : "/hq/settings"
+          hqHref(
+            initialTab ? `/hq/settings?tab=${initialTab}` : "/hq/settings"
+          )
         );
       }
     },
-    [onOpenSettings, router]
+    [hqHref, onOpenSettings, router]
   );
 
   return (

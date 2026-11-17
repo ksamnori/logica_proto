@@ -1,7 +1,7 @@
 // src/app/hq/layout.tsx
 "use client";
 
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { usePathname } from "next/navigation";
 import HqHeader from "@/components/hq/HqHeader";
 import HqSchemaSetupBanner from "@/components/hq/HqSchemaSetupBanner";
@@ -9,6 +9,7 @@ import { HqShellProvider, useHqShell } from "@/components/hq/HqShellContext";
 import HqSidebar from "@/components/hq/HqSidebar";
 import HqMemberProfileModal from "@/components/hq/members/HqMemberProfileModal";
 import HqSettingsModal from "@/components/hq/settings/HqSettingsModal";
+import { HQ_ROUTE_TAB_TITLES, toCanonicalHqPath } from "@/lib/hq/hqRoutes";
 
 function HqWorkspaceFrame({
   children,
@@ -82,6 +83,7 @@ function HqWorkspaceFrame({
 
 export default function HqLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  const canonicalPath = toCanonicalHqPath(pathname);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [profileSubModal, setProfileSubModal] = useState<
     "basic" | "hr" | null
@@ -89,8 +91,15 @@ export default function HqLayout({ children }: { children: React.ReactNode }) {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsTab, setSettingsTab] = useState("company");
 
+  useEffect(() => {
+    const label = HQ_ROUTE_TAB_TITLES[canonicalPath];
+    document.title = label
+      ? `${label} | Logica HQ`
+      : "Logica HQ | 천종현수학연구소 본부";
+  }, [canonicalPath]);
+
   // 로그인·가입 화면은 쉘(사이드바·헤더·세션 가드) 없이 단독 렌더링
-  if (pathname === "/hq/login" || pathname === "/hq/signup") {
+  if (canonicalPath === "/hq/login" || canonicalPath === "/hq/signup") {
     return <>{children}</>;
   }
 
