@@ -214,27 +214,109 @@ export default function RightPreview({ examData }: { examData: any }) {
   const saveEdit = async () => {
     try {
       const realId = editingId?.includes('_added_') ? editingId.split('_added_')[0] : editingId;
-      
+      if (!realId) return;
+
       // 🌟 DB 스키마에 맞춰 박스 데이터 파싱 처리 (배열/다중 문자열 안전 변환)
       const img1Obj = parseBoxObject(editForm.image_box);
       const img2Obj = parseBoxObject(editForm.image_2_box);
       const parsedImgBox = Object.keys(img1Obj).length > 0 ? img1Obj : null;
       const parsedImg2Box = Object.keys(img2Obj).length > 0 ? img2Obj : null;
 
-      const updateData = {
+      const updateData: Record<string, any> = {
         ...editForm,
+        question: editForm.question ?? '',
+        question_2: editForm.question_2 || null,
+        answer: editForm.answer ?? '',
+        explanation: editForm.explanation || null,
+        solution: editForm.solution || null,
+        step_1_concept: editForm.step_1_concept || null,
+        step_2_approach: editForm.step_2_approach || null,
+        step_3_process: editForm.step_3_process || null,
+        step_4_conclusion: editForm.step_4_conclusion || null,
         image_box: parsedImgBox,
         image_2_box: parsedImg2Box ? JSON.stringify(parsedImg2Box) : null,
       };
 
-      const { error } = await supabase.from('question_db').update(updateData).eq('question_id', realId);
-      if (error) throw error;
-      
+      // 서버(SERVICE_ROLE_KEY) 우선 반영 + textbook_question 동기화, 실패 시 클라이언트 직접 업데이트 폴백
+      let savedViaServer = false;
+      try {
+        const { data: sessionData } = await supabase.auth.getSession();
+        const token = sessionData?.session?.access_token;
+        const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+        if (token) headers['Authorization'] = `Bearer ${token}`;
+
+        const srvRes = await fetch('/api/gemini-twin', {
+          method: 'PUT',
+          headers,
+          body: JSON.stringify({
+            action: 'update_question',
+            questionId: realId,
+            updateData,
+            textbookUpdateData: {
+              question: updateData.question,
+              answer: updateData.answer,
+            },
+          }),
+        });
+        const srvJson = await srvRes.json().catch(() => null);
+        if (srvRes.ok && srvJson?.success) {
+          savedViaServer = true;
+        }
+      } catch {
+        // 네트워크 예외 시 직접 업데이트로 폴백
+      }
+
+      if (!savedViaServer) {
+        const { error } = await supabase.from('question_db').update(updateData).eq('question_id', realId);
+        if (error) throw error;
+      }
+
+      // textbook_question.raw_metadata 내 4단계 해설 캐시도 비차단으로 함께 동기화
+      try {
+        const { data: tqRows } = await supabase
+          .from('textbook_question')
+          .select('tq_id, raw_metadata')
+          .eq('question_id', realId);
+        if (Array.isArray(tqRows) && tqRows.length > 0) {
+          for (const row of tqRows) {
+            let meta: Record<string, any> = {};
+            if (row.raw_metadata) {
+              if (typeof row.raw_metadata === 'string') {
+                try {
+                  meta = JSON.parse(row.raw_metadata) || {};
+                } catch {
+                  meta = {};
+                }
+              } else if (typeof row.raw_metadata === 'object') {
+                meta = { ...row.raw_metadata };
+              }
+            }
+            meta.step_1_concept = updateData.step_1_concept;
+            meta.step_2_approach = updateData.step_2_approach;
+            meta.step_3_process = updateData.step_3_process;
+            meta.step_4_conclusion = updateData.step_4_conclusion;
+            meta.explanation = updateData.explanation;
+            meta.solution = updateData.solution;
+            await supabase
+              .from('textbook_question')
+              .update({
+                question: updateData.question,
+                answer: updateData.answer,
+                raw_metadata: meta,
+              })
+              .eq('tq_id', row.tq_id);
+          }
+        }
+      } catch {
+        // 보조 동기화 경고 무시
+      }
+
       setQuestions((prev: any) => prev.map((g: any) => ({
         ...g, items: g.items.map((item: any) => (item.question_id === editingId || item.question_id === realId) ? { ...item, ...updateData } : item)
       })));
-      alert("✅ 수정 및 이미지 배율이 데이터베이스에 완벽하게 반영되었습니다!");
       setEditingId(null);
+      setTimeout(() => forceMathJaxRender(), 60);
+      alert("✅ 문제·4단계 해설 및 이미지 배율이 데이터베이스에 반영되었습니다!");
     } catch(e: any) { alert("❌ 저장 실패: " + e.message); }
   };
 
@@ -1250,11 +1332,65 @@ export default function RightPreview({ examData }: { examData: any }) {
                            <label className="block text-[12px] font-extrabold text-amber-800 mb-1">🎯 정답 수정</label>
                            <textarea value={editForm.answer} onChange={e => setEditForm({...editForm, answer: e.target.value})} className="w-full p-2 border border-amber-300 rounded mb-3 text-[14px] font-bold focus:outline-none focus:ring-2 focus:ring-amber-500 custom-scrollbar cursor-text bg-white" rows={1}></textarea>
                            
-                           <label className="block text-[12px] font-extrabold text-amber-800 mb-1 mt-2">📖 일반 해설 및 풀이</label>
-                           <div className="flex gap-2 mb-3">
-                               <textarea value={editForm.explanation} onChange={e => setEditForm({...editForm, explanation: e.target.value})} className="w-1/2 p-2 border border-amber-300 rounded text-[13px] font-bold focus:outline-none focus:ring-2 focus:ring-amber-500 custom-scrollbar cursor-text bg-white" rows={2} placeholder="일반 해설"></textarea>
-                               <textarea value={editForm.solution} onChange={e => setEditForm({...editForm, solution: e.target.value})} className="w-1/2 p-2 border border-amber-300 rounded text-[13px] font-bold focus:outline-none focus:ring-2 focus:ring-amber-500 custom-scrollbar cursor-text bg-white" rows={2} placeholder="일반 풀이"></textarea>
+                           <div className="mt-2 pt-3 border-t border-amber-200/80">
+                             <label className="block text-[12px] font-extrabold text-amber-900 mb-2">🧭 4단계 상세 해설 수정 (개념 · 접근 · 풀이과정 · 결론)</label>
+                             <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5 mb-3">
+                               <div className="flex flex-col gap-1">
+                                 <span className="text-[11px] font-extrabold text-blue-700">[1단계 · 개념]</span>
+                                 <textarea
+                                   value={editForm.step_1_concept || ''}
+                                   onChange={e => setEditForm({ ...editForm, step_1_concept: e.target.value })}
+                                   className="w-full p-2 border border-amber-300 rounded text-[13px] font-bold focus:outline-none focus:ring-2 focus:ring-amber-500 custom-scrollbar cursor-text bg-white resize-y"
+                                   rows={2}
+                                   placeholder="1단계 핵심 개념을 입력하세요 ($수식$ 사용 가능)"
+                                 />
+                               </div>
+                               <div className="flex flex-col gap-1">
+                                 <span className="text-[11px] font-extrabold text-blue-700">[2단계 · 접근]</span>
+                                 <textarea
+                                   value={editForm.step_2_approach || ''}
+                                   onChange={e => setEditForm({ ...editForm, step_2_approach: e.target.value })}
+                                   className="w-full p-2 border border-amber-300 rounded text-[13px] font-bold focus:outline-none focus:ring-2 focus:ring-amber-500 custom-scrollbar cursor-text bg-white resize-y"
+                                   rows={2}
+                                   placeholder="2단계 문제 접근 방법을 입력하세요"
+                                 />
+                               </div>
+                               <div className="flex flex-col gap-1">
+                                 <span className="text-[11px] font-extrabold text-blue-700">[3단계 · 풀이과정]</span>
+                                 <textarea
+                                   value={editForm.step_3_process || ''}
+                                   onChange={e => setEditForm({ ...editForm, step_3_process: e.target.value })}
+                                   className="w-full p-2 border border-amber-300 rounded text-[13px] font-bold focus:outline-none focus:ring-2 focus:ring-amber-500 custom-scrollbar cursor-text bg-white resize-y"
+                                   rows={3}
+                                   placeholder="3단계 상세 풀이 과정을 입력하세요"
+                                 />
+                               </div>
+                               <div className="flex flex-col gap-1">
+                                 <span className="text-[11px] font-extrabold text-rose-600">[4단계 · 결론]</span>
+                                 <textarea
+                                   value={editForm.step_4_conclusion || ''}
+                                   onChange={e => setEditForm({ ...editForm, step_4_conclusion: e.target.value })}
+                                   className="w-full p-2 border border-amber-300 rounded text-[13px] font-bold focus:outline-none focus:ring-2 focus:ring-amber-500 custom-scrollbar cursor-text bg-white resize-y"
+                                   rows={2}
+                                   placeholder="4단계 최종 결론을 입력하세요"
+                                 />
+                               </div>
+                             </div>
                            </div>
+
+                           <details
+                             key={`general-exp-${editingId || 'none'}`}
+                             defaultOpen={Boolean(editForm.explanation || editForm.solution)}
+                             className="mb-3"
+                           >
+                             <summary className="text-[11.5px] font-extrabold text-amber-800/80 hover:text-amber-900 cursor-pointer select-none mb-1.5">
+                               📖 보조 일반 해설 및 풀이 (선택 입력)
+                             </summary>
+                             <div className="flex gap-2 mt-1">
+                               <textarea value={editForm.explanation || ''} onChange={e => setEditForm({...editForm, explanation: e.target.value})} className="w-1/2 p-2 border border-amber-300 rounded text-[13px] font-bold focus:outline-none focus:ring-2 focus:ring-amber-500 custom-scrollbar cursor-text bg-white resize-y" rows={2} placeholder="일반 해설"></textarea>
+                               <textarea value={editForm.solution || ''} onChange={e => setEditForm({...editForm, solution: e.target.value})} className="w-1/2 p-2 border border-amber-300 rounded text-[13px] font-bold focus:outline-none focus:ring-2 focus:ring-amber-500 custom-scrollbar cursor-text bg-white resize-y" rows={2} placeholder="일반 풀이"></textarea>
+                             </div>
+                           </details>
 
                            <div className="flex justify-end gap-2 mt-4">
                                <button onClick={() => setEditingId(null)} className="px-4 py-2 bg-white border border-slate-300 text-slate-600 font-bold text-xs rounded hover:bg-slate-50 shadow-sm cursor-pointer">취소</button>

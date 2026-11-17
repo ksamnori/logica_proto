@@ -74,7 +74,34 @@ function classifyExamItem(exam: any): {
     };
   }
 
-  // 4. 정규 시험: 입학테스트 · 진단평가 전용
+  // 4. 정규 시험: 입학테스트 · 진단평가 · 분기평가
+  const isQuarterlyByType =
+    typeStr === '분기평가' ||
+    typeStr === '분기테스트' ||
+    typeStr.includes('분기평가') ||
+    typeStr.includes('분기테스트');
+  const isQuarterlyByMeta =
+    !['과제', '과제프린트', '주간테스트'].includes(typeStr) &&
+    !/오답\s*(프린트|유사)?/.test(titleStr) &&
+    (titleStr.includes('분기평가') ||
+      titleStr.includes('분기테스트') ||
+      tagsStr.includes('분기평가') ||
+      tagsStr.includes('분기테스트'));
+
+  if (isQuarterlyByType || isQuarterlyByMeta) {
+    return {
+      bucket: 'EXAM',
+      badgeLabel:
+        typeStr === '분기테스트'
+          ? '분기평가'
+          : isQuarterlyByType
+          ? typeStr
+          : '분기평가',
+      badgeColorClass: 'bg-fuchsia-50 text-fuchsia-700 border-fuchsia-200',
+      searchKeywords: `${typeStr} 분기평가 분기테스트 정규시험`,
+    };
+  }
+
   const isDiagnosticByType =
     typeStr === '입학테스트' ||
     typeStr === '진단평가' ||
@@ -82,6 +109,7 @@ function classifyExamItem(exam: any): {
     typeStr.includes('진단평가');
   const isDiagnosticByMeta =
     !['과제', '과제프린트', '주간테스트'].includes(typeStr) &&
+    !/오답\s*(프린트|유사)?/.test(titleStr) &&
     (titleStr.includes('입학테스트') ||
       titleStr.includes('진단평가') ||
       tagsStr.includes('입학테스트') ||
@@ -119,15 +147,7 @@ function classifyExamItem(exam: any): {
     };
   }
 
-  // 7. 그 외 기타 평가 (분기평가, 중간평가, 단원평가, 선택없음 등)
-  if (['분기평가', '분기테스트'].includes(typeStr)) {
-    return {
-      bucket: 'OTHER',
-      badgeLabel: typeStr,
-      badgeColorClass: 'bg-fuchsia-50 text-fuchsia-700 border-fuchsia-200',
-      searchKeywords: typeStr,
-    };
-  }
+  // 7. 그 외 기타 평가 (중간평가, 단원평가, 선택없음 등)
 
   return {
     bucket: 'OTHER',
@@ -903,7 +923,7 @@ export default function ExamListPage() {
       <div className="flex justify-between items-end shrink-0">
         <div>
           <h2 className="text-xl font-bold text-slate-800">📝 문제지 보관함</h2>
-          <p className="text-sm font-bold text-slate-400 mt-1">주간테스트, 오답프린트, 미완료과제, 문제지 과제, 쌍둥이/유사, 정규 시험(진단평가)을 분류별로 조회하고 관리합니다.</p>
+          <p className="text-sm font-bold text-slate-400 mt-1">주간테스트, 오답프린트, 미완료과제, 문제지 과제, 쌍둥이/유사, 정규 시험(진단평가·분기평가)을 분류별로 조회하고 관리합니다.</p>
         </div>
       </div>
 
@@ -952,7 +972,7 @@ export default function ExamListPage() {
           <button 
             onClick={() => { setMainTab('EXAM'); setCurrentPage(1); }} 
             className={`px-3.5 py-2 rounded-lg font-bold text-[13px] transition-all whitespace-nowrap ${mainTab === 'EXAM' ? 'bg-blue-600 text-white shadow-md' : 'text-slate-500 hover:text-blue-600 hover:bg-blue-50'}`}
-            title="입학테스트 · 진단평가 전용"
+            title="입학테스트 · 진단평가 · 분기평가"
           >
             💯 정규 시험
           </button>
