@@ -34,7 +34,7 @@ function HqWorkspaceFrame({
   );
 
   return (
-    <div className="h-screen flex overflow-hidden bg-[#F5F7FA] text-slate-800 print:h-auto print:overflow-visible print:bg-white">
+    <div className="h-screen flex overflow-hidden bg-[#F5F7FA] text-slate-800 break-keep print:h-auto print:overflow-visible print:bg-white">
       <HqSidebar />
 
       <div className="flex-1 flex flex-col min-w-0 h-full overflow-hidden print:h-auto print:overflow-visible">

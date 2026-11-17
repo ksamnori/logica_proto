@@ -27,6 +27,7 @@ export async function hqFetch<T = any>(
   const res = await fetch(url, {
     method: options?.method || "GET",
     headers,
+    cache: "no-store",
     body: options?.body ? JSON.stringify(options.body) : undefined,
   });
 

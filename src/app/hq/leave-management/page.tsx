@@ -125,10 +125,12 @@ export default function HqLeaveManagementPage() {
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
 
-  // 공통 필터
+  // 공통 필터 및 표시 옵션
   const [deptFilter, setDeptFilter] = useState("ALL");
   const [searchOpen, setSearchOpen] = useState(false);
   const [keyword, setKeyword] = useState("");
+  const [showEmpNo, setShowEmpNo] = useState(false);
+  const [showOnRequestQuota, setShowOnRequestQuota] = useState(false);
 
   // 탭별 연도 / 기간 필터
   const [historyStart, setHistoryStart] = useState(`${currentYear}-01-01`);
@@ -379,12 +381,13 @@ export default function HqLeaveManagementPage() {
   );
 
   // 구성원별 맞춤 휴가 보유량 표시 헬퍼
-  // - '신청 시 부여' / '관리자가 직접 부여' / '연차 소진 시 부여': 신청·직접부여 전에는 기본 일수를 표시하지 않음 (빈칸)
-  // - 사용 가능 기간(만료일)이 지난 부여분은 잔여에서 제외
-  // - '여성' 전용은 성별 '여'에게만, '남성' 전용은 성별 '남'에게만 적용
+  // - '관리자가 직접 부여': 직접 부여된 유효 잔여분만 표시 (없으면 빈칸)
+  // - '연차 소진 시 부여'(예: 병가 60일): 잔여 연차가 0 이하로 모두 소진되었을 때(또는 직접 부여 시) 자동 활성화하여 잔여일수 표시
+  // - '신청 시 부여': 기본은 빈칸 유지, [신청 시 부여 기준일수 표시] 토글 활성화 시 플렉스처럼 자격(성별) 충족 구성원에게 1회 신청 가능 기준일수 표시
   const getCustomLeaveDisplayValue = (
     memberId: string,
     memberGender: string,
+    annualRemainDays: number,
     item: HqCustomLeaveItem
   ): string => {
     if (!isCustomLeaveEligibleForGender(item, memberGender)) return "";
@@ -407,12 +410,41 @@ export default function HqLeaveManagementPage() {
       )
       .reduce((acc, d) => acc + Number(d.leave_days || 0), 0);
 
-    if (
-      item.grant_method === "신청 시 부여" ||
-      isManuallyGrantableCustomLeave(item)
-    ) {
+    if (item.grant_method === "연차 소진 시 부여") {
+      if (item.target_gender !== "모두" && !memberGender && grantedSum <= 0) {
+        return "";
+      }
+      const autoExhaustQuota =
+        annualRemainDays <= 0 ? Number(item.grant_amount || 0) : 0;
+      const rem = Math.max(
+        0,
+        Math.round((autoExhaustQuota + grantedSum - usedSum) * 100) / 100
+      );
+      return rem > 0 ? String(rem) : "";
+    }
+
+    if (isManuallyGrantableCustomLeave(item)) {
       const rem = Math.max(0, Math.round((grantedSum - usedSum) * 100) / 100);
       return rem > 0 ? String(rem) : "";
+    }
+
+    if (item.grant_method === "신청 시 부여") {
+      const grantedRem = Math.max(
+        0,
+        Math.round((grantedSum - usedSum) * 100) / 100
+      );
+      if (grantedRem > 0) return String(grantedRem);
+
+      if (
+        showOnRequestQuota &&
+        item.id !== "cl-military" &&
+        item.grant_unit !== "신청하는 만큼 부여" &&
+        Number(item.grant_amount || 0) > 0
+      ) {
+        if (item.target_gender !== "모두" && !memberGender) return "";
+        return String(item.grant_amount);
+      }
+      return "";
     }
 
     // 반복 부여 (예: 보건 매월 1일 부여 — 여성 전용)
@@ -512,10 +544,18 @@ export default function HqLeaveManagementPage() {
   const handleDeleteAdjustment = async (id: string) => {
     if (!confirm("해당 연차 조정 내역을 취소(삭제)하시겠습니까?")) return;
     try {
-      await hqFetch("/api/hq/leaves", {
+      const res = await hqFetch<{
+        success: boolean;
+        data?: { adjustments?: HqLeaveAdjustmentItem[] };
+      }>("/api/hq/leaves", {
         method: "POST",
         body: { action: "DELETE_ADJUSTMENT", id },
       });
+      if (res.data?.adjustments) {
+        setAdjustments(res.data.adjustments);
+      } else {
+        setAdjustments((prev) => prev.filter((a) => a.id !== id));
+      }
       await Promise.all([loadLeavesAll(), refreshMembers()]);
     } catch (err: any) {
       alert(err?.message || "조정 내역 삭제 실패");
@@ -525,10 +565,18 @@ export default function HqLeaveManagementPage() {
   const handleDeleteCustomGrant = async (id: string) => {
     if (!confirm("해당 맞춤 휴가 부여 내역을 취소(삭제)하시겠습니까?")) return;
     try {
-      await hqFetch("/api/hq/leaves", {
+      const res = await hqFetch<{
+        success: boolean;
+        data?: { customGrants?: HqCustomLeaveGrantItem[] };
+      }>("/api/hq/leaves", {
         method: "POST",
         body: { action: "DELETE_CUSTOM_GRANT", id },
       });
+      if (res.data?.customGrants) {
+        setCustomGrants(res.data.customGrants);
+      } else {
+        setCustomGrants((prev) => prev.filter((g) => g.id !== id));
+      }
       await loadLeavesAll();
     } catch (err: any) {
       alert(err?.message || "부여 내역 삭제 실패");
@@ -728,7 +776,7 @@ export default function HqLeaveManagementPage() {
           m.employee_no || "",
           String(rem),
           ...customLeaves.map((c) =>
-            getCustomLeaveDisplayValue(m.instructor_id, gender, c)
+            getCustomLeaveDisplayValue(m.instructor_id, gender, rem, c)
           ),
         ].join(",");
       });
@@ -874,13 +922,14 @@ export default function HqLeaveManagementPage() {
             if (ym) setAdjYm(ym);
             setAdjModalOpen(true);
           }}
+          onSyncCustomGrants={(next) => setCustomGrants(next)}
           onMutated={async () => {
             await Promise.all([loadLeavesAll(), refreshMembers()]);
           }}
         />
       ) : ledgerSubView ? (
         <div className="w-full flex-1 flex flex-col">
-          <div className="px-9 pt-7 pb-5 border-b border-slate-200 flex flex-wrap items-center justify-between gap-3">
+          <div className="px-5 sm:px-7 xl:px-9 pt-7 pb-5 border-b border-slate-200 flex flex-wrap items-center justify-between gap-3">
             <div className="flex items-center gap-2.5">
               <button
                 type="button"
@@ -1113,7 +1162,7 @@ export default function HqLeaveManagementPage() {
       ) : (
         <>
       {/* 상단 타이틀 & 탭별 우측 액션 버튼 */}
-      <div className="w-full px-9 pt-7 border-b border-slate-200">
+      <div className="w-full px-5 sm:px-7 xl:px-9 pt-7 border-b border-slate-200">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-3">
             <h1 className="text-[22px] font-extrabold text-slate-900 tracking-tight">
@@ -1407,32 +1456,63 @@ export default function HqLeaveManagementPage() {
          ===================================================================== */}
       {tab === "BALANCE" && (
         <div className="flex-1 flex flex-col">
-          <div className="px-9 py-3.5 border-b border-slate-100 flex items-center gap-2 text-xs">
-            <select
-              value={deptFilter}
-              onChange={(e) => setDeptFilter(e.target.value)}
-              className="px-3 py-1.5 rounded-lg border border-slate-200 font-semibold text-slate-600 bg-white"
+          <div className="px-5 sm:px-7 xl:px-9 py-3.5 border-b border-slate-100 flex flex-wrap items-center justify-between gap-2 text-xs">
+            <div className="flex flex-wrap items-center gap-2">
+              <select
+                value={deptFilter}
+                onChange={(e) => setDeptFilter(e.target.value)}
+                className="px-3 py-1.5 rounded-lg border border-slate-200 font-semibold text-slate-600 bg-white"
+              >
+                <option value="ALL">品 조직</option>
+                {departments.map((d) => (
+                  <option key={d} value={d}>
+                    {d}
+                  </option>
+                ))}
+              </select>
+
+              <button
+                type="button"
+                onClick={() => setShowEmpNo((v) => !v)}
+                className={`px-3 py-1.5 rounded-lg border font-bold transition-colors whitespace-nowrap ${
+                  showEmpNo
+                    ? "bg-slate-900 border-slate-900 text-white"
+                    : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+                }`}
+              >
+                {showEmpNo ? "# 사번 표시 중 ✕" : "+ 사번 표시"}
+              </button>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setShowOnRequestQuota((v) => !v)}
+              className={`px-3 py-1.5 rounded-lg border font-bold transition-colors whitespace-nowrap ${
+                showOnRequestQuota
+                  ? "bg-emerald-50 border-emerald-200 text-[#00a84b]"
+                  : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50"
+              }`}
+              title="활성화 시 플렉스처럼 신청 시 부여 휴가(경조사·산전후·비상 등)의 1회 신청 기준 일수를 함께 표시합니다."
             >
-              <option value="ALL">品 조직</option>
-              {departments.map((d) => (
-                <option key={d} value={d}>
-                  {d}
-                </option>
-              ))}
-            </select>
+              {showOnRequestQuota
+                ? "✓ 신청 시 부여 기준일수 표시 중"
+                : "신청 시 부여 기준일수 표시"}
+            </button>
           </div>
 
           <div className="flex-1 overflow-x-auto">
-            <table className="w-full min-w-[1440px] text-left border-collapse">
+            <table className="w-full min-w-max text-left border-collapse">
               <thead>
                 <tr className="border-b border-slate-200 text-xs bg-white">
-                  <th className="py-3 pl-9 pr-4 w-52 sticky left-0 bg-white z-10 font-semibold text-slate-500">
+                  <th className="py-3 pl-5 sm:pl-7 xl:pl-9 pr-4 min-w-[188px] whitespace-nowrap sticky left-0 bg-white z-10 font-semibold text-slate-500">
                     이름
                   </th>
-                  <th className="py-3 px-4 w-28 font-semibold text-slate-500 text-right">
-                    사번
-                  </th>
-                  <th className="py-3 px-4 w-24 font-bold text-slate-700 text-right border-r border-slate-100">
+                  {showEmpNo && (
+                    <th className="py-3 px-4 min-w-[156px] whitespace-nowrap font-semibold text-slate-500 text-right">
+                      사번
+                    </th>
+                  )}
+                  <th className="py-3 px-4 min-w-[80px] whitespace-nowrap font-bold text-slate-700 text-right border-r border-slate-100">
                     연차
                   </th>
                   {customLeaves.map((c) => {
@@ -1459,7 +1539,7 @@ export default function HqLeaveManagementPage() {
                     return (
                       <th
                         key={c.id}
-                        className="py-2.5 px-4 min-w-[132px] text-right border-r border-slate-100/80"
+                        className="py-2.5 px-4 min-w-[132px] whitespace-nowrap text-right border-r border-slate-100/80"
                       >
                         <div className="font-semibold text-slate-600 whitespace-nowrap">
                           {c.name}
@@ -1476,7 +1556,7 @@ export default function HqLeaveManagementPage() {
                 {loading ? (
                   <tr>
                     <td
-                      colSpan={3 + customLeaves.length}
+                      colSpan={(showEmpNo ? 3 : 2) + customLeaves.length}
                       className="py-20 text-center text-slate-400 font-semibold"
                     >
                       구성원 휴가 보유 현황을 계산하는 중입니다...
@@ -1503,7 +1583,7 @@ export default function HqLeaveManagementPage() {
                         onClick={() => setSelectedMemberId(m.instructor_id)}
                         className="hover:bg-emerald-50/40 cursor-pointer transition-colors group"
                       >
-                        <td className="py-3.5 pl-9 pr-4 sticky left-0 bg-white group-hover:bg-emerald-50/40 z-10 transition-colors">
+                        <td className="py-3.5 pl-5 sm:pl-7 xl:pl-9 pr-4 min-w-[188px] whitespace-nowrap sticky left-0 bg-white group-hover:bg-emerald-50/40 z-10 transition-colors">
                           <div className="flex items-center gap-3">
                             <span
                               style={{ backgroundColor: avatarBg(m.name) }}
@@ -1523,20 +1603,23 @@ export default function HqLeaveManagementPage() {
                             </div>
                           </div>
                         </td>
-                        <td className="py-3.5 px-4 text-right text-slate-500 tabular-nums">
-                          {cleanEmpNo}
-                        </td>
-                        <td className="py-3.5 px-4 text-right font-extrabold text-slate-900 tabular-nums border-r border-slate-100">
+                        {showEmpNo && (
+                          <td className="py-3.5 px-4 min-w-[156px] whitespace-nowrap font-mono text-right text-slate-500 tabular-nums">
+                            {cleanEmpNo}
+                          </td>
+                        )}
+                        <td className="py-3.5 px-4 min-w-[80px] whitespace-nowrap text-right font-extrabold text-slate-900 tabular-nums border-r border-slate-100">
                           {annualRem}
                         </td>
                         {customLeaves.map((c) => (
                           <td
                             key={c.id}
-                            className="py-3.5 px-4 text-right font-semibold text-slate-700 tabular-nums border-r border-slate-100/80"
+                            className="py-3.5 px-4 min-w-[132px] whitespace-nowrap text-right font-semibold text-slate-700 tabular-nums border-r border-slate-100/80"
                           >
                             {getCustomLeaveDisplayValue(
                               m.instructor_id,
                               gender,
+                              annualRem,
                               c
                             )}
                           </td>
@@ -1556,9 +1639,9 @@ export default function HqLeaveManagementPage() {
          ===================================================================== */}
       {tab === "HISTORY" && (
         <div className="flex-1 flex flex-col">
-          <div className="px-9 py-3.5 border-b border-slate-100 flex flex-wrap items-center gap-2 text-xs">
+          <div className="px-5 sm:px-7 xl:px-9 py-3.5 border-b border-slate-100 flex flex-wrap items-center gap-2 text-xs">
             <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-white">
-              <span className="text-slate-400">📅 조회 기간</span>
+              <span className="text-slate-400 whitespace-nowrap">📅 조회 기간</span>
               <input
                 type="date"
                 value={historyStart}
@@ -1598,31 +1681,57 @@ export default function HqLeaveManagementPage() {
               <option value="CANCELLED">휴가취소</option>
               <option value="REJECTED">반려</option>
             </select>
+
+            <button
+              type="button"
+              onClick={() => setShowEmpNo((v) => !v)}
+              className={`px-3 py-1.5 rounded-lg border font-bold transition-colors whitespace-nowrap ${
+                showEmpNo
+                  ? "bg-slate-900 border-slate-900 text-white"
+                  : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+              }`}
+            >
+              {showEmpNo ? "# 사번 표시 중 ✕" : "+ 사번 표시"}
+            </button>
           </div>
 
           <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse">
+            <table className="w-full min-w-max text-left border-collapse">
               <thead>
                 <tr className="border-b border-slate-200 text-xs font-semibold text-slate-500">
-                  <th className="py-3 pl-9 pr-4 w-56">이름</th>
-                  <th className="py-3 px-4 w-36">사번</th>
+                  <th className="py-3 pl-5 sm:pl-7 xl:pl-9 pr-4 min-w-[188px] whitespace-nowrap">
+                    이름
+                  </th>
+                  {showEmpNo && (
+                    <th className="py-3 px-4 min-w-[156px] whitespace-nowrap">
+                      사번
+                    </th>
+                  )}
                   <th
                     onClick={() => setSortPeriodAsc((v) => !v)}
-                    className="py-3 px-4 cursor-pointer hover:text-slate-800"
+                    className="py-3 px-4 min-w-[196px] whitespace-nowrap cursor-pointer hover:text-slate-800"
                   >
                     기간 ⇅
                   </th>
-                  <th className="py-3 px-4">항목</th>
-                  <th className="py-3 px-4">사용 시간 ⇅</th>
-                  <th className="py-3 px-4">상태</th>
-                  <th className="py-3 pl-4 pr-9">증명자료</th>
+                  <th className="py-3 px-4 min-w-[132px] whitespace-nowrap">
+                    항목
+                  </th>
+                  <th className="py-3 px-4 min-w-[96px] whitespace-nowrap">
+                    사용 시간 ⇅
+                  </th>
+                  <th className="py-3 px-4 min-w-[92px] whitespace-nowrap">
+                    상태
+                  </th>
+                  <th className="py-3 pl-4 pr-5 sm:pr-7 xl:pr-9 min-w-[88px] whitespace-nowrap">
+                    증명자료
+                  </th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 text-xs">
                 {filteredHistoryRows.length === 0 ? (
                   <tr>
                     <td
-                      colSpan={7}
+                      colSpan={showEmpNo ? 7 : 6}
                       className="py-20 text-center text-slate-400 font-semibold"
                     >
                       조회 기간에 등록된 휴가 사용 내역이 없습니다.
@@ -1671,7 +1780,7 @@ export default function HqLeaveManagementPage() {
                         onClick={() => setSelectedMemberId(doc.drafter_id)}
                         className="hover:bg-emerald-50/40 cursor-pointer transition-colors"
                       >
-                        <td className="py-3.5 pl-9 pr-4">
+                        <td className="py-3.5 pl-5 sm:pl-7 xl:pl-9 pr-4 whitespace-nowrap">
                           <div className="flex items-center gap-3">
                             <span
                               style={{
@@ -1693,26 +1802,28 @@ export default function HqLeaveManagementPage() {
                             </div>
                           </div>
                         </td>
-                        <td className="py-3.5 px-4 text-slate-500 tabular-nums">
-                          {empNo}
-                        </td>
-                        <td className="py-3.5 px-4 font-medium text-slate-800 tabular-nums">
+                        {showEmpNo && (
+                          <td className="py-3.5 px-4 min-w-[156px] whitespace-nowrap font-mono text-slate-500 tabular-nums">
+                            {empNo}
+                          </td>
+                        )}
+                        <td className="py-3.5 px-4 whitespace-nowrap font-medium text-slate-800 tabular-nums">
                           {formatDateRangeKo(doc.effective_date, doc.end_date)}
                         </td>
-                        <td className="py-3.5 px-4 font-medium text-slate-800">
+                        <td className="py-3.5 px-4 whitespace-nowrap font-medium text-slate-800">
                           {doc.leave_type || "연차"}
                         </td>
-                        <td className="py-3.5 px-4 font-bold text-slate-800 tabular-nums">
+                        <td className="py-3.5 px-4 whitespace-nowrap font-bold text-slate-800 tabular-nums">
                           {doc.leave_days}일
                         </td>
-                        <td className="py-3.5 px-4">
+                        <td className="py-3.5 px-4 whitespace-nowrap">
                           <span
                             className={`px-2 py-0.5 rounded text-[11px] font-extrabold ${badge.cls}`}
                           >
                             {badge.label}
                           </span>
                         </td>
-                        <td className="py-3.5 pl-4 pr-9 text-slate-400">
+                        <td className="py-3.5 pl-4 pr-5 sm:pr-7 xl:pr-9 whitespace-nowrap text-slate-400">
                           {doc.receipt_url ? (
                             <a
                               href={doc.receipt_url}
@@ -1741,9 +1852,9 @@ export default function HqLeaveManagementPage() {
          ===================================================================== */}
       {tab === "MONTHLY" && (
         <div className="flex-1 flex flex-col">
-          <div className="px-9 py-3.5 border-b border-slate-100 flex flex-wrap items-center gap-2 text-xs">
+          <div className="px-5 sm:px-7 xl:px-9 py-3.5 border-b border-slate-100 flex flex-wrap items-center gap-2 text-xs">
             <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-white">
-              <span className="text-slate-400">📅 조회 기간</span>
+              <span className="text-slate-400 whitespace-nowrap">📅 조회 기간</span>
               <select
                 value={monthlyYear}
                 onChange={(e) => setMonthlyYear(Number(e.target.value))}
@@ -1774,22 +1885,42 @@ export default function HqLeaveManagementPage() {
                 </option>
               ))}
             </select>
+
+            <button
+              type="button"
+              onClick={() => setShowEmpNo((v) => !v)}
+              className={`px-3 py-1.5 rounded-lg border font-bold transition-colors whitespace-nowrap ${
+                showEmpNo
+                  ? "bg-slate-900 border-slate-900 text-white"
+                  : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+              }`}
+            >
+              {showEmpNo ? "# 사번 표시 중 ✕" : "+ 사번 표시"}
+            </button>
           </div>
 
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[1280px] text-left border-collapse">
+            <table className="w-full min-w-max text-left border-collapse">
               <thead>
-                <tr className="border-b border-slate-200 text-xs font-semibold text-slate-500">
-                  <th className="py-3 pl-9 pr-4 w-52">이름</th>
-                  <th className="py-3 px-4 w-28 text-right">사번</th>
-                  <th className="py-3 px-4 w-32 text-right">입사일</th>
-                  <th className="py-3 px-4 w-28 text-right font-bold text-slate-700 border-r border-slate-100">
+                <tr className="border-b border-slate-200 text-xs font-semibold text-slate-500 bg-white">
+                  <th className="py-3 pl-5 sm:pl-7 xl:pl-9 pr-4 min-w-[188px] whitespace-nowrap sticky left-0 bg-white z-10">
+                    이름
+                  </th>
+                  {showEmpNo && (
+                    <th className="py-3 px-4 min-w-[156px] whitespace-nowrap text-right">
+                      사번
+                    </th>
+                  )}
+                  <th className="py-3 px-4 min-w-[112px] whitespace-nowrap text-right">
+                    입사일
+                  </th>
+                  <th className="py-3 px-4 min-w-[92px] whitespace-nowrap text-right font-bold text-slate-700 border-r border-slate-100">
                     잔여 연차
                   </th>
                   {Array.from({ length: 12 }, (_, idx) => (
                     <th
                       key={idx}
-                      className="py-3 px-3 text-right border-r border-slate-100/70"
+                      className="py-3 px-3 min-w-[58px] whitespace-nowrap text-right border-r border-slate-100/70"
                     >
                       {idx + 1}월
                     </th>
@@ -1812,9 +1943,9 @@ export default function HqLeaveManagementPage() {
                     <tr
                       key={m.instructor_id}
                       onClick={() => setSelectedMemberId(m.instructor_id)}
-                      className="hover:bg-emerald-50/40 cursor-pointer transition-colors"
+                      className="hover:bg-emerald-50/40 cursor-pointer transition-colors group"
                     >
-                      <td className="py-3.5 pl-9 pr-4">
+                      <td className="py-3.5 pl-5 sm:pl-7 xl:pl-9 pr-4 min-w-[188px] whitespace-nowrap sticky left-0 bg-white group-hover:bg-emerald-50/40 z-10 transition-colors">
                         <div className="flex items-center gap-3">
                           <span
                             style={{ backgroundColor: avatarBg(m.name) }}
@@ -1834,19 +1965,21 @@ export default function HqLeaveManagementPage() {
                           </div>
                         </div>
                       </td>
-                      <td className="py-3.5 px-4 text-right text-slate-500 tabular-nums">
-                        {cleanEmpNo}
-                      </td>
-                      <td className="py-3.5 px-4 text-right text-slate-600 tabular-nums">
+                      {showEmpNo && (
+                        <td className="py-3.5 px-4 min-w-[156px] whitespace-nowrap font-mono text-right text-slate-500 tabular-nums">
+                          {cleanEmpNo}
+                        </td>
+                      )}
+                      <td className="py-3.5 px-4 whitespace-nowrap text-right text-slate-600 tabular-nums">
                         {formatHireDot(m.hire_date)}
                       </td>
-                      <td className="py-3.5 px-4 text-right font-extrabold text-slate-900 tabular-nums border-r border-slate-100">
+                      <td className="py-3.5 px-4 whitespace-nowrap text-right font-extrabold text-slate-900 tabular-nums border-r border-slate-100">
                         {remain}
                       </td>
                       {months.map((val, idx) => (
                         <td
                           key={idx}
-                          className={`py-3.5 px-3 text-right tabular-nums border-r border-slate-100/70 ${
+                          className={`py-3.5 px-3 whitespace-nowrap text-right tabular-nums border-r border-slate-100/70 ${
                             val > 0
                               ? "font-bold text-slate-800"
                               : "text-slate-400"
@@ -1869,9 +2002,9 @@ export default function HqLeaveManagementPage() {
          ===================================================================== */}
       {tab === "PROMOTION" && (
         <div className="flex-1 flex flex-col">
-          <div className="px-9 py-3.5 border-b border-slate-100 flex flex-wrap items-center gap-2 text-xs">
+          <div className="px-5 sm:px-7 xl:px-9 py-3.5 border-b border-slate-100 flex flex-wrap items-center gap-2 text-xs">
             <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-white">
-              <span className="text-slate-400">📅 조회 기간</span>
+              <span className="text-slate-400 whitespace-nowrap">📅 조회 기간</span>
               <select
                 value={promoYear}
                 onChange={(e) => setPromoYear(Number(e.target.value))}
@@ -1903,7 +2036,7 @@ export default function HqLeaveManagementPage() {
               onClick={() =>
                 setPromoWorkStatus((s) => (s === "재직" ? "ALL" : "재직"))
               }
-              className={`px-3 py-1.5 rounded-lg border font-bold flex items-center gap-1.5 ${
+              className={`px-3 py-1.5 rounded-lg border font-bold flex items-center gap-1.5 whitespace-nowrap ${
                 promoWorkStatus === "재직"
                   ? "bg-blue-50 border-blue-200 text-blue-700"
                   : "border-slate-200 text-slate-600"
@@ -1923,27 +2056,57 @@ export default function HqLeaveManagementPage() {
               <option value="COMPLETED">완료</option>
               <option value="EXPIRED">작성 기간 지남</option>
             </select>
+
+            <button
+              type="button"
+              onClick={() => setShowEmpNo((v) => !v)}
+              className={`px-3 py-1.5 rounded-lg border font-bold transition-colors whitespace-nowrap ${
+                showEmpNo
+                  ? "bg-slate-900 border-slate-900 text-white"
+                  : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+              }`}
+            >
+              {showEmpNo ? "# 사번 표시 중 ✕" : "+ 사번 표시"}
+            </button>
           </div>
 
           <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse">
+            <table className="w-full min-w-max text-left border-collapse">
               <thead>
                 <tr className="border-b border-slate-200 text-xs font-semibold text-slate-500">
-                  <th className="py-3 pl-9 pr-3 w-20">재직 상태</th>
-                  <th className="py-3 px-4 w-52">이름</th>
-                  <th className="py-3 px-4 w-32">사번</th>
-                  <th className="py-3 px-4">촉진 유형</th>
-                  <th className="py-3 px-4">소멸일</th>
-                  <th className="py-3 px-4">진행 상태</th>
-                  <th className="py-3 px-4">사용 계획</th>
-                  <th className="py-3 pl-4 pr-9 text-right">더 보기</th>
+                  <th className="py-3 pl-5 sm:pl-7 xl:pl-9 pr-3 min-w-[84px] whitespace-nowrap">
+                    재직 상태
+                  </th>
+                  <th className="py-3 px-4 min-w-[184px] whitespace-nowrap">
+                    이름
+                  </th>
+                  {showEmpNo && (
+                    <th className="py-3 px-4 min-w-[156px] whitespace-nowrap">
+                      사번
+                    </th>
+                  )}
+                  <th className="py-3 px-4 min-w-[92px] whitespace-nowrap">
+                    촉진 유형
+                  </th>
+                  <th className="py-3 px-4 min-w-[164px] whitespace-nowrap">
+                    소멸일
+                  </th>
+                  <th className="py-3 px-4 min-w-[168px] whitespace-nowrap">
+                    진행 상태
+                  </th>
+                  <th className="py-3 px-4 min-w-[88px] whitespace-nowrap">
+                    사용 계획
+                  </th>
+                  <th className="py-3 pl-4 pr-5 sm:pr-7 xl:pr-9 min-w-[72px] whitespace-nowrap text-right">
+                    더 보기
+                  </th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 text-xs">
                 {filteredPromoRows.length === 0 ? (
                   <tr>
                     <td
-                      colSpan={8}
+                      colSpan={showEmpNo ? 8 : 7}
                       className="py-20 text-center text-slate-400 font-semibold"
                     >
                       우측 상단 [연차 사용계획 요청] 버튼을 눌러 대상자에게 연차 촉진을 시작해보세요.
@@ -1967,18 +2130,18 @@ export default function HqLeaveManagementPage() {
                         onClick={() => setSelectedMemberId(row.member_id)}
                         className="hover:bg-emerald-50/40 cursor-pointer transition-colors"
                       >
-                        <td className="py-3.5 pl-9 pr-3">
+                        <td className="py-3.5 pl-5 sm:pl-7 xl:pl-9 pr-3 whitespace-nowrap">
                           <span className="px-2 py-0.5 rounded bg-slate-100 text-slate-600 text-[11px] font-bold">
                             재직
                           </span>
                         </td>
-                        <td className="py-3.5 px-4">
+                        <td className="py-3.5 px-4 whitespace-nowrap">
                           <div className="flex items-center gap-3">
                             <span
                               style={{
                                 backgroundColor: avatarBg(row.member_name),
                               }}
-                              className="w-8 h-8 rounded-full text-white text-[11px] font-extrabold inline-flex items-center justify-center"
+                              className="w-8 h-8 rounded-full text-white text-[11px] font-extrabold inline-flex items-center justify-center shrink-0"
                             >
                               {row.member_name.slice(-2)}
                             </span>
@@ -1992,13 +2155,15 @@ export default function HqLeaveManagementPage() {
                             </div>
                           </div>
                         </td>
-                        <td className="py-3.5 px-4 text-slate-500 tabular-nums">
-                          {cleanEmpNo}
-                        </td>
-                        <td className="py-3.5 px-4 font-semibold text-slate-800">
+                        {showEmpNo && (
+                          <td className="py-3.5 px-4 min-w-[156px] whitespace-nowrap font-mono text-slate-500 tabular-nums">
+                            {cleanEmpNo}
+                          </td>
+                        )}
+                        <td className="py-3.5 px-4 whitespace-nowrap font-semibold text-slate-800">
                           {row.promo_type}
                         </td>
-                        <td className="py-3.5 px-4 font-medium text-slate-700">
+                        <td className="py-3.5 px-4 whitespace-nowrap font-medium text-slate-700">
                           {formatExpireDateKo(row.expire_date)}{" "}
                           <span
                             title="당해 연도 말일(12월 31일) 경과 시 소멸됩니다."
@@ -2007,7 +2172,7 @@ export default function HqLeaveManagementPage() {
                             ⓘ
                           </span>
                         </td>
-                        <td className="py-3.5 px-4">
+                        <td className="py-3.5 px-4 whitespace-nowrap">
                           {row.status === "COMPLETED" || submittedPlan ? (
                             <span className="inline-flex items-center gap-1 font-bold text-emerald-600">
                               <span>●</span>
@@ -2025,7 +2190,7 @@ export default function HqLeaveManagementPage() {
                             </span>
                           )}
                         </td>
-                        <td className="py-3.5 px-4">
+                        <td className="py-3.5 px-4 whitespace-nowrap">
                           {submittedPlan && (
                             <button
                               type="button"
@@ -2039,7 +2204,7 @@ export default function HqLeaveManagementPage() {
                             </button>
                           )}
                         </td>
-                        <td className="py-3.5 pl-4 pr-9 text-right">
+                        <td className="py-3.5 pl-4 pr-5 sm:pr-7 xl:pr-9 whitespace-nowrap text-right">
                           {canManage && (
                             <button
                               type="button"
@@ -2081,7 +2246,8 @@ export default function HqLeaveManagementPage() {
         lockedPersonalMember={personalGrantMember}
         initialLeaveId={cgLeaveId}
         initialTargetIds={cgTargetIds}
-        onSubmitted={async () => {
+        onSubmitted={async (nextGrants) => {
+          if (nextGrants) setCustomGrants(nextGrants);
           await loadLeavesAll();
         }}
       />
@@ -2096,7 +2262,8 @@ export default function HqLeaveManagementPage() {
         orgNodes={companySettings?.extra_settings?.org_chart_nodes}
         initialTargetIds={adjTargetIds}
         initialYm={adjYm}
-        onSubmitted={async () => {
+        onSubmitted={async (nextAdj) => {
+          if (nextAdj) setAdjustments(nextAdj);
           await Promise.all([loadLeavesAll(), refreshMembers()]);
         }}
       />
@@ -2116,7 +2283,8 @@ export default function HqLeaveManagementPage() {
         leaveDocs={leaveDocs}
         adjustments={adjustments}
         uploadedMonthly={uploadedMonthly}
-        onSubmitted={async () => {
+        onSubmitted={async (nextAdj) => {
+          if (nextAdj) setAdjustments(nextAdj);
           await Promise.all([loadLeavesAll(), refreshMembers()]);
         }}
       />

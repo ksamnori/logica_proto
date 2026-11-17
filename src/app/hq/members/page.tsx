@@ -1141,34 +1141,34 @@ export default function HqMembersPage() {
                             className="rounded border-slate-300"
                           />
                         </th>
-                        <th className="py-2.5 px-3 border-r border-slate-100 w-[190px]">
+                        <th className="py-2.5 px-3 border-r border-slate-100 min-w-[190px] whitespace-nowrap">
                           이름
                         </th>
-                        <th className="py-2.5 px-3 border-r border-slate-100 w-[90px]">
+                        <th className="py-2.5 px-3 border-r border-slate-100 min-w-[90px] whitespace-nowrap">
                           재직 상태
                         </th>
-                        <th className="py-2.5 px-3 border-r border-slate-100 w-[100px]">
+                        <th className="py-2.5 px-3 border-r border-slate-100 min-w-[152px] whitespace-nowrap">
                           사번
                         </th>
-                        <th className="py-2.5 px-3 border-r border-slate-100 w-[105px]">
+                        <th className="py-2.5 px-3 border-r border-slate-100 min-w-[108px] whitespace-nowrap">
                           입사일
                         </th>
-                        <th className="py-2.5 px-3 border-r border-slate-100 w-[95px]">
+                        <th className="py-2.5 px-3 border-r border-slate-100 min-w-[98px] whitespace-nowrap">
                           근속 기간
                         </th>
-                        <th className="py-2.5 px-3 border-r border-slate-100 w-[180px]">
+                        <th className="py-2.5 px-3 border-r border-slate-100 min-w-[180px] whitespace-nowrap">
                           이메일
                         </th>
-                        <th className="py-2.5 px-3 border-r border-slate-100 w-[160px]">
+                        <th className="py-2.5 px-3 border-r border-slate-100 min-w-[160px] whitespace-nowrap">
                           개인 이메일
                         </th>
-                        <th className="py-2.5 px-3 border-r border-slate-100 w-[135px]">
+                        <th className="py-2.5 px-3 border-r border-slate-100 min-w-[138px] whitespace-nowrap">
                           휴대전화번호
                         </th>
-                        <th className="py-2.5 px-3 border-r border-slate-100 w-[230px]">
+                        <th className="py-2.5 px-3 border-r border-slate-100 min-w-[230px] whitespace-nowrap">
                           조직 정보
                         </th>
-                        <th className="py-2.5 pl-3 pr-8">주조직 · 직책 · 관리</th>
+                        <th className="py-2.5 pl-3 pr-8 min-w-[200px] whitespace-nowrap">주조직 · 직책 · 관리</th>
                       </tr>
                     </thead>
 
@@ -1231,7 +1231,7 @@ export default function HqMembersPage() {
                               </div>
                             </td>
 
-                            <td className="py-3 px-3 border-r border-slate-100">
+                            <td className="py-3 px-3 border-r border-slate-100 whitespace-nowrap">
                               <span
                                 className={`px-2 py-0.5 rounded text-[11px] font-bold ${
                                   m.work_status === "재직"
@@ -1245,15 +1245,15 @@ export default function HqMembersPage() {
                               </span>
                             </td>
 
-                            <td className="py-3 px-3 border-r border-slate-100 font-mono text-slate-600">
+                            <td className="py-3 px-3 border-r border-slate-100 font-mono text-slate-600 whitespace-nowrap">
                               {m.employee_no || ""}
                             </td>
 
-                            <td className="py-3 px-3 border-r border-slate-100 text-slate-700">
+                            <td className="py-3 px-3 border-r border-slate-100 text-slate-700 whitespace-nowrap">
                               {formatDotDate(m.hire_date)}
                             </td>
 
-                            <td className="py-3 px-3 border-r border-slate-100 text-slate-600">
+                            <td className="py-3 px-3 border-r border-slate-100 text-slate-600 whitespace-nowrap">
                               {calcTenureText(m.hire_date, asOfDate)}
                             </td>
 
@@ -1265,7 +1265,7 @@ export default function HqMembersPage() {
                               {m.profile_extra?.personal_email || ""}
                             </td>
 
-                            <td className="py-3 px-3 border-r border-slate-100 text-slate-700">
+                            <td className="py-3 px-3 border-r border-slate-100 text-slate-700 whitespace-nowrap">
                               {m.phone}
                             </td>
 

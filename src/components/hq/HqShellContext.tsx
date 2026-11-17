@@ -42,6 +42,8 @@ interface HqShellState {
   schemaMissing: boolean;
   sessionExpired: boolean;
   isBooting: boolean;
+  sidebarCollapsed: boolean;
+  toggleSidebar: () => void;
   refreshMembers: () => Promise<void>;
   refreshCompanySettings: () => Promise<void>;
   refreshApprovalBadge: () => Promise<void>;
@@ -100,6 +102,29 @@ export function HqShellProvider({
   const [schemaMissing, setSchemaMissing] = useState(false);
   const [sessionExpired, setSessionExpired] = useState(false);
   const [isBooting, setIsBooting] = useState(true);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+
+  useEffect(() => {
+    try {
+      if (localStorage.getItem("logica_hq_sidebar_collapsed") === "1") {
+        setSidebarCollapsed(true);
+      }
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  const toggleSidebar = useCallback(() => {
+    setSidebarCollapsed((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem("logica_hq_sidebar_collapsed", next ? "1" : "0");
+      } catch {
+        // ignore
+      }
+      return next;
+    });
+  }, []);
 
   const logout = useCallback(async () => {
     document.cookie =
@@ -444,6 +469,8 @@ export function HqShellProvider({
         schemaMissing,
         sessionExpired,
         isBooting,
+        sidebarCollapsed,
+        toggleSidebar,
         refreshMembers,
         refreshCompanySettings,
         refreshApprovalBadge,

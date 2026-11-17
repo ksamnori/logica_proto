@@ -1,6 +1,6 @@
 // src/lib/hq/leavesLedgerServer.ts
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { SETTINGS_STORAGE_BUCKET } from "./companySettingsServer";
+import { readHqKvPayload, writeHqKvPayload } from "./hqKvStoreServer";
 import type {
   HqAnnualLeavePlanItem,
   HqAttendanceLockItem,
@@ -13,6 +13,8 @@ import type {
   HqUploadedMonthlyUsageItem,
 } from "./types";
 
+export const LEAVES_LEDGER_SETTING_KEY = "LEAVES_LEDGER";
+export const WORK_MGMT_SETTING_KEY = "WORK_MGMT_STATE";
 export const LEAVES_LEDGER_PATH = "hq_system_config/leaves_ledger.json";
 export const WORK_MGMT_STORAGE_PATH = "hq_system_config/work_management.json";
 
@@ -37,42 +39,45 @@ export const EMPTY_LEAVES_LEDGER: StoredLeavesLedger = {
 export async function readLeavesLedgerServer(
   supabaseAdmin: SupabaseClient
 ): Promise<StoredLeavesLedger> {
-  try {
-    const { data: blob, error } = await supabaseAdmin.storage
-      .from(SETTINGS_STORAGE_BUCKET)
-      .download(LEAVES_LEDGER_PATH);
-    if (error || !blob) return { ...EMPTY_LEAVES_LEDGER };
-    const parsed = JSON.parse(await blob.text());
+  const parsed = await readHqKvPayload<Partial<StoredLeavesLedger>>(
+    supabaseAdmin,
+    LEAVES_LEDGER_SETTING_KEY,
+    LEAVES_LEDGER_PATH
+  );
+  if (!parsed) {
     return {
-      adjustments: Array.isArray(parsed?.adjustments) ? parsed.adjustments : [],
-      promotions: Array.isArray(parsed?.promotions) ? parsed.promotions : [],
-      promotionTargets: Array.isArray(parsed?.promotionTargets)
-        ? parsed.promotionTargets
-        : [],
-      plans: Array.isArray(parsed?.plans) ? parsed.plans : [],
-      customGrants: Array.isArray(parsed?.customGrants)
-        ? parsed.customGrants
-        : [],
-      uploadedMonthly: Array.isArray(parsed?.uploadedMonthly)
-        ? parsed.uploadedMonthly
-        : [],
+      adjustments: [],
+      promotions: [],
+      promotionTargets: [],
+      plans: [],
+      customGrants: [],
+      uploadedMonthly: [],
     };
-  } catch {
-    return { ...EMPTY_LEAVES_LEDGER };
   }
+  return {
+    adjustments: Array.isArray(parsed.adjustments) ? parsed.adjustments : [],
+    promotions: Array.isArray(parsed.promotions) ? parsed.promotions : [],
+    promotionTargets: Array.isArray(parsed.promotionTargets)
+      ? parsed.promotionTargets
+      : [],
+    plans: Array.isArray(parsed.plans) ? parsed.plans : [],
+    customGrants: Array.isArray(parsed.customGrants) ? parsed.customGrants : [],
+    uploadedMonthly: Array.isArray(parsed.uploadedMonthly)
+      ? parsed.uploadedMonthly
+      : [],
+  };
 }
 
 export async function writeLeavesLedgerServer(
   supabaseAdmin: SupabaseClient,
   ledger: StoredLeavesLedger
 ): Promise<void> {
-  const bytes = new TextEncoder().encode(JSON.stringify(ledger, null, 2));
-  await supabaseAdmin.storage
-    .from(SETTINGS_STORAGE_BUCKET)
-    .upload(LEAVES_LEDGER_PATH, bytes, {
-      contentType: "application/json",
-      upsert: true,
-    });
+  await writeHqKvPayload(
+    supabaseAdmin,
+    LEAVES_LEDGER_SETTING_KEY,
+    ledger,
+    LEAVES_LEDGER_PATH
+  );
 }
 
 export interface StoredWorkManagementState {
@@ -90,35 +95,37 @@ export const EMPTY_WORK_MGMT_STATE: StoredWorkManagementState = {
 export async function readWorkMgmtStateServer(
   supabaseAdmin: SupabaseClient
 ): Promise<StoredWorkManagementState> {
-  try {
-    const { data: blob, error } = await supabaseAdmin.storage
-      .from(SETTINGS_STORAGE_BUCKET)
-      .download(WORK_MGMT_STORAGE_PATH);
-    if (error || !blob) return { ...EMPTY_WORK_MGMT_STATE };
-    const parsed = JSON.parse(await blob.text());
+  const parsed = await readHqKvPayload<Partial<StoredWorkManagementState>>(
+    supabaseAdmin,
+    WORK_MGMT_SETTING_KEY,
+    WORK_MGMT_STORAGE_PATH
+  );
+  if (!parsed) {
     return {
-      compGrants: Array.isArray(parsed?.compGrants) ? parsed.compGrants : [],
-      holidaySubstitutes: Array.isArray(parsed?.holidaySubstitutes)
-        ? parsed.holidaySubstitutes
-        : [],
-      attendanceLocks: Array.isArray(parsed?.attendanceLocks)
-        ? parsed.attendanceLocks
-        : [],
+      compGrants: [],
+      holidaySubstitutes: [],
+      attendanceLocks: [],
     };
-  } catch {
-    return { ...EMPTY_WORK_MGMT_STATE };
   }
+  return {
+    compGrants: Array.isArray(parsed.compGrants) ? parsed.compGrants : [],
+    holidaySubstitutes: Array.isArray(parsed.holidaySubstitutes)
+      ? parsed.holidaySubstitutes
+      : [],
+    attendanceLocks: Array.isArray(parsed.attendanceLocks)
+      ? parsed.attendanceLocks
+      : [],
+  };
 }
 
 export async function writeWorkMgmtStateServer(
   supabaseAdmin: SupabaseClient,
   state: StoredWorkManagementState
 ): Promise<void> {
-  const bytes = new TextEncoder().encode(JSON.stringify(state, null, 2));
-  await supabaseAdmin.storage
-    .from(SETTINGS_STORAGE_BUCKET)
-    .upload(WORK_MGMT_STORAGE_PATH, bytes, {
-      contentType: "application/json",
-      upsert: true,
-    });
+  await writeHqKvPayload(
+    supabaseAdmin,
+    WORK_MGMT_SETTING_KEY,
+    state,
+    WORK_MGMT_STORAGE_PATH
+  );
 }

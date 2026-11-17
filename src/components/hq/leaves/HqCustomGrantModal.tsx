@@ -9,6 +9,7 @@ import {
   isManuallyGrantableCustomLeave,
 } from "@/lib/hq/defaultLeaveSettings";
 import type {
+  HqCustomLeaveGrantItem,
   HqCustomLeaveGrantPeriodMode,
   HqCustomLeaveItem,
   HqMember,
@@ -24,7 +25,7 @@ interface Props {
   lockedPersonalMember?: HqMember | null;
   initialLeaveId?: string;
   initialTargetIds?: string[];
-  onSubmitted: () => Promise<void>;
+  onSubmitted: (nextCustomGrants?: HqCustomLeaveGrantItem[]) => Promise<void>;
 }
 
 function todayIso(): string {
@@ -210,7 +211,10 @@ export default function HqCustomGrantModal({
 
     setSubmitting(true);
     try {
-      await hqFetch("/api/hq/leaves", {
+      const res = await hqFetch<{
+        success: boolean;
+        data?: { customGrants?: HqCustomLeaveGrantItem[] };
+      }>("/api/hq/leaves", {
         method: "POST",
         body: {
           action: "GRANT_CUSTOM_LEAVE",
@@ -233,7 +237,7 @@ export default function HqCustomGrantModal({
           }),
         },
       });
-      await onSubmitted();
+      await onSubmitted(res.data?.customGrants);
       onClose();
     } catch (err: any) {
       alert(err?.message || "맞춤 휴가 부여에 실패했습니다.");

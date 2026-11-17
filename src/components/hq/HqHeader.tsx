@@ -104,6 +104,8 @@ export default function HqHeader() {
     me,
     pendingApprovalCount,
     myTodayAttendance,
+    sidebarCollapsed,
+    toggleSidebar,
     quickCheckIn,
     quickCheckOut,
     openProfileModal,
@@ -154,15 +156,29 @@ export default function HqHeader() {
     : null;
 
   return (
-    <header className="print:hidden h-16 bg-white border-b border-slate-200 px-6 flex items-center justify-between shrink-0 z-10">
-      <div className="min-w-0">
-        <h2 className="text-[16px] font-bold text-slate-800 leading-tight truncate">
-          {meta.title}
-        </h2>
-        <p className="text-xs text-slate-500 mt-0.5 truncate">{meta.subtitle}</p>
+    <header className="print:hidden h-16 bg-white border-b border-slate-200 px-4 sm:px-6 flex items-center justify-between gap-3 shrink-0 z-10">
+      <div className="flex items-center gap-2.5 min-w-0">
+        {sidebarCollapsed && (
+          <button
+            type="button"
+            onClick={toggleSidebar}
+            title="사이드바 펼치기"
+            className="w-8 h-8 rounded-lg border border-slate-200 hover:bg-slate-100 text-slate-600 flex items-center justify-center text-sm font-bold shrink-0 transition-colors"
+          >
+            ◫
+          </button>
+        )}
+        <div className="min-w-0">
+          <h2 className="text-[15px] sm:text-[16px] font-bold text-slate-800 leading-tight truncate">
+            {meta.title}
+          </h2>
+          <p className="text-xs text-slate-500 mt-0.5 truncate hidden sm:block">
+            {meta.subtitle}
+          </p>
+        </div>
       </div>
 
-      <div className="flex items-center gap-2 shrink-0">
+      <div className="flex items-center gap-1.5 sm:gap-2 shrink-0 whitespace-nowrap">
         {/* 실시간 출퇴근 미니 위젯 */}
         {!myTodayAttendance ? (
           <div className="hidden lg:flex items-center rounded-xl border border-emerald-200 bg-emerald-50/70 p-0.5">

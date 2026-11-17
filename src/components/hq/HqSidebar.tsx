@@ -21,6 +21,8 @@ export default function HqSidebar() {
     unsignedContractCount,
     unreadChatCount,
     sessionExpired,
+    sidebarCollapsed,
+    toggleSidebar,
     openProfileModal,
     openSettingsModal,
     logout,
@@ -53,6 +55,63 @@ export default function HqSidebar() {
         : "text-slate-300 hover:bg-slate-800 hover:text-white"
     }`;
 
+  if (sidebarCollapsed) {
+    const compactLinks = [
+      { href: "/hq", icon: "🏠", label: "본부 홈 대시보드" },
+      { href: "/hq/notices", icon: "📢", label: "공지" },
+      { href: "/hq/members", icon: "👥", label: "구성원" },
+      { href: "/hq/org-chart", icon: "🏢", label: "조직도" },
+      { href: "/hq/meetings", icon: "💬", label: "미팅" },
+      { href: "/hq/attendance", icon: "⏱️", label: "근무" },
+      { href: "/hq/leaves", icon: "🏖️", label: "내 휴가" },
+      { href: "/hq/work-management", icon: "🕒", label: "근무 관리" },
+      { href: "/hq/leave-management", icon: "🗓️", label: "휴가 관리" },
+      { href: "/hq/approvals", icon: "📋", label: "워크플로우" },
+      { href: "/hq/contracts", icon: "📑", label: "전자계약 · 저작권" },
+      { href: "/hq/expenses", icon: "💳", label: "비용 · 경비 정산" },
+      { href: "/hq/payroll", icon: "💰", label: "급여 · 인세 · 원천세" },
+      { href: "/hq/publishing", icon: "📚", label: "출판 공정 · ISBN 보드" },
+      { href: "/hq/messenger", icon: "💬", label: "사내 메신저" },
+    ];
+    return (
+      <aside className="print:hidden w-[64px] bg-slate-900 text-slate-200 flex flex-col items-center border-r border-slate-800 shrink-0 z-20 select-none py-3 gap-2">
+        <button
+          type="button"
+          onClick={toggleSidebar}
+          title="사이드바 펼치기"
+          className="w-10 h-10 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 flex items-center justify-center text-sm font-extrabold transition-colors shrink-0"
+        >
+          ◫
+        </button>
+        <div className="w-8 h-px bg-slate-800 my-0.5" />
+        <nav className="flex-1 overflow-y-auto w-full px-2 space-y-1 custom-scroll flex flex-col items-center">
+          {compactLinks.map((item) => (
+            <Link
+              key={item.href}
+              href={item.href}
+              title={item.label}
+              className={`w-10 h-10 rounded-xl flex items-center justify-center text-base transition-all shrink-0 ${
+                isActive(item.href)
+                  ? "bg-brand text-white shadow-md"
+                  : "text-slate-300 hover:bg-slate-800 hover:text-white"
+              }`}
+            >
+              {item.icon}
+            </Link>
+          ))}
+          <button
+            type="button"
+            onClick={() => openSettingsModal("company")}
+            title="설정"
+            className="w-10 h-10 rounded-xl flex items-center justify-center text-base text-slate-300 hover:bg-slate-800 hover:text-white transition-all shrink-0"
+          >
+            ⚙️
+          </button>
+        </nav>
+      </aside>
+    );
+  }
+
   return (
     <aside className="print:hidden w-[244px] bg-slate-900 text-slate-200 flex flex-col border-r border-slate-800 shrink-0 z-20 select-none">
       {/* 상단 브랜드 로고 영역 */}
@@ -60,25 +119,38 @@ export default function HqSidebar() {
         onClick={() => router.push("/hq")}
         className="px-4 py-4 border-b border-slate-800 cursor-pointer hover:bg-slate-800/40 transition-colors"
       >
-        <div className="flex items-center gap-2.5">
-          <div className="relative w-9 h-9 rounded-xl bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center text-white font-extrabold text-sm shadow-md shrink-0 overflow-hidden">
-            <span>HQ</span>
-            {companyLogoUrl && (
-              <img
-                src={companyLogoUrl}
-                alt="logo"
-                className="absolute inset-0 w-full h-full object-cover bg-white"
-              />
-            )}
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className="relative w-9 h-9 rounded-xl bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center text-white font-extrabold text-sm shadow-md shrink-0 overflow-hidden">
+              <span>HQ</span>
+              {companyLogoUrl && (
+                <img
+                  src={companyLogoUrl}
+                  alt="logo"
+                  className="absolute inset-0 w-full h-full object-cover bg-white"
+                />
+              )}
+            </div>
+            <div className="min-w-0">
+              <h1 className="text-[14px] font-bold text-white leading-tight truncate">
+                {companySettings?.company_name || "(주)천종현수학연구소"}
+              </h1>
+              <p className="text-[11px] font-semibold text-slate-400 mt-0.5 truncate">
+                출판 · 연구 본부 올인원 HR
+              </p>
+            </div>
           </div>
-          <div className="min-w-0">
-            <h1 className="text-[14px] font-bold text-white leading-tight truncate">
-              {companySettings?.company_name || "(주)천종현수학연구소"}
-            </h1>
-            <p className="text-[11px] font-semibold text-slate-400 mt-0.5 truncate">
-              출판 · 연구 본부 올인원 HR
-            </p>
-          </div>
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              toggleSidebar();
+            }}
+            title="사이드바 접기"
+            className="w-7 h-7 rounded-lg hover:bg-slate-700/80 text-slate-400 hover:text-white flex items-center justify-center text-sm shrink-0 transition-colors"
+          >
+            ◫
+          </button>
         </div>
 
         {me && (

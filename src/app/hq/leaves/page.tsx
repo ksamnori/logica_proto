@@ -349,10 +349,24 @@ export default function HqLeavesPage() {
     return leaveDocs.filter((d) => d.drafter_id === me.instructor_id);
   }, [leaveDocs, me]);
 
-  // 휴가 등록 카드 노출 목록 구성 (성별 남/여/미입력 및 직접부여 잔여분 기준 완벽 필터링)
+  // 휴가 등록 카드 노출 목록 구성 (성별 남/여/미입력 및 직접부여·연차소진시부여 잔여분 기준 완벽 필터링)
   const displayedCustomLeaves = useMemo(() => {
     const myGender = me?.profile_extra?.gender || "";
     const myId = me?.instructor_id || "";
+    const myRemainAnnual = me
+      ? computeMemberAnnualLeaveLedgerForYear({
+          memberId: me.instructor_id,
+          hireDate: me.hire_date,
+          groupHireDate: me.profile_extra?.group_hire_date || null,
+          year: currentYear,
+          currentYear,
+          currentMonth,
+          policy: annualPolicy,
+          leaveDocs,
+          adjustments,
+          uploadedMonthly,
+        }).availableRemainDays
+      : 0;
     const todayIso = `${currentYear}-${String(currentMonth).padStart(
       2,
       "0"
@@ -369,10 +383,14 @@ export default function HqLeavesPage() {
               isCustomGrantValidOnDate(g, todayIso, false)
           )
           .reduce((acc, g) => acc + Number(g.granted_amount || 0), 0);
+        const autoExhaust =
+          c.grant_method === "연차 소진 시 부여" && myRemainAnnual <= 0
+            ? Number(c.grant_amount || 0)
+            : 0;
         const used = myLeaveDocs
           .filter((d) => d.status === "APPROVED" && d.leave_type === c.name)
           .reduce((acc, d) => acc + Number(d.leave_days || 0), 0);
-        return granted - used > 0;
+        return autoExhaust + granted - used > 0;
       }
       return true;
     };
@@ -416,8 +434,14 @@ export default function HqLeavesPage() {
     return eligibleList;
   }, [
     customLeaves,
-    me?.profile_extra?.gender,
-    me?.instructor_id,
+    me,
+    currentYear,
+    currentMonth,
+    now,
+    annualPolicy,
+    leaveDocs,
+    adjustments,
+    uploadedMonthly,
     showAllCustomLeaves,
     customGrants,
     myLeaveDocs,
@@ -483,6 +507,41 @@ export default function HqLeavesPage() {
     adjustments,
     uploadedMonthly,
   ]);
+
+  const getMyCustomRemainDays = useCallback(
+    (c: HqCustomLeaveItem): number => {
+      const myId = me?.instructor_id || "";
+      const todayIso = `${currentYear}-${String(currentMonth).padStart(
+        2,
+        "0"
+      )}-${String(now.getDate()).padStart(2, "0")}`;
+      const granted = customGrants
+        .filter(
+          (g) =>
+            g.member_id === myId &&
+            g.leave_id === c.id &&
+            isCustomGrantValidOnDate(g, todayIso, false)
+        )
+        .reduce((acc, g) => acc + Number(g.granted_amount || 0), 0);
+      const autoExhaust =
+        c.grant_method === "연차 소진 시 부여" && myAvailableAnnualDays <= 0
+          ? Number(c.grant_amount || 0)
+          : 0;
+      const used = myLeaveDocs
+        .filter((d) => d.status === "APPROVED" && d.leave_type === c.name)
+        .reduce((acc, d) => acc + Number(d.leave_days || 0), 0);
+      return Math.max(0, Math.round((autoExhaust + granted - used) * 100) / 100);
+    },
+    [
+      me?.instructor_id,
+      currentYear,
+      currentMonth,
+      now,
+      customGrants,
+      myAvailableAnnualDays,
+      myLeaveDocs,
+    ]
+  );
 
   // 사용한 기록 필터링
   const mapDocToFilterStatus = (doc: HqApprovalDoc): LeaveFilterStatus => {
@@ -928,17 +987,20 @@ export default function HqLeavesPage() {
 
               {/* 맞춤 휴가 카드 목록 */}
               {displayedCustomLeaves.map((item) => {
+                const remainCustom = getMyCustomRemainDays(item);
                 const subText =
-                  item.id === "cl-military" ||
-                  item.grant_unit === "신청하는 만큼 부여"
-                    ? "신청 시 부여"
-                    : item.grant_method === "신청 시 부여"
-                    ? `신청 시 ${item.grant_amount}${
-                        item.grant_unit.startsWith("시간") ? "시간" : "일"
-                      } 부여`
-                    : item.grant_method === "반복 부여"
-                    ? `${item.grant_amount}일 (${item.repeat_cycle || "반복 부여"})`
-                    : `${item.grant_method}`;
+                  remainCustom > 0
+                    ? `${remainCustom}일 보유`
+                    : item.id === "cl-military" ||
+                        item.grant_unit === "신청하는 만큼 부여"
+                      ? "신청 시 부여"
+                      : item.grant_method === "신청 시 부여"
+                        ? `신청 시 ${item.grant_amount}${
+                            item.grant_unit.startsWith("시간") ? "시간" : "일"
+                          } 부여`
+                        : item.grant_method === "반복 부여"
+                          ? `${item.grant_amount}일 (${item.repeat_cycle || "반복 부여"})`
+                          : `${item.grant_method}`;
 
                 return (
                   <button
@@ -956,7 +1018,13 @@ export default function HqLeavesPage() {
                       <div className="text-xs font-bold text-slate-800 truncate">
                         {item.name}
                       </div>
-                      <div className="text-[13px] font-semibold text-slate-400 mt-0.5">
+                      <div
+                        className={`text-[13px] mt-0.5 font-semibold ${
+                          remainCustom > 0
+                            ? "text-emerald-700 font-extrabold"
+                            : "text-slate-400"
+                        }`}
+                      >
                         {subText}
                       </div>
                     </div>

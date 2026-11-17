@@ -34,6 +34,7 @@ interface Props {
   onBack: () => void;
   onOpenGrantModalForMember: (memberId: string, leaveId?: string) => void;
   onOpenAdjustModalForMember: (memberId: string, defaultYm?: string) => void;
+  onSyncCustomGrants?: (next: HqCustomLeaveGrantItem[]) => void;
   onMutated: () => Promise<void>;
 }
 
@@ -138,6 +139,7 @@ export default function HqMemberLeaveDetailView({
   onBack,
   onOpenGrantModalForMember,
   onOpenAdjustModalForMember,
+  onSyncCustomGrants,
   onMutated,
 }: Props) {
   const now = useMemo(() => new Date(), []);
@@ -263,7 +265,12 @@ export default function HqMemberLeaveDetailView({
     [customLeaves, memberGender]
   );
 
-  // 해당 구성원의 성별 및 직접부여 내역(유효기간 내)에 맞는 맞춤 휴가 카드 목록
+  const memberCustomGrants = useMemo(
+    () => customGrants.filter((g) => g.member_id === member.instructor_id),
+    [customGrants, member.instructor_id]
+  );
+
+  // 해당 구성원의 성별 및 직접부여·소진시부여 내역(유효기간 내)에 맞는 맞춤 휴가 카드 목록
   const visibleCustomCards = useMemo(() => {
     const getGrantInfo = (c: HqCustomLeaveItem) => {
       const validGrants = customGrants.filter(
@@ -276,12 +283,17 @@ export default function HqMemberLeaveDetailView({
         (acc, g) => acc + Number(g.granted_amount || 0),
         0
       );
+      const autoExhaustQuota =
+        c.grant_method === "연차 소진 시 부여" &&
+        currentYearSummary.availableRemainDays <= 0
+          ? Number(c.grant_amount || 0)
+          : 0;
       const used = memberLeaveDocs
         .filter((d) => d.status === "APPROVED" && d.leave_type === c.name)
         .reduce((acc, d) => acc + Number(d.leave_days || 0), 0);
       const remainGranted = Math.max(
         0,
-        Math.round((granted - used) * 100) / 100
+        Math.round((autoExhaustQuota + granted - used) * 100) / 100
       );
       const latestPeriodGrant = validGrants.find(
         (g) => g.valid_from || g.expires_at
@@ -337,7 +349,27 @@ export default function HqMemberLeaveDetailView({
     member.instructor_id,
     memberLeaveDocs,
     todayYmd,
+    currentYearSummary.availableRemainDays,
   ]);
+
+  const handleDeleteMemberCustomGrant = async (grantId: string) => {
+    if (!confirm("이 맞춤 휴가 부여 내역을 취소(삭제)하시겠습니까?")) return;
+    try {
+      const res = await hqFetch<{
+        success: boolean;
+        data?: { customGrants?: HqCustomLeaveGrantItem[] };
+      }>("/api/hq/leaves", {
+        method: "POST",
+        body: { action: "DELETE_CUSTOM_GRANT", id: grantId },
+      });
+      if (res.data?.customGrants && onSyncCustomGrants) {
+        onSyncCustomGrants(res.data.customGrants);
+      }
+      await onMutated();
+    } catch (e: any) {
+      alert(e?.message || "부여 내역 삭제 실패");
+    }
+  };
 
   // 사용한 기록 (해당 연도 + 상태 필터 -> 예정된 휴가 / 지난 휴가 분리)
   const yearRecords = useMemo(() => {
@@ -730,6 +762,60 @@ export default function HqMemberLeaveDetailView({
               })}
             </div>
           </section>
+
+          {/* 1-B) 이 구성원에게 직접 부여된 맞춤 휴가 내역 & 즉시 취소 */}
+          {memberCustomGrants.length > 0 && (
+            <section className="space-y-3">
+              <div className="flex items-center justify-between">
+                <h2 className="text-sm font-extrabold text-slate-900">
+                  부여된 맞춤 휴가 내역{" "}
+                  <span className="text-[#00a84b]">
+                    {memberCustomGrants.length}
+                  </span>
+                </h2>
+              </div>
+              <div className="rounded-2xl border border-slate-200 divide-y divide-slate-100 bg-white overflow-x-auto">
+                {memberCustomGrants.map((g) => (
+                  <div
+                    key={g.id}
+                    className="px-4 py-3 flex flex-wrap items-center justify-between gap-3 text-xs"
+                  >
+                    <div className="flex flex-wrap items-center gap-2.5">
+                      <span className="px-2.5 py-0.5 rounded-md bg-emerald-50 text-[#00a84b] font-extrabold tabular-nums">
+                        +{g.granted_amount}일
+                        {g.grant_unit_mode === "HOURS" && g.granted_hours
+                          ? ` (${g.granted_hours}시간)`
+                          : ""}
+                      </span>
+                      <span className="font-extrabold text-slate-900">
+                        {g.leave_name}
+                      </span>
+                      <span className="text-slate-500 font-semibold tabular-nums">
+                        사용 가능 기간: {formatCustomGrantPeriodLabel(g)}
+                      </span>
+                      {g.reason && (
+                        <span className="text-slate-400">· {g.reason}</span>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2.5 shrink-0">
+                      <span className="text-[11px] text-slate-400 tabular-nums">
+                        {g.created_at.slice(0, 16).replace("T", " ")} ({g.actor_name})
+                      </span>
+                      {canManage && (
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteMemberCustomGrant(g.id)}
+                          className="px-2.5 py-1 rounded-lg border border-slate-200 hover:border-rose-200 hover:bg-rose-50 text-rose-600 font-bold"
+                        >
+                          부여 취소
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
 
           {/* 2) 사용한 기록 (예정된 휴가 / 지난 휴가) */}
           <section className="space-y-4">

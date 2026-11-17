@@ -24,7 +24,7 @@ interface ManualAdjustModalProps {
   orgNodes?: HqOrgChartNode[] | null;
   initialTargetIds?: string[];
   initialYm?: string;
-  onSubmitted: () => Promise<void>;
+  onSubmitted: (nextAdjustments?: HqLeaveAdjustmentItem[]) => Promise<void>;
 }
 
 export function HqManualAnnualAdjustModal({
@@ -82,7 +82,10 @@ export function HqManualAnnualAdjustModal({
 
     setSubmitting(true);
     try {
-      await hqFetch("/api/hq/leaves", {
+      const res = await hqFetch<{
+        success: boolean;
+        data?: { adjustments?: HqLeaveAdjustmentItem[] };
+      }>("/api/hq/leaves", {
         method: "POST",
         body: {
           action: "BATCH_ADJUSTMENT",
@@ -104,7 +107,7 @@ export function HqManualAnnualAdjustModal({
           }),
         },
       });
-      await onSubmitted();
+      await onSubmitted(res.data?.adjustments);
       onClose();
     } catch (err: any) {
       alert(err?.message || "연차 조정 반영에 실패했습니다.");
@@ -270,7 +273,7 @@ interface SettlementAdjustModalProps {
   leaveDocs: HqApprovalDoc[];
   adjustments: HqLeaveAdjustmentItem[];
   uploadedMonthly: HqUploadedMonthlyUsageItem[];
-  onSubmitted: () => Promise<void>;
+  onSubmitted: (nextAdjustments?: HqLeaveAdjustmentItem[]) => Promise<void>;
 }
 
 export function HqSettlementAnnualAdjustModal({
@@ -520,7 +523,10 @@ export function HqSettlementAnnualAdjustModal({
 
     setSubmitting(true);
     try {
-      await hqFetch("/api/hq/leaves", {
+      const res = await hqFetch<{
+        success: boolean;
+        data?: { adjustments?: HqLeaveAdjustmentItem[] };
+      }>("/api/hq/leaves", {
         method: "POST",
         body: {
           action: "BATCH_ADJUSTMENT",
@@ -535,7 +541,7 @@ export function HqSettlementAnnualAdjustModal({
           targets: targetsPayload,
         },
       });
-      await onSubmitted();
+      await onSubmitted(res.data?.adjustments);
       onClose();
     } catch (err: any) {
       alert(err?.message || "정산용 잔여 연차 조정에 실패했습니다.");

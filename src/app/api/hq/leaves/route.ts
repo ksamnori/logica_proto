@@ -24,6 +24,7 @@ import type {
 } from "@/lib/hq/types";
 
 export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
 export async function GET(req: NextRequest) {
   try {
@@ -35,21 +36,15 @@ export async function GET(req: NextRequest) {
     const canManage =
       caller.isHrManager || caller.isHqAdmin || caller.rankLevel >= 3;
 
-    // 기한 지난 촉진 요청 상태 자동 갱신
+    // 기한 지난 촉진 요청 상태 실시간 판정 (GET 요청 시 부작용 쓰기 방지로 동시성 경합 차단)
     const todayYmd = new Date(Date.now() + 9 * 60 * 60 * 1000)
       .toISOString()
       .slice(0, 10);
-    let dirty = false;
-    ledger.promotionTargets = ledger.promotionTargets.map((t) => {
-      if (t.status === "PENDING" && t.due_date && t.due_date < todayYmd) {
-        dirty = true;
-        return { ...t, status: "EXPIRED" };
-      }
-      return t;
-    });
-    if (dirty) {
-      await writeLeavesLedgerServer(supabaseAdmin, ledger).catch(() => {});
-    }
+    const normalizedPromotionTargets = ledger.promotionTargets.map((t) =>
+      t.status === "PENDING" && t.due_date && t.due_date < todayYmd
+        ? { ...t, status: "EXPIRED" as const }
+        : t
+    );
 
     let leaveDocs: HqApprovalDoc[] = [];
     if (!caller.schemaMissing) {
@@ -149,22 +144,29 @@ export async function GET(req: NextRequest) {
       : ledger.uploadedMonthly.filter((u) => u.member_id === caller.userId);
 
     const visiblePromoTargets = canManage
-      ? ledger.promotionTargets
-      : ledger.promotionTargets.filter((t) => t.member_id === caller.userId);
+      ? normalizedPromotionTargets
+      : normalizedPromotionTargets.filter((t) => t.member_id === caller.userId);
 
-    return NextResponse.json({
-      success: true,
-      data: {
-        canManage,
-        adjustments: visibleAdjustments,
-        promotions: ledger.promotions,
-        promotionTargets: visiblePromoTargets,
-        plans: visiblePlans,
-        customGrants: visibleCustomGrants,
-        uploadedMonthly: visibleUploadedMonthly,
-        leaveDocs,
+    return NextResponse.json(
+      {
+        success: true,
+        data: {
+          canManage,
+          adjustments: visibleAdjustments,
+          promotions: ledger.promotions,
+          promotionTargets: visiblePromoTargets,
+          plans: visiblePlans,
+          customGrants: visibleCustomGrants,
+          uploadedMonthly: visibleUploadedMonthly,
+          leaveDocs,
+        },
       },
-    });
+      {
+        headers: {
+          "Cache-Control": "no-store, max-age=0",
+        },
+      }
+    );
   } catch (e: any) {
     return apiFail(String(e?.message || e), 500);
   }

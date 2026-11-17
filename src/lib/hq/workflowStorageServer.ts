@@ -10,6 +10,7 @@ import {
   DEFAULT_WORKFLOW_FORMS,
   mergeFormsWithPolicies,
 } from "./defaultWorkflowForms";
+import { readHqKvPayload, writeHqKvPayload } from "./hqKvStoreServer";
 import { isMissingHqTableError } from "./serverAuth";
 import type {
   HqApprovalPolicyItem,
@@ -43,15 +44,16 @@ export async function readWorkflowFormsPayload(
   );
 
   try {
-    const { data: blob, error } = await supabaseAdmin.storage
-      .from(SETTINGS_STORAGE_BUCKET)
-      .download(WORKFLOW_FORMS_STORAGE_PATH);
-    if (!error && blob) {
-      const parsed = JSON.parse(await blob.text());
+    const parsed = await readHqKvPayload<Partial<StoredWorkflowFormsPayload>>(
+      supabaseAdmin,
+      "WORKFLOW_FORMS",
+      WORKFLOW_FORMS_STORAGE_PATH
+    );
+    if (parsed) {
       const deletedSet = new Set<string>(
-        Array.isArray(parsed?.deletedFormIds) ? parsed.deletedFormIds : []
+        Array.isArray(parsed.deletedFormIds) ? parsed.deletedFormIds : []
       );
-      const savedForms: HqWorkflowFormDef[] = Array.isArray(parsed?.forms)
+      const savedForms: HqWorkflowFormDef[] = Array.isArray(parsed.forms)
         ? parsed.forms
         : DEFAULT_WORKFLOW_FORMS;
       const merged = mergeFormsWithPolicies(
@@ -61,7 +63,7 @@ export async function readWorkflowFormsPayload(
 
       return {
         categories:
-          Array.isArray(parsed?.categories) && parsed.categories.length > 0
+          Array.isArray(parsed.categories) && parsed.categories.length > 0
             ? parsed.categories
             : DEFAULT_WORKFLOW_CATEGORIES,
         forms: merged,
@@ -83,13 +85,12 @@ export async function writeWorkflowFormsPayload(
   supabaseAdmin: SupabaseClient,
   payload: StoredWorkflowFormsPayload
 ): Promise<void> {
-  const bytes = new TextEncoder().encode(JSON.stringify(payload, null, 2));
-  await supabaseAdmin.storage
-    .from(SETTINGS_STORAGE_BUCKET)
-    .upload(WORKFLOW_FORMS_STORAGE_PATH, bytes, {
-      contentType: "application/json",
-      upsert: true,
-    });
+  await writeHqKvPayload(
+    supabaseAdmin,
+    "WORKFLOW_FORMS",
+    payload,
+    WORKFLOW_FORMS_STORAGE_PATH
+  );
 }
 
 export async function syncWorkflowFormsToCompanySettings(
@@ -178,22 +179,23 @@ export async function readWorkflowMetaPayload(
   supabaseAdmin: SupabaseClient
 ): Promise<StoredWorkflowMetaPayload> {
   try {
-    const { data: blob, error } = await supabaseAdmin.storage
-      .from(SETTINGS_STORAGE_BUCKET)
-      .download(WORKFLOW_META_STORAGE_PATH);
-    if (!error && blob) {
-      const parsed = JSON.parse(await blob.text());
+    const parsed = await readHqKvPayload<Partial<StoredWorkflowMetaPayload>>(
+      supabaseAdmin,
+      "WORKFLOW_META",
+      WORKFLOW_META_STORAGE_PATH
+    );
+    if (parsed) {
       return {
         docMetaById:
-          parsed?.docMetaById && typeof parsed.docMetaById === "object"
+          parsed.docMetaById && typeof parsed.docMetaById === "object"
             ? parsed.docMetaById
             : {},
         starredByUser:
-          parsed?.starredByUser && typeof parsed.starredByUser === "object"
+          parsed.starredByUser && typeof parsed.starredByUser === "object"
             ? parsed.starredByUser
             : {},
         savedViewsByUser:
-          parsed?.savedViewsByUser && typeof parsed.savedViewsByUser === "object"
+          parsed.savedViewsByUser && typeof parsed.savedViewsByUser === "object"
             ? parsed.savedViewsByUser
             : {},
       };
@@ -212,11 +214,10 @@ export async function writeWorkflowMetaPayload(
   supabaseAdmin: SupabaseClient,
   payload: StoredWorkflowMetaPayload
 ): Promise<void> {
-  const bytes = new TextEncoder().encode(JSON.stringify(payload, null, 2));
-  await supabaseAdmin.storage
-    .from(SETTINGS_STORAGE_BUCKET)
-    .upload(WORKFLOW_META_STORAGE_PATH, bytes, {
-      contentType: "application/json",
-      upsert: true,
-    });
+  await writeHqKvPayload(
+    supabaseAdmin,
+    "WORKFLOW_META",
+    payload,
+    WORKFLOW_META_STORAGE_PATH
+  );
 }

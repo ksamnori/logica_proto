@@ -336,50 +336,50 @@ export default function HqHomeDashboardPage() {
 
   return (
     <>
-      <div className="p-6 space-y-6 max-w-[1440px] w-full mx-auto print:hidden">
+      <div className="p-4 sm:p-6 space-y-6 w-full break-keep print:hidden">
         {/* 1. 상단 직급·맥락 기반 워크스페이스 브리핑 & 빠른 액션 */}
-        <section className="rounded-3xl bg-gradient-to-br from-slate-900 via-slate-800 to-brand text-white p-6 sm:p-7 shadow-lg border border-slate-800">
-          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-5">
-            <div className="space-y-2">
+        <section className="rounded-3xl bg-gradient-to-br from-slate-900 via-slate-800 to-brand text-white p-5 sm:p-7 shadow-lg border border-slate-800">
+          <div className="flex flex-col gap-5">
+            <div className="space-y-2 min-w-0">
               <div className="flex flex-wrap items-center gap-2">
-                <span className="px-2.5 py-0.5 rounded-full bg-white/15 text-xs font-bold text-blue-100">
+                <span className="px-2.5 py-0.5 rounded-full bg-white/15 text-xs font-bold text-blue-100 whitespace-nowrap">
                   {me?.department || "본부"} · Lv.{myRankMeta.level}{" "}
                   {me?.job_title || myRankMeta.defaultTitle}
                 </span>
                 {isHrManager && (
-                  <span className="px-2.5 py-0.5 rounded-full bg-emerald-400/20 border border-emerald-300/30 text-xs font-bold text-emerald-200">
+                  <span className="px-2.5 py-0.5 rounded-full bg-emerald-400/20 border border-emerald-300/30 text-xs font-bold text-emerald-200 whitespace-nowrap">
                     HR · 조직관리 권한
                   </span>
                 )}
               </div>
-              <h1 className="text-xl sm:text-2xl font-extrabold tracking-tight">
+              <h1 className="text-xl sm:text-2xl font-extrabold tracking-tight break-keep">
                 안녕하세요, {me?.name || "구성원"} {me?.job_title || ""}님 👋
               </h1>
-              <p className="text-xs sm:text-sm text-slate-300 font-medium">
+              <p className="text-xs sm:text-sm text-slate-300 font-medium leading-relaxed break-keep">
                 {myRankMeta.description} — 직급과 부서 권한에 맞춘 당일 우선 업무를 안내합니다.
               </p>
             </div>
 
             {/* 빠른 기안 · 셀프서비스 실행 바 */}
-            <div className="flex flex-wrap items-center gap-2 shrink-0">
+            <div className="flex flex-wrap items-center gap-2">
               <button
                 type="button"
                 onClick={() => router.push("/hq/attendance")}
-                className="px-3.5 py-2.5 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-300/30 text-emerald-100 text-xs font-extrabold transition-colors"
+                className="px-3.5 py-2.5 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-300/30 text-emerald-100 text-xs font-extrabold transition-colors whitespace-nowrap"
               >
                 ⏱️ 출퇴근·유연근무
               </button>
               <button
                 type="button"
                 onClick={() => router.push("/hq/contracts")}
-                className="px-3.5 py-2.5 rounded-xl bg-white/10 hover:bg-white/20 border border-white/15 text-white text-xs font-bold transition-colors"
+                className="px-3.5 py-2.5 rounded-xl bg-white/10 hover:bg-white/20 border border-white/15 text-white text-xs font-bold transition-colors whitespace-nowrap"
               >
                 📑 전자계약·저작권
               </button>
               <button
                 type="button"
                 onClick={() => router.push("/hq/publishing")}
-                className="px-3.5 py-2.5 rounded-xl bg-white/10 hover:bg-white/20 border border-white/15 text-white text-xs font-bold transition-colors"
+                className="px-3.5 py-2.5 rounded-xl bg-white/10 hover:bg-white/20 border border-white/15 text-white text-xs font-bold transition-colors whitespace-nowrap"
               >
                 📚 출판 공정 보드
               </button>
@@ -394,7 +394,7 @@ export default function HqHomeDashboardPage() {
                   key={btn.type}
                   type="button"
                   onClick={() => openQuickDraft(btn.type)}
-                  className="px-3.5 py-2.5 rounded-xl bg-white/10 hover:bg-white/20 border border-white/15 text-white text-xs font-bold transition-colors"
+                  className="px-3.5 py-2.5 rounded-xl bg-white/10 hover:bg-white/20 border border-white/15 text-white text-xs font-bold transition-colors whitespace-nowrap"
                 >
                   {btn.label}
                 </button>
@@ -403,7 +403,7 @@ export default function HqHomeDashboardPage() {
                 <button
                   type="button"
                   onClick={() => setCertModalOpen(true)}
-                  className="px-3.5 py-2.5 rounded-xl bg-white text-slate-900 hover:bg-blue-50 text-xs font-extrabold shadow-sm transition-colors"
+                  className="px-3.5 py-2.5 rounded-xl bg-white text-slate-900 hover:bg-blue-50 text-xs font-extrabold shadow-sm transition-colors whitespace-nowrap"
                 >
                   🪪 증명서 발급
                 </button>
@@ -412,7 +412,7 @@ export default function HqHomeDashboardPage() {
           </div>
 
           {/* 선제적 업무 제안 스트립 */}
-          <div className="mt-5 pt-5 border-t border-white/10 grid grid-cols-1 md:grid-cols-2 gap-2.5">
+          <div className="mt-5 pt-5 border-t border-white/10 grid grid-cols-1 xl:grid-cols-2 gap-2.5">
             {proactiveNotices.map((notice) => {
               const badgeStyle =
                 notice.tone === "urgent"
@@ -425,15 +425,15 @@ export default function HqHomeDashboardPage() {
               return (
                 <div
                   key={notice.id}
-                  className="rounded-2xl bg-white/8 border border-white/10 px-4 py-3 flex items-center justify-between gap-3"
+                  className="rounded-2xl bg-white/8 border border-white/10 px-4 py-3 flex flex-wrap sm:flex-nowrap items-center justify-between gap-3"
                 >
                   <div className="flex items-start gap-2.5 min-w-0">
                     <span
-                      className={`px-2 py-0.5 rounded-md text-[11px] font-extrabold shrink-0 mt-0.5 ${badgeStyle}`}
+                      className={`px-2 py-0.5 rounded-md text-[11px] font-extrabold whitespace-nowrap shrink-0 mt-0.5 ${badgeStyle}`}
                     >
                       {notice.badge}
                     </span>
-                    <p className="text-xs text-slate-100 leading-relaxed font-medium">
+                    <p className="text-xs text-slate-100 leading-relaxed font-medium break-keep">
                       {notice.text}
                     </p>
                   </div>
@@ -551,9 +551,9 @@ export default function HqHomeDashboardPage() {
         </section>
 
         {/* 3. 하단 메인 그리드: 좌측 결재 워크플로우 / 우측 직급 체계 & 조직 요약 */}
-        <section className="grid grid-cols-1 lg:grid-cols-12 gap-5">
+        <section className="grid grid-cols-1 xl:grid-cols-12 gap-5">
           {/* 좌측 7칸: 내 결재 차례 & 최근 상신 문서 */}
-          <div className="lg:col-span-7 space-y-5">
+          <div className="xl:col-span-7 space-y-5 min-w-0">
             {/* 내 결재 차례 박스 */}
             <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
               <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
@@ -716,7 +716,7 @@ export default function HqHomeDashboardPage() {
           </div>
 
           {/* 우측 5칸: 직급별 결재 단계 규정 & 부서 조직 요약 */}
-          <div className="lg:col-span-5 space-y-5">
+          <div className="xl:col-span-5 space-y-5 min-w-0">
             {/* 직급별 결재 단계 및 자동 전결 기준 안내 */}
             <div className="bg-white rounded-2xl border border-slate-200 shadow-xs p-5 space-y-4">
               <div className="flex items-center justify-between">
