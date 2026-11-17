@@ -15,6 +15,9 @@ import { DEFAULT_APPROVAL_POLICIES } from "@/lib/hq/defaultApprovalPolicies";
 import {
   DEFAULT_ANNUAL_LEAVE_SETTINGS,
   DEFAULT_CUSTOM_LEAVES,
+  isCustomGrantValidOnDate,
+  isCustomLeaveEligibleForGender,
+  isManuallyGrantableCustomLeave,
 } from "@/lib/hq/defaultLeaveSettings";
 import { computeMemberAnnualLeaveLedgerForYear } from "@/lib/hq/leaveBalanceEngine";
 import type {
@@ -350,16 +353,21 @@ export default function HqLeavesPage() {
   const displayedCustomLeaves = useMemo(() => {
     const myGender = me?.profile_extra?.gender || "";
     const myId = me?.instructor_id || "";
+    const todayIso = `${currentYear}-${String(currentMonth).padStart(
+      2,
+      "0"
+    )}-${String(now.getDate()).padStart(2, "0")}`;
 
     const isEligible = (c: HqCustomLeaveItem) => {
-      if (c.target_gender === "여성" && myGender !== "여") return false;
-      if (c.target_gender === "남성" && myGender !== "남") return false;
-      if (
-        c.grant_method === "관리자가 직접 부여" ||
-        c.grant_method === "연차 소진 시 부여"
-      ) {
+      if (!isCustomLeaveEligibleForGender(c, myGender)) return false;
+      if (isManuallyGrantableCustomLeave(c)) {
         const granted = customGrants
-          .filter((g) => g.member_id === myId && g.leave_id === c.id)
+          .filter(
+            (g) =>
+              g.member_id === myId &&
+              g.leave_id === c.id &&
+              isCustomGrantValidOnDate(g, todayIso, false)
+          )
           .reduce((acc, g) => acc + Number(g.granted_amount || 0), 0);
         const used = myLeaveDocs
           .filter((d) => d.status === "APPROVED" && d.leave_type === c.name)
@@ -879,10 +887,10 @@ export default function HqLeavesPage() {
       </div>
 
       {/* =====================================================================
-          탭 1: [휴가 개요] (스크린샷 1 & 3)
+          탭 1: [휴가 개요] (좌우 폭 100% 확장)
          ===================================================================== */}
       {subTab === "OVERVIEW" && (
-        <div className="px-10 py-8 max-w-[1360px] w-full space-y-10">
+        <div className="px-10 py-8 w-full space-y-10">
           {/* 섹션 1: 휴가 등록 */}
           <section>
             <div className="flex items-center justify-between mb-4">
@@ -900,7 +908,7 @@ export default function HqLeavesPage() {
               </button>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3.5">
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-7 gap-3.5">
               {/* 카드 1: 연차 */}
               <button
                 type="button"
@@ -1138,10 +1146,10 @@ export default function HqLeavesPage() {
       )}
 
       {/* =====================================================================
-          탭 2: [연차 상세] (스크린샷 4 100% 재현)
+          탭 2: [연차 상세] (좌우 폭 100% 확장)
          ===================================================================== */}
       {subTab === "DETAIL" && (
-        <div className="px-10 py-8 max-w-[1360px] w-full space-y-5">
+        <div className="px-10 py-8 w-full space-y-5">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex flex-wrap items-center gap-2.5">
               <h2 className="text-[15px] font-extrabold text-slate-900">

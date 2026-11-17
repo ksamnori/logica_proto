@@ -3,6 +3,12 @@
 
 import React, { useMemo, useState } from "react";
 import { hqFetch } from "@/lib/hq/clientApi";
+import {
+  formatCustomGrantPeriodLabel,
+  isCustomGrantValidOnDate,
+  isCustomLeaveEligibleForGender,
+  isManuallyGrantableCustomLeave,
+} from "@/lib/hq/defaultLeaveSettings";
 import { computeMemberAnnualLeaveLedgerForYear } from "@/lib/hq/leaveBalanceEngine";
 import type {
   HqAnnualLeavePolicyItem,
@@ -147,6 +153,7 @@ export default function HqMemberLeaveDetailView({
     {}
   );
   const [menuDocId, setMenuDocId] = useState<string | null>(null);
+  const [grantMenuOpen, setGrantMenuOpen] = useState(false);
 
   // 2개월 달력 휴가 등록 모달 (Screenshot 5)
   const [calModalOpen, setCalModalOpen] = useState(false);
@@ -245,26 +252,50 @@ export default function HqMemberLeaveDetailView({
     return set;
   }, [holidaysByYear]);
 
-  // 해당 구성원의 성별 및 직접부여 내역에 맞는 맞춤 휴가 카드 목록 (Screenshots 4 & 7)
+  // 플렉스 개인 상세페이지 '맞춤 휴가 부여 ▾' 드롭다운: 해당 구성원이 받을 수 있는 항목만 노출 (일정 주기·신청 시 부여 제외 + 성별 일치)
+  const personalGrantableLeaves = useMemo(
+    () =>
+      customLeaves.filter(
+        (c) =>
+          isManuallyGrantableCustomLeave(c) &&
+          isCustomLeaveEligibleForGender(c, memberGender)
+      ),
+    [customLeaves, memberGender]
+  );
+
+  // 해당 구성원의 성별 및 직접부여 내역(유효기간 내)에 맞는 맞춤 휴가 카드 목록
   const visibleCustomCards = useMemo(() => {
-    const getRemainGranted = (c: HqCustomLeaveItem) => {
-      const granted = customGrants
-        .filter((g) => g.member_id === member.instructor_id && g.leave_id === c.id)
-        .reduce((acc, g) => acc + Number(g.granted_amount || 0), 0);
+    const getGrantInfo = (c: HqCustomLeaveItem) => {
+      const validGrants = customGrants.filter(
+        (g) =>
+          g.member_id === member.instructor_id &&
+          g.leave_id === c.id &&
+          isCustomGrantValidOnDate(g, todayYmd, false)
+      );
+      const granted = validGrants.reduce(
+        (acc, g) => acc + Number(g.granted_amount || 0),
+        0
+      );
       const used = memberLeaveDocs
         .filter((d) => d.status === "APPROVED" && d.leave_type === c.name)
         .reduce((acc, d) => acc + Number(d.leave_days || 0), 0);
-      return Math.max(0, Math.round((granted - used) * 100) / 100);
+      const remainGranted = Math.max(
+        0,
+        Math.round((granted - used) * 100) / 100
+      );
+      const latestPeriodGrant = validGrants.find(
+        (g) => g.valid_from || g.expires_at
+      );
+      const periodCaption = latestPeriodGrant
+        ? formatCustomGrantPeriodLabel(latestPeriodGrant)
+        : "";
+      return { remainGranted, periodCaption };
     };
 
     const eligible = customLeaves.filter((c) => {
-      if (c.target_gender === "여성" && memberGender !== "여") return false;
-      if (c.target_gender === "남성" && memberGender !== "남") return false;
-      if (
-        c.grant_method === "관리자가 직접 부여" ||
-        c.grant_method === "연차 소진 시 부여"
-      ) {
-        return getRemainGranted(c) > 0;
+      if (!isCustomLeaveEligibleForGender(c, memberGender)) return false;
+      if (isManuallyGrantableCustomLeave(c)) {
+        return getGrantInfo(c).remainGranted > 0;
       }
       return true;
     });
@@ -272,34 +303,41 @@ export default function HqMemberLeaveDetailView({
     const preferredIds =
       memberGender === "여" ? FEMALE_AND_COMMON_ORDER : MALE_AND_COMMON_ORDER;
 
-    const ordered: { item: HqCustomLeaveItem; remainGranted: number }[] = [];
-    // 직접 부여되어 잔여분이 있는 항목 최상단 배치
+    const ordered: {
+      item: HqCustomLeaveItem;
+      remainGranted: number;
+      periodCaption: string;
+    }[] = [];
+
     eligible.forEach((c) => {
-      const rem = getRemainGranted(c);
-      if (
-        (c.grant_method === "관리자가 직접 부여" ||
-          c.grant_method === "연차 소진 시 부여") &&
-        rem > 0
-      ) {
-        ordered.push({ item: c, remainGranted: rem });
+      const info = getGrantInfo(c);
+      if (isManuallyGrantableCustomLeave(c) && info.remainGranted > 0) {
+        ordered.push({ item: c, ...info });
       }
     });
 
     preferredIds.forEach((id) => {
       const found = eligible.find((c) => c.id === id);
       if (found && !ordered.some((o) => o.item.id === found.id)) {
-        ordered.push({ item: found, remainGranted: getRemainGranted(found) });
+        ordered.push({ item: found, ...getGrantInfo(found) });
       }
     });
 
     eligible.forEach((c) => {
       if (!ordered.some((o) => o.item.id === c.id)) {
-        ordered.push({ item: c, remainGranted: getRemainGranted(c) });
+        ordered.push({ item: c, ...getGrantInfo(c) });
       }
     });
 
     return ordered;
-  }, [customLeaves, memberGender, customGrants, member.instructor_id, memberLeaveDocs]);
+  }, [
+    customLeaves,
+    memberGender,
+    customGrants,
+    member.instructor_id,
+    memberLeaveDocs,
+    todayYmd,
+  ]);
 
   // 사용한 기록 (해당 연도 + 상태 필터 -> 예정된 휴가 / 지난 휴가 분리)
   const yearRecords = useMemo(() => {
@@ -391,6 +429,30 @@ export default function HqMemberLeaveDetailView({
       alert("휴가 날짜를 선택해 주세요.");
       return;
     }
+    const effEnd = pickEnd || pickStart;
+
+    if (
+      selectedCard.kind === "CUSTOM" &&
+      isManuallyGrantableCustomLeave(selectedCard.item)
+    ) {
+      const grantsForItem = customGrants.filter(
+        (g) =>
+          g.member_id === member.instructor_id &&
+          g.leave_id === selectedCard.item.id
+      );
+      const validOnRange = grantsForItem.filter(
+        (g) =>
+          isCustomGrantValidOnDate(g, pickStart, true) &&
+          isCustomGrantValidOnDate(g, effEnd, true)
+      );
+      if (grantsForItem.length > 0 && validOnRange.length === 0) {
+        alert(
+          "선택한 날짜가 부여된 맞춤 휴가의 사용 가능 기간(시작일·만료일) 범위를 벗어났습니다."
+        );
+        return;
+      }
+    }
+
     const leaveLabel =
       selectedCard.kind === "ANNUAL"
         ? unitMode === "AM_HALF"
@@ -493,8 +555,11 @@ export default function HqMemberLeaveDetailView({
 
   return (
     <div
-      className="min-h-full bg-white flex flex-col"
-      onClick={() => setMenuDocId(null)}
+      className="w-full min-h-full bg-white flex flex-col"
+      onClick={() => {
+        setMenuDocId(null);
+        setGrantMenuOpen(false);
+      }}
     >
       {/* 상단 헤더: < {이름} 님의 휴가 (Screenshots 4, 6, 7) */}
       <div className="px-9 pt-7 border-b border-slate-200">
@@ -542,9 +607,9 @@ export default function HqMemberLeaveDetailView({
         </div>
       </div>
 
-      {/* ================= 탭 1: 휴가 개요 (Screenshots 4, 5, 7) ================= */}
+      {/* ================= 탭 1: 휴가 개요 (플렉스 좌우 100% 확장 + 개인별 맞춤휴가 드롭다운) ================= */}
       {subTab === "OVERVIEW" && (
-        <div className="px-9 py-8 max-w-[1280px] space-y-10">
+        <div className="w-full px-9 py-8 space-y-10">
           {/* 1) 휴가 등록 + 맞춤 휴가 부여 버튼 */}
           <section className="space-y-4">
             <div className="flex items-center justify-between">
@@ -552,18 +617,58 @@ export default function HqMemberLeaveDetailView({
                 휴가 등록
               </h2>
               {canManage && (
-                <button
-                  type="button"
-                  onClick={() => onOpenGrantModalForMember(member.instructor_id)}
-                  className="px-3.5 py-2 rounded-xl bg-[#16a34a] hover:bg-[#15803d] text-white text-xs font-extrabold shadow-xs flex items-center gap-1.5"
+                <div
+                  className="relative"
+                  onClick={(e) => e.stopPropagation()}
                 >
-                  <span>맞춤 휴가 부여</span>
-                  <span className="text-[10px] opacity-80">▾</span>
-                </button>
+                  <button
+                    type="button"
+                    onClick={() => setGrantMenuOpen((v) => !v)}
+                    className="px-3.5 py-2 rounded-xl bg-[#16a34a] hover:bg-[#15803d] text-white text-xs font-extrabold shadow-xs flex items-center gap-1.5"
+                  >
+                    <span>맞춤 휴가 부여</span>
+                    <span className="text-[10px] opacity-80">▾</span>
+                  </button>
+
+                  {grantMenuOpen && (
+                    <div className="absolute right-0 top-10 z-30 w-64 rounded-2xl bg-white border border-slate-200 shadow-2xl overflow-hidden">
+                      <div className="py-1.5">
+                        {personalGrantableLeaves.length === 0 ? (
+                          <div className="px-4 py-3 text-xs text-slate-400">
+                            부여 가능한 맞춤 휴가 항목이 없습니다.
+                          </div>
+                        ) : (
+                          personalGrantableLeaves.map((lv) => (
+                            <button
+                              key={lv.id}
+                              type="button"
+                              onClick={() => {
+                                setGrantMenuOpen(false);
+                                onOpenGrantModalForMember(
+                                  member.instructor_id,
+                                  lv.id
+                                );
+                              }}
+                              className="w-full px-4 py-2.5 text-left text-xs font-bold text-slate-800 hover:bg-slate-50 flex items-center gap-2.5 transition-colors"
+                            >
+                              <span className="text-sm opacity-80">
+                                {lv.icon}
+                              </span>
+                              <span>{lv.name}</span>
+                            </button>
+                          ))
+                        )}
+                      </div>
+                      <div className="px-4 py-2.5 bg-slate-50/70 border-t border-slate-100 text-[11px] text-slate-400 leading-relaxed">
+                        휴가 종류 중 &apos;일정 주기&apos;, &apos;신청 시 부여&apos;를 제외하고 부여가 가능해요.
+                      </div>
+                    </div>
+                  )}
+                </div>
               )}
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3.5">
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-7 gap-3.5">
               {/* 연차 카드 */}
               <button
                 type="button"
@@ -580,7 +685,7 @@ export default function HqMemberLeaveDetailView({
               </button>
 
               {/* 성별·부여내역 맞춤 휴가 카드들 */}
-              {visibleCustomCards.map(({ item, remainGranted }) => {
+              {visibleCustomCards.map(({ item, remainGranted, periodCaption }) => {
                 const subLabel =
                   remainGranted > 0
                     ? `${remainGranted}일 보유`
@@ -613,6 +718,11 @@ export default function HqMemberLeaveDetailView({
                       >
                         {subLabel}
                       </div>
+                      {remainGranted > 0 && periodCaption && (
+                        <div className="text-[10px] font-semibold text-slate-400 mt-0.5 truncate">
+                          {periodCaption}
+                        </div>
+                      )}
                     </div>
                   </button>
                 );
@@ -829,9 +939,9 @@ export default function HqMemberLeaveDetailView({
         </div>
       )}
 
-      {/* ================= 탭 2: 연차 상세 (Screenshot 6) ================= */}
+      {/* ================= 탭 2: 연차 상세 (플렉스 좌우 100% 확장) ================= */}
       {subTab === "DETAIL" && (
-        <div className="px-9 py-8 max-w-[1280px] space-y-5">
+        <div className="w-full px-9 py-8 space-y-5">
           <div className="flex items-center justify-between">
             <h2 className="text-base font-extrabold text-slate-900">
               연차 상세 현황

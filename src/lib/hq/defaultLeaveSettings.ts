@@ -3,6 +3,7 @@ import { DEFAULT_OVERTIME_COMP_SETTINGS } from "./defaultWorkRules";
 import type {
   HqAnnualLeaveGlobalSettings,
   HqAnnualLeavePolicyItem,
+  HqCustomLeaveGrantItem,
   HqCustomLeaveItem,
   HqOvertimeAssignedMember,
 } from "./types";
@@ -123,7 +124,7 @@ export const DEFAULT_CUSTOM_LEAVES: HqCustomLeaveItem[] = [
     description:
       "유산 또는 사산으로 인한 신체적 · 정신적 건강 회복을 위해 사용하는 휴가입니다.",
     is_mandatory: true,
-    grant_method: "신청 시 부여",
+    grant_method: "관리자가 직접 부여",
     grant_unit: "일 단위 부여",
     grant_amount: 10,
     usage_unit: "한번에 모두 사용",
@@ -143,7 +144,7 @@ export const DEFAULT_CUSTOM_LEAVES: HqCustomLeaveItem[] = [
     description:
       "유산 또는 사산으로 인한 신체적 · 정신적 건강 회복을 위해 사용하는 휴가입니다.",
     is_mandatory: true,
-    grant_method: "신청 시 부여",
+    grant_method: "관리자가 직접 부여",
     grant_unit: "일 단위 부여",
     grant_amount: 15,
     usage_unit: "한번에 모두 사용",
@@ -282,9 +283,9 @@ export const DEFAULT_CUSTOM_LEAVES: HqCustomLeaveItem[] = [
     icon: "🏥",
     description: "",
     is_mandatory: false,
-    grant_method: "신청 시 부여",
+    grant_method: "연차 소진 시 부여",
     grant_unit: "일 단위 부여",
-    grant_amount: 30,
+    grant_amount: 60,
     usage_unit: "일 단위 사용",
     pay_type: "무급",
     request_on_register: true,
@@ -411,6 +412,59 @@ export const DEFAULT_CUSTOM_LEAVES: HqCustomLeaveItem[] = [
     deduct_on_holidays: false,
   },
 ];
+
+/**
+ * 플렉스 기준: '일정 주기(반복 부여)', '신청 시 부여'를 제외한 휴가 종류만 수동 맞춤 휴가 부여 대상에 노출
+ */
+export function isManuallyGrantableCustomLeave(
+  item: HqCustomLeaveItem
+): boolean {
+  return (
+    item.grant_method !== "반복 부여" && item.grant_method !== "신청 시 부여"
+  );
+}
+
+/**
+ * 구성원 성별("남" | "여" | "")에 따른 해당 휴가 적용 가능 여부 판별
+ */
+export function isCustomLeaveEligibleForGender(
+  item: HqCustomLeaveItem,
+  memberGender?: string | null
+): boolean {
+  if (item.target_gender === "여성") return memberGender === "여";
+  if (item.target_gender === "남성") return memberGender === "남";
+  return true;
+}
+
+/**
+ * 맞춤 휴가 부여 건이 특정 기준일(YYYY-MM-DD)에 유효한지 판별 (만료일 경과 건 제외, checkStart=true 시 시작일 전 제외)
+ */
+export function isCustomGrantValidOnDate(
+  grant: HqCustomLeaveGrantItem,
+  refYmd: string,
+  checkStart = false
+): boolean {
+  if (grant.expires_at && grant.expires_at < refYmd) return false;
+  if (checkStart && grant.valid_from && grant.valid_from > refYmd) return false;
+  return true;
+}
+
+export function formatCustomGrantPeriodLabel(
+  grant: Pick<HqCustomLeaveGrantItem, "period_mode" | "valid_from" | "expires_at">
+): string {
+  const fmt = (ymd?: string | null) => {
+    if (!ymd) return "";
+    const [y, m, d] = ymd.slice(0, 10).split("-").map(Number);
+    if (!y || !m || !d) return ymd;
+    return `${y}. ${m}. ${d}`;
+  };
+  const s = fmt(grant.valid_from);
+  const e = fmt(grant.expires_at);
+  if (s && e) return `${s} ~ ${e}`;
+  if (s) return `${s}부터 사용 가능`;
+  if (e) return `${e}까지 사용 가능`;
+  return "언제든 사용 가능";
+}
 
 export interface AccrualPreviewRow {
   sortMs: number;

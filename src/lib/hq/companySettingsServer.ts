@@ -151,25 +151,55 @@ export function normalizeCompanySettings(raw: any): HqCompanySettings {
       custom_leaves:
         Array.isArray(incomingExtra.custom_leaves) &&
         incomingExtra.custom_leaves.length > 0
-          ? incomingExtra.custom_leaves.map((cl: any) => {
-              if (!cl || typeof cl !== "object") return cl;
-              // 기존 시드에서 남성 전용(배우자출산/배우자 유산·사산/군소집훈련)이 '모두'로 저장되었거나 난임치료가 '반복 부여'로 저장된 경우 보정
-              if (
-                (cl.id === "cl-paternity" ||
-                  cl.id === "cl-spouse-miscarriage" ||
-                  cl.id === "cl-military") &&
-                cl.target_gender === "모두"
-              ) {
-                return { ...cl, target_gender: "남성" };
-              }
-              if (
-                cl.id === "cl-subfertility" &&
-                cl.grant_method === "반복 부여"
-              ) {
-                return { ...cl, grant_method: "관리자가 직접 부여" };
-              }
-              return cl;
-            })
+          ? (() => {
+              const upgraded = incomingExtra.custom_leaves.map((cl: any) => {
+                if (!cl || typeof cl !== "object") return cl;
+                let next = { ...cl };
+                if (
+                  (next.id === "cl-paternity" ||
+                    next.id === "cl-spouse-miscarriage" ||
+                    next.id === "cl-military") &&
+                  next.target_gender === "모두"
+                ) {
+                  next.target_gender = "남성";
+                }
+                if (
+                  next.id === "cl-spouse-miscarriage" &&
+                  next.grant_amount === 3
+                ) {
+                  next.grant_amount = 5;
+                }
+                if (
+                  next.id === "cl-subfertility" &&
+                  next.grant_method === "반복 부여"
+                ) {
+                  next.grant_method = "관리자가 직접 부여";
+                }
+                if (
+                  (next.id === "cl-miscarriage" ||
+                    next.id === "cl-miscarriage-multi") &&
+                  next.grant_method === "신청 시 부여"
+                ) {
+                  next.grant_method = "관리자가 직접 부여";
+                }
+                if (
+                  next.id === "cl-sick" &&
+                  next.grant_method === "신청 시 부여"
+                ) {
+                  next.grant_method = "연차 소진 시 부여";
+                  if (next.grant_amount === 30) next.grant_amount = 60;
+                }
+                return next;
+              });
+              // 필수 시드 항목 중 누락된 항목이 있다면 기본값 보충
+              const existingIds = new Set(
+                upgraded.map((c: any) => String(c?.id || ""))
+              );
+              const missingDefaults = (
+                def.extra_settings.custom_leaves || []
+              ).filter((d) => d.is_mandatory && !existingIds.has(d.id));
+              return [...upgraded, ...missingDefaults];
+            })()
           : def.extra_settings.custom_leaves,
       payroll_settings: incomingExtra.payroll_settings
         ? {

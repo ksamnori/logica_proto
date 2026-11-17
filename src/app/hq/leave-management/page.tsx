@@ -3,11 +3,21 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useHqShell } from "@/components/hq/HqShellContext";
+import {
+  HqManualAnnualAdjustModal,
+  HqSettlementAnnualAdjustModal,
+} from "@/components/hq/leaves/HqAnnualAdjustModals";
+import HqCustomGrantModal from "@/components/hq/leaves/HqCustomGrantModal";
+import HqFlexTargetPicker from "@/components/hq/leaves/HqFlexTargetPicker";
 import HqMemberLeaveDetailView from "@/components/hq/leaves/HqMemberLeaveDetailView";
 import { hqFetch } from "@/lib/hq/clientApi";
 import {
   DEFAULT_ANNUAL_LEAVE_SETTINGS,
   DEFAULT_CUSTOM_LEAVES,
+  formatCustomGrantPeriodLabel,
+  isCustomGrantValidOnDate,
+  isCustomLeaveEligibleForGender,
+  isManuallyGrantableCustomLeave,
 } from "@/lib/hq/defaultLeaveSettings";
 import { computeMemberAnnualLeaveLedgerForYear } from "@/lib/hq/leaveBalanceEngine";
 import type {
@@ -142,22 +152,36 @@ export default function HqLeaveManagementPage() {
     HqUploadedMonthlyUsageItem[]
   >([]);
 
-  // 모달 상태들
+  // 모달 & 드롭다운 & 서브내역 뷰 상태들
+  const [customGrantMenuOpen, setCustomGrantMenuOpen] = useState(false);
+  const [adjMenuOpen, setAdjMenuOpen] = useState(false);
+  const [ledgerSubView, setLedgerSubView] = useState<
+    | null
+    | "ANNUAL_ADJ_HISTORY"
+    | "SETTLEMENT_ADJ_HISTORY"
+    | "CUSTOM_GRANT_HISTORY"
+  >(null);
+  const [settlementHistoryFilter, setSettlementHistoryFilter] = useState<
+    "ALL" | "ACTIVE_SETTLEMENT" | "RETIREE_SETTLEMENT"
+  >("ALL");
+
   // 1) 맞춤 휴가 부여 모달
   const [customGrantModalOpen, setCustomGrantModalOpen] = useState(false);
-  const [cgLeaveId, setCgLeaveId] = useState("cl-reward");
+  const [cgLeaveId, setCgLeaveId] = useState("cl-subfertility");
   const [cgTargetIds, setCgTargetIds] = useState<string[]>([]);
-  const [cgAmount, setCgAmount] = useState("1");
-  const [cgReason, setCgReason] = useState("");
+  const [personalGrantMemberId, setPersonalGrantMemberId] = useState<
+    string | null
+  >(null);
 
-  // 2) 연차 조정 모달
+  // 2) 연차 조정 모달 (일반 수동 조정 / 재직자·퇴직자 정산 조정)
   const [adjModalOpen, setAdjModalOpen] = useState(false);
   const [adjTargetIds, setAdjTargetIds] = useState<string[]>([]);
   const [adjYm, setAdjYm] = useState(
     `${currentYear}-${String(currentMonth).padStart(2, "0")}`
   );
-  const [adjDelta, setAdjDelta] = useState("1");
-  const [adjReason, setAdjReason] = useState("");
+  const [settlementModalMode, setSettlementModalMode] = useState<
+    "ACTIVE_SETTLEMENT" | "RETIREE_SETTLEMENT" | null
+  >(null);
 
   // 3) 월별 연차 사용 내역 업로드 모달
   const [uploadModalOpen, setUploadModalOpen] = useState(false);
@@ -341,19 +365,37 @@ export default function HqLeaveManagementPage() {
     uploadedMonthly,
   ]);
 
+  const todayIso = useMemo(
+    () =>
+      `${currentYear}-${String(currentMonth).padStart(2, "0")}-${String(
+        now.getDate()
+      ).padStart(2, "0")}`,
+    [currentYear, currentMonth, now]
+  );
+
+  const grantableCustomLeaves = useMemo(
+    () => customLeaves.filter((c) => isManuallyGrantableCustomLeave(c)),
+    [customLeaves]
+  );
+
   // 구성원별 맞춤 휴가 보유량 표시 헬퍼
   // - '신청 시 부여' / '관리자가 직접 부여' / '연차 소진 시 부여': 신청·직접부여 전에는 기본 일수를 표시하지 않음 (빈칸)
-  // - '여성' 전용은 성별 '여'에게만, '남성' 전용(배우자출산·배우자 유산/사산·군소집훈련)은 성별 '남'에게만 적용
+  // - 사용 가능 기간(만료일)이 지난 부여분은 잔여에서 제외
+  // - '여성' 전용은 성별 '여'에게만, '남성' 전용은 성별 '남'에게만 적용
   const getCustomLeaveDisplayValue = (
     memberId: string,
     memberGender: string,
     item: HqCustomLeaveItem
   ): string => {
-    if (item.target_gender === "여성" && memberGender !== "여") return "";
-    if (item.target_gender === "남성" && memberGender !== "남") return "";
+    if (!isCustomLeaveEligibleForGender(item, memberGender)) return "";
 
     const grantedSum = customGrants
-      .filter((g) => g.member_id === memberId && g.leave_id === item.id)
+      .filter(
+        (g) =>
+          g.member_id === memberId &&
+          g.leave_id === item.id &&
+          isCustomGrantValidOnDate(g, todayIso, false)
+      )
       .reduce((acc, g) => acc + Number(g.granted_amount || 0), 0);
 
     const usedSum = leaveDocs
@@ -365,11 +407,9 @@ export default function HqLeaveManagementPage() {
       )
       .reduce((acc, d) => acc + Number(d.leave_days || 0), 0);
 
-    // 신청 시 부여 / 관리자가 직접 부여 / 연차 소진 시 부여 → 실제 부여되어 남은 잔여분이 있을 때만 표시
     if (
       item.grant_method === "신청 시 부여" ||
-      item.grant_method === "관리자가 직접 부여" ||
-      item.grant_method === "연차 소진 시 부여"
+      isManuallyGrantableCustomLeave(item)
     ) {
       const rem = Math.max(0, Math.round((grantedSum - usedSum) * 100) / 100);
       return rem > 0 ? String(rem) : "";
@@ -467,79 +507,31 @@ export default function HqLeaveManagementPage() {
   ]);
 
   // ============================================================================
-  // 액션 핸들러 (맞춤휴가 부여 / 연차 조정 / 월별 업로드 / 촉진 설정 / 계획 요청 / CSV 다운로드)
+  // 액션 핸들러 (조정/부여 취소 · 월별 업로드 · 촉진 설정 · 계획 요청 · CSV 다운로드)
   // ============================================================================
-  const handleGrantCustomLeave = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (cgTargetIds.length === 0) {
-      alert("부여 대상 구성원을 최소 1명 선택해 주세요.");
-      return;
-    }
-    const lv = customLeaves.find((c) => c.id === cgLeaveId);
-    if (!lv) return;
-
-    setSubmitting(true);
+  const handleDeleteAdjustment = async (id: string) => {
+    if (!confirm("해당 연차 조정 내역을 취소(삭제)하시겠습니까?")) return;
     try {
       await hqFetch("/api/hq/leaves", {
         method: "POST",
-        body: {
-          action: "GRANT_CUSTOM_LEAVE",
-          leave_id: lv.id,
-          leave_name: lv.name,
-          granted_amount: Number(cgAmount),
-          reason: cgReason.trim() || `${lv.name} 직접 부여`,
-          targets: cgTargetIds.map((id) => {
-            const m = activeMembers.find((x) => x.instructor_id === id);
-            return { member_id: id, member_name: m?.name || "" };
-          }),
-        },
+        body: { action: "DELETE_ADJUSTMENT", id },
       });
-      setCustomGrantModalOpen(false);
-      setCgTargetIds([]);
-      setCgReason("");
-      await loadLeavesAll();
+      await Promise.all([loadLeavesAll(), refreshMembers()]);
     } catch (err: any) {
-      alert(err?.message || "맞춤 휴가 부여 실패");
-    } finally {
-      setSubmitting(false);
+      alert(err?.message || "조정 내역 삭제 실패");
     }
   };
 
-  const handleBatchAdjustment = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (adjTargetIds.length === 0) {
-      alert("조정 대상 구성원을 선택해 주세요.");
-      return;
-    }
-    const delta = Number(adjDelta);
-    if (!delta) {
-      alert("0이 아닌 조정 일수를 입력해 주세요.");
-      return;
-    }
-
-    setSubmitting(true);
+  const handleDeleteCustomGrant = async (id: string) => {
+    if (!confirm("해당 맞춤 휴가 부여 내역을 취소(삭제)하시겠습니까?")) return;
     try {
       await hqFetch("/api/hq/leaves", {
         method: "POST",
-        body: {
-          action: "BATCH_ADJUSTMENT",
-          year_month: adjYm,
-          delta_days: delta,
-          reason: adjReason.trim() || "인사관리자 연차 조정",
-          targets: adjTargetIds.map((id) => {
-            const m = activeMembers.find((x) => x.instructor_id === id);
-            return { member_id: id, member_name: m?.name || "" };
-          }),
-        },
+        body: { action: "DELETE_CUSTOM_GRANT", id },
       });
-      setAdjModalOpen(false);
-      setAdjTargetIds([]);
-      setAdjReason("");
-      await Promise.all([loadLeavesAll(), refreshMembers()]);
+      await loadLeavesAll();
     } catch (err: any) {
-      alert(err?.message || "연차 조정 실패");
-    } finally {
-      setSubmitting(false);
+      alert(err?.message || "부여 내역 삭제 실패");
     }
   };
 
@@ -818,8 +810,47 @@ export default function HqLeaveManagementPage() {
     [members, selectedMemberId]
   );
 
+  const personalGrantMember = useMemo(
+    () =>
+      personalGrantMemberId
+        ? members.find((m) => m.instructor_id === personalGrantMemberId) || null
+        : null,
+    [members, personalGrantMemberId]
+  );
+
+  const manualAdjustmentsOnly = useMemo(
+    () =>
+      adjustments.filter(
+        (a) =>
+          !a.adjustment_category || a.adjustment_category === "MANUAL"
+      ),
+    [adjustments]
+  );
+
+  const settlementAdjustmentsOnly = useMemo(
+    () =>
+      adjustments.filter((a) => {
+        const cat = a.adjustment_category;
+        if (
+          cat !== "ACTIVE_SETTLEMENT" &&
+          cat !== "RETIREE_SETTLEMENT"
+        ) {
+          return false;
+        }
+        if (settlementHistoryFilter === "ALL") return true;
+        return cat === settlementHistoryFilter;
+      }),
+    [adjustments, settlementHistoryFilter]
+  );
+
   return (
-    <div className="min-h-full bg-white flex flex-col">
+    <div
+      className="w-full min-h-full bg-white flex flex-col"
+      onClick={() => {
+        setCustomGrantMenuOpen(false);
+        setAdjMenuOpen(false);
+      }}
+    >
       {selectedDetailMember ? (
         <HqMemberLeaveDetailView
           member={selectedDetailMember}
@@ -833,6 +864,7 @@ export default function HqLeaveManagementPage() {
           uploadedMonthly={uploadedMonthly}
           onBack={() => setSelectedMemberId(null)}
           onOpenGrantModalForMember={(mId, lvId) => {
+            setPersonalGrantMemberId(mId);
             setCgTargetIds([mId]);
             if (lvId) setCgLeaveId(lvId);
             setCustomGrantModalOpen(true);
@@ -846,10 +878,242 @@ export default function HqLeaveManagementPage() {
             await Promise.all([loadLeavesAll(), refreshMembers()]);
           }}
         />
+      ) : ledgerSubView ? (
+        <div className="w-full flex-1 flex flex-col">
+          <div className="px-9 pt-7 pb-5 border-b border-slate-200 flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-2.5">
+              <button
+                type="button"
+                onClick={() => setLedgerSubView(null)}
+                className="w-8 h-8 rounded-xl hover:bg-slate-100 text-slate-600 flex items-center justify-center text-lg font-bold"
+              >
+                ‹
+              </button>
+              <h1 className="text-[22px] font-extrabold text-slate-900 tracking-tight">
+                {ledgerSubView === "ANNUAL_ADJ_HISTORY"
+                  ? "연차 조정 내역"
+                  : ledgerSubView === "SETTLEMENT_ADJ_HISTORY"
+                    ? "재직 · 퇴직자 잔여 연차 조정 내역"
+                    : "맞춤 휴가 부여 내역"}
+              </h1>
+            </div>
+
+            {ledgerSubView === "SETTLEMENT_ADJ_HISTORY" && (
+              <div className="flex items-center gap-1 p-1 rounded-xl bg-slate-100 text-xs">
+                {(
+                  [
+                    { key: "ALL", label: "전체" },
+                    { key: "ACTIVE_SETTLEMENT", label: "재직자 정산" },
+                    { key: "RETIREE_SETTLEMENT", label: "퇴직자 정산" },
+                  ] as const
+                ).map((f) => (
+                  <button
+                    key={f.key}
+                    type="button"
+                    onClick={() => setSettlementHistoryFilter(f.key)}
+                    className={`px-3 py-1.5 rounded-lg font-bold ${
+                      settlementHistoryFilter === f.key
+                        ? "bg-white text-slate-900 shadow-xs"
+                        : "text-slate-500 hover:text-slate-800"
+                    }`}
+                  >
+                    {f.label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="w-full flex-1 overflow-x-auto">
+            {ledgerSubView === "CUSTOM_GRANT_HISTORY" ? (
+              <table className="w-full text-left border-collapse text-xs">
+                <thead>
+                  <tr className="border-b border-slate-200 text-slate-500 font-semibold">
+                    <th className="py-3 pl-9 pr-4">부여 일시</th>
+                    <th className="py-3 px-4">대상 구성원</th>
+                    <th className="py-3 px-4">휴가 종류</th>
+                    <th className="py-3 px-4 text-right">부여 시간</th>
+                    <th className="py-3 px-4">사용 가능 기간</th>
+                    <th className="py-3 px-4">사유</th>
+                    <th className="py-3 px-4">처리자</th>
+                    <th className="py-3 pl-4 pr-9 text-right">관리</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {customGrants.length === 0 ? (
+                    <tr>
+                      <td
+                        colSpan={8}
+                        className="py-20 text-center text-slate-400 font-semibold"
+                      >
+                        등록된 맞춤 휴가 부여 내역이 없습니다.
+                      </td>
+                    </tr>
+                  ) : (
+                    customGrants.map((g) => (
+                      <tr key={g.id} className="hover:bg-slate-50/60">
+                        <td className="py-3.5 pl-9 pr-4 text-slate-500 tabular-nums">
+                          {g.created_at.slice(0, 16).replace("T", " ")}
+                        </td>
+                        <td className="py-3.5 px-4 font-bold text-slate-900">
+                          {g.member_name}
+                          {g.department ? (
+                            <span className="ml-1.5 text-[11px] font-medium text-slate-400">
+                              {g.department}
+                            </span>
+                          ) : null}
+                        </td>
+                        <td className="py-3.5 px-4 font-bold text-slate-800">
+                          {g.leave_name}
+                        </td>
+                        <td className="py-3.5 px-4 text-right font-extrabold text-[#00a84b] tabular-nums">
+                          +{g.granted_amount}일
+                          {g.grant_unit_mode === "HOURS" && g.granted_hours
+                            ? ` (${g.granted_hours}시간)`
+                            : ""}
+                        </td>
+                        <td className="py-3.5 px-4 font-semibold text-slate-600 tabular-nums">
+                          {formatCustomGrantPeriodLabel(g)}
+                        </td>
+                        <td className="py-3.5 px-4 text-slate-600">
+                          {g.reason}
+                        </td>
+                        <td className="py-3.5 px-4 text-slate-500">
+                          {g.actor_name}
+                        </td>
+                        <td className="py-3.5 pl-4 pr-9 text-right">
+                          {canManage && (
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteCustomGrant(g.id)}
+                              className="px-2.5 py-1 rounded-lg border border-slate-200 hover:border-rose-200 hover:bg-rose-50 text-rose-600 font-bold"
+                            >
+                              부여 취소
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            ) : (
+              <table className="w-full text-left border-collapse text-xs">
+                <thead>
+                  <tr className="border-b border-slate-200 text-slate-500 font-semibold">
+                    <th className="py-3 pl-9 pr-4">조정 일시</th>
+                    <th className="py-3 px-4">대상 구성원</th>
+                    {ledgerSubView === "SETTLEMENT_ADJ_HISTORY" && (
+                      <th className="py-3 px-4">정산 구분</th>
+                    )}
+                    <th className="py-3 px-4">적용 연월</th>
+                    <th className="py-3 px-4 text-right">조정 일수</th>
+                    {ledgerSubView === "SETTLEMENT_ADJ_HISTORY" && (
+                      <th className="py-3 px-4 text-right">정산 전 → 후</th>
+                    )}
+                    <th className="py-3 px-4">조정 사유</th>
+                    <th className="py-3 px-4">처리자</th>
+                    <th className="py-3 pl-4 pr-9 text-right">관리</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {(ledgerSubView === "ANNUAL_ADJ_HISTORY"
+                    ? manualAdjustmentsOnly
+                    : settlementAdjustmentsOnly
+                  ).length === 0 ? (
+                    <tr>
+                      <td
+                        colSpan={
+                          ledgerSubView === "SETTLEMENT_ADJ_HISTORY" ? 9 : 7
+                        }
+                        className="py-20 text-center text-slate-400 font-semibold"
+                      >
+                        등록된 조정 내역이 없습니다.
+                      </td>
+                    </tr>
+                  ) : (
+                    (ledgerSubView === "ANNUAL_ADJ_HISTORY"
+                      ? manualAdjustmentsOnly
+                      : settlementAdjustmentsOnly
+                    ).map((a) => (
+                      <tr key={a.id} className="hover:bg-slate-50/60">
+                        <td className="py-3.5 pl-9 pr-4 text-slate-500 tabular-nums">
+                          {a.created_at.slice(0, 16).replace("T", " ")}
+                        </td>
+                        <td className="py-3.5 px-4 font-bold text-slate-900">
+                          {a.member_name}
+                          {a.department ? (
+                            <span className="ml-1.5 text-[11px] font-medium text-slate-400">
+                              {a.department}
+                            </span>
+                          ) : null}
+                        </td>
+                        {ledgerSubView === "SETTLEMENT_ADJ_HISTORY" && (
+                          <td className="py-3.5 px-4">
+                            <span
+                              className={`px-2 py-0.5 rounded text-[11px] font-bold ${
+                                a.adjustment_category === "RETIREE_SETTLEMENT"
+                                  ? "bg-rose-50 text-rose-600"
+                                  : "bg-blue-50 text-blue-700"
+                              }`}
+                            >
+                              {a.adjustment_category === "RETIREE_SETTLEMENT"
+                                ? "퇴직자 정산"
+                                : "재직자 정산"}
+                            </span>
+                          </td>
+                        )}
+                        <td className="py-3.5 px-4 font-semibold text-slate-700 tabular-nums">
+                          {a.year_month}
+                        </td>
+                        <td
+                          className={`py-3.5 px-4 text-right font-extrabold tabular-nums ${
+                            a.delta_days > 0
+                              ? "text-[#00a84b]"
+                              : "text-rose-600"
+                          }`}
+                        >
+                          {a.delta_days > 0
+                            ? `+${a.delta_days}일`
+                            : `${a.delta_days}일`}
+                        </td>
+                        {ledgerSubView === "SETTLEMENT_ADJ_HISTORY" && (
+                          <td className="py-3.5 px-4 text-right font-semibold text-slate-600 tabular-nums">
+                            {typeof a.before_remain_days === "number" &&
+                            typeof a.after_remain_days === "number"
+                              ? `${a.before_remain_days}일 → ${a.after_remain_days}일`
+                              : "-"}
+                          </td>
+                        )}
+                        <td className="py-3.5 px-4 text-slate-600">
+                          {a.reason}
+                        </td>
+                        <td className="py-3.5 px-4 text-slate-500">
+                          {a.actor_name}
+                        </td>
+                        <td className="py-3.5 pl-4 pr-9 text-right">
+                          {canManage && (
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteAdjustment(a.id)}
+                              className="px-2.5 py-1 rounded-lg border border-slate-200 hover:border-rose-200 hover:bg-rose-50 text-rose-600 font-bold"
+                            >
+                              조정 취소
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            )}
+          </div>
+        </div>
       ) : (
         <>
       {/* 상단 타이틀 & 탭별 우측 액션 버튼 */}
-      <div className="px-9 pt-7 border-b border-slate-200">
+      <div className="w-full px-9 pt-7 border-b border-slate-200">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-3">
             <h1 className="text-[22px] font-extrabold text-slate-900 tracking-tight">
@@ -865,23 +1129,174 @@ export default function HqLeaveManagementPage() {
           </div>
 
           {tab === "BALANCE" && canManage && (
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => setCustomGrantModalOpen(true)}
-                className="px-3.5 py-2 rounded-lg border border-slate-200 hover:bg-slate-50 text-xs font-bold text-slate-800 flex items-center gap-1.5"
-              >
-                <span>맞춤 휴가 부여</span>
-                <span className="text-[10px] text-slate-400">▾</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setAdjModalOpen(true)}
-                className="px-3.5 py-2 rounded-lg bg-[#16a34a] hover:bg-[#15803d] text-white text-xs font-extrabold shadow-xs flex items-center gap-1.5"
-              >
-                <span>연차 조정</span>
-                <span className="text-[10px] opacity-80">▾</span>
-              </button>
+            <div
+              className="flex items-center gap-2"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* 1) 맞춤 휴가 부여 ▾ 드롭다운 */}
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAdjMenuOpen(false);
+                    setCustomGrantMenuOpen((v) => !v);
+                  }}
+                  className="px-3.5 py-2 rounded-lg border border-slate-200 hover:bg-slate-50 text-xs font-bold text-slate-800 flex items-center gap-1.5"
+                >
+                  <span>맞춤 휴가 부여</span>
+                  <span className="text-[10px] text-slate-400">▾</span>
+                </button>
+
+                {customGrantMenuOpen && (
+                  <div className="absolute right-0 top-10 z-30 w-64 rounded-2xl bg-white border border-slate-200 shadow-2xl overflow-hidden text-xs">
+                    <div className="px-4 pt-3 pb-1 text-[10px] font-bold text-slate-400">
+                      맞춤 휴가 부여
+                    </div>
+                    <div className="py-1">
+                      {grantableCustomLeaves.map((lv) => (
+                        <button
+                          key={lv.id}
+                          type="button"
+                          onClick={() => {
+                            setCustomGrantMenuOpen(false);
+                            setPersonalGrantMemberId(null);
+                            setCgLeaveId(lv.id);
+                            setCgTargetIds([]);
+                            setCustomGrantModalOpen(true);
+                          }}
+                          className="w-full px-4 py-2 text-left font-bold text-slate-800 hover:bg-slate-50 flex items-center justify-between"
+                        >
+                          <span className="flex items-center gap-2">
+                            <span>{lv.icon}</span>
+                            <span>{lv.name}</span>
+                          </span>
+                          {lv.target_gender !== "모두" && (
+                            <span className="text-[10px] font-semibold text-slate-400">
+                              {lv.target_gender}
+                            </span>
+                          )}
+                        </button>
+                      ))}
+                    </div>
+                    <div className="border-t border-slate-100 py-1.5">
+                      <div className="px-4 py-1 text-[10px] font-bold text-slate-400">
+                        부여 내역
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setCustomGrantMenuOpen(false);
+                          setLedgerSubView("CUSTOM_GRANT_HISTORY");
+                        }}
+                        className="w-full px-4 py-2 text-left font-bold text-slate-700 hover:bg-slate-50"
+                      >
+                        맞춤 휴가 부여 내역
+                      </button>
+                    </div>
+                    <div className="px-4 py-2.5 bg-slate-50/70 border-t border-slate-100 text-[11px] text-slate-400 leading-relaxed">
+                      휴가 종류 중 &apos;일정 주기&apos;, &apos;신청 시 부여&apos;를 제외하고 부여가 가능해요.
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* 2) 연차 조정 ▾ 드롭다운 (Screenshot 6 100% 재현) */}
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCustomGrantMenuOpen(false);
+                    setAdjMenuOpen((v) => !v);
+                  }}
+                  className="px-3.5 py-2 rounded-lg bg-[#16a34a] hover:bg-[#15803d] text-white text-xs font-extrabold shadow-xs flex items-center gap-1.5"
+                >
+                  <span>연차 조정</span>
+                  <span className="text-[10px] opacity-80">▾</span>
+                </button>
+
+                {adjMenuOpen && (
+                  <div className="absolute right-0 top-10 z-30 w-72 rounded-2xl bg-white border border-slate-200 shadow-2xl overflow-hidden text-xs py-2">
+                    <div className="px-4 py-1.5 text-[11px] font-bold text-slate-400">
+                      조정
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAdjMenuOpen(false);
+                        setAdjTargetIds([]);
+                        setAdjModalOpen(true);
+                      }}
+                      className="w-full px-4 py-2.5 text-left hover:bg-slate-50 transition-colors"
+                    >
+                      <div className="font-extrabold text-slate-900">
+                        연차 조정
+                      </div>
+                      <div className="text-[11px] text-slate-400 mt-0.5">
+                        연차를 수동으로 부여 · 차감해요.
+                      </div>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAdjMenuOpen(false);
+                        setSettlementModalMode("ACTIVE_SETTLEMENT");
+                      }}
+                      className="w-full px-4 py-2.5 text-left hover:bg-slate-50 transition-colors"
+                    >
+                      <div className="font-extrabold text-slate-900">
+                        재직자 정산용 잔여 연차 조정
+                      </div>
+                      <div className="text-[11px] text-slate-400 mt-0.5">
+                        재직자 연차 수당 지급을 위해 잔여분을 확인 · 조정해요.
+                      </div>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAdjMenuOpen(false);
+                        setSettlementModalMode("RETIREE_SETTLEMENT");
+                      }}
+                      className="w-full px-4 py-2.5 text-left hover:bg-slate-50 transition-colors"
+                    >
+                      <div className="font-extrabold text-slate-900">
+                        퇴직자 정산용 잔여 연차 조정
+                      </div>
+                      <div className="text-[11px] text-slate-400 mt-0.5">
+                        퇴직자 연차 수당 지급을 위해 잔여분을 확인 · 조정해요.
+                      </div>
+                    </button>
+
+                    <div className="my-1.5 border-t border-slate-100" />
+
+                    <div className="px-4 py-1.5 text-[11px] font-bold text-slate-400">
+                      조정 내역
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAdjMenuOpen(false);
+                        setLedgerSubView("ANNUAL_ADJ_HISTORY");
+                      }}
+                      className="w-full px-4 py-2 text-left font-bold text-slate-800 hover:bg-slate-50"
+                    >
+                      연차 조정 내역
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAdjMenuOpen(false);
+                        setSettlementHistoryFilter("ALL");
+                        setLedgerSubView("SETTLEMENT_ADJ_HISTORY");
+                      }}
+                      className="w-full px-4 py-2 text-left font-bold text-slate-800 hover:bg-slate-50"
+                    >
+                      재직 · 퇴직자 잔여 연차 조정 내역
+                    </button>
+                  </div>
+                )}
+              </div>
             </div>
           )}
 
@@ -1022,19 +1437,24 @@ export default function HqLeaveManagementPage() {
                   </th>
                   {customLeaves.map((c) => {
                     const subDesc =
-                      c.grant_method === "관리자가 직접 부여"
-                        ? `관리자가 직접 부여${
-                            c.grant_amount
-                              ? `(${c.grant_amount}${
-                                  c.grant_unit.startsWith("시간") ? "시간" : "일"
-                                })`
-                              : ""
-                          }`
-                        : c.id === "cl-military"
-                        ? "신청 시 부여"
-                        : c.grant_method === "반복 부여"
-                        ? `매월 부여(${c.grant_amount}일)`
-                        : `신청 시 부여(${c.grant_amount}일)`;
+                      c.id === "cl-miscarriage" ||
+                      c.id === "cl-miscarriage-multi"
+                        ? "관리자가 직접 부여"
+                        : c.grant_method === "관리자가 직접 부여"
+                          ? `관리자가 직접 부여${
+                              c.grant_amount
+                                ? `(${c.grant_amount}${
+                                    c.grant_unit.startsWith("시간") ? "시간" : "일"
+                                  })`
+                                : ""
+                            }`
+                          : c.grant_method === "연차 소진 시 부여"
+                            ? `소진 시 부여(${c.grant_amount}일)`
+                            : c.id === "cl-military"
+                              ? "신청 시 부여"
+                              : c.grant_method === "반복 부여"
+                                ? `매월 부여(${c.grant_amount}일)`
+                                : `신청 시 부여(${c.grant_amount}일)`;
                     return (
                       <th
                         key={c.id}
@@ -1646,233 +2066,59 @@ export default function HqLeaveManagementPage() {
       )}
 
       {/* =====================================================================
-          모달 1: 맞춤 휴가 직접 부여 모달
+          모달 1: 플렉스형 맞춤 휴가 부여하기 모달 (전원선택 + 조직2단피커 + 사용가능기간 + 개인대상 필터)
          ===================================================================== */}
-      {customGrantModalOpen && (
-        <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl border border-slate-200 shadow-2xl w-full max-w-lg overflow-hidden">
-            <div className="px-6 py-4 border-b border-slate-200 flex items-center justify-between">
-              <h3 className="text-base font-extrabold text-slate-900">
-                맞춤 휴가 부여
-              </h3>
-              <button
-                type="button"
-                onClick={() => setCustomGrantModalOpen(false)}
-                className="w-8 h-8 rounded-lg hover:bg-slate-100 text-slate-500 font-bold"
-              >
-                ✕
-              </button>
-            </div>
-            <form onSubmit={handleGrantCustomLeave} className="p-6 space-y-4">
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">
-                    맞춤 휴가 항목
-                  </label>
-                  <select
-                    value={cgLeaveId}
-                    onChange={(e) => setCgLeaveId(e.target.value)}
-                    className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs font-bold bg-white"
-                  >
-                    {customLeaves.map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.icon} {c.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">
-                    부여 일수
-                  </label>
-                  <input
-                    type="number"
-                    step="0.25"
-                    min="0.25"
-                    required
-                    value={cgAmount}
-                    onChange={(e) => setCgAmount(e.target.value)}
-                    className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs font-bold"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                  대상 구성원 선택 ({cgTargetIds.length}명)
-                </label>
-                <div className="max-h-36 overflow-y-auto p-2.5 rounded-xl bg-slate-50 border border-slate-200 flex flex-wrap gap-1.5">
-                  {activeMembers.map((m) => {
-                    const checked = cgTargetIds.includes(m.instructor_id);
-                    return (
-                      <button
-                        key={m.instructor_id}
-                        type="button"
-                        onClick={() =>
-                          setCgTargetIds((prev) =>
-                            checked
-                              ? prev.filter((x) => x !== m.instructor_id)
-                              : [...prev, m.instructor_id]
-                          )
-                        }
-                        className={`px-2.5 py-1 rounded-lg border text-xs font-bold ${
-                          checked
-                            ? "bg-slate-900 text-white border-slate-900"
-                            : "bg-white text-slate-600 border-slate-200"
-                        }`}
-                      >
-                        {m.name}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-
-              <input
-                value={cgReason}
-                onChange={(e) => setCgReason(e.target.value)}
-                placeholder="부여 사유 (선택)"
-                className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs font-semibold"
-              />
-
-              <div className="flex justify-end gap-2 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setCustomGrantModalOpen(false)}
-                  className="px-4 py-2 rounded-xl border border-slate-300 text-xs font-bold text-slate-700"
-                >
-                  취소
-                </button>
-                <button
-                  type="submit"
-                  disabled={submitting}
-                  className="px-5 py-2 rounded-xl bg-[#16a34a] text-white text-xs font-extrabold"
-                >
-                  부여하기
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+      <HqCustomGrantModal
+        isOpen={customGrantModalOpen}
+        onClose={() => {
+          setCustomGrantModalOpen(false);
+          setPersonalGrantMemberId(null);
+        }}
+        customLeaves={customLeaves}
+        activeMembers={activeMembers}
+        orgNodes={companySettings?.extra_settings?.org_chart_nodes}
+        lockedPersonalMember={personalGrantMember}
+        initialLeaveId={cgLeaveId}
+        initialTargetIds={cgTargetIds}
+        onSubmitted={async () => {
+          await loadLeavesAll();
+        }}
+      />
 
       {/* =====================================================================
-          모달 2: 연차 일괄/개별 조정 모달
+          모달 2-A: 플렉스형 일반 연차 수동 조정 모달
          ===================================================================== */}
-      {adjModalOpen && (
-        <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl border border-slate-200 shadow-2xl w-full max-w-lg overflow-hidden">
-            <div className="px-6 py-4 border-b border-slate-200 flex items-center justify-between">
-              <h3 className="text-base font-extrabold text-slate-900">
-                연차 일수 조정 (당해 연말 잔여연차 즉시 반영)
-              </h3>
-              <button
-                type="button"
-                onClick={() => setAdjModalOpen(false)}
-                className="w-8 h-8 rounded-lg hover:bg-slate-100 text-slate-500 font-bold"
-              >
-                ✕
-              </button>
-            </div>
-            <form onSubmit={handleBatchAdjustment} className="p-6 space-y-4">
-              <div>
-                <div className="flex items-center justify-between mb-1.5">
-                  <label className="text-xs font-bold text-slate-700">
-                    대상 구성원 ({adjTargetIds.length}명)
-                  </label>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setAdjTargetIds(activeMembers.map((m) => m.instructor_id))
-                    }
-                    className="text-[11px] font-bold text-blue-600 hover:underline"
-                  >
-                    전체 선택
-                  </button>
-                </div>
-                <div className="max-h-36 overflow-y-auto p-2.5 rounded-xl bg-slate-50 border border-slate-200 flex flex-wrap gap-1.5">
-                  {activeMembers.map((m) => {
-                    const checked = adjTargetIds.includes(m.instructor_id);
-                    return (
-                      <button
-                        key={m.instructor_id}
-                        type="button"
-                        onClick={() =>
-                          setAdjTargetIds((prev) =>
-                            checked
-                              ? prev.filter((x) => x !== m.instructor_id)
-                              : [...prev, m.instructor_id]
-                          )
-                        }
-                        className={`px-2.5 py-1 rounded-lg border text-xs font-bold ${
-                          checked
-                            ? "bg-[#16a34a] text-white border-[#16a34a]"
-                            : "bg-white text-slate-600 border-slate-200"
-                        }`}
-                      >
-                        {m.name}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
+      <HqManualAnnualAdjustModal
+        isOpen={adjModalOpen}
+        onClose={() => setAdjModalOpen(false)}
+        activeMembers={activeMembers}
+        orgNodes={companySettings?.extra_settings?.org_chart_nodes}
+        initialTargetIds={adjTargetIds}
+        initialYm={adjYm}
+        onSubmitted={async () => {
+          await Promise.all([loadLeavesAll(), refreshMembers()]);
+        }}
+      />
 
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">
-                    반영 연월
-                  </label>
-                  <input
-                    type="month"
-                    required
-                    value={adjYm}
-                    onChange={(e) => setAdjYm(e.target.value)}
-                    className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs font-bold"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">
-                    조정 일수 (+추가 / -차감)
-                  </label>
-                  <input
-                    type="number"
-                    step="0.25"
-                    required
-                    value={adjDelta}
-                    onChange={(e) => setAdjDelta(e.target.value)}
-                    className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs font-bold"
-                  />
-                </div>
-              </div>
-
-              <input
-                required
-                value={adjReason}
-                onChange={(e) => setAdjReason(e.target.value)}
-                placeholder="조정 사유 (예: 포상 추가 연차 / 기존 사용분 정산)"
-                className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs font-semibold"
-              />
-
-              <div className="flex justify-end gap-2 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setAdjModalOpen(false)}
-                  className="px-4 py-2 rounded-xl border border-slate-300 text-xs font-bold text-slate-700"
-                >
-                  취소
-                </button>
-                <button
-                  type="submit"
-                  disabled={submitting}
-                  className="px-5 py-2 rounded-xl bg-[#16a34a] text-white text-xs font-extrabold"
-                >
-                  조정 반영하기
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+      {/* =====================================================================
+          모달 2-B: 플렉스형 재직자 / 퇴직자 정산용 잔여 연차 조정 모달
+         ===================================================================== */}
+      <HqSettlementAnnualAdjustModal
+        mode={settlementModalMode}
+        onClose={() => setSettlementModalMode(null)}
+        allMembers={members}
+        annualPolicy={annualPolicy}
+        retireeRule={
+          annualSettings.retiree_adjustment_rule ||
+          "구성원에게 유리한 기준으로 적용"
+        }
+        leaveDocs={leaveDocs}
+        adjustments={adjustments}
+        uploadedMonthly={uploadedMonthly}
+        onSubmitted={async () => {
+          await Promise.all([loadLeavesAll(), refreshMembers()]);
+        }}
+      />
 
       {/* =====================================================================
           모달 3: 월별 연차 사용 내역 CSV 업로드 모달
@@ -2262,30 +2508,15 @@ export default function HqLeaveManagementPage() {
                 </select>
 
                 {reqTargetMode === "SELECT" && (
-                  <div className="mt-2 max-h-32 overflow-y-auto p-2.5 rounded-xl bg-slate-50 border border-slate-200 flex flex-wrap gap-1.5">
-                    {activeMembers.map((m) => {
-                      const checked = reqSelectedIds.includes(m.instructor_id);
-                      return (
-                        <button
-                          key={m.instructor_id}
-                          type="button"
-                          onClick={() =>
-                            setReqSelectedIds((prev) =>
-                              checked
-                                ? prev.filter((x) => x !== m.instructor_id)
-                                : [...prev, m.instructor_id]
-                            )
-                          }
-                          className={`px-2 py-1 rounded-lg border text-[11px] font-bold ${
-                            checked
-                              ? "bg-emerald-600 text-white border-emerald-600"
-                              : "bg-white text-slate-600 border-slate-200"
-                          }`}
-                        >
-                          {m.name}
-                        </button>
-                      );
-                    })}
+                  <div className="mt-2.5">
+                    <HqFlexTargetPicker
+                      label="요청 대상 구성원"
+                      members={activeMembers}
+                      orgNodes={companySettings?.extra_settings?.org_chart_nodes}
+                      selectedIds={reqSelectedIds}
+                      onChange={setReqSelectedIds}
+                      placeholder="요청 대상 선택"
+                    />
                   </div>
                 )}
               </div>

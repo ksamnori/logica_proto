@@ -1327,12 +1327,23 @@ export interface HqMeetingItem {
   updated_at: string;
 }
 
+export type HqLeaveAdjustmentCategory =
+  | "MANUAL"
+  | "ACTIVE_SETTLEMENT"
+  | "RETIREE_SETTLEMENT";
+
 export interface HqLeaveAdjustmentItem {
   id: string;
   member_id: string;
   member_name: string;
+  department?: string;
   year_month: string; // 예: "2026-11"
   delta_days: number; // 예: +2 또는 -0.5
+  unit_mode?: "DAYS" | "HOURS";
+  raw_input_amount?: number;
+  adjustment_category?: HqLeaveAdjustmentCategory;
+  before_remain_days?: number;
+  after_remain_days?: number;
   reason: string;
   actor_name: string;
   created_at: string;
@@ -1357,13 +1368,25 @@ export interface HqAnnualLeavePlanItem {
   submitted_at: string;
 }
 
+export type HqCustomLeaveGrantPeriodMode =
+  | "ALWAYS"
+  | "RANGE"
+  | "START_ONLY"
+  | "END_ONLY";
+
 export interface HqCustomLeaveGrantItem {
   id: string;
   member_id: string;
   member_name: string;
+  department?: string;
   leave_id: string; // 예: "cl-reward", "cl-subfertility"
   leave_name: string;
   granted_amount: number; // 일수 (시간 단위 부여 시 8시간=1일 환산 또는 일수)
+  grant_unit_mode?: "DAYS" | "HOURS";
+  granted_hours?: number;
+  period_mode?: HqCustomLeaveGrantPeriodMode;
+  valid_from?: string | null; // YYYY-MM-DD (시작일)
+  expires_at?: string | null; // YYYY-MM-DD (만료일)
   reason: string;
   actor_name: string;
   created_at: string;

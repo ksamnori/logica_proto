@@ -16,6 +16,8 @@ import type {
   HqApprovalDoc,
   HqApprovalStep,
   HqCustomLeaveGrantItem,
+  HqCustomLeaveGrantPeriodMode,
+  HqLeaveAdjustmentCategory,
   HqLeaveAdjustmentItem,
   HqLeavePromotionTargetItem,
   HqPromotionKind,
@@ -185,39 +187,73 @@ export async function POST(req: NextRequest) {
         return apiFail("연차 조정은 인사담당자·최고관리자만 가능합니다.", 403);
       }
 
-      const targets: { member_id: string; member_name: string }[] =
+      const targets: {
+        member_id: string;
+        member_name: string;
+        department?: string;
+        delta_days?: number;
+        before_remain_days?: number;
+        after_remain_days?: number;
+      }[] =
         action === "BATCH_ADJUSTMENT" && Array.isArray(body?.targets)
           ? body.targets
           : [
               {
                 member_id: String(body?.member_id || "").trim(),
                 member_name: String(body?.member_name || "").trim(),
+                department: body?.department ? String(body.department) : undefined,
               },
             ];
 
       const yearMonth = String(body?.year_month || "").trim();
-      const deltaDays = Number(body?.delta_days || 0);
+      const defaultDeltaDays = Number(body?.delta_days || 0);
+      const unitMode: "DAYS" | "HOURS" =
+        body?.unit_mode === "HOURS" ? "HOURS" : "DAYS";
+      const rawInputAmount =
+        typeof body?.raw_input_amount === "number"
+          ? body.raw_input_amount
+          : undefined;
+      const adjustmentCategory: HqLeaveAdjustmentCategory =
+        body?.adjustment_category === "ACTIVE_SETTLEMENT" ||
+        body?.adjustment_category === "RETIREE_SETTLEMENT"
+          ? body.adjustment_category
+          : "MANUAL";
       const reason = String(body?.reason || "").trim() || "관리자 연차 조정";
 
-      if (
-        targets.length === 0 ||
-        !targets[0].member_id ||
-        !/^\d{4}-\d{2}$/.test(yearMonth) ||
-        !deltaDays
-      ) {
+      const validTargets = targets.filter((t) => {
+        if (!t?.member_id) return false;
+        const d =
+          typeof t.delta_days === "number" ? t.delta_days : defaultDeltaDays;
+        return d !== 0 && !Number.isNaN(d);
+      });
+
+      if (validTargets.length === 0 || !/^\d{4}-\d{2}$/.test(yearMonth)) {
         return apiFail("대상자, 적용 연월, 조정 일수를 확인해 주세요.");
       }
 
-      targets.forEach((t, idx) => {
-        if (!t.member_id) return;
+      validTargets.forEach((t, idx) => {
+        const effDelta =
+          typeof t.delta_days === "number" ? t.delta_days : defaultDeltaDays;
         const item: HqLeaveAdjustmentItem = {
           id: `lvadj-${Date.now()}-${idx}-${Math.random()
             .toString(36)
             .slice(2, 6)}`,
           member_id: String(t.member_id),
           member_name: String(t.member_name || ""),
+          department: t.department || undefined,
           year_month: yearMonth,
-          delta_days: deltaDays,
+          delta_days: Math.round(effDelta * 1000) / 1000,
+          unit_mode: unitMode,
+          raw_input_amount: rawInputAmount,
+          adjustment_category: adjustmentCategory,
+          before_remain_days:
+            typeof t.before_remain_days === "number"
+              ? t.before_remain_days
+              : undefined,
+          after_remain_days:
+            typeof t.after_remain_days === "number"
+              ? t.after_remain_days
+              : undefined,
           reason,
           actor_name: caller.name,
           created_at: nowIso,
@@ -235,9 +271,7 @@ export async function POST(req: NextRequest) {
         department: caller.department,
         event_type: "수정",
         info_type: "휴가정보",
-        description: `연차 수동 조정 (${targets.length}명 · ${
-          deltaDays > 0 ? `+${deltaDays}` : deltaDays
-        }일 · ${reason})`,
+        description: `연차 수동 조정 (${validTargets.length}명 · ${reason})`,
         delegated: caller.isDelegatedHrAdmin,
       }).catch(() => {});
 
@@ -262,15 +296,32 @@ export async function POST(req: NextRequest) {
       if (!canManage) {
         return apiFail("맞춤 휴가 부여는 인사관리자만 가능합니다.", 403);
       }
-      const targets: { member_id: string; member_name: string }[] =
-        Array.isArray(body?.targets) ? body.targets : [];
+      const targets: {
+        member_id: string;
+        member_name: string;
+        department?: string;
+      }[] = Array.isArray(body?.targets) ? body.targets : [];
       const leaveId = String(body?.leave_id || "").trim();
       const leaveName = String(body?.leave_name || "").trim();
       const grantedAmount = Number(body?.granted_amount || 0);
+      const grantUnitMode: "DAYS" | "HOURS" =
+        body?.grant_unit_mode === "HOURS" ? "HOURS" : "DAYS";
+      const grantedHours =
+        typeof body?.granted_hours === "number"
+          ? body.granted_hours
+          : undefined;
+      const periodMode: HqCustomLeaveGrantPeriodMode =
+        body?.period_mode === "RANGE" ||
+        body?.period_mode === "START_ONLY" ||
+        body?.period_mode === "END_ONLY"
+          ? body.period_mode
+          : "ALWAYS";
+      const validFrom = body?.valid_from ? String(body.valid_from).trim() : null;
+      const expiresAt = body?.expires_at ? String(body.expires_at).trim() : null;
       const reason = String(body?.reason || "").trim() || "맞춤 휴가 직접 부여";
 
       if (targets.length === 0 || !leaveId || grantedAmount <= 0) {
-        return apiFail("부여 대상자, 맞춤 휴가 항목, 부여 일수를 확인해 주세요.");
+        return apiFail("부여 대상자, 맞춤 휴가 항목, 부여 시간을 확인해 주세요.");
       }
 
       targets.forEach((t, idx) => {
@@ -279,9 +330,15 @@ export async function POST(req: NextRequest) {
           id: `clg-${Date.now()}-${idx}-${Math.random().toString(36).slice(2, 5)}`,
           member_id: String(t.member_id),
           member_name: String(t.member_name || ""),
+          department: t.department || undefined,
           leave_id: leaveId,
           leave_name: leaveName,
-          granted_amount: grantedAmount,
+          granted_amount: Math.round(grantedAmount * 1000) / 1000,
+          grant_unit_mode: grantUnitMode,
+          granted_hours: grantedHours,
+          period_mode: periodMode,
+          valid_from: validFrom,
+          expires_at: expiresAt,
           reason,
           actor_name: caller.name,
           created_at: nowIso,
@@ -289,6 +346,17 @@ export async function POST(req: NextRequest) {
         ledger.customGrants.unshift(g);
       });
 
+      await writeLeavesLedgerServer(supabaseAdmin, ledger);
+      return NextResponse.json({
+        success: true,
+        data: { customGrants: ledger.customGrants },
+      });
+    }
+
+    if (action === "DELETE_CUSTOM_GRANT") {
+      if (!canManage) return apiFail("권한이 없습니다.", 403);
+      const id = String(body?.id || "").trim();
+      ledger.customGrants = ledger.customGrants.filter((g) => g.id !== id);
       await writeLeavesLedgerServer(supabaseAdmin, ledger);
       return NextResponse.json({
         success: true,
