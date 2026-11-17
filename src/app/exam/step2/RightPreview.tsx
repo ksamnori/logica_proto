@@ -197,9 +197,12 @@ export default function RightPreview({ examData }: { examData: any }) {
     }
   };
 
+  const [showGeneralExp, setShowGeneralExp] = useState(false);
+
   const startEditing = (q: any) => {
     const img1Obj = parseBoxObject(q.image_box);
     const img2Obj = parseBoxObject(q.image_2_box);
+    setShowGeneralExp(Boolean(q.explanation || q.solution));
     setEditingId(q.question_id);
     setEditForm({
       question: q.question || '', question_2: q.question_2 || '', answer: q.answer || '', explanation: q.explanation || '', solution: q.solution || '',
@@ -1378,19 +1381,22 @@ export default function RightPreview({ examData }: { examData: any }) {
                              </div>
                            </div>
 
-                           <details
-                             key={`general-exp-${editingId || 'none'}`}
-                             defaultOpen={Boolean(editForm.explanation || editForm.solution)}
-                             className="mb-3"
-                           >
-                             <summary className="text-[11.5px] font-extrabold text-amber-800/80 hover:text-amber-900 cursor-pointer select-none mb-1.5">
-                               📖 보조 일반 해설 및 풀이 (선택 입력)
-                             </summary>
-                             <div className="flex gap-2 mt-1">
-                               <textarea value={editForm.explanation || ''} onChange={e => setEditForm({...editForm, explanation: e.target.value})} className="w-1/2 p-2 border border-amber-300 rounded text-[13px] font-bold focus:outline-none focus:ring-2 focus:ring-amber-500 custom-scrollbar cursor-text bg-white resize-y" rows={2} placeholder="일반 해설"></textarea>
-                               <textarea value={editForm.solution || ''} onChange={e => setEditForm({...editForm, solution: e.target.value})} className="w-1/2 p-2 border border-amber-300 rounded text-[13px] font-bold focus:outline-none focus:ring-2 focus:ring-amber-500 custom-scrollbar cursor-text bg-white resize-y" rows={2} placeholder="일반 풀이"></textarea>
-                             </div>
-                           </details>
+                           <div className="mb-3">
+                             <button
+                               type="button"
+                               onClick={() => setShowGeneralExp((prev) => !prev)}
+                               className="flex items-center gap-1 text-[11.5px] font-extrabold text-amber-800/80 hover:text-amber-900 cursor-pointer select-none mb-1.5"
+                             >
+                               <span>{showGeneralExp ? '▼' : '▶'}</span>
+                               <span>📖 보조 일반 해설 및 풀이 (선택 입력)</span>
+                             </button>
+                             {showGeneralExp && (
+                               <div className="flex gap-2 mt-1">
+                                 <textarea value={editForm.explanation || ''} onChange={e => setEditForm({...editForm, explanation: e.target.value})} className="w-1/2 p-2 border border-amber-300 rounded text-[13px] font-bold focus:outline-none focus:ring-2 focus:ring-amber-500 custom-scrollbar cursor-text bg-white resize-y" rows={2} placeholder="일반 해설"></textarea>
+                                 <textarea value={editForm.solution || ''} onChange={e => setEditForm({...editForm, solution: e.target.value})} className="w-1/2 p-2 border border-amber-300 rounded text-[13px] font-bold focus:outline-none focus:ring-2 focus:ring-amber-500 custom-scrollbar cursor-text bg-white resize-y" rows={2} placeholder="일반 풀이"></textarea>
+                               </div>
+                             )}
+                           </div>
 
                            <div className="flex justify-end gap-2 mt-4">
                                <button onClick={() => setEditingId(null)} className="px-4 py-2 bg-white border border-slate-300 text-slate-600 font-bold text-xs rounded hover:bg-slate-50 shadow-sm cursor-pointer">취소</button>
