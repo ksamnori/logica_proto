@@ -60,7 +60,7 @@ const PAGE_TITLES: Record<string, { title: string; subtitle: string }> = {
   },
   "/hq/payroll": {
     title: "급여 · 외주 원천세(3.3% / 8.8%) · 인세 정산",
-    subtitle: "임직원 급여명세서 셀프 열람 · 외주 프리랜서 원천세 및 저자 인세 자동 계산",
+    subtitle: "세무사 급여대장 엑셀 1클릭 명세서 배부 · 세무사 전달 기초자료 · 은행 대량이체 · 저자 인세/퇴직금",
   },
   "/hq/publishing": {
     title: "출판 기획 · 편집 마감 & ISBN 공정 보드",

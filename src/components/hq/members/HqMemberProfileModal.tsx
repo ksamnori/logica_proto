@@ -2,8 +2,10 @@
 "use client";
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import { supabase } from "@/lib/supabase";
 import { useOptionalHqShell } from "@/components/hq/HqShellContext";
+import { useHqHref } from "@/lib/hq/hqRoutes";
 import {
   HQ_DEFAULT_DEPARTMENTS,
   HQ_EMPLOYMENT_TYPES,
@@ -194,6 +196,7 @@ export default function HqMemberProfileModal({
   onSaved,
 }: Props) {
   const shell = useOptionalHqShell();
+  const hqHref = useHqHref();
   const [activeTab, setActiveTab] = useState<ProfileTab>("info");
   const [isMaximized, setIsMaximized] = useState(false);
   const [statusMenuOpen, setStatusMenuOpen] = useState(false);
@@ -2186,6 +2189,24 @@ export default function HqMemberProfileModal({
                           급여일: {ex.wage_contract?.pay_day || "매월 25일"} ·
                           공제대상 {basicDeductionCount}명
                         </div>
+                      </div>
+
+                      <div className="sm:col-span-2 p-4 rounded-2xl border border-blue-200 bg-blue-50/50 flex flex-wrap items-center justify-between gap-3">
+                        <div>
+                          <div className="text-xs font-extrabold text-slate-900">
+                            📄 월별 급여명세서 열람 · PDF 출력
+                          </div>
+                          <div className="text-[11px] text-slate-500 mt-0.5">
+                            배부 확정된 월별 임금명세서(세무사 급여대장 확정분)를 조회하고 A4 인쇄할 수 있습니다.
+                          </div>
+                        </div>
+                        <Link
+                          href={hqHref("/hq/payroll")}
+                          onClick={onClose}
+                          className="px-3.5 py-2 rounded-xl bg-brand hover:bg-brand-hover text-white text-xs font-extrabold"
+                        >
+                          급여명세서 보관함 이동 →
+                        </Link>
                       </div>
                     </div>
                   )}
