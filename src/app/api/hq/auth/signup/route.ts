@@ -14,6 +14,7 @@ import {
   generateEmployeeNoByPolicy,
   readCompanySettingsServer,
 } from "@/lib/hq/companySettingsServer";
+import { buildFlatOrgTreeOptions } from "@/lib/hq/orgTreeHelper";
 import type { HqRankCode } from "@/lib/hq/types";
 
 export const runtime = "nodejs";
@@ -49,10 +50,71 @@ async function checkHasTopAdmin(supabaseAdmin: ReturnType<typeof getSupabaseAdmi
 export async function GET() {
   try {
     const supabaseAdmin = getSupabaseAdmin();
-    const { hasTopAdmin } = await checkHasTopAdmin(supabaseAdmin);
-    return NextResponse.json({ success: true, data: { hasTopAdmin } });
+    const [{ hasTopAdmin }, { settings }] = await Promise.all([
+      checkHasTopAdmin(supabaseAdmin),
+      readCompanySettingsServer(supabaseAdmin),
+    ]);
+
+    const flatOrgs = buildFlatOrgTreeOptions(
+      settings.extra_settings?.org_chart_nodes,
+      [],
+      { includeHiddenSystemNodes: false, excludeRetired: true }
+    );
+
+    // 최고관리자가 이미 있는 일반 임직원 가입 시에는 '대표'를 제외한 실무 하위 조직을 우선 노출
+    const selectableOrgs = hasTopAdmin
+      ? flatOrgs.filter((o) => o.name !== "대표")
+      : flatOrgs;
+
+    const hrPositions = settings.extra_settings?.hr_positions || [
+      "대표",
+      "팀장",
+      "실장",
+      "사원",
+    ];
+    const hrTitles = settings.extra_settings?.hr_titles || [
+      "팀장",
+      "실장",
+      "총괄",
+      "사원",
+    ];
+
+    return NextResponse.json({
+      success: true,
+      data: {
+        hasTopAdmin,
+        orgOptions:
+          selectableOrgs.length > 0
+            ? selectableOrgs.map((o) => ({
+                name: o.name,
+                label: o.indentedLabel,
+                depth: o.depth,
+              }))
+            : flatOrgs.map((o) => ({
+                name: o.name,
+                label: o.indentedLabel,
+                depth: o.depth,
+              })),
+        hrPositions,
+        hrTitles,
+      },
+    });
   } catch {
-    return NextResponse.json({ success: true, data: { hasTopAdmin: true } });
+    return NextResponse.json({
+      success: true,
+      data: {
+        hasTopAdmin: true,
+        orgOptions: [
+          { name: "집필팀", label: "└ 집필팀", depth: 1 },
+          { name: "디자인", label: "└ 디자인", depth: 1 },
+          { name: "영업팀", label: "└ 영업팀", depth: 1 },
+          { name: "관리팀", label: "└ 관리팀", depth: 1 },
+          { name: "마케팅", label: "└ 마케팅", depth: 1 },
+        ],
+        hrPositions: ["대표", "팀장", "실장", "사원"],
+        hrTitles: ["팀장", "실장", "총괄", "사원"],
+      },
+    });
   }
 }
 
@@ -175,6 +237,23 @@ export async function POST(req: NextRequest) {
           annual_leave_total: 15.0,
           annual_leave_used: 0.0,
           account_holder: name,
+          profile_extra: {
+            hr_effective_date: today,
+            hr_position: jobTitle,
+            org_assignments: [
+              {
+                id: `org-asg-${Date.now()}`,
+                org_name: department,
+                is_primary: true,
+                is_leader:
+                  !hasTopAdmin &&
+                  (rankCode === "TEAM_LEAD" ||
+                    rankCode === "DIRECTOR" ||
+                    rankCode === "CEO"),
+                title: jobTitle,
+              },
+            ],
+          },
         },
         { onConflict: "instructor_id" }
       );

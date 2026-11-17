@@ -84,13 +84,11 @@ export const HQ_RANK_LIST: RankMeta[] = [
 ];
 
 export const HQ_DEFAULT_DEPARTMENTS = [
-  "사업부",
   "집필팀",
-  "경영지원팀",
-  "연구개발팀",
-  "출판편집팀",
-  "디자인팀",
-  "제작·마케팅팀",
+  "디자인",
+  "영업팀",
+  "관리팀",
+  "마케팅",
 ] as const;
 
 export const HQ_EMPLOYMENT_TYPES = [

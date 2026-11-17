@@ -179,6 +179,24 @@ export async function PATCH(req: NextRequest) {
       })
       .catch(() => {});
 
+    // 조직도 설정에서 조직 이름이 변경되었거나 삭제 후 이동된 경우 소속 구성원 부서명 자동 동기화
+    if (body?.org_rename_map && typeof body.org_rename_map === "object") {
+      const entries = Object.entries(
+        body.org_rename_map as Record<string, string>
+      ).filter(([oldName, newName]) => oldName && newName && oldName !== newName);
+
+      for (const [oldName, newName] of entries) {
+        await supabaseAdmin
+          .from("instructor")
+          .update({ department: newName })
+          .eq("department", oldName);
+        await supabaseAdmin
+          .from("hq_member_profile")
+          .update({ department: newName, updated_at: nowIso })
+          .eq("department", oldName);
+      }
+    }
+
     const changedAreas = Object.keys(body?.extra_settings || {});
     const detailDesc =
       changedAreas.length > 0

@@ -178,12 +178,28 @@ export interface HqProfileChangeLog {
   summary: string;
 }
 
+export interface HqMemberOrgAssignment {
+  id: string;
+  org_name: string;
+  is_primary: boolean;
+  is_leader: boolean;
+  title: string;
+}
+
 export interface HqProfileExtra {
   nickname?: string;
   bio?: string;
   personal_email?: string;
   group_hire_date?: string;
   hire_type?: string;
+  hr_effective_date?: string;
+  hr_appointment_label?: string;
+  hr_appointment_memo?: string;
+  hr_jobs_selected?: string[];
+  hr_job_group?: string;
+  hr_position?: string;
+  hr_grade?: string;
+  org_assignments?: HqMemberOrgAssignment[];
   rrn_front?: string;
   gender?: "남" | "여" | "";
   nationality?: string;

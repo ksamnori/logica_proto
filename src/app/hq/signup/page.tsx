@@ -3,22 +3,35 @@
 
 import React, { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import {
-  getRankMeta,
-  HQ_DEFAULT_DEPARTMENTS,
-  HQ_RANK_LIST,
-} from "@/lib/hq/constants";
-import type { HqRankCode } from "@/lib/hq/types";
+import { HQ_DEFAULT_DEPARTMENTS } from "@/lib/hq/constants";
+import { inferRankCodeFromHrSelection } from "@/lib/hq/orgTreeHelper";
+
+interface SignupOrgOption {
+  name: string;
+  label: string;
+  depth: number;
+}
 
 export default function HqSignupPage() {
   const router = useRouter();
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
   const [password, setPassword] = useState("");
-  const [department, setDepartment] = useState<string>(HQ_DEFAULT_DEPARTMENTS[0]);
-  const [customDept, setCustomDept] = useState("");
-  const [rankCode, setRankCode] = useState<HqRankCode>("STAFF");
-  const [jobTitle, setJobTitle] = useState("연구원");
+
+  const [orgOptions, setOrgOptions] = useState<SignupOrgOption[]>(
+    HQ_DEFAULT_DEPARTMENTS.map((d) => ({ name: d, label: d, depth: 1 }))
+  );
+  const [titleOptions, setTitleOptions] = useState<string[]>([
+    "사원",
+    "연구원",
+    "팀장",
+    "실장",
+  ]);
+
+  const [department, setDepartment] = useState<string>(
+    HQ_DEFAULT_DEPARTMENTS[0]
+  );
+  const [jobTitle, setJobTitle] = useState("사원");
   const [hasTopAdmin, setHasTopAdmin] = useState(true);
   const [isLoading, setIsLoading] = useState(false);
 
@@ -26,8 +39,25 @@ export default function HqSignupPage() {
     fetch("/api/hq/auth/signup")
       .then((r) => r.json())
       .then((json) => {
-        if (json?.data && typeof json.data.hasTopAdmin === "boolean") {
-          setHasTopAdmin(json.data.hasTopAdmin);
+        const d = json?.data;
+        if (!d) return;
+        if (typeof d.hasTopAdmin === "boolean") {
+          setHasTopAdmin(d.hasTopAdmin);
+        }
+        if (Array.isArray(d.orgOptions) && d.orgOptions.length > 0) {
+          setOrgOptions(d.orgOptions);
+          setDepartment(d.orgOptions[0].name);
+        }
+        const mergedTitles = Array.from(
+          new Set<string>([
+            ...(Array.isArray(d.hrPositions) ? d.hrPositions : []),
+            ...(Array.isArray(d.hrTitles) ? d.hrTitles : []),
+            "사원",
+          ])
+        ).filter((t) => (d.hasTopAdmin ? t !== "대표" : true));
+        if (mergedTitles.length > 0) {
+          setTitleOptions(mergedTitles);
+          setJobTitle(mergedTitles.includes("사원") ? "사원" : mergedTitles[0]);
         }
       })
       .catch(() => {});
@@ -40,20 +70,21 @@ export default function HqSignupPage() {
     return `${res.slice(0, 3)}-${res.slice(3, 7)}-${res.slice(7, 11)}`;
   };
 
-  const handleRankChange = (nextRank: HqRankCode) => {
-    setRankCode(nextRank);
-    setJobTitle(getRankMeta(nextRank).defaultTitle);
-  };
-
   const handleSignup = async (e: React.FormEvent) => {
     e.preventDefault();
-    const finalDept =
-      department === "__CUSTOM__" ? customDept.trim() : department;
 
-    if (!name.trim() || !phone || !password || !finalDept || !jobTitle.trim()) {
-      alert("모든 필수 항목을 입력해주세요.");
+    if (!name.trim() || !phone || !password || !department || !jobTitle.trim()) {
+      alert("모든 필수 항목을 입력해 주세요.");
       return;
     }
+
+    const inferredRank = hasTopAdmin
+      ? "STAFF"
+      : inferRankCodeFromHrSelection({
+          orgName: department,
+          position: jobTitle,
+          title: jobTitle,
+        });
 
     setIsLoading(true);
     try {
@@ -64,8 +95,8 @@ export default function HqSignupPage() {
           name: name.trim(),
           phone,
           password,
-          department: finalDept,
-          rank_code: rankCode,
+          department,
+          rank_code: inferredRank,
           job_title: jobTitle.trim(),
         }),
       });
@@ -75,7 +106,7 @@ export default function HqSignupPage() {
       }
 
       alert(
-        "🏢 본부 구성원 계정과 인사 프로필 생성이 완료되었습니다.\n로그인 화면으로 이동합니다."
+        "🏢 본부 구성원 계정과 조직도 소속 배정이 완료되었습니다.\n로그인 화면으로 이동합니다."
       );
       router.replace("/hq/login");
     } catch (error: any) {
@@ -85,12 +116,6 @@ export default function HqSignupPage() {
     }
   };
 
-  const selectableRanks = hasTopAdmin
-    ? HQ_RANK_LIST.filter((r) => r.level <= 2)
-    : HQ_RANK_LIST;
-
-  const selectedRankMeta = getRankMeta(rankCode);
-
   return (
     <div className="min-h-screen flex items-center justify-center bg-slate-950 p-4 py-10">
       <div className="bg-white p-8 sm:p-10 rounded-3xl shadow-2xl w-full max-w-lg relative overflow-hidden border border-slate-200">
@@ -99,7 +124,7 @@ export default function HqSignupPage() {
         <div className="text-center mb-7">
           <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-blue-50 border border-blue-200 text-brand text-xs font-extrabold mb-2.5">
             <span>👤</span>
-            <span>본부 임직원 온보딩 (Core HR)</span>
+            <span>본부 임직원 가입 (조직도 실시간 연동)</span>
           </div>
           <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-900 tracking-tight">
             천종현수학연구소 <span className="text-brand">HQ</span>
@@ -157,67 +182,41 @@ export default function HqSignupPage() {
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="block text-xs font-bold text-slate-700 mb-1">
-                소속 부서 <span className="text-rose-500">*</span>
+                소속 조직 (조직도 기준) <span className="text-rose-500">*</span>
               </label>
               <select
                 value={department}
                 onChange={(e) => setDepartment(e.target.value)}
                 className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-brand font-bold text-slate-900"
               >
-                {HQ_DEFAULT_DEPARTMENTS.map((dept) => (
-                  <option key={dept} value={dept}>
-                    {dept}
+                {orgOptions.map((opt) => (
+                  <option key={opt.name} value={opt.name}>
+                    {opt.label}
                   </option>
                 ))}
-                <option value="__CUSTOM__">+ 직접 입력</option>
               </select>
-              {department === "__CUSTOM__" && (
-                <input
-                  type="text"
-                  required
-                  value={customDept}
-                  onChange={(e) => setCustomDept(e.target.value)}
-                  className="w-full mt-2 px-3.5 py-2 bg-white border border-slate-300 rounded-xl font-bold text-slate-900"
-                  placeholder="부서명 직접 입력"
-                />
-              )}
             </div>
 
             <div>
               <label className="block text-xs font-bold text-slate-700 mb-1">
-                호칭 / 직책명 <span className="text-rose-500">*</span>
+                직위 · 직책 <span className="text-rose-500">*</span>
               </label>
-              <input
-                type="text"
-                required
+              <select
                 value={jobTitle}
                 onChange={(e) => setJobTitle(e.target.value)}
                 className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-brand font-bold text-slate-900"
-                placeholder="예: 연구원, 편집자, 디자이너"
-              />
+              >
+                {titleOptions.map((ttl) => (
+                  <option key={ttl} value={ttl}>
+                    {ttl}
+                  </option>
+                ))}
+              </select>
             </div>
           </div>
 
-          <div className="rounded-2xl bg-slate-50 border border-slate-200 p-3.5 space-y-2">
-            <label className="block text-xs font-bold text-slate-700">
-              초기 실무 직급 선택 <span className="text-rose-500">*</span>
-            </label>
-            <select
-              value={rankCode}
-              onChange={(e) => handleRankChange(e.target.value as HqRankCode)}
-              className="w-full px-3.5 py-2.5 bg-white border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-brand font-bold text-slate-900"
-            >
-              {selectableRanks.map((r) => (
-                <option key={r.code} value={r.code}>
-                  {r.label}
-                </option>
-              ))}
-            </select>
-            <p className="text-[11px] text-slate-500 font-medium leading-relaxed">
-              {hasTopAdmin
-                ? "🔒 팀장·본부장·대표 결재권 및 인사·시스템 관리자 권한은 가입 후 최고관리자가 배정합니다."
-                : `💡 ${selectedRankMeta.description}`}
-            </p>
+          <div className="rounded-2xl bg-slate-50 border border-slate-200 px-3.5 py-3 text-[11px] text-slate-500 font-medium leading-relaxed">
+            💡 [조직도 설정]에 등록된 조직으로 즉시 배정되며, 가입 후 인사관리자가 세부 직무·직군·조직장 권한을 설정할 수 있습니다.
           </div>
 
           <button

@@ -35,7 +35,9 @@ import type {
   HqTrainingItem,
   HqWorkStatus,
 } from "@/lib/hq/types";
+import { getRegisteredOrgNames } from "@/lib/hq/orgTreeHelper";
 import CertificatePrintModal from "./CertificatePrintModal";
+import HqMemberHrChangeModal from "./HqMemberHrChangeModal";
 
 interface Props {
   isOpen: boolean;
@@ -370,19 +372,10 @@ export default function HqMemberProfileModal({
   const companyExtra = shell?.companySettings?.extra_settings;
   const empNoLocked = Boolean(companyExtra?.emp_no_locked);
 
-  const deptOptions = useMemo(() => {
-    const orgNames = (companyExtra?.org_chart_nodes || [])
-      .filter((n) => !n.is_hidden && n.name !== "퇴직")
-      .sort((a, b) => a.order - b.order)
-      .map((n) => n.name);
-    return Array.from(
-      new Set([
-        ...orgNames,
-        ...HQ_DEFAULT_DEPARTMENTS,
-        ...existingDepartments.filter(Boolean),
-      ])
-    );
-  }, [companyExtra?.org_chart_nodes, existingDepartments]);
+  const deptOptions = useMemo(
+    () => getRegisteredOrgNames(companyExtra?.org_chart_nodes),
+    [companyExtra?.org_chart_nodes]
+  );
 
   const titleSuggestions = useMemo(
     () =>
@@ -888,35 +881,109 @@ export default function HqMemberProfileModal({
             >
               {activeTab === "info" && (
                 <>
-                  {/* (1) 인사 정보 */}
+                  {/* (1) 인사 정보 (Flex 3행 구조: 조직·직책 / 직무·직군 / 직위·직급) */}
                   <section id="sec-hr" className="scroll-mt-4">
-                    <SectionHeader
-                      title="인사 정보"
-                      actionLabel={isHrManager ? "✏️ 변경" : undefined}
-                      onAction={isHrManager ? openHrEdit : undefined}
-                    />
-                    <div className="divide-y divide-slate-100 border-t border-slate-100">
-                      <InfoRow icon="🏢" label="소속 · 직책">
-                        <span className="font-semibold text-slate-800">
-                          {member.department}
-                        </span>
-                        <span className="mx-2 text-slate-300">|</span>
-                        <span className="text-slate-700">
-                          {member.job_title} ({rankMeta.label})
-                        </span>
-                        {member.is_dept_head && (
-                          <span className="ml-2 px-2 py-0.5 rounded bg-indigo-50 text-indigo-700 text-[11px] font-bold">
-                            조직장(1차 결재권자)
+                    <div className="flex items-center justify-between pb-2.5">
+                      <h4 className="text-[14px] font-extrabold text-slate-900">
+                        인사 정보
+                      </h4>
+                      <div className="flex items-center gap-3 text-xs">
+                        {(ex.hr_effective_date || member.hire_date) && (
+                          <span className="text-slate-400 font-medium">
+                            🕒{" "}
+                            {String(ex.hr_effective_date || member.hire_date)
+                              .replace(/-/g, ". ")}{" "}
+                            ~ 현재
                           </span>
                         )}
+                        {isHrManager && (
+                          <button
+                            type="button"
+                            onClick={() => setEditModal("hr")}
+                            className="text-slate-500 hover:text-slate-900 font-bold"
+                          >
+                            ✏️ 변경
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="divide-y divide-slate-100 border-t border-slate-100">
+                      <InfoRow icon="品" label="조직 · 직책">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="text-slate-400 text-xs">주조직</span>
+                          <span className="font-semibold text-slate-800">
+                            {member.department || "미지정"}
+                          </span>
+                          {member.job_title && (
+                            <>
+                              <span className="text-slate-300">·</span>
+                              <span className="font-semibold text-slate-800">
+                                {member.job_title}
+                              </span>
+                            </>
+                          )}
+                          {member.is_dept_head && (
+                            <span className="px-1.5 py-0.5 rounded bg-emerald-50 text-[#00a84b] text-[10px] font-extrabold">
+                              조직장
+                            </span>
+                          )}
+                          {(ex.org_assignments || [])
+                            .filter((a) => !a.is_primary)
+                            .map((sub) => (
+                              <span
+                                key={sub.id}
+                                className="px-2 py-0.5 rounded-md bg-slate-100 text-slate-600 text-xs font-semibold"
+                              >
+                                겸직: {sub.org_name}
+                                {sub.title ? ` · ${sub.title}` : ""}
+                              </span>
+                            ))}
+                        </div>
                       </InfoRow>
-                      <InfoRow icon="💼" label="담당 직무">
-                        {member.job_description ? (
-                          <span className="text-slate-800">
+
+                      <InfoRow icon="✏️" label="직무 · 직군">
+                        <span className="text-slate-400 mr-1.5">직무</span>
+                        {ex.hr_jobs_selected &&
+                        ex.hr_jobs_selected.length > 0 ? (
+                          <span className="font-semibold text-slate-800 mr-4">
+                            {ex.hr_jobs_selected.join(", ")}
+                          </span>
+                        ) : member.job_description ? (
+                          <span className="font-semibold text-slate-800 mr-4">
                             {member.job_description}
                           </span>
                         ) : (
-                          <EmptyText />
+                          <span className="text-slate-300 mr-4">없음</span>
+                        )}
+
+                        <span className="text-slate-400 mr-1.5">직군</span>
+                        {ex.hr_job_group ? (
+                          <span className="font-semibold text-slate-800">
+                            {ex.hr_job_group}
+                          </span>
+                        ) : (
+                          <span className="text-slate-300">없음</span>
+                        )}
+                      </InfoRow>
+
+                      <InfoRow icon="🎖️" label="직위 · 직급">
+                        <span className="text-slate-400 mr-1.5">직위</span>
+                        {ex.hr_position || member.job_title ? (
+                          <span className="font-semibold text-slate-800 mr-4">
+                            {ex.hr_position || member.job_title}
+                          </span>
+                        ) : (
+                          <span className="text-slate-300 mr-4">없음</span>
+                        )}
+
+                        <span className="text-slate-400 mr-1.5">직급</span>
+                        {ex.hr_grade ? (
+                          <span className="font-semibold text-slate-800">
+                            {ex.hr_grade}
+                          </span>
+                        ) : (
+                          <span className="text-slate-300">없음</span>
                         )}
                       </InfoRow>
                     </div>
@@ -2535,154 +2602,13 @@ export default function HqMemberProfileModal({
       {/* 서브 편집 모달들 (각 섹션 ✏️ 변경 / + 추가 클릭 시 열림)               */}
       {/* =================================================================== */}
 
-      {/* 1. 인사 정보 편집 (HR 전용) */}
-      {editModal === "hr" && (
-        <SubDialog
-          title="인사 발령 · 직급 · 직무 변경"
-          saving={saving}
-          onClose={() => setEditModal(null)}
-          onSubmit={() => {
-            const finalDept =
-              hrForm.department === "__CUSTOM__"
-                ? hrForm.customDept.trim() || "미지정"
-                : hrForm.department;
-            patchMember(
-              {
-                department: finalDept,
-                rank_code: hrForm.rank_code,
-                job_title: hrForm.job_title,
-                employee_no: hrForm.employee_no,
-                job_description: hrForm.job_description,
-                is_dept_head: hrForm.is_dept_head,
-                work_status: hrForm.work_status,
-                resign_date:
-                  hrForm.work_status === "퇴직" ? hrForm.resign_date || null : null,
-              },
-              "인사 발령·직급 정보 변경"
-            );
-          }}
-        >
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <Field label="소속 부서">
-              <select
-                value={hrForm.department}
-                onChange={(e) =>
-                  setHrForm({ ...hrForm, department: e.target.value })
-                }
-                className="w-full px-3 py-2 rounded-xl border border-slate-300 font-bold"
-              >
-                {deptOptions.map((d) => (
-                  <option key={d} value={d}>
-                    {d}
-                  </option>
-                ))}
-                <option value="__CUSTOM__">+ 새 부서 직접 입력</option>
-              </select>
-              {hrForm.department === "__CUSTOM__" && (
-                <input
-                  value={hrForm.customDept}
-                  onChange={(e) =>
-                    setHrForm({ ...hrForm, customDept: e.target.value })
-                  }
-                  placeholder="신규 부서명"
-                  className="mt-2 w-full px-3 py-2 rounded-xl border border-blue-300 font-bold"
-                />
-              )}
-            </Field>
-
-            <Field label="직급 단계 (결재선 레벨)">
-              <select
-                value={hrForm.rank_code}
-                onChange={(e) => {
-                  const next = e.target.value as HqRankCode;
-                  setHrForm({
-                    ...hrForm,
-                    rank_code: next,
-                    job_title: getRankMeta(next).defaultTitle,
-                  });
-                }}
-                className="w-full px-3 py-2 rounded-xl border border-slate-300 font-bold"
-              >
-                {HQ_RANK_LIST.map((r) => (
-                  <option key={r.code} value={r.code}>
-                    {r.label}
-                  </option>
-                ))}
-              </select>
-            </Field>
-
-            <Field label="직책 · 호칭">
-              <input
-                list="hq-profile-title-suggestions"
-                value={hrForm.job_title}
-                onChange={(e) =>
-                  setHrForm({ ...hrForm, job_title: e.target.value })
-                }
-                className="w-full px-3 py-2 rounded-xl border border-slate-300 font-bold"
-              />
-              {titleSuggestions.length > 0 && (
-                <datalist id="hq-profile-title-suggestions">
-                  {titleSuggestions.map((t) => (
-                    <option key={t} value={t} />
-                  ))}
-                </datalist>
-              )}
-            </Field>
-
-            <Field
-              label={
-                empNoLocked && Boolean(member.employee_no)
-                  ? "사번 (🔒 사번 수정 잠금 중)"
-                  : "사번"
-              }
-            >
-              <input
-                disabled={empNoLocked && Boolean(member.employee_no)}
-                value={hrForm.employee_no}
-                onChange={(e) =>
-                  setHrForm({ ...hrForm, employee_no: e.target.value })
-                }
-                className="w-full px-3 py-2 rounded-xl border border-slate-300 disabled:bg-slate-100 disabled:text-slate-500"
-              />
-            </Field>
-
-            <div className="sm:col-span-2">
-              <Field label="담당 직무 설명">
-                <input
-                  list="hq-profile-job-suggestions"
-                  value={hrForm.job_description}
-                  onChange={(e) =>
-                    setHrForm({ ...hrForm, job_description: e.target.value })
-                  }
-                  placeholder="예: 교재 집필, 편집, 디자인, 마케팅"
-                  className="w-full px-3 py-2 rounded-xl border border-slate-300"
-                />
-                {jobSuggestions.length > 0 && (
-                  <datalist id="hq-profile-job-suggestions">
-                    {jobSuggestions.map((j) => (
-                      <option key={j} value={j} />
-                    ))}
-                  </datalist>
-                )}
-              </Field>
-            </div>
-          </div>
-
-          <label className="flex items-center gap-2 pt-2 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={hrForm.is_dept_head}
-              onChange={(e) =>
-                setHrForm({ ...hrForm, is_dept_head: e.target.checked })
-              }
-              className="w-4 h-4 accent-brand rounded"
-            />
-            <span className="text-xs font-bold text-slate-700">
-              부서장(조직장)으로 지정 — 소속 부서원 기안 시 1차 결재자로 자동 추천
-            </span>
-          </label>
-        </SubDialog>
-      )}
+      {/* 1. 인사 정보 변경하기 (플렉스형 작은 모달 — 직무/직군/직위/직급 + 조직·직책 트리 연동) */}
+      <HqMemberHrChangeModal
+        isOpen={editModal === "hr"}
+        member={member}
+        onClose={() => setEditModal(null)}
+        onSaved={onSaved}
+      />
 
       {/* 2. 기본 정보 편집 */}
       {editModal === "basic" && (

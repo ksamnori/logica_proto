@@ -45,6 +45,16 @@ function sanitizeExtraForViewer(
     return {
       nickname: src.nickname || "",
       bio: src.bio || "",
+      hr_effective_date: src.hr_effective_date || "",
+      hr_jobs_selected: Array.isArray(src.hr_jobs_selected)
+        ? src.hr_jobs_selected
+        : [],
+      hr_job_group: src.hr_job_group || "",
+      hr_position: src.hr_position || "",
+      hr_grade: src.hr_grade || "",
+      org_assignments: Array.isArray(src.org_assignments)
+        ? src.org_assignments
+        : [],
       work_schedule_type: src.work_schedule_type || "기본 9시",
       work_schedule_mode: src.work_schedule_mode || "고정",
       weekly_work_hours: Number(src.weekly_work_hours ?? 40),
@@ -57,6 +67,18 @@ function sanitizeExtraForViewer(
     personal_email: src.personal_email || "",
     group_hire_date: src.group_hire_date || "",
     hire_type: src.hire_type || "",
+    hr_effective_date: src.hr_effective_date || "",
+    hr_appointment_label: src.hr_appointment_label || "",
+    hr_appointment_memo: src.hr_appointment_memo || "",
+    hr_jobs_selected: Array.isArray(src.hr_jobs_selected)
+      ? src.hr_jobs_selected
+      : [],
+    hr_job_group: src.hr_job_group || "",
+    hr_position: src.hr_position || "",
+    hr_grade: src.hr_grade || "",
+    org_assignments: Array.isArray(src.org_assignments)
+      ? src.org_assignments
+      : [],
     rrn_front: src.rrn_front
       ? String(src.rrn_front).replace(/[^0-9]/g, "").slice(0, 6)
       : "",
@@ -704,6 +726,14 @@ export async function PATCH(req: NextRequest) {
         const hrOnlyKeys: (keyof HqProfileExtra)[] = [
           "group_hire_date",
           "hire_type",
+          "hr_effective_date",
+          "hr_appointment_label",
+          "hr_appointment_memo",
+          "hr_jobs_selected",
+          "hr_job_group",
+          "hr_position",
+          "hr_grade",
+          "org_assignments",
           "work_schedule_type",
           "work_schedule_mode",
           "weekly_work_hours",

@@ -9,6 +9,7 @@ import HqMemberProfileModal from "@/components/hq/members/HqMemberProfileModal";
 import MemberFormModal from "@/components/hq/members/MemberFormModal";
 import { hqFetch, resolveStoragePublicUrl } from "@/lib/hq/clientApi";
 import { getRankMeta, HQ_RANK_LIST } from "@/lib/hq/constants";
+import { getRegisteredOrgNames } from "@/lib/hq/orgTreeHelper";
 import type {
   HqHrLifecycleState,
   HqInviteCandidateItem,
@@ -255,16 +256,11 @@ export default function HqMembersPage() {
     await refreshCompanySettings();
   };
 
-  const existingDepartments = useMemo(() => {
-    const set = new Set<string>();
-    (companySettings?.extra_settings?.org_chart_nodes || [])
-      .filter((n) => !n.is_hidden && n.parent_id !== null)
-      .forEach((n) => set.add(n.name));
-    members.forEach((m) => {
-      if (m.department && m.department !== "미지정") set.add(m.department);
-    });
-    return Array.from(set).sort((a, b) => a.localeCompare(b, "ko"));
-  }, [members, companySettings?.extra_settings?.org_chart_nodes]);
+  // 조직도 설정(org_chart_nodes)에 등록된 조직만 단일 기준으로 노출
+  const existingDepartments = useMemo(
+    () => getRegisteredOrgNames(companySettings?.extra_settings?.org_chart_nodes),
+    [companySettings?.extra_settings?.org_chart_nodes]
+  );
 
   const activeProfileMember = useMemo(
     () => members.find((m) => m.instructor_id === profileTargetId) || null,

@@ -3,6 +3,8 @@
 
 import React, { useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import HqOrgChartSettingsModal from "@/components/hq/org-chart/HqOrgChartSettingsModal";
+import { hqFetch } from "@/lib/hq/clientApi";
 import { HQ_EMPLOYMENT_TYPES } from "@/lib/hq/constants";
 import {
   DEFAULT_ORG_CHART_NODES,
@@ -1676,287 +1678,34 @@ export default function HqHrInfoSettingsSection({
       )}
 
       {/* ================================================================= */}
-      {/* 모달 D: 조직도 설정 (Images 8 & 9)                                 */}
+      {/* 모달 D: 플렉스형 조직도 설정 (하위 조직 추가/삭제 · 이동 · 숨김 통합) */}
       {/* ================================================================= */}
-      {subModal === "org_chart" && (
-        <div className="fixed inset-0 bg-slate-900/45 z-[70] flex items-center justify-center p-4">
-          <div className="bg-white w-full max-w-[520px] h-[680px] max-h-[88vh] rounded-2xl shadow-2xl border border-slate-200 flex flex-col overflow-hidden p-7">
-            {/* 상단 우측 메뉴 & 닫기 */}
-            <div className="flex items-center justify-end gap-2 relative shrink-0">
-              {canEdit && (
-                <button
-                  type="button"
-                  onClick={() => setOrgTopMenuOpen((p) => !p)}
-                  className="w-7 h-7 rounded-lg hover:bg-slate-100 text-slate-400 hover:text-slate-700 font-bold text-sm"
-                >
-                  ⋯
-                </button>
-              )}
-              <button
-                type="button"
-                onClick={() => setSubModal(null)}
-                className="w-6 h-6 rounded-full bg-slate-200/80 hover:bg-slate-300 text-slate-500 flex items-center justify-center text-xs font-bold"
-              >
-                ✕
-              </button>
-
-              {orgTopMenuOpen && (
-                <div className="absolute right-8 top-7 w-52 rounded-xl bg-white border border-slate-200 shadow-xl py-1.5 z-30 text-xs">
-                  <button
-                    type="button"
-                    onClick={handleSyncFromActualDepartments}
-                    className="w-full px-3.5 py-2 text-left font-semibold text-slate-700 hover:bg-slate-50"
-                  >
-                    🔄 재직 구성원 부서 자동 동기화
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setOrgTopMenuOpen(false);
-                      setOrgDraft(DEFAULT_ORG_CHART_NODES.map((n) => ({ ...n })));
-                    }}
-                    className="w-full px-3.5 py-2 text-left font-semibold text-slate-500 hover:bg-slate-50"
-                  >
-                    기본 조직도로 초기화
-                  </button>
-                </div>
-              )}
-            </div>
-
-            {/* 타이틀 + 적용일/메모 칩 */}
-            <div className="mt-1 shrink-0 relative">
-              <h3 className="text-xl font-extrabold text-slate-900">
-                조직도 설정
-              </h3>
-
-              <div className="mt-3 flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setOrgDateOpen((p) => !p);
-                    setOrgGuideStep(0);
-                  }}
-                  className={`px-2.5 py-1 rounded-lg bg-orange-50 text-orange-600 text-xs font-bold ${
-                    orgGuideStep === 1
-                      ? "ring-2 ring-blue-400 border border-blue-300"
-                      : "border border-orange-200/80"
-                  }`}
-                >
-                  적용일 {effectiveLabel}
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => {
-                    setOrgMemoOpen((p) => !p);
-                    setOrgGuideStep(0);
-                  }}
-                  className={`px-2.5 py-1 rounded-lg border text-xs font-semibold ${
-                    orgGuideStep === 2
-                      ? "ring-2 ring-blue-400 border-blue-300 bg-white text-slate-800"
-                      : orgMemo
-                        ? "bg-blue-50 border-blue-200 text-blue-700"
-                        : "bg-slate-100 border-slate-200/70 text-slate-500"
-                  }`}
-                >
-                  메모{orgMemo ? " ✓" : ""}
-                </button>
-              </div>
-
-              {/* Image 8 스타일 2단계 온보딩 툴팁 */}
-              {orgGuideStep > 0 && (
-                <div className="absolute left-0 top-20 z-30 w-64 rounded-xl bg-[#1e2329] text-white p-4 shadow-xl text-xs">
-                  {orgGuideStep === 1 ? (
-                    <>
-                      <div className="font-bold mb-1">
-                        조직도의 적용 시점을 설정해보세요.
-                      </div>
-                      <p className="text-[11px] text-slate-300 leading-relaxed">
-                        조직별로 설정하던 조직의 시작, 종료일을 &apos;적용일&apos;로 한번에 설정할 수 있어요.
-                      </p>
-                    </>
-                  ) : (
-                    <>
-                      <div className="font-bold mb-1">
-                        조직 개편 메모를 함께 남겨보세요.
-                      </div>
-                      <p className="text-[11px] text-slate-300 leading-relaxed">
-                        조직 개편 사유나 변경 내역을 메모로 기록해 두면 언제든 확인할 수 있어요.
-                      </p>
-                    </>
-                  )}
-                  <div className="mt-3.5 flex items-center justify-between">
-                    <div className="flex items-center gap-1.5">
-                      <span
-                        className={`w-1.5 h-1.5 rounded-full ${
-                          orgGuideStep === 1 ? "bg-white" : "bg-slate-600"
-                        }`}
-                      />
-                      <span
-                        className={`w-1.5 h-1.5 rounded-full ${
-                          orgGuideStep === 2 ? "bg-white" : "bg-slate-600"
-                        }`}
-                      />
-                    </div>
-                    <div className="flex items-center gap-3">
-                      <button
-                        type="button"
-                        onClick={() => setOrgGuideStep(0)}
-                        className="text-[11px] font-semibold text-slate-400 hover:text-white"
-                      >
-                        닫기
-                      </button>
-                      {orgGuideStep === 1 ? (
-                        <button
-                          type="button"
-                          onClick={() => setOrgGuideStep(2)}
-                          className="text-[11px] font-bold text-white hover:underline"
-                        >
-                          다음
-                        </button>
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={() => setOrgGuideStep(0)}
-                          className="text-[11px] font-bold text-emerald-400 hover:underline"
-                        >
-                          확인
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {orgDateOpen && (
-                <div className="mt-2.5 flex items-center gap-2">
-                  <input
-                    type="date"
-                    value={orgEffectiveDate}
-                    onChange={(e) => setOrgEffectiveDate(e.target.value)}
-                    className="px-3 py-1.5 rounded-lg border border-slate-300 text-xs font-bold"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setOrgEffectiveDate(todayIso)}
-                    className="px-2.5 py-1.5 rounded-lg bg-slate-100 text-xs font-bold text-slate-600"
-                  >
-                    오늘
-                  </button>
-                </div>
-              )}
-
-              {orgMemoOpen && (
-                <div className="mt-2.5">
-                  <input
-                    value={orgMemo}
-                    onChange={(e) => setOrgMemo(e.target.value)}
-                    placeholder="조직 개편 사유나 메모를 남겨보세요."
-                    className="w-full px-3 py-2 rounded-lg border border-slate-200 bg-slate-50 text-xs"
-                  />
-                </div>
-              )}
-            </div>
-
-            {/* 전체(N) + 검색 / 추가 / 모두 접기 툴바 */}
-            <div className="mt-6 pb-2.5 border-b border-slate-100 flex items-center justify-between text-xs shrink-0">
-              <span className="font-bold text-slate-800">
-                전체 ({orgDraft.length})
-              </span>
-
-              <div className="flex items-center gap-2.5 text-slate-500">
-                <button
-                  type="button"
-                  onClick={() => setOrgSearchOpen((p) => !p)}
-                  className="hover:text-slate-900"
-                  title="조직 검색"
-                >
-                  🔍
-                </button>
-                {canEdit && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const ceoNode = orgDraft.find((n) => n.name === "대표");
-                      setAddingNodeParentId(ceoNode ? ceoNode.id : null);
-                      if (ceoNode && !expandedNodeIds.includes(ceoNode.id)) {
-                        setExpandedNodeIds((prev) => [...prev, ceoNode.id]);
-                      }
-                      setNewNodeName("");
-                    }}
-                    className="font-bold text-base leading-none hover:text-slate-900"
-                    title="부서 추가"
-                  >
-                    +
-                  </button>
-                )}
-                <span className="text-slate-200">|</span>
-                <button
-                  type="button"
-                  onClick={toggleAllOrgExpand}
-                  className="text-[11px] font-semibold text-slate-500 hover:text-slate-900"
-                >
-                  {expandedNodeIds.length > 0 ? "⤡ 모두 접기" : "⤢ 모두 펼치기"}
-                </button>
-              </div>
-            </div>
-
-            {orgSearchOpen && (
-              <div className="py-2 border-b border-slate-100 shrink-0">
-                <input
-                  autoFocus
-                  value={orgSearchQuery}
-                  onChange={(e) => setOrgSearchQuery(e.target.value)}
-                  placeholder="부서·조직명 검색..."
-                  className="w-full px-3 py-1.5 rounded-lg bg-slate-50 border border-slate-200 text-xs focus:outline-none"
-                />
-              </div>
-            )}
-
-            {/* 트리 본문 */}
-            <div className="flex-1 overflow-y-auto custom-scroll py-1">
-              {addingNodeParentId === null && (
-                <div className="py-2.5 px-2 bg-emerald-50/40 border-b border-emerald-100 flex items-center gap-2">
-                  <input
-                    autoFocus
-                    value={newNodeName}
-                    onChange={(e) => setNewNodeName(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") handleAddOrgNode();
-                      if (e.key === "Escape") setAddingNodeParentId("CLOSED");
-                    }}
-                    placeholder="최상위 조직명 입력"
-                    className="flex-1 px-2.5 py-1.5 rounded-lg border border-emerald-300 bg-white text-xs font-bold"
-                  />
-                  <button
-                    type="button"
-                    onClick={handleAddOrgNode}
-                    className="px-3 py-1.5 rounded-lg bg-emerald-600 text-white text-xs font-bold"
-                  >
-                    추가
-                  </button>
-                </div>
-              )}
-
-              {renderOrgTreeNodes(null, 0)}
-            </div>
-
-            {/* 하단 풀사이즈 그라데이션 저장하기 버튼 (Images 8 & 9 동일) */}
-            {canEdit && (
-              <div className="pt-4 shrink-0">
-                <button
-                  type="button"
-                  disabled={saving}
-                  onClick={handleSaveOrgChart}
-                  className="w-full py-3.5 rounded-xl bg-gradient-to-r from-[#00c73c] to-[#00b894] hover:opacity-95 text-white text-xs font-extrabold shadow-md transition-opacity"
-                >
-                  {saving ? "저장 중..." : "저장하기"}
-                </button>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
+      <HqOrgChartSettingsModal
+        isOpen={subModal === "org_chart"}
+        initialNodes={orgNodes}
+        initialEffectiveDate={ex.org_chart_effective_date}
+        initialMemo={ex.org_chart_memo}
+        members={members}
+        saving={saving}
+        onClose={() => setSubModal(null)}
+        onSave={async (payload) => {
+          if (Object.keys(payload.renameMap).length > 0) {
+            await hqFetch("/api/hq/settings", {
+              method: "PATCH",
+              body: { org_rename_map: payload.renameMap },
+            }).catch(() => {});
+          }
+          await onSaveExtra(
+            {
+              org_chart_nodes: payload.nodes,
+              org_chart_effective_date: payload.effectiveDate,
+              org_chart_memo: payload.memo,
+            },
+            "조직도 설정이 저장되었습니다."
+          );
+          setSubModal(null);
+        }}
+      />
 
       {/* ================================================================= */}
       {/* 모달 E: 사번 자동 부여 정책 추가/수정                              */}

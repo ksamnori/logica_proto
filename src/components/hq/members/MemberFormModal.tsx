@@ -5,11 +5,14 @@ import React, { useEffect, useMemo, useState } from "react";
 import { useOptionalHqShell } from "@/components/hq/HqShellContext";
 import {
   getRankMeta,
-  HQ_DEFAULT_DEPARTMENTS,
   HQ_EMPLOYMENT_TYPES,
   HQ_RANK_LIST,
 } from "@/lib/hq/constants";
 import { hqFetch } from "@/lib/hq/clientApi";
+import {
+  buildFlatOrgTreeOptions,
+  getRegisteredOrgNames,
+} from "@/lib/hq/orgTreeHelper";
 import type { HqMember, HqRankCode, HqWorkStatus } from "@/lib/hq/types";
 
 interface Props {
@@ -38,10 +41,9 @@ export default function MemberFormModal({
   const [password, setPassword] = useState("");
   const [email, setEmail] = useState("");
   const [employeeNo, setEmployeeNo] = useState("");
-  const [department, setDepartment] = useState<string>(HQ_DEFAULT_DEPARTMENTS[0]);
-  const [customDept, setCustomDept] = useState("");
+  const [department, setDepartment] = useState<string>("집필팀");
   const [rankCode, setRankCode] = useState<HqRankCode>("STAFF");
-  const [jobTitle, setJobTitle] = useState("연구원");
+  const [jobTitle, setJobTitle] = useState("사원");
   const [isDeptHead, setIsDeptHead] = useState(false);
   const [employmentType, setEmploymentType] = useState("정규직");
   const [workStatus, setWorkStatus] = useState<HqWorkStatus>("재직");
@@ -63,19 +65,19 @@ export default function MemberFormModal({
   const empNoLocked = Boolean(extraSettings?.emp_no_locked);
   const hasAutoEmpPolicy = (extraSettings?.emp_no_policies?.length || 0) > 0;
 
-  const deptOptions = useMemo(() => {
-    const orgNames = (extraSettings?.org_chart_nodes || [])
-      .filter((n) => !n.is_hidden && n.name !== "퇴직")
-      .sort((a, b) => a.order - b.order)
-      .map((n) => n.name);
-    return Array.from(
-      new Set([
-        ...orgNames,
-        ...HQ_DEFAULT_DEPARTMENTS,
-        ...existingDepartments.filter(Boolean),
-      ])
-    );
-  }, [extraSettings?.org_chart_nodes, existingDepartments]);
+  const orgTreeOptions = useMemo(
+    () =>
+      buildFlatOrgTreeOptions(extraSettings?.org_chart_nodes, [], {
+        includeHiddenSystemNodes: false,
+        excludeRetired: true,
+      }),
+    [extraSettings?.org_chart_nodes]
+  );
+
+  const deptOptions = useMemo(
+    () => getRegisteredOrgNames(extraSettings?.org_chart_nodes),
+    [extraSettings?.org_chart_nodes]
+  );
 
   const titleSuggestions = useMemo(
     () =>
@@ -109,10 +111,11 @@ export default function MemberFormModal({
       setPassword("");
       setEmail("");
       setEmployeeNo("");
-      setDepartment(HQ_DEFAULT_DEPARTMENTS[0]);
-      setCustomDept("");
+      setDepartment(
+        deptOptions.find((d) => d !== "대표") || deptOptions[0] || "집필팀"
+      );
       setRankCode("STAFF");
-      setJobTitle("연구원");
+      setJobTitle("사원");
       setIsDeptHead(false);
       setEmploymentType("정규직");
       setWorkStatus("재직");
@@ -134,13 +137,11 @@ export default function MemberFormModal({
       setPassword("");
       setEmail(member.email || "");
       setEmployeeNo(member.employee_no || "");
-      if (deptOptions.includes(member.department)) {
-        setDepartment(member.department);
-        setCustomDept("");
-      } else {
-        setDepartment("__CUSTOM__");
-        setCustomDept(member.department || "");
-      }
+      setDepartment(
+        deptOptions.includes(member.department)
+          ? member.department
+          : deptOptions.find((d) => d !== "대표") || deptOptions[0] || "집필팀"
+      );
       setRankCode(member.rank_code);
       setJobTitle(member.job_title);
       setIsDeptHead(member.is_dept_head);
@@ -175,8 +176,7 @@ export default function MemberFormModal({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const finalDept =
-      department === "__CUSTOM__" ? customDept.trim() || "미지정" : department;
+    const finalDept = department || "집필팀";
 
     setSaving(true);
     try {
@@ -377,28 +377,19 @@ export default function MemberFormModal({
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
                 <div>
                   <label className="block text-xs font-bold text-slate-700 mb-1">
-                    소속 부서
+                    소속 조직 (조직도 기준)
                   </label>
                   <select
                     value={department}
                     onChange={(e) => setDepartment(e.target.value)}
                     className="w-full px-3.5 py-2 rounded-xl border border-slate-300 bg-white font-bold text-slate-800"
                   >
-                    {deptOptions.map((d) => (
-                      <option key={d} value={d}>
-                        {d}
+                    {orgTreeOptions.map((opt) => (
+                      <option key={opt.id} value={opt.name}>
+                        {opt.indentedLabel}
                       </option>
                     ))}
-                    <option value="__CUSTOM__">+ 새 부서 직접 입력</option>
                   </select>
-                  {department === "__CUSTOM__" && (
-                    <input
-                      value={customDept}
-                      onChange={(e) => setCustomDept(e.target.value)}
-                      className="mt-2 w-full px-3.5 py-2 rounded-xl border border-blue-300 bg-white font-bold text-slate-800"
-                      placeholder="신규 부서명 입력 (예: 콘텐츠기획팀)"
-                    />
-                  )}
                 </div>
 
                 <div>
