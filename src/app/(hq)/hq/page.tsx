@@ -4,6 +4,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useHqShell } from "@/components/hq/HqShellContext";
+import HqCalendarSidebar from "@/components/hq/HqCalendarSidebar";
 import ApprovalCreateModal from "@/components/hq/approvals/ApprovalCreateModal";
 import ApprovalDetailModal from "@/components/hq/approvals/ApprovalDetailModal";
 import CertificatePrintModal from "@/components/hq/members/CertificatePrintModal";
@@ -41,6 +42,7 @@ export default function HqHomeDashboardPage() {
     unreadChatCount,
     schemaMissing,
     canAccessMenu,
+    openChatDrawer,
     refreshMembers,
     refreshApprovalBadge,
   } = useHqShell();
@@ -291,14 +293,14 @@ export default function HqHomeDashboardPage() {
       });
     }
 
-    if (unreadChatCount > 0) {
+    if (unreadChatCount > 0 && canAccessMenu("/hq/messenger")) {
       items.push({
         id: "unread-chat",
         tone: "info",
         badge: "사내 메신저",
         text: `읽지 않은 전사 메신저 대화가 ${unreadChatCount}건 도착해 있습니다.`,
         actionLabel: "메신저 열기 →",
-        onClick: () => goHq("/hq/messenger"),
+        onClick: () => openChatDrawer(),
       });
     }
 
@@ -326,6 +328,7 @@ export default function HqHomeDashboardPage() {
     books,
     unreadChatCount,
     canAccessMenu,
+    openChatDrawer,
     goHq,
   ]);
 
@@ -344,7 +347,8 @@ export default function HqHomeDashboardPage() {
 
   return (
     <>
-      <div className="p-4 sm:p-6 space-y-6 w-full break-keep print:hidden">
+      <div className="flex-1 flex flex-col xl:flex-row min-h-0 w-full break-keep print:hidden">
+        <div className="flex-1 min-w-0 p-4 sm:p-6 space-y-6">
         {/* 1. 상단 직급·맥락 기반 워크스페이스 브리핑 & 빠른 액션 */}
         <section className="rounded-3xl bg-gradient-to-br from-slate-900 via-slate-800 to-brand text-white p-5 sm:p-7 shadow-lg border border-slate-800">
           <div className="flex flex-col gap-5">
@@ -476,7 +480,7 @@ export default function HqHomeDashboardPage() {
         </section>
 
         {/* 2. 핵심 HR · 결재 · 비용 KPI 요약 카드 4종 */}
-        <section className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+        <section className="grid grid-cols-1 sm:grid-cols-2 2xl:grid-cols-4 gap-4">
           <div
             onClick={() => goHq("/hq/approvals")}
             className="bg-white rounded-2xl p-5 border border-slate-200 shadow-xs hover:border-brand/40 cursor-pointer transition-all"
@@ -574,9 +578,9 @@ export default function HqHomeDashboardPage() {
         </section>
 
         {/* 3. 하단 메인 그리드: 좌측 결재 워크플로우 / 우측 직급 체계 & 조직 요약 */}
-        <section className="grid grid-cols-1 xl:grid-cols-12 gap-5">
+        <section className="grid grid-cols-1 2xl:grid-cols-12 gap-5">
           {/* 좌측 7칸: 내 결재 차례 & 최근 상신 문서 */}
-          <div className="xl:col-span-7 space-y-5 min-w-0">
+          <div className="2xl:col-span-7 space-y-5 min-w-0">
             {/* 내 결재 차례 박스 */}
             <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
               <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
@@ -739,7 +743,7 @@ export default function HqHomeDashboardPage() {
           </div>
 
           {/* 우측 5칸: 직급별 결재 단계 규정 & 부서 조직 요약 */}
-          <div className="xl:col-span-5 space-y-5 min-w-0">
+          <div className="2xl:col-span-5 space-y-5 min-w-0">
             {/* 직급별 결재 단계 및 자동 전결 기준 안내 */}
             <div className="bg-white rounded-2xl border border-slate-200 shadow-xs p-5 space-y-4">
               <div className="flex items-center justify-between">
@@ -871,18 +875,24 @@ export default function HqHomeDashboardPage() {
                       );
                     })}
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => goHq("/hq/messenger")}
-                    className="text-xs font-bold text-slate-600 hover:text-brand"
-                  >
-                    💬 사내 메신저 열기
-                  </button>
+                  {canAccessMenu("/hq/messenger") && (
+                    <button
+                      type="button"
+                      onClick={() => openChatDrawer()}
+                      className="text-xs font-bold text-slate-600 hover:text-brand"
+                    >
+                      💬 사내 메신저 열기
+                    </button>
+                  )}
                 </div>
               )}
             </div>
           </div>
         </section>
+        </div>
+
+        {/* 우측: Google 캘린더 + 본부 통합 일정 사이드바 */}
+        <HqCalendarSidebar />
       </div>
 
       {/* 기안 작성 모달 */}

@@ -132,13 +132,16 @@ export default function HqSidebar() {
               key={item.href}
               href={hqHref(item.href)}
               title={item.label}
-              className={`w-10 h-10 rounded-xl flex items-center justify-center text-base transition-all shrink-0 ${
+              className={`relative w-10 h-10 rounded-xl flex items-center justify-center text-base transition-all shrink-0 ${
                 isActive(item.href)
                   ? "bg-brand text-white shadow-md"
                   : "text-slate-300 hover:bg-slate-800 hover:text-white"
               }`}
             >
-              {item.icon}
+              <span>{item.icon}</span>
+              {item.href === "/hq/messenger" && unreadChatCount > 0 && (
+                <span className="absolute top-1 right-1 w-2.5 h-2.5 rounded-full bg-rose-500 ring-2 ring-slate-900" />
+              )}
             </Link>
           ))}
           {canAccessMenu("/hq/settings") && (

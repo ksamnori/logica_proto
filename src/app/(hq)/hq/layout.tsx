@@ -3,6 +3,7 @@
 
 import React, { useEffect, useMemo, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
+import HqChatDrawer from "@/components/hq/HqChatDrawer";
 import HqHeader from "@/components/hq/HqHeader";
 import HqSchemaSetupBanner from "@/components/hq/HqSchemaSetupBanner";
 import { HqShellProvider, useHqShell } from "@/components/hq/HqShellContext";
@@ -91,6 +92,9 @@ function HqWorkspaceFrame({
           )}
         </main>
       </div>
+
+      {/* 우측 슬라이드 미니 사내 메신저 */}
+      <HqChatDrawer />
 
       {/* 내 프로필 모달 */}
       <HqMemberProfileModal

@@ -53,6 +53,10 @@ interface HqShellState {
   isBooting: boolean;
   sidebarCollapsed: boolean;
   toggleSidebar: () => void;
+  chatDrawerOpen: boolean;
+  openChatDrawer: () => void;
+  closeChatDrawer: () => void;
+  toggleChatDrawer: () => void;
   refreshMembers: () => Promise<void>;
   refreshCompanySettings: () => Promise<void>;
   refreshApprovalBadge: () => Promise<void>;
@@ -113,6 +117,14 @@ export function HqShellProvider({
   const [sessionExpired, setSessionExpired] = useState(false);
   const [isBooting, setIsBooting] = useState(true);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [chatDrawerOpen, setChatDrawerOpen] = useState(false);
+
+  const openChatDrawer = useCallback(() => setChatDrawerOpen(true), []);
+  const closeChatDrawer = useCallback(() => setChatDrawerOpen(false), []);
+  const toggleChatDrawer = useCallback(
+    () => setChatDrawerOpen((prev) => !prev),
+    []
+  );
 
   useEffect(() => {
     try {
@@ -402,6 +414,13 @@ export function HqShellProvider({
       }
     );
 
+    const unsubChatMember = subscribePostgresChanges(
+      { table: "internal_chat_member", events: ["INSERT", "UPDATE"] },
+      () => {
+        refreshChatUnread();
+      }
+    );
+
     const onApprovalChange = () => {
       refreshApprovalBadge();
       refreshMembers();
@@ -421,6 +440,7 @@ export function HqShellProvider({
 
     return () => {
       unsubMsg();
+      unsubChatMember();
       window.removeEventListener("hq:approval-updated", onApprovalChange);
       window.removeEventListener("hq:attendance-updated", onAttendanceChange);
       window.removeEventListener("hq:contract-updated", onContractChange);
@@ -528,6 +548,10 @@ export function HqShellProvider({
         isBooting,
         sidebarCollapsed,
         toggleSidebar,
+        chatDrawerOpen,
+        openChatDrawer,
+        closeChatDrawer,
+        toggleChatDrawer,
         refreshMembers,
         refreshCompanySettings,
         refreshApprovalBadge,

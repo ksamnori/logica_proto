@@ -115,9 +115,13 @@ export default function HqHeader() {
   const {
     me,
     pendingApprovalCount,
+    unreadChatCount,
     myTodayAttendance,
     sidebarCollapsed,
     toggleSidebar,
+    chatDrawerOpen,
+    toggleChatDrawer,
+    canAccessMenu,
     quickCheckIn,
     quickCheckOut,
     openProfileModal,
@@ -269,8 +273,38 @@ export default function HqHeader() {
           className="px-3.5 py-2 rounded-xl bg-brand hover:bg-brand-hover text-white text-xs font-bold shadow-sm transition-colors flex items-center gap-1.5"
         >
           <span>✍️</span>
-          <span>새 결재 기안</span>
+          <span className="hidden sm:inline">새 결재 기안</span>
         </button>
+
+        {canAccessMenu("/hq/messenger") && (
+          <button
+            type="button"
+            onClick={() => {
+              if (canonicalPath === "/hq/messenger") return;
+              toggleChatDrawer();
+            }}
+            title={
+              unreadChatCount > 0
+                ? `사내 메신저 열기 (안 읽은 메시지 ${unreadChatCount}건)`
+                : "사내 메신저 열기"
+            }
+            className={`relative px-3 py-2 rounded-xl border text-xs font-extrabold transition-all flex items-center gap-1.5 ${
+              chatDrawerOpen || canonicalPath === "/hq/messenger"
+                ? "bg-slate-900 border-slate-900 text-white shadow-xs"
+                : unreadChatCount > 0
+                  ? "bg-rose-50/80 hover:bg-rose-100 border-rose-200 text-slate-800"
+                  : "bg-slate-50 hover:bg-slate-100 border-slate-200 text-slate-700"
+            }`}
+          >
+            <span className="text-sm leading-none">💬</span>
+            <span className="hidden md:inline">메신저</span>
+            {unreadChatCount > 0 && (
+              <span className=" -top-1.5 -right-1.5 absolute min-w-[20px] h-5 px-1.5 rounded-full bg-rose-600 text-white text-[10px] font-extrabold flex items-center justify-center shadow-sm ring-2 ring-white leading-none">
+                {unreadChatCount > 99 ? "99+" : unreadChatCount}
+              </span>
+            )}
+          </button>
+        )}
 
         <div className="w-px h-5 bg-slate-200 mx-1" />
 
