@@ -165,6 +165,7 @@ export default function HqLeavesPage() {
     refreshMembers,
     refreshApprovalBadge,
     refreshAttendanceState,
+    openProfileModal,
   } = useHqShell();
 
   const now = useMemo(() => new Date(), []);
@@ -911,9 +912,9 @@ export default function HqLeavesPage() {
   };
 
   return (
-    <div className="min-h-full bg-white flex flex-col">
+    <div className="w-full min-h-full shrink-0 bg-white flex flex-col">
       {/* 상단 헤더 & 3개 서브탭 */}
-      <div className="px-10 pt-8 border-b border-slate-200">
+      <div className="px-5 sm:px-8 xl:px-10 pt-8 border-b border-slate-200">
         <h1 className="text-[22px] font-extrabold text-slate-900 tracking-tight">
           내 휴가
         </h1>
@@ -949,7 +950,25 @@ export default function HqLeavesPage() {
           탭 1: [휴가 개요] (좌우 폭 100% 확장)
          ===================================================================== */}
       {subTab === "OVERVIEW" && (
-        <div className="px-10 py-8 w-full space-y-10">
+        <div className="px-5 sm:px-8 xl:px-10 py-8 w-full space-y-10">
+          {me && !me.profile_extra?.gender && (
+            <div className="px-4 py-3 rounded-2xl bg-amber-50/70 border border-amber-200/80 flex flex-wrap items-center justify-between gap-3 text-xs">
+              <div className="flex items-center gap-2 text-amber-900 font-semibold">
+                <span>🪪</span>
+                <span>
+                  내 프로필에 <b>주민등록번호(앞 6자리 · 뒷 첫자리)</b>를 등록하면 산전후·보건·배우자출산 등 본인에게 해당하는 맞춤 휴가가 자동으로 표시됩니다.
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => openProfileModal("basic")}
+                className="px-3 py-1.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-extrabold whitespace-nowrap transition-colors"
+              >
+                주민등록번호 등록하기 →
+              </button>
+            </div>
+          )}
+
           {/* 섹션 1: 휴가 등록 */}
           <section>
             <div className="flex items-center justify-between mb-4">

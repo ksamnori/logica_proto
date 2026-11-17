@@ -34,6 +34,7 @@ interface Props {
   onBack: () => void;
   onOpenGrantModalForMember: (memberId: string, leaveId?: string) => void;
   onOpenAdjustModalForMember: (memberId: string, defaultYm?: string) => void;
+  onOpenBasicProfile?: (member: HqMember) => void;
   onSyncCustomGrants?: (next: HqCustomLeaveGrantItem[]) => void;
   onMutated: () => Promise<void>;
 }
@@ -139,6 +140,7 @@ export default function HqMemberLeaveDetailView({
   onBack,
   onOpenGrantModalForMember,
   onOpenAdjustModalForMember,
+  onOpenBasicProfile,
   onSyncCustomGrants,
   onMutated,
 }: Props) {
@@ -587,14 +589,14 @@ export default function HqMemberLeaveDetailView({
 
   return (
     <div
-      className="w-full min-h-full bg-white flex flex-col"
+      className="w-full min-h-full shrink-0 bg-white flex flex-col"
       onClick={() => {
         setMenuDocId(null);
         setGrantMenuOpen(false);
       }}
     >
-      {/* 상단 헤더: < {이름} 님의 휴가 (Screenshots 4, 6, 7) */}
-      <div className="px-9 pt-7 border-b border-slate-200">
+      {/* 상단 헤더: < {이름} 님의 휴가 */}
+      <div className="px-5 sm:px-7 xl:px-9 pt-7 border-b border-slate-200">
         <div className="flex items-center gap-2.5">
           <button
             type="button"
@@ -607,10 +609,11 @@ export default function HqMemberLeaveDetailView({
           <h1 className="text-[22px] font-extrabold text-slate-900 tracking-tight">
             {member.name} 님의 휴가
           </h1>
-          <span className="px-2 py-0.5 rounded-md bg-slate-100 text-slate-500 text-xs font-bold">
-            {member.department}
-            {memberGender ? ` · ${memberGender}성` : " · 성별 미등록"}
-          </span>
+          {member.department && member.department !== "미지정" && (
+            <span className="px-2 py-0.5 rounded-md bg-slate-100 text-slate-500 text-xs font-bold">
+              {member.department}
+            </span>
+          )}
         </div>
 
         <div className="mt-5 flex items-center gap-6">
@@ -641,7 +644,27 @@ export default function HqMemberLeaveDetailView({
 
       {/* ================= 탭 1: 휴가 개요 (플렉스 좌우 100% 확장 + 개인별 맞춤휴가 드롭다운) ================= */}
       {subTab === "OVERVIEW" && (
-        <div className="w-full px-9 py-8 space-y-10">
+        <div className="w-full px-5 sm:px-7 xl:px-9 py-8 space-y-10">
+          {!memberGender && (
+            <div className="px-4 py-3 rounded-2xl bg-amber-50/70 border border-amber-200/80 flex flex-wrap items-center justify-between gap-3 text-xs">
+              <div className="flex items-center gap-2 text-amber-900 font-semibold">
+                <span>🪪</span>
+                <span>
+                  기본 정보에 <b>주민등록번호(앞 6자리 · 뒷 첫자리)</b>가 등록되지 않아 산전후·보건·배우자출산 등 성별 기준 맞춤 휴가가 아직 표시되지 않습니다.
+                </span>
+              </div>
+              {onOpenBasicProfile && (
+                <button
+                  type="button"
+                  onClick={() => onOpenBasicProfile(member)}
+                  className="px-3 py-1.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-extrabold whitespace-nowrap transition-colors"
+                >
+                  주민등록번호 입력하기 →
+                </button>
+              )}
+            </div>
+          )}
+
           {/* 1) 휴가 등록 + 맞춤 휴가 부여 버튼 */}
           <section className="space-y-4">
             <div className="flex items-center justify-between">

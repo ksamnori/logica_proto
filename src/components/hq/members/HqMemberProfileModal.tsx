@@ -45,6 +45,7 @@ interface Props {
   meId: string;
   isHrManager: boolean;
   existingDepartments?: string[];
+  initialSubModal?: "basic" | "hr" | null;
   onClose: () => void;
   onSaved: () => void;
 }
@@ -188,6 +189,7 @@ export default function HqMemberProfileModal({
   meId,
   isHrManager,
   existingDepartments = [],
+  initialSubModal = null,
   onClose,
   onSaved,
 }: Props) {
@@ -364,11 +366,41 @@ export default function HqMemberProfileModal({
   useEffect(() => {
     if (!isOpen || !member) return;
     setActiveTab("info");
-    setEditModal(null);
     setStatusMenuOpen(false);
     setEditingBio(false);
     setBioDraft(member.profile_extra?.bio || "");
-  }, [isOpen, member?.instructor_id]);
+    if (initialSubModal === "basic") {
+      const mEx = member.profile_extra || {};
+      setBasicForm({
+        name: member.name,
+        nickname: mEx.nickname || "",
+        email: member.email || "",
+        personal_email: mEx.personal_email || "",
+        employee_no: member.employee_no || "",
+        hire_date: member.hire_date || "",
+        group_hire_date: mEx.group_hire_date || member.hire_date || "",
+        hire_type: mEx.hire_type || "",
+        rrn_front: mEx.rrn_front || "",
+        rrn_gender_digit: mEx.rrn_gender_digit || "",
+        gender: (mEx.gender as "" | "남" | "여") || "",
+        birth_date: member.birth_date || "",
+        nationality: mEx.nationality || "대한민국(KOR)",
+        phone: member.phone || "",
+        extension_no: member.extension_no || "",
+        emergency_contact: member.emergency_contact || "",
+        postal_code: mEx.postal_code || "",
+        address: member.address || "",
+        bank_name: member.bank_name || "",
+        bank_account: member.bank_account || "",
+        account_holder: member.account_holder || member.name,
+      });
+      setEditModal("basic");
+    } else if (initialSubModal === "hr") {
+      setEditModal("hr");
+    } else {
+      setEditModal(null);
+    }
+  }, [isOpen, member?.instructor_id, initialSubModal]);
 
   const companyExtra = shell?.companySettings?.extra_settings;
   const empNoLocked = Boolean(companyExtra?.emp_no_locked);
@@ -1083,22 +1115,21 @@ export default function HqMemberProfileModal({
                             <span className="text-slate-400 mr-1.5">
                               주민등록번호
                             </span>
-                            {ex.rrn_front ? (
-                              <span className="font-mono text-slate-800 mr-2">
-                                {ex.rrn_front}-{ex.rrn_gender_digit ? `${ex.rrn_gender_digit}******` : "*******"}
+                            {ex.rrn_front && ex.rrn_gender_digit ? (
+                              <span className="font-mono text-slate-800 mr-4">
+                                {ex.rrn_front}-{ex.rrn_gender_digit}******
                               </span>
                             ) : (
-                              <span className="mr-2">
+                              <span className="mr-4">
                                 <PlaceholderBtn
-                                  text="입력하기"
+                                  text={
+                                    ex.rrn_front
+                                      ? `${ex.rrn_front}- (뒷 첫자리 입력하기)`
+                                      : "입력하기"
+                                  }
                                   canClick={canEditSelfOrHr}
                                   onClick={openBasicEdit}
                                 />
-                              </span>
-                            )}
-                            {ex.gender && (
-                              <span className="px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 text-[11px] font-bold mr-4">
-                                {ex.gender}
                               </span>
                             )}
                             <span className="text-slate-400 mr-1.5">생일</span>
@@ -2612,19 +2643,45 @@ export default function HqMemberProfileModal({
         onSaved={onSaved}
       />
 
-      {/* 2. 기본 정보 편집 */}
+      {/* 2. 기본 정보 편집 (주민등록번호 기반 성별 자동 판별 · 가로 넘침 없는 정돈된 레이아웃) */}
       {editModal === "basic" && (
         <SubDialog
           title="기본 정보 변경"
+          maxWidthClass="max-w-[580px]"
           saving={saving}
           onClose={() => setEditModal(null)}
           onSubmit={() => {
+            const cleanFront = basicForm.rrn_front
+              .replace(/[^0-9]/g, "")
+              .slice(0, 6);
+            const cleanDigit = basicForm.rrn_gender_digit
+              .replace(/[^1-8]/g, "")
+              .slice(0, 1);
+            const derivedGender: "" | "남" | "여" = ["1", "3", "5", "7"].includes(
+              cleanDigit
+            )
+              ? "남"
+              : ["2", "4", "6", "8"].includes(cleanDigit)
+                ? "여"
+                : "";
+
+            let effBirthDate = basicForm.birth_date || "";
+            if (!effBirthDate && cleanFront.length === 6 && cleanDigit) {
+              const yy = cleanFront.slice(0, 2);
+              const mm = cleanFront.slice(2, 4);
+              const dd = cleanFront.slice(4, 6);
+              const century = ["1", "2", "5", "6"].includes(cleanDigit)
+                ? "19"
+                : "20";
+              effBirthDate = `${century}${yy}-${mm}-${dd}`;
+            }
+
             const payload: Record<string, unknown> = {
               phone: basicForm.phone,
               email: basicForm.email,
               extension_no: basicForm.extension_no,
               emergency_contact: basicForm.emergency_contact,
-              birth_date: basicForm.birth_date || null,
+              birth_date: effBirthDate || null,
               address: basicForm.address,
               bank_name: basicForm.bank_name,
               bank_account: basicForm.bank_account,
@@ -2632,13 +2689,9 @@ export default function HqMemberProfileModal({
               profile_extra: {
                 nickname: basicForm.nickname.trim(),
                 personal_email: basicForm.personal_email.trim(),
-                rrn_front: basicForm.rrn_front
-                  .replace(/[^0-9]/g, "")
-                  .slice(0, 6),
-                rrn_gender_digit: basicForm.rrn_gender_digit
-                  .replace(/[^0-9]/g, "")
-                  .slice(0, 1),
-                gender: basicForm.gender,
+                rrn_front: cleanFront,
+                rrn_gender_digit: cleanDigit,
+                gender: derivedGender,
                 nationality: basicForm.nationality.trim() || "대한민국(KOR)",
                 postal_code: basicForm.postal_code.trim(),
                 ...(isHrManager
@@ -2659,7 +2712,7 @@ export default function HqMemberProfileModal({
             patchMember(payload, "기본 정보 변경");
           }}
         >
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
             <Field label="본명">
               <input
                 disabled={!isHrManager}
@@ -2667,7 +2720,7 @@ export default function HqMemberProfileModal({
                 onChange={(e) =>
                   setBasicForm({ ...basicForm, name: e.target.value })
                 }
-                className="w-full px-3 py-2 rounded-xl border border-slate-300 font-bold disabled:bg-slate-100"
+                className="w-full min-w-0 px-3 py-2.5 rounded-xl border border-slate-300 font-bold disabled:bg-slate-100"
               />
             </Field>
             <Field label="닉네임 / 영어이름">
@@ -2677,7 +2730,7 @@ export default function HqMemberProfileModal({
                   setBasicForm({ ...basicForm, nickname: e.target.value })
                 }
                 placeholder="선택 입력"
-                className="w-full px-3 py-2 rounded-xl border border-slate-300"
+                className="w-full min-w-0 px-3 py-2.5 rounded-xl border border-slate-300"
               />
             </Field>
 
@@ -2688,7 +2741,7 @@ export default function HqMemberProfileModal({
                 onChange={(e) =>
                   setBasicForm({ ...basicForm, email: e.target.value })
                 }
-                className="w-full px-3 py-2 rounded-xl border border-slate-300"
+                className="w-full min-w-0 px-3 py-2.5 rounded-xl border border-slate-300"
               />
             </Field>
             <Field label="개인 이메일">
@@ -2702,12 +2755,12 @@ export default function HqMemberProfileModal({
                   })
                 }
                 placeholder="example@naver.com"
-                className="w-full px-3 py-2 rounded-xl border border-slate-300"
+                className="w-full min-w-0 px-3 py-2.5 rounded-xl border border-slate-300"
               />
             </Field>
 
             {isHrManager && (
-              <>
+              <div className="sm:col-span-2 grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <Field label="입사일">
                   <input
                     type="date"
@@ -2715,167 +2768,177 @@ export default function HqMemberProfileModal({
                     onChange={(e) =>
                       setBasicForm({ ...basicForm, hire_date: e.target.value })
                     }
-                    className="w-full px-3 py-2 rounded-xl border border-slate-300"
+                    className="w-full min-w-0 px-3 py-2.5 rounded-xl border border-slate-300"
                   />
                 </Field>
-                <Field label="그룹 입사일 / 입사 유형">
-                  <div className="flex gap-2">
-                    <input
-                      type="date"
-                      value={basicForm.group_hire_date}
-                      onChange={(e) =>
-                        setBasicForm({
-                          ...basicForm,
-                          group_hire_date: e.target.value,
-                        })
-                      }
-                      className="flex-1 px-2.5 py-2 rounded-xl border border-slate-300 text-xs"
-                    />
-                    <select
-                      value={basicForm.hire_type}
-                      onChange={(e) =>
-                        setBasicForm({
-                          ...basicForm,
-                          hire_type: e.target.value,
-                        })
-                      }
-                      className="w-24 px-2 py-2 rounded-xl border border-slate-300 text-xs font-bold"
-                    >
-                      <option value="">유형없음</option>
-                      <option value="신입">신입</option>
-                      <option value="경력">경력</option>
-                      <option value="전배">전배</option>
-                    </select>
-                  </div>
+                <Field label="그룹 입사일">
+                  <input
+                    type="date"
+                    value={basicForm.group_hire_date}
+                    onChange={(e) =>
+                      setBasicForm({
+                        ...basicForm,
+                        group_hire_date: e.target.value,
+                      })
+                    }
+                    className="w-full min-w-0 px-3 py-2.5 rounded-xl border border-slate-300"
+                  />
                 </Field>
-              </>
+                <Field label="입사 유형">
+                  <select
+                    value={basicForm.hire_type}
+                    onChange={(e) =>
+                      setBasicForm({
+                        ...basicForm,
+                        hire_type: e.target.value,
+                      })
+                    }
+                    className="w-full min-w-0 px-3 py-2.5 rounded-xl border border-slate-300 font-bold bg-white"
+                  >
+                    <option value="">유형없음</option>
+                    <option value="신입">신입</option>
+                    <option value="경력">경력</option>
+                    <option value="전배">전배</option>
+                  </select>
+                </Field>
+              </div>
             )}
 
-            <Field label="주민등록번호 (앞 6자리 + 뒷 첫자리로 성별 자동 판별)">
-              <div className="flex items-center gap-1.5">
+            <Field label="주민등록번호 (앞 6자리 · 뒷 첫자리)">
+              <div className="flex items-center gap-1.5 min-w-0">
                 <input
                   maxLength={6}
                   value={basicForm.rrn_front}
                   onChange={(e) => {
-                    const front = e.target.value.replace(/[^0-9]/g, "").slice(0, 6);
-                    setBasicForm((prev) => ({
-                      ...prev,
-                      rrn_front: front,
-                    }));
+                    const front = e.target.value
+                      .replace(/[^0-9]/g, "")
+                      .slice(0, 6);
+                    setBasicForm((prev) => {
+                      let nextBirth = prev.birth_date;
+                      if (front.length === 6 && prev.rrn_gender_digit) {
+                        const yy = front.slice(0, 2);
+                        const mm = front.slice(2, 4);
+                        const dd = front.slice(4, 6);
+                        const century = ["1", "2", "5", "6"].includes(
+                          prev.rrn_gender_digit
+                        )
+                          ? "19"
+                          : "20";
+                        nextBirth = `${century}${yy}-${mm}-${dd}`;
+                      }
+                      return {
+                        ...prev,
+                        rrn_front: front,
+                        birth_date: nextBirth,
+                      };
+                    });
                   }}
-                  placeholder="870704"
-                  className="w-24 px-2.5 py-2 rounded-xl border border-slate-300 font-mono text-center"
+                  placeholder="810201"
+                  className="w-28 min-w-0 px-3 py-2.5 rounded-xl border border-slate-300 font-mono text-center font-semibold"
                 />
-                <span className="text-slate-400 font-mono">-</span>
+                <span className="text-slate-400 font-mono shrink-0">-</span>
                 <input
                   maxLength={1}
                   value={basicForm.rrn_gender_digit}
                   onChange={(e) => {
-                    const digit = e.target.value.replace(/[^1-8]/g, "").slice(0, 1);
-                    let nextGender = basicForm.gender;
-                    let nextBirth = basicForm.birth_date;
-                    if (["1", "3", "5", "7"].includes(digit)) nextGender = "남";
-                    if (["2", "4", "6", "8"].includes(digit)) nextGender = "여";
-                    if (digit && /^\d{6}$/.test(basicForm.rrn_front) && !nextBirth) {
-                      const yy = basicForm.rrn_front.slice(0, 2);
-                      const mm = basicForm.rrn_front.slice(2, 4);
-                      const dd = basicForm.rrn_front.slice(4, 6);
-                      const century = ["1", "2", "5", "6"].includes(digit) ? "19" : "20";
-                      nextBirth = `${century}${yy}-${mm}-${dd}`;
-                    }
-                    setBasicForm((prev) => ({
-                      ...prev,
-                      rrn_gender_digit: digit,
-                      gender: nextGender,
-                      birth_date: nextBirth,
-                    }));
+                    const digit = e.target.value
+                      .replace(/[^1-8]/g, "")
+                      .slice(0, 1);
+                    setBasicForm((prev) => {
+                      let nextBirth = prev.birth_date;
+                      if (digit && /^\d{6}$/.test(prev.rrn_front)) {
+                        const yy = prev.rrn_front.slice(0, 2);
+                        const mm = prev.rrn_front.slice(2, 4);
+                        const dd = prev.rrn_front.slice(4, 6);
+                        const century = ["1", "2", "5", "6"].includes(digit)
+                          ? "19"
+                          : "20";
+                        nextBirth = `${century}${yy}-${mm}-${dd}`;
+                      }
+                      return {
+                        ...prev,
+                        rrn_gender_digit: digit,
+                        birth_date: nextBirth,
+                      };
+                    });
                   }}
                   placeholder="1"
-                  className="w-9 px-1 py-2 rounded-xl border border-slate-300 font-mono text-center font-bold"
+                  className="w-10 shrink-0 px-1 py-2.5 rounded-xl border border-slate-300 font-mono text-center font-bold"
                 />
-                <span className="text-slate-400 font-mono text-xs">******</span>
-                <select
-                  value={basicForm.gender}
-                  onChange={(e) =>
-                    setBasicForm({
-                      ...basicForm,
-                      gender: e.target.value as "" | "남" | "여",
-                    })
-                  }
-                  className="ml-auto px-2.5 py-2 rounded-xl border border-slate-300 text-xs font-bold"
-                >
-                  <option value="">성별 선택</option>
-                  <option value="남">남</option>
-                  <option value="여">여</option>
-                </select>
+                <span className="text-slate-400 font-mono text-xs tracking-wider select-none shrink-0">
+                  ••••••
+                </span>
               </div>
             </Field>
 
-            <Field label="생년월일 / 국적">
-              <div className="flex gap-2">
-                <input
-                  type="date"
-                  value={basicForm.birth_date}
-                  onChange={(e) =>
-                    setBasicForm({ ...basicForm, birth_date: e.target.value })
-                  }
-                  className="flex-1 px-2.5 py-2 rounded-xl border border-slate-300 text-xs"
-                />
-                <input
-                  value={basicForm.nationality}
-                  onChange={(e) =>
-                    setBasicForm({ ...basicForm, nationality: e.target.value })
-                  }
-                  placeholder="대한민국(KOR)"
-                  className="w-32 px-2.5 py-2 rounded-xl border border-slate-300 text-xs"
-                />
-              </div>
+            <Field label="생년월일">
+              <input
+                type="date"
+                value={basicForm.birth_date}
+                onChange={(e) =>
+                  setBasicForm({ ...basicForm, birth_date: e.target.value })
+                }
+                className="w-full min-w-0 px-3 py-2.5 rounded-xl border border-slate-300"
+              />
             </Field>
 
             <Field label="휴대전화번호">
               <input
                 value={basicForm.phone}
                 maxLength={13}
+                placeholder="010-0000-0000"
                 onChange={(e) =>
                   setBasicForm({
                     ...basicForm,
                     phone: formatPhoneInput(e.target.value),
                   })
                 }
-                className="w-full px-3 py-2 rounded-xl border border-slate-300 font-bold"
+                className="w-full min-w-0 px-3 py-2.5 rounded-xl border border-slate-300 font-bold"
               />
             </Field>
 
-            <Field label="내선번호 / 비상연락망">
-              <div className="flex gap-2">
-                <input
-                  value={basicForm.extension_no}
-                  onChange={(e) =>
-                    setBasicForm({
-                      ...basicForm,
-                      extension_no: e.target.value,
-                    })
-                  }
-                  placeholder="내선"
-                  className="w-24 px-2.5 py-2 rounded-xl border border-slate-300 text-xs"
-                />
-                <input
-                  value={basicForm.emergency_contact}
-                  onChange={(e) =>
-                    setBasicForm({
-                      ...basicForm,
-                      emergency_contact: e.target.value,
-                    })
-                  }
-                  placeholder="비상연락망 (관계·번호)"
-                  className="flex-1 px-2.5 py-2 rounded-xl border border-slate-300 text-xs"
-                />
-              </div>
+            <Field label="국적">
+              <input
+                value={basicForm.nationality}
+                onChange={(e) =>
+                  setBasicForm({ ...basicForm, nationality: e.target.value })
+                }
+                placeholder="대한민국(KOR)"
+                className="w-full min-w-0 px-3 py-2.5 rounded-xl border border-slate-300"
+              />
+            </Field>
+
+            <Field label="내선번호">
+              <input
+                value={basicForm.extension_no}
+                onChange={(e) =>
+                  setBasicForm({
+                    ...basicForm,
+                    extension_no: e.target.value,
+                  })
+                }
+                placeholder="선택 입력"
+                className="w-full min-w-0 px-3 py-2.5 rounded-xl border border-slate-300"
+              />
+            </Field>
+
+            <Field label="비상연락망">
+              <input
+                value={basicForm.emergency_contact}
+                onChange={(e) =>
+                  setBasicForm({
+                    ...basicForm,
+                    emergency_contact: e.target.value,
+                  })
+                }
+                placeholder="관계 · 연락처"
+                className="w-full min-w-0 px-3 py-2.5 rounded-xl border border-slate-300"
+              />
             </Field>
 
             <div className="sm:col-span-2">
               <Field label="주소 · 우편번호">
-                <div className="flex gap-2">
+                <div className="grid grid-cols-1 sm:grid-cols-12 gap-2.5">
                   <input
                     value={basicForm.postal_code}
                     maxLength={6}
@@ -2886,7 +2949,7 @@ export default function HqMemberProfileModal({
                       })
                     }
                     placeholder="우편번호"
-                    className="w-28 px-3 py-2 rounded-xl border border-slate-300 font-mono"
+                    className="sm:col-span-4 w-full min-w-0 px-3 py-2.5 rounded-xl border border-slate-300 font-mono"
                   />
                   <input
                     value={basicForm.address}
@@ -2894,7 +2957,7 @@ export default function HqMemberProfileModal({
                       setBasicForm({ ...basicForm, address: e.target.value })
                     }
                     placeholder="도로명 주소 및 상세주소"
-                    className="flex-1 px-3 py-2 rounded-xl border border-slate-300"
+                    className="sm:col-span-8 w-full min-w-0 px-3 py-2.5 rounded-xl border border-slate-300"
                   />
                 </div>
               </Field>
@@ -2902,14 +2965,14 @@ export default function HqMemberProfileModal({
 
             <div className="sm:col-span-2">
               <Field label="급여 · 경비정산 계좌">
-                <div className="grid grid-cols-3 gap-2">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
                   <input
                     value={basicForm.bank_name}
                     onChange={(e) =>
                       setBasicForm({ ...basicForm, bank_name: e.target.value })
                     }
                     placeholder="은행명 (예: 하나은행)"
-                    className="px-3 py-2 rounded-xl border border-slate-300"
+                    className="w-full min-w-0 px-3 py-2.5 rounded-xl border border-slate-300"
                   />
                   <input
                     value={basicForm.bank_account}
@@ -2920,7 +2983,7 @@ export default function HqMemberProfileModal({
                       })
                     }
                     placeholder="계좌번호"
-                    className="px-3 py-2 rounded-xl border border-slate-300"
+                    className="w-full min-w-0 px-3 py-2.5 rounded-xl border border-slate-300"
                   />
                   <input
                     value={basicForm.account_holder}
@@ -2931,7 +2994,7 @@ export default function HqMemberProfileModal({
                       })
                     }
                     placeholder="예금주"
-                    className="px-3 py-2 rounded-xl border border-slate-300"
+                    className="w-full min-w-0 px-3 py-2.5 rounded-xl border border-slate-300"
                   />
                 </div>
               </Field>
@@ -4190,8 +4253,8 @@ function Field({
   children: React.ReactNode;
 }) {
   return (
-    <div>
-      <label className="block text-[11px] font-bold text-slate-600 mb-1">
+    <div className="min-w-0">
+      <label className="block text-[11px] font-bold text-slate-600 mb-1.5">
         {label}
       </label>
       {children}
@@ -4201,20 +4264,28 @@ function Field({
 
 function SubDialog({
   title,
+  maxWidthClass = "max-w-lg",
   saving,
   onClose,
   onSubmit,
   children,
 }: {
   title: string;
+  maxWidthClass?: string;
   saving: boolean;
   onClose: () => void;
   onSubmit: () => void;
   children: React.ReactNode;
 }) {
   return (
-    <div className="fixed inset-0 bg-slate-900/50 z-[60] flex items-center justify-center p-4">
-      <div className="bg-white w-full max-w-lg rounded-2xl shadow-2xl border border-slate-200 overflow-hidden flex flex-col max-h-[85vh] text-xs">
+    <div
+      className="fixed inset-0 bg-slate-900/50 z-[60] flex items-center justify-center p-4"
+      onMouseDown={onClose}
+    >
+      <div
+        onMouseDown={(e) => e.stopPropagation()}
+        className={`bg-white w-full ${maxWidthClass} rounded-2xl shadow-2xl border border-slate-200 overflow-hidden flex flex-col max-h-[88vh] text-xs`}
+      >
         <div className="px-5 py-4 bg-slate-900 text-white flex items-center justify-between shrink-0">
           <h4 className="text-sm font-bold">{title}</h4>
           <button
@@ -4225,7 +4296,7 @@ function SubDialog({
             &times;
           </button>
         </div>
-        <div className="p-5 overflow-y-auto space-y-3 flex-1 custom-scroll">
+        <div className="p-5 sm:p-6 overflow-y-auto overflow-x-hidden space-y-3 flex-1 custom-scroll">
           {children}
         </div>
         <div className="px-5 py-3.5 bg-slate-50 border-t border-slate-200 flex justify-end gap-2 shrink-0">

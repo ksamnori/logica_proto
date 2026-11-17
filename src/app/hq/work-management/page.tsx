@@ -773,7 +773,7 @@ export default function HqWorkManagementPage() {
   };
 
   return (
-    <div className="min-h-full bg-white flex flex-col">
+    <div className="w-full min-h-full shrink-0 bg-white flex flex-col">
       {/* 상단 헤더 & 우측 컨텍스트 버튼 */}
       <div className="px-9 pt-7 border-b border-slate-200">
         <div className="flex flex-wrap items-center justify-between gap-3">

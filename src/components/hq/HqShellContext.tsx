@@ -53,7 +53,7 @@ interface HqShellState {
   refreshChatUnread: () => Promise<void>;
   quickCheckIn: (workMode?: HqWorkMode, locationNote?: string) => Promise<void>;
   quickCheckOut: () => Promise<void>;
-  openProfileModal: () => void;
+  openProfileModal: (subModal?: "basic" | "hr" | null | unknown) => void;
   openSettingsModal: (initialTab?: string) => void;
   logout: () => Promise<void>;
 }
@@ -78,7 +78,7 @@ export function HqShellProvider({
   onOpenSettings,
 }: {
   children: React.ReactNode;
-  onOpenProfile: () => void;
+  onOpenProfile: (subModal?: "basic" | "hr" | null | unknown) => void;
   onOpenSettings?: (initialTab?: string) => void;
 }) {
   const router = useRouter();

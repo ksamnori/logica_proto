@@ -10,6 +10,7 @@ import {
 import HqCustomGrantModal from "@/components/hq/leaves/HqCustomGrantModal";
 import HqFlexTargetPicker from "@/components/hq/leaves/HqFlexTargetPicker";
 import HqMemberLeaveDetailView from "@/components/hq/leaves/HqMemberLeaveDetailView";
+import HqMemberProfileModal from "@/components/hq/members/HqMemberProfileModal";
 import { hqFetch } from "@/lib/hq/clientApi";
 import {
   DEFAULT_ANNUAL_LEAVE_SETTINGS,
@@ -28,6 +29,7 @@ import type {
   HqCustomLeaveItem,
   HqLeaveAdjustmentItem,
   HqLeavePromotionTargetItem,
+  HqMember,
   HqPromotionKind,
   HqUploadedMonthlyUsageItem,
 } from "@/lib/hq/types";
@@ -107,12 +109,15 @@ function downloadCsvFile(filename: string, lines: string[]) {
 
 export default function HqLeaveManagementPage() {
   const {
+    instId,
+    me,
     members,
     companySettings,
     isHrManager,
     isHqAdmin,
     refreshCompanySettings,
     refreshMembers,
+    openProfileModal,
     openSettingsModal,
   } = useHqShell();
 
@@ -122,6 +127,10 @@ export default function HqLeaveManagementPage() {
 
   const [tab, setTab] = useState<LeaveMgmtTab>("BALANCE");
   const [selectedMemberId, setSelectedMemberId] = useState<string | null>(null);
+  const [basicProfileTargetId, setBasicProfileTargetId] = useState<
+    string | null
+  >(null);
+  const [rrnGuideOpen, setRrnGuideOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
 
@@ -891,12 +900,26 @@ export default function HqLeaveManagementPage() {
     [adjustments, settlementHistoryFilter]
   );
 
+  const basicProfileTarget = useMemo<HqMember | null>(
+    () =>
+      basicProfileTargetId
+        ? members.find((m) => m.instructor_id === basicProfileTargetId) || null
+        : null,
+    [members, basicProfileTargetId]
+  );
+
+  const missingRrnMembers = useMemo(
+    () => activeMembers.filter((m) => !m.profile_extra?.gender),
+    [activeMembers]
+  );
+
   return (
     <div
-      className="w-full min-h-full bg-white flex flex-col"
+      className="w-full min-h-full shrink-0 bg-white flex flex-col"
       onClick={() => {
         setCustomGrantMenuOpen(false);
         setAdjMenuOpen(false);
+        setRrnGuideOpen(false);
       }}
     >
       {selectedDetailMember ? (
@@ -922,14 +945,19 @@ export default function HqLeaveManagementPage() {
             if (ym) setAdjYm(ym);
             setAdjModalOpen(true);
           }}
+          onOpenBasicProfile={
+            canManage || selectedDetailMember.instructor_id === instId
+              ? (target) => setBasicProfileTargetId(target.instructor_id)
+              : undefined
+          }
           onSyncCustomGrants={(next) => setCustomGrants(next)}
           onMutated={async () => {
             await Promise.all([loadLeavesAll(), refreshMembers()]);
           }}
         />
       ) : ledgerSubView ? (
-        <div className="w-full flex-1 flex flex-col">
-          <div className="px-5 sm:px-7 xl:px-9 pt-7 pb-5 border-b border-slate-200 flex flex-wrap items-center justify-between gap-3">
+        <div className="w-full flex-1 flex flex-col bg-white">
+          <div className="px-5 sm:px-7 xl:px-9 pt-7 pb-5 border-b border-slate-200 flex flex-wrap items-center justify-between gap-3 bg-white">
             <div className="flex items-center gap-2.5">
               <button
                 type="button"
@@ -1455,8 +1483,8 @@ export default function HqLeaveManagementPage() {
           탭 1: [휴가 보유 현황] (스크린샷 010944 100% 대응)
          ===================================================================== */}
       {tab === "BALANCE" && (
-        <div className="flex-1 flex flex-col">
-          <div className="px-5 sm:px-7 xl:px-9 py-3.5 border-b border-slate-100 flex flex-wrap items-center justify-between gap-2 text-xs">
+        <div className="flex-1 flex flex-col bg-white">
+          <div className="px-5 sm:px-7 xl:px-9 py-3.5 border-b border-slate-100 flex flex-wrap items-center justify-between gap-2 text-xs bg-white">
             <div className="flex flex-wrap items-center gap-2">
               <select
                 value={deptFilter}
@@ -1482,6 +1510,67 @@ export default function HqLeaveManagementPage() {
               >
                 {showEmpNo ? "# 사번 표시 중 ✕" : "+ 사번 표시"}
               </button>
+
+              {canManage && missingRrnMembers.length > 0 && (
+                <div
+                  className="relative"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <button
+                    type="button"
+                    onClick={() => setRrnGuideOpen((v) => !v)}
+                    className="px-3 py-1.5 rounded-lg border border-amber-200 bg-amber-50 hover:bg-amber-100 text-amber-800 font-bold transition-colors whitespace-nowrap flex items-center gap-1"
+                  >
+                    <span>🪪 주민번호 미등록 {missingRrnMembers.length}명</span>
+                    <span className="text-[10px]">▾</span>
+                  </button>
+
+                  {rrnGuideOpen && (
+                    <div className="absolute left-0 top-10 z-30 w-80 rounded-2xl bg-white border border-slate-200 shadow-2xl p-3 space-y-2">
+                      <div className="text-[11px] text-slate-600 leading-relaxed">
+                        주민등록번호(앞 6자리·뒷 첫자리)를 등록하면 <b>산전후·보건·배우자출산</b> 등 성별 기준 맞춤 휴가가 자동 적용됩니다.
+                      </div>
+                      <div className="max-h-48 overflow-y-auto divide-y divide-slate-100 border-t border-slate-100 pt-1">
+                        {missingRrnMembers.map((mm) => (
+                          <div
+                            key={mm.instructor_id}
+                            className="py-1.5 flex items-center justify-between gap-2"
+                          >
+                            <div className="min-w-0">
+                              <span className="font-bold text-slate-800">
+                                {mm.name}
+                              </span>
+                              <span className="ml-1.5 text-[11px] text-slate-400">
+                                {mm.department}
+                              </span>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setRrnGuideOpen(false);
+                                setBasicProfileTargetId(mm.instructor_id);
+                              }}
+                              className="px-2 py-1 rounded-md bg-amber-50 hover:bg-amber-100 text-amber-800 font-bold text-[11px] shrink-0"
+                            >
+                              입력하기 →
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {!canManage && me && !me.profile_extra?.gender && (
+                <button
+                  type="button"
+                  onClick={() => openProfileModal("basic")}
+                  className="px-3 py-1.5 rounded-lg border border-amber-200 bg-amber-50 hover:bg-amber-100 text-amber-800 font-bold transition-colors whitespace-nowrap"
+                >
+                  🪪 주민등록번호 등록하기 →
+                </button>
+              )}
             </div>
 
             <button
@@ -1500,19 +1589,19 @@ export default function HqLeaveManagementPage() {
             </button>
           </div>
 
-          <div className="flex-1 overflow-x-auto">
-            <table className="w-full min-w-max text-left border-collapse">
+          <div className="w-full overflow-x-auto bg-white">
+            <table className="w-full min-w-max text-left border-collapse bg-white">
               <thead>
                 <tr className="border-b border-slate-200 text-xs bg-white">
                   <th className="py-3 pl-5 sm:pl-7 xl:pl-9 pr-4 min-w-[188px] whitespace-nowrap sticky left-0 bg-white z-10 font-semibold text-slate-500">
                     이름
                   </th>
                   {showEmpNo && (
-                    <th className="py-3 px-4 min-w-[156px] whitespace-nowrap font-semibold text-slate-500 text-right">
+                    <th className="py-3 px-4 min-w-[156px] whitespace-nowrap font-semibold text-slate-500 text-right bg-white">
                       사번
                     </th>
                   )}
-                  <th className="py-3 px-4 min-w-[80px] whitespace-nowrap font-bold text-slate-700 text-right border-r border-slate-100">
+                  <th className="py-3 px-4 min-w-[80px] whitespace-nowrap font-bold text-slate-700 text-right border-r border-slate-100 bg-white">
                     연차
                   </th>
                   {customLeaves.map((c) => {
@@ -1539,7 +1628,7 @@ export default function HqLeaveManagementPage() {
                     return (
                       <th
                         key={c.id}
-                        className="py-2.5 px-4 min-w-[132px] whitespace-nowrap text-right border-r border-slate-100/80"
+                        className="py-2.5 px-4 min-w-[132px] whitespace-nowrap text-right border-r border-slate-100/80 bg-white"
                       >
                         <div className="font-semibold text-slate-600 whitespace-nowrap">
                           {c.name}
@@ -1552,12 +1641,12 @@ export default function HqLeaveManagementPage() {
                   })}
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100 text-xs">
+              <tbody className="divide-y divide-slate-100 text-xs bg-white">
                 {loading ? (
-                  <tr>
+                  <tr className="bg-white">
                     <td
                       colSpan={(showEmpNo ? 3 : 2) + customLeaves.length}
-                      className="py-20 text-center text-slate-400 font-semibold"
+                      className="py-20 text-center text-slate-400 font-semibold bg-white"
                     >
                       구성원 휴가 보유 현황을 계산하는 중입니다...
                     </td>
@@ -1581,7 +1670,7 @@ export default function HqLeaveManagementPage() {
                       <tr
                         key={m.instructor_id}
                         onClick={() => setSelectedMemberId(m.instructor_id)}
-                        className="hover:bg-emerald-50/40 cursor-pointer transition-colors group"
+                        className="bg-white hover:bg-emerald-50/40 cursor-pointer transition-colors group"
                       >
                         <td className="py-3.5 pl-5 sm:pl-7 xl:pl-9 pr-4 min-w-[188px] whitespace-nowrap sticky left-0 bg-white group-hover:bg-emerald-50/40 z-10 transition-colors">
                           <div className="flex items-center gap-3">
@@ -1695,10 +1784,10 @@ export default function HqLeaveManagementPage() {
             </button>
           </div>
 
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-max text-left border-collapse">
+          <div className="w-full overflow-x-auto bg-white">
+            <table className="w-full min-w-max text-left border-collapse bg-white">
               <thead>
-                <tr className="border-b border-slate-200 text-xs font-semibold text-slate-500">
+                <tr className="border-b border-slate-200 text-xs font-semibold text-slate-500 bg-white">
                   <th className="py-3 pl-5 sm:pl-7 xl:pl-9 pr-4 min-w-[188px] whitespace-nowrap">
                     이름
                   </th>
@@ -1899,8 +1988,8 @@ export default function HqLeaveManagementPage() {
             </button>
           </div>
 
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-max text-left border-collapse">
+          <div className="w-full overflow-x-auto bg-white">
+            <table className="w-full min-w-max text-left border-collapse bg-white">
               <thead>
                 <tr className="border-b border-slate-200 text-xs font-semibold text-slate-500 bg-white">
                   <th className="py-3 pl-5 sm:pl-7 xl:pl-9 pr-4 min-w-[188px] whitespace-nowrap sticky left-0 bg-white z-10">
@@ -2070,10 +2159,10 @@ export default function HqLeaveManagementPage() {
             </button>
           </div>
 
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-max text-left border-collapse">
+          <div className="w-full overflow-x-auto bg-white">
+            <table className="w-full min-w-max text-left border-collapse bg-white">
               <thead>
-                <tr className="border-b border-slate-200 text-xs font-semibold text-slate-500">
+                <tr className="border-b border-slate-200 text-xs font-semibold text-slate-500 bg-white">
                   <th className="py-3 pl-5 sm:pl-7 xl:pl-9 pr-3 min-w-[84px] whitespace-nowrap">
                     재직 상태
                   </th>
@@ -2765,6 +2854,20 @@ export default function HqLeaveManagementPage() {
           </div>
         </div>
       )}
+
+      {/* 구성원 기본정보(주민등록번호) 즉시 입력 모달 */}
+      <HqMemberProfileModal
+        isOpen={Boolean(basicProfileTarget)}
+        member={basicProfileTarget}
+        meId={instId}
+        isHrManager={canManage}
+        existingDepartments={departments}
+        initialSubModal="basic"
+        onClose={() => setBasicProfileTargetId(null)}
+        onSaved={async () => {
+          await refreshMembers();
+        }}
+      />
     </div>
   );
 }

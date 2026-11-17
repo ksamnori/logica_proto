@@ -13,6 +13,7 @@ import HqSettingsModal from "@/components/hq/settings/HqSettingsModal";
 function HqWorkspaceFrame({
   children,
   isProfileOpen,
+  profileInitialSubModal,
   onCloseProfile,
   settingsModalOpen,
   settingsInitialTab,
@@ -20,6 +21,7 @@ function HqWorkspaceFrame({
 }: {
   children: React.ReactNode;
   isProfileOpen: boolean;
+  profileInitialSubModal: "basic" | "hr" | null;
   onCloseProfile: () => void;
   settingsModalOpen: boolean;
   settingsInitialTab: string;
@@ -62,6 +64,7 @@ function HqWorkspaceFrame({
         meId={instId}
         isHrManager={isHrManager}
         existingDepartments={existingDepts}
+        initialSubModal={profileInitialSubModal}
         onClose={onCloseProfile}
         onSaved={refreshMembers}
       />
@@ -80,6 +83,9 @@ function HqWorkspaceFrame({
 export default function HqLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const [isProfileOpen, setIsProfileOpen] = useState(false);
+  const [profileSubModal, setProfileSubModal] = useState<
+    "basic" | "hr" | null
+  >(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsTab, setSettingsTab] = useState("company");
 
@@ -90,7 +96,10 @@ export default function HqLayout({ children }: { children: React.ReactNode }) {
 
   return (
     <HqShellProvider
-      onOpenProfile={() => setIsProfileOpen(true)}
+      onOpenProfile={(sub) => {
+        setProfileSubModal(sub === "basic" || sub === "hr" ? sub : null);
+        setIsProfileOpen(true);
+      }}
       onOpenSettings={(tab) => {
         setSettingsTab(tab || "company");
         setSettingsOpen(true);
@@ -98,7 +107,11 @@ export default function HqLayout({ children }: { children: React.ReactNode }) {
     >
       <HqWorkspaceFrame
         isProfileOpen={isProfileOpen}
-        onCloseProfile={() => setIsProfileOpen(false)}
+        profileInitialSubModal={profileSubModal}
+        onCloseProfile={() => {
+          setIsProfileOpen(false);
+          setProfileSubModal(null);
+        }}
         settingsModalOpen={settingsOpen}
         settingsInitialTab={settingsTab}
         onCloseSettings={() => setSettingsOpen(false)}

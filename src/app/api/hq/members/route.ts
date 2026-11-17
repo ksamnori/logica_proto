@@ -34,6 +34,13 @@ import type {
 
 export const runtime = "nodejs";
 
+function inferGenderFromRrnDigit(digit?: unknown): "" | "남" | "여" {
+  const d = String(digit || "").trim();
+  if (["1", "3", "5", "7"].includes(d)) return "남";
+  if (["2", "4", "6", "8"].includes(d)) return "여";
+  return "";
+}
+
 function sanitizeExtraForViewer(
   raw: any,
   canSeePrivate: boolean
@@ -41,13 +48,8 @@ function sanitizeExtraForViewer(
   const src: HqProfileExtra =
     raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
 
-  const inferredGender = (() => {
-    if (src.gender === "남" || src.gender === "여") return src.gender;
-    const d = String(src.rrn_gender_digit || "").trim();
-    if (["1", "3", "5", "7"].includes(d)) return "남" as const;
-    if (["2", "4", "6", "8"].includes(d)) return "여" as const;
-    return "";
-  })();
+  // 성별은 오직 주민등록번호 뒷 첫자리(1~8)로만 자동 판별
+  const inferredGender = inferGenderFromRrnDigit(src.rrn_gender_digit);
 
   if (!canSeePrivate) {
     return {
@@ -729,10 +731,34 @@ export async function PATCH(req: NextRequest) {
             prevExtra.rrn_front = String(incomingExtra.rrn_front || "")
               .replace(/[^0-9]/g, "")
               .slice(0, 6);
+          } else if (key === "rrn_gender_digit") {
+            prevExtra.rrn_gender_digit = String(
+              incomingExtra.rrn_gender_digit || ""
+            )
+              .replace(/[^1-8]/g, "")
+              .slice(0, 1);
+          } else if (key === "gender") {
+            // 수동 성별 입력 무시 — 아래에서 주민등록번호 뒷 첫자리 기준으로만 동기화
           } else {
             (prevExtra as any)[key] = incomingExtra[key];
           }
         }
+      }
+      prevExtra.gender = inferGenderFromRrnDigit(prevExtra.rrn_gender_digit);
+      if (
+        profilePatch.birth_date === undefined &&
+        !existingProf?.birth_date &&
+        prevExtra.rrn_front &&
+        /^\d{6}$/.test(prevExtra.rrn_front) &&
+        prevExtra.rrn_gender_digit
+      ) {
+        const yy = prevExtra.rrn_front.slice(0, 2);
+        const mm = prevExtra.rrn_front.slice(2, 4);
+        const dd = prevExtra.rrn_front.slice(4, 6);
+        const century = ["1", "2", "5", "6"].includes(prevExtra.rrn_gender_digit)
+          ? "19"
+          : "20";
+        profilePatch.birth_date = `${century}${yy}-${mm}-${dd}`;
       }
 
       if (caller.isHrManager) {
