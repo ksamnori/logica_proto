@@ -13,7 +13,10 @@ import {
 import {
   generateEmployeeNoByPolicy,
   readCompanySettingsServer,
+  SETTINGS_STORAGE_BUCKET,
+  SETTINGS_STORAGE_FALLBACK_PATH,
 } from "@/lib/hq/companySettingsServer";
+import { DEFAULT_ORG_CHART_NODES } from "@/lib/hq/defaultCompanySettings";
 import { buildFlatOrgTreeOptions } from "@/lib/hq/orgTreeHelper";
 import type { HqRankCode } from "@/lib/hq/types";
 
@@ -184,8 +187,55 @@ export async function POST(req: NextRequest) {
     const today = new Date().toISOString().slice(0, 10);
     const empType =
       rankCode === "CEO" || rankCode === "DIRECTOR" ? "임원" : "정규직";
-    const { settings: companySettings } =
+    const { settings: companySettings, usingFallback } =
       await readCompanySettingsServer(supabaseAdmin);
+
+    // 가입 시 직접 입력한 신규 조직명이 조직도에 없다면 조직도(대표 하위)에 자동 등록
+    const curOrgNodes =
+      companySettings.extra_settings?.org_chart_nodes &&
+      companySettings.extra_settings.org_chart_nodes.length > 0
+        ? companySettings.extra_settings.org_chart_nodes
+        : DEFAULT_ORG_CHART_NODES;
+
+    if (
+      department &&
+      department !== "미지정" &&
+      !curOrgNodes.some((n) => n.name === department)
+    ) {
+      const ceoNode =
+        curOrgNodes.find((n) => n.name === "대표") ||
+        curOrgNodes.find((n) => n.parent_id === null && !n.is_hidden);
+      const maxOrder = curOrgNodes.reduce((m, n) => Math.max(m, n.order), 0);
+      const nextNodes = [
+        ...curOrgNodes,
+        {
+          id: `org-${Date.now()}`,
+          name: department,
+          parent_id: ceoNode ? ceoNode.id : null,
+          is_hidden: false,
+          order: maxOrder + 1,
+        },
+      ];
+      const nextExtra = {
+        ...companySettings.extra_settings,
+        org_chart_nodes: nextNodes,
+      };
+      if (!usingFallback) {
+        await supabaseAdmin
+          .from("hq_company_settings")
+          .update({ extra_settings: nextExtra, updated_at: new Date().toISOString() })
+          .eq("setting_key", "MAIN");
+      }
+      const nextFull = { ...companySettings, extra_settings: nextExtra };
+      const bytes = new TextEncoder().encode(JSON.stringify(nextFull, null, 2));
+      await supabaseAdmin.storage
+        .from(SETTINGS_STORAGE_BUCKET)
+        .upload(SETTINGS_STORAGE_FALLBACK_PATH, bytes, {
+          contentType: "application/json",
+          upsert: true,
+        })
+        .catch(() => {});
+    }
     const generatedEmpNo = await generateEmployeeNoByPolicy(
       supabaseAdmin,
       companySettings,

@@ -228,6 +228,7 @@ export default function HqMemberProfileModal({
     group_hire_date: "",
     hire_type: "",
     rrn_front: "",
+    rrn_gender_digit: "",
     gender: "" as "" | "남" | "여",
     birth_date: "",
     nationality: "대한민국(KOR)",
@@ -492,6 +493,7 @@ export default function HqMemberProfileModal({
       group_hire_date: ex.group_hire_date || member.hire_date || "",
       hire_type: ex.hire_type || "",
       rrn_front: ex.rrn_front || "",
+      rrn_gender_digit: ex.rrn_gender_digit || "",
       gender: (ex.gender as "" | "남" | "여") || "",
       birth_date: member.birth_date || "",
       nationality: ex.nationality || "대한민국(KOR)",
@@ -1083,7 +1085,7 @@ export default function HqMemberProfileModal({
                             </span>
                             {ex.rrn_front ? (
                               <span className="font-mono text-slate-800 mr-2">
-                                {ex.rrn_front}-*******
+                                {ex.rrn_front}-{ex.rrn_gender_digit ? `${ex.rrn_gender_digit}******` : "*******"}
                               </span>
                             ) : (
                               <span className="mr-2">
@@ -2633,6 +2635,9 @@ export default function HqMemberProfileModal({
                 rrn_front: basicForm.rrn_front
                   .replace(/[^0-9]/g, "")
                   .slice(0, 6),
+                rrn_gender_digit: basicForm.rrn_gender_digit
+                  .replace(/[^0-9]/g, "")
+                  .slice(0, 1),
                 gender: basicForm.gender,
                 nationality: basicForm.nationality.trim() || "대한민국(KOR)",
                 postal_code: basicForm.postal_code.trim(),
@@ -2746,21 +2751,49 @@ export default function HqMemberProfileModal({
               </>
             )}
 
-            <Field label="주민등록번호 앞 6자리 (뒷자리는 자동 마스킹)">
-              <div className="flex items-center gap-2">
+            <Field label="주민등록번호 (앞 6자리 + 뒷 첫자리로 성별 자동 판별)">
+              <div className="flex items-center gap-1.5">
                 <input
                   maxLength={6}
                   value={basicForm.rrn_front}
-                  onChange={(e) =>
-                    setBasicForm({
-                      ...basicForm,
-                      rrn_front: e.target.value.replace(/[^0-9]/g, ""),
-                    })
-                  }
-                  placeholder="예: 810201"
-                  className="w-28 px-3 py-2 rounded-xl border border-slate-300 font-mono"
+                  onChange={(e) => {
+                    const front = e.target.value.replace(/[^0-9]/g, "").slice(0, 6);
+                    setBasicForm((prev) => ({
+                      ...prev,
+                      rrn_front: front,
+                    }));
+                  }}
+                  placeholder="870704"
+                  className="w-24 px-2.5 py-2 rounded-xl border border-slate-300 font-mono text-center"
                 />
-                <span className="text-slate-400 font-mono">- *******</span>
+                <span className="text-slate-400 font-mono">-</span>
+                <input
+                  maxLength={1}
+                  value={basicForm.rrn_gender_digit}
+                  onChange={(e) => {
+                    const digit = e.target.value.replace(/[^1-8]/g, "").slice(0, 1);
+                    let nextGender = basicForm.gender;
+                    let nextBirth = basicForm.birth_date;
+                    if (["1", "3", "5", "7"].includes(digit)) nextGender = "남";
+                    if (["2", "4", "6", "8"].includes(digit)) nextGender = "여";
+                    if (digit && /^\d{6}$/.test(basicForm.rrn_front) && !nextBirth) {
+                      const yy = basicForm.rrn_front.slice(0, 2);
+                      const mm = basicForm.rrn_front.slice(2, 4);
+                      const dd = basicForm.rrn_front.slice(4, 6);
+                      const century = ["1", "2", "5", "6"].includes(digit) ? "19" : "20";
+                      nextBirth = `${century}${yy}-${mm}-${dd}`;
+                    }
+                    setBasicForm((prev) => ({
+                      ...prev,
+                      rrn_gender_digit: digit,
+                      gender: nextGender,
+                      birth_date: nextBirth,
+                    }));
+                  }}
+                  placeholder="1"
+                  className="w-9 px-1 py-2 rounded-xl border border-slate-300 font-mono text-center font-bold"
+                />
+                <span className="text-slate-400 font-mono text-xs">******</span>
                 <select
                   value={basicForm.gender}
                   onChange={(e) =>
@@ -2769,9 +2802,9 @@ export default function HqMemberProfileModal({
                       gender: e.target.value as "" | "남" | "여",
                     })
                   }
-                  className="px-2.5 py-2 rounded-xl border border-slate-300 text-xs font-bold"
+                  className="ml-auto px-2.5 py-2 rounded-xl border border-slate-300 text-xs font-bold"
                 >
-                  <option value="">성별</option>
+                  <option value="">성별 선택</option>
                   <option value="남">남</option>
                   <option value="여">여</option>
                 </select>

@@ -346,31 +346,74 @@ export default function HqLeavesPage() {
     return leaveDocs.filter((d) => d.drafter_id === me.instructor_id);
   }, [leaveDocs, me]);
 
-  // 휴가 등록 카드 노출 목록 구성 (스크린샷 1 순서 100% 반영)
+  // 휴가 등록 카드 노출 목록 구성 (성별 남/여/미입력 및 직접부여 잔여분 기준 완벽 필터링)
   const displayedCustomLeaves = useMemo(() => {
     const myGender = me?.profile_extra?.gender || "";
-    const orderedPrimary: HqCustomLeaveItem[] = [];
-    PRIMARY_CUSTOM_LEAVE_IDS.forEach((id) => {
-      const found = customLeaves.find((c) => c.id === id);
-      if (found) orderedPrimary.push(found);
-    });
+    const myId = me?.instructor_id || "";
+
+    const isEligible = (c: HqCustomLeaveItem) => {
+      if (c.target_gender === "여성" && myGender !== "여") return false;
+      if (c.target_gender === "남성" && myGender !== "남") return false;
+      if (
+        c.grant_method === "관리자가 직접 부여" ||
+        c.grant_method === "연차 소진 시 부여"
+      ) {
+        const granted = customGrants
+          .filter((g) => g.member_id === myId && g.leave_id === c.id)
+          .reduce((acc, g) => acc + Number(g.granted_amount || 0), 0);
+        const used = myLeaveDocs
+          .filter((d) => d.status === "APPROVED" && d.leave_type === c.name)
+          .reduce((acc, d) => acc + Number(d.leave_days || 0), 0);
+        return granted - used > 0;
+      }
+      return true;
+    };
+
+    const eligibleList = customLeaves.filter(isEligible);
 
     if (!showAllCustomLeaves) {
-      if (myGender === "여") {
-        const femaleItems = customLeaves.filter(
-          (c) =>
-            c.target_gender === "여성" && !PRIMARY_CUSTOM_LEAVE_IDS.includes(c.id)
-        );
-        return [...orderedPrimary, ...femaleItems];
-      }
-      return orderedPrimary;
+      const prioritized: HqCustomLeaveItem[] = [];
+      // 여성 구성원은 산전후/보건 우선 + 공통 경조사 노출 (스크린샷 4 동일)
+      const preferredOrder =
+        myGender === "여"
+          ? [
+              "cl-premature",
+              "cl-menstrual",
+              "cl-maternity",
+              "cl-maternity-multi",
+              "cl-condolence-1",
+              "cl-condolence-2",
+              "cl-marriage",
+              "cl-emergency",
+            ]
+          : PRIMARY_CUSTOM_LEAVE_IDS;
+
+      preferredOrder.forEach((id) => {
+        const found = eligibleList.find((c) => c.id === id);
+        if (found) prioritized.push(found);
+      });
+      // 관리자가 직접 부여해 잔여분이 있는 항목(보상/난임 등)도 누락 없이 카드에 노출
+      eligibleList.forEach((c) => {
+        if (
+          (c.grant_method === "관리자가 직접 부여" ||
+            c.grant_method === "연차 소진 시 부여") &&
+          !prioritized.some((p) => p.id === c.id)
+        ) {
+          prioritized.unshift(c);
+        }
+      });
+      return prioritized;
     }
 
-    const rest = customLeaves.filter(
-      (c) => !orderedPrimary.some((p) => p.id === c.id)
-    );
-    return [...orderedPrimary, ...rest];
-  }, [customLeaves, me?.profile_extra?.gender, showAllCustomLeaves]);
+    return eligibleList;
+  }, [
+    customLeaves,
+    me?.profile_extra?.gender,
+    me?.instructor_id,
+    showAllCustomLeaves,
+    customGrants,
+    myLeaveDocs,
+  ]);
 
   // ============================================================================
   // 연차 상세 월별 원장 계산 (공통 엔진: 당해 연말 12월 31일 사용 기준 완벽 반영)

@@ -41,10 +41,19 @@ function sanitizeExtraForViewer(
   const src: HqProfileExtra =
     raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
 
+  const inferredGender = (() => {
+    if (src.gender === "남" || src.gender === "여") return src.gender;
+    const d = String(src.rrn_gender_digit || "").trim();
+    if (["1", "3", "5", "7"].includes(d)) return "남" as const;
+    if (["2", "4", "6", "8"].includes(d)) return "여" as const;
+    return "";
+  })();
+
   if (!canSeePrivate) {
     return {
       nickname: src.nickname || "",
       bio: src.bio || "",
+      gender: inferredGender,
       hr_effective_date: src.hr_effective_date || "",
       hr_jobs_selected: Array.isArray(src.hr_jobs_selected)
         ? src.hr_jobs_selected
@@ -82,7 +91,10 @@ function sanitizeExtraForViewer(
     rrn_front: src.rrn_front
       ? String(src.rrn_front).replace(/[^0-9]/g, "").slice(0, 6)
       : "",
-    gender: src.gender === "남" || src.gender === "여" ? src.gender : "",
+    rrn_gender_digit: src.rrn_gender_digit
+      ? String(src.rrn_gender_digit).replace(/[^0-9]/g, "").slice(0, 1)
+      : "",
+    gender: inferredGender,
     nationality: src.nationality || "대한민국(KOR)",
     postal_code: src.postal_code || "",
     work_schedule_type: src.work_schedule_type || "기본 9시",
@@ -698,6 +710,7 @@ export async function PATCH(req: NextRequest) {
         "bio",
         "personal_email",
         "rrn_front",
+        "rrn_gender_digit",
         "gender",
         "nationality",
         "postal_code",

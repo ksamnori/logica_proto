@@ -31,7 +31,11 @@ export default function HqSignupPage() {
   const [department, setDepartment] = useState<string>(
     HQ_DEFAULT_DEPARTMENTS[0]
   );
+  const [customDept, setCustomDept] = useState("");
+
   const [jobTitle, setJobTitle] = useState("사원");
+  const [customJobTitle, setCustomJobTitle] = useState("");
+
   const [hasTopAdmin, setHasTopAdmin] = useState(true);
   const [isLoading, setIsLoading] = useState(false);
 
@@ -73,7 +77,12 @@ export default function HqSignupPage() {
   const handleSignup = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (!name.trim() || !phone || !password || !department || !jobTitle.trim()) {
+    const finalDept =
+      department === "__CUSTOM__" ? customDept.trim() : department;
+    const finalTitle =
+      jobTitle === "__CUSTOM__" ? customJobTitle.trim() : jobTitle.trim();
+
+    if (!name.trim() || !phone || !password || !finalDept || !finalTitle) {
       alert("모든 필수 항목을 입력해 주세요.");
       return;
     }
@@ -81,9 +90,9 @@ export default function HqSignupPage() {
     const inferredRank = hasTopAdmin
       ? "STAFF"
       : inferRankCodeFromHrSelection({
-          orgName: department,
-          position: jobTitle,
-          title: jobTitle,
+          orgName: finalDept,
+          position: finalTitle,
+          title: finalTitle,
         });
 
     setIsLoading(true);
@@ -95,9 +104,9 @@ export default function HqSignupPage() {
           name: name.trim(),
           phone,
           password,
-          department,
+          department: finalDept,
           rank_code: inferredRank,
-          job_title: jobTitle.trim(),
+          job_title: finalTitle,
         }),
       });
       const json = await res.json();
@@ -106,7 +115,7 @@ export default function HqSignupPage() {
       }
 
       alert(
-        "🏢 본부 구성원 계정과 조직도 소속 배정이 완료되었습니다.\n로그인 화면으로 이동합니다."
+        "🏢 본부 구성원 계정 생성이 완료되었습니다.\n로그인 화면으로 이동합니다."
       );
       router.replace("/hq/login");
     } catch (error: any) {
@@ -124,7 +133,7 @@ export default function HqSignupPage() {
         <div className="text-center mb-7">
           <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-blue-50 border border-blue-200 text-brand text-xs font-extrabold mb-2.5">
             <span>👤</span>
-            <span>본부 임직원 가입 (조직도 실시간 연동)</span>
+            <span>본부 임직원 가입</span>
           </div>
           <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-900 tracking-tight">
             천종현수학연구소 <span className="text-brand">HQ</span>
@@ -182,7 +191,7 @@ export default function HqSignupPage() {
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="block text-xs font-bold text-slate-700 mb-1">
-                소속 조직 (조직도 기준) <span className="text-rose-500">*</span>
+                소속 조직 <span className="text-rose-500">*</span>
               </label>
               <select
                 value={department}
@@ -194,7 +203,18 @@ export default function HqSignupPage() {
                     {opt.label}
                   </option>
                 ))}
+                <option value="__CUSTOM__">+ 직접 입력</option>
               </select>
+              {department === "__CUSTOM__" && (
+                <input
+                  type="text"
+                  required
+                  value={customDept}
+                  onChange={(e) => setCustomDept(e.target.value)}
+                  className="w-full mt-2 px-3.5 py-2 bg-white border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-brand font-bold text-slate-900"
+                  placeholder="소속 조직명 직접 입력"
+                />
+              )}
             </div>
 
             <div>
@@ -211,18 +231,25 @@ export default function HqSignupPage() {
                     {ttl}
                   </option>
                 ))}
+                <option value="__CUSTOM__">+ 직접 입력</option>
               </select>
+              {jobTitle === "__CUSTOM__" && (
+                <input
+                  type="text"
+                  required
+                  value={customJobTitle}
+                  onChange={(e) => setCustomJobTitle(e.target.value)}
+                  className="w-full mt-2 px-3.5 py-2 bg-white border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-brand font-bold text-slate-900"
+                  placeholder="직위·직책 직접 입력"
+                />
+              )}
             </div>
-          </div>
-
-          <div className="rounded-2xl bg-slate-50 border border-slate-200 px-3.5 py-3 text-[11px] text-slate-500 font-medium leading-relaxed">
-            💡 [조직도 설정]에 등록된 조직으로 즉시 배정되며, 가입 후 인사관리자가 세부 직무·직군·조직장 권한을 설정할 수 있습니다.
           </div>
 
           <button
             type="submit"
             disabled={isLoading}
-            className="w-full bg-brand hover:bg-brand-hover text-white font-bold py-3.5 rounded-xl shadow-lg transition-colors mt-2 disabled:opacity-50"
+            className="w-full bg-brand hover:bg-brand-hover text-white font-bold py-3.5 rounded-xl shadow-lg transition-colors mt-3 disabled:opacity-50"
           >
             {isLoading ? "계정 등록 중..." : "본부 구성원 계정 생성 완료"}
           </button>

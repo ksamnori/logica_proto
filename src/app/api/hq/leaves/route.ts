@@ -516,6 +516,99 @@ export async function POST(req: NextRequest) {
       });
     }
 
+    if (action === "ADMIN_REGISTER_LEAVE") {
+      if (!canManage) {
+        return apiFail("구성원 휴가 대리 등록은 인사관리자만 가능합니다.", 403);
+      }
+      if (caller.schemaMissing) {
+        return apiFail("먼저 본부 전용 DB 테이블(hq_schema.sql)을 생성해 주세요.", 400);
+      }
+
+      const targetId = String(body?.member_id || "").trim();
+      const targetName = String(body?.member_name || "").trim();
+      const targetDept = String(body?.department || "미지정").trim();
+      const leaveType = String(body?.leave_type || "연차").trim();
+      const startDate = String(body?.start_date || "").trim();
+      const endDate = String(body?.end_date || startDate).trim();
+      const leaveDays = Number(body?.leave_days || 1);
+      const reason = String(body?.reason || "").trim();
+
+      if (!targetId || !startDate || leaveDays <= 0) {
+        return apiFail("대상 구성원, 휴가 시작일, 사용 일수를 확인해 주세요.");
+      }
+
+      const ym = startDate.slice(0, 7).replace("-", "");
+      const docNo = `APR-${ym}-${String(Math.floor(1000 + Math.random() * 9000))}`;
+
+      const { data: createdDoc, error: docErr } = await supabaseAdmin
+        .from("hq_approval_doc")
+        .insert({
+          doc_no: docNo,
+          doc_type: "LEAVE",
+          title: `[${leaveType}] ${targetName} 휴가 등록`,
+          content: reason || `인사관리자(${caller.name}) 휴가 등록`,
+          drafter_id: targetId,
+          drafter_name: targetName,
+          drafter_dept: targetDept,
+          drafter_rank: "STAFF",
+          drafter_title: "",
+          status: "APPROVED",
+          current_step_order: 1,
+          total_steps: 1,
+          is_auto_delegated: false,
+          amount: 0,
+          effective_date: startDate,
+          end_date: endDate,
+          leave_type: leaveType,
+          leave_days: leaveDays,
+          submitted_at: nowIso,
+          completed_at: nowIso,
+          updated_at: nowIso,
+        })
+        .select("*")
+        .single();
+
+      if (docErr || !createdDoc) {
+        return apiFail(`휴가 등록 실패: ${docErr?.message || ""}`, 500);
+      }
+
+      await supabaseAdmin.from("hq_approval_step").insert({
+        approval_id: createdDoc.approval_id,
+        step_order: 1,
+        step_role: "FINAL_APPROVER",
+        approver_id: caller.userId,
+        approver_name: caller.name,
+        approver_dept: caller.department,
+        approver_rank: caller.rankCode,
+        approver_title: caller.jobTitle,
+        status: "APPROVED",
+        comment: "인사관리자 직접 등록",
+        acted_at: nowIso,
+      });
+
+      return NextResponse.json({
+        success: true,
+        data: { approval_id: createdDoc.approval_id },
+      });
+    }
+
+    if (action === "ADMIN_CANCEL_LEAVE_DOC") {
+      if (!canManage) {
+        return apiFail("휴가 기록 취소 권한이 없습니다.", 403);
+      }
+      const approvalId = String(body?.approval_id || "").trim();
+      if (!approvalId) return apiFail("문서 ID가 없습니다.");
+      await supabaseAdmin
+        .from("hq_approval_doc")
+        .update({ status: "CANCELLED", updated_at: nowIso })
+        .eq("approval_id", approvalId);
+      await supabaseAdmin
+        .from("hq_attendance")
+        .delete()
+        .eq("approval_id", approvalId);
+      return NextResponse.json({ success: true, data: { cancelled: true } });
+    }
+
     return apiFail("지원하지 않는 휴가 요청입니다.");
   } catch (e: any) {
     return apiFail(String(e?.message || e), 500);

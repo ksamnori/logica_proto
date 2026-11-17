@@ -3,6 +3,7 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useHqShell } from "@/components/hq/HqShellContext";
+import HqMemberLeaveDetailView from "@/components/hq/leaves/HqMemberLeaveDetailView";
 import { hqFetch } from "@/lib/hq/clientApi";
 import {
   DEFAULT_ANNUAL_LEAVE_SETTINGS,
@@ -110,6 +111,7 @@ export default function HqLeaveManagementPage() {
   const currentMonth = now.getMonth() + 1;
 
   const [tab, setTab] = useState<LeaveMgmtTab>("BALANCE");
+  const [selectedMemberId, setSelectedMemberId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
 
@@ -339,14 +341,16 @@ export default function HqLeaveManagementPage() {
     uploadedMonthly,
   ]);
 
-  // 구성원별 맞춤 휴가 보유량 표시 헬퍼 (스크린샷 010944 동일 규칙)
+  // 구성원별 맞춤 휴가 보유량 표시 헬퍼
+  // - '신청 시 부여' / '관리자가 직접 부여' / '연차 소진 시 부여': 신청·직접부여 전에는 기본 일수를 표시하지 않음 (빈칸)
+  // - '여성' 전용은 성별 '여'에게만, '남성' 전용(배우자출산·배우자 유산/사산·군소집훈련)은 성별 '남'에게만 적용
   const getCustomLeaveDisplayValue = (
     memberId: string,
     memberGender: string,
     item: HqCustomLeaveItem
   ): string => {
-    if (item.target_gender === "여성" && memberGender === "남") return "";
-    if (item.target_gender === "남성" && memberGender === "여") return "";
+    if (item.target_gender === "여성" && memberGender !== "여") return "";
+    if (item.target_gender === "남성" && memberGender !== "남") return "";
 
     const grantedSum = customGrants
       .filter((g) => g.member_id === memberId && g.leave_id === item.id)
@@ -361,26 +365,38 @@ export default function HqLeaveManagementPage() {
       )
       .reduce((acc, d) => acc + Number(d.leave_days || 0), 0);
 
-    if (item.grant_method === "관리자가 직접 부여") {
+    // 신청 시 부여 / 관리자가 직접 부여 / 연차 소진 시 부여 → 실제 부여되어 남은 잔여분이 있을 때만 표시
+    if (
+      item.grant_method === "신청 시 부여" ||
+      item.grant_method === "관리자가 직접 부여" ||
+      item.grant_method === "연차 소진 시 부여"
+    ) {
       const rem = Math.max(0, Math.round((grantedSum - usedSum) * 100) / 100);
       return rem > 0 ? String(rem) : "";
     }
 
-    if (item.id === "cl-military") {
-      return grantedSum > 0 ? String(grantedSum) : "";
-    }
-
-    if (
-      item.grant_method === "신청 시 부여" ||
-      item.grant_method === "반복 부여"
-    ) {
-      // 성별 미기입 시 공통(모두) 휴가는 기본 부여일수 표기
+    // 반복 부여 (예: 보건 매월 1일 부여 — 여성 전용)
+    if (item.grant_method === "반복 부여") {
       if (item.target_gender !== "모두" && !memberGender) return "";
-      const rem = Math.max(0, Number(item.grant_amount || 0) + grantedSum - usedSum);
+      const ymPrefix = `${currentYear}-${String(currentMonth).padStart(2, "0")}`;
+      const usedThisCycle = leaveDocs
+        .filter(
+          (d) =>
+            d.drafter_id === memberId &&
+            d.status === "APPROVED" &&
+            d.leave_type === item.name &&
+            (d.effective_date || "").startsWith(ymPrefix)
+        )
+        .reduce((acc, d) => acc + Number(d.leave_days || 0), 0);
+      const rem = Math.max(
+        0,
+        Number(item.grant_amount || 0) + grantedSum - usedThisCycle
+      );
       return rem > 0 ? String(rem) : "";
     }
 
-    return grantedSum > 0 ? String(grantedSum) : "";
+    const rem = Math.max(0, Math.round((grantedSum - usedSum) * 100) / 100);
+    return rem > 0 ? String(rem) : "";
   };
 
   // 탭 2: 휴가 사용 내역 필터링
@@ -794,8 +810,44 @@ export default function HqLeaveManagementPage() {
     ]);
   };
 
+  const selectedDetailMember = useMemo(
+    () =>
+      selectedMemberId
+        ? members.find((m) => m.instructor_id === selectedMemberId) || null
+        : null,
+    [members, selectedMemberId]
+  );
+
   return (
     <div className="min-h-full bg-white flex flex-col">
+      {selectedDetailMember ? (
+        <HqMemberLeaveDetailView
+          member={selectedDetailMember}
+          canManage={canManage}
+          annualPolicy={annualPolicy}
+          customLeaves={customLeaves}
+          holidaysByYear={companySettings?.holidays_by_year || {}}
+          leaveDocs={leaveDocs}
+          adjustments={adjustments}
+          customGrants={customGrants}
+          uploadedMonthly={uploadedMonthly}
+          onBack={() => setSelectedMemberId(null)}
+          onOpenGrantModalForMember={(mId, lvId) => {
+            setCgTargetIds([mId]);
+            if (lvId) setCgLeaveId(lvId);
+            setCustomGrantModalOpen(true);
+          }}
+          onOpenAdjustModalForMember={(mId, ym) => {
+            setAdjTargetIds([mId]);
+            if (ym) setAdjYm(ym);
+            setAdjModalOpen(true);
+          }}
+          onMutated={async () => {
+            await Promise.all([loadLeavesAll(), refreshMembers()]);
+          }}
+        />
+      ) : (
+        <>
       {/* 상단 타이틀 & 탭별 우측 액션 버튼 */}
       <div className="px-9 pt-7 border-b border-slate-200">
         <div className="flex flex-wrap items-center justify-between gap-3">
@@ -1027,9 +1079,10 @@ export default function HqLeaveManagementPage() {
                     return (
                       <tr
                         key={m.instructor_id}
-                        className="hover:bg-slate-50/60"
+                        onClick={() => setSelectedMemberId(m.instructor_id)}
+                        className="hover:bg-emerald-50/40 cursor-pointer transition-colors group"
                       >
-                        <td className="py-3.5 pl-9 pr-4 sticky left-0 bg-white z-10">
+                        <td className="py-3.5 pl-9 pr-4 sticky left-0 bg-white group-hover:bg-emerald-50/40 z-10 transition-colors">
                           <div className="flex items-center gap-3">
                             <span
                               style={{ backgroundColor: avatarBg(m.name) }}
@@ -1194,7 +1247,8 @@ export default function HqLeaveManagementPage() {
                     return (
                       <tr
                         key={doc.approval_id}
-                        className="hover:bg-slate-50/60"
+                        onClick={() => setSelectedMemberId(doc.drafter_id)}
+                        className="hover:bg-emerald-50/40 cursor-pointer transition-colors"
                       >
                         <td className="py-3.5 pl-9 pr-4">
                           <div className="flex items-center gap-3">
@@ -1334,7 +1388,11 @@ export default function HqLeaveManagementPage() {
                     (m.department !== "미지정" ? m.department : "");
 
                   return (
-                    <tr key={m.instructor_id} className="hover:bg-slate-50/60">
+                    <tr
+                      key={m.instructor_id}
+                      onClick={() => setSelectedMemberId(m.instructor_id)}
+                      className="hover:bg-emerald-50/40 cursor-pointer transition-colors"
+                    >
                       <td className="py-3.5 pl-9 pr-4">
                         <div className="flex items-center gap-3">
                           <span
@@ -1483,7 +1541,11 @@ export default function HqLeaveManagementPage() {
                       : row.employee_no || "";
 
                     return (
-                      <tr key={row.id} className="hover:bg-slate-50/60">
+                      <tr
+                        key={row.id}
+                        onClick={() => setSelectedMemberId(row.member_id)}
+                        className="hover:bg-emerald-50/40 cursor-pointer transition-colors"
+                      >
                         <td className="py-3.5 pl-9 pr-3">
                           <span className="px-2 py-0.5 rounded bg-slate-100 text-slate-600 text-[11px] font-bold">
                             재직
@@ -1546,7 +1608,10 @@ export default function HqLeaveManagementPage() {
                           {submittedPlan && (
                             <button
                               type="button"
-                              onClick={() => setViewPlanTarget(submittedPlan)}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setViewPlanTarget(submittedPlan);
+                              }}
                               className="px-3 py-1 rounded-lg border border-slate-200 hover:bg-slate-50 font-bold text-slate-700"
                             >
                               보기
@@ -1557,7 +1622,10 @@ export default function HqLeaveManagementPage() {
                           {canManage && (
                             <button
                               type="button"
-                              onClick={() => handleDeletePromoTarget(row.id)}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleDeletePromoTarget(row.id);
+                              }}
                               className="px-2 py-1 rounded hover:bg-slate-100 text-slate-400 hover:text-rose-600 font-bold"
                               title="촉진 내역 삭제"
                             >
@@ -1573,6 +1641,8 @@ export default function HqLeaveManagementPage() {
             </table>
           </div>
         </div>
+      )}
+        </>
       )}
 
       {/* =====================================================================

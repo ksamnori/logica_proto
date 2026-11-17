@@ -201,6 +201,7 @@ export interface HqProfileExtra {
   hr_grade?: string;
   org_assignments?: HqMemberOrgAssignment[];
   rrn_front?: string;
+  rrn_gender_digit?: string;
   gender?: "남" | "여" | "";
   nationality?: string;
   postal_code?: string;
