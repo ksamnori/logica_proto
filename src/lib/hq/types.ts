@@ -203,8 +203,11 @@ export interface HqProfileExtra {
   rrn_front?: string;
   rrn_gender_digit?: string;
   gender?: "남" | "여" | "";
+  birth_is_lunar?: boolean;
   nationality?: string;
   postal_code?: string;
+  address_base?: string;
+  address_detail?: string;
   work_schedule_type?: string;
   work_schedule_mode?: string;
   weekly_work_hours?: number;

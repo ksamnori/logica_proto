@@ -6,6 +6,7 @@ import Link from "next/link";
 import { supabase } from "@/lib/supabase";
 import { useOptionalHqShell } from "@/components/hq/HqShellContext";
 import { useHqHref } from "@/lib/hq/hqRoutes";
+import DaumPostcodeModal from "./DaumPostcodeModal";
 import {
   HQ_DEFAULT_DEPARTMENTS,
   HQ_EMPLOYMENT_TYPES,
@@ -223,6 +224,8 @@ export default function HqMemberProfileModal({
   });
 
   // 2) 기본 정보 폼
+  const [postcodeOpen, setPostcodeOpen] = useState(false);
+  const addressDetailRef = useRef<HTMLInputElement | null>(null);
   const [basicForm, setBasicForm] = useState({
     name: "",
     nickname: "",
@@ -236,12 +239,14 @@ export default function HqMemberProfileModal({
     rrn_gender_digit: "",
     gender: "" as "" | "남" | "여",
     birth_date: "",
+    birth_is_lunar: false,
     nationality: "대한민국(KOR)",
     phone: "",
     extension_no: "",
     emergency_contact: "",
     postal_code: "",
-    address: "",
+    address_base: "",
+    address_detail: "",
     bank_name: "",
     bank_account: "",
     account_holder: "",
@@ -374,6 +379,9 @@ export default function HqMemberProfileModal({
     setBioDraft(member.profile_extra?.bio || "");
     if (initialSubModal === "basic") {
       const mEx = member.profile_extra || {};
+      const legacyAddress = member.address || "";
+      const savedBase = mEx.address_base ?? legacyAddress;
+      const savedDetail = mEx.address_detail ?? "";
       setBasicForm({
         name: member.name,
         nickname: mEx.nickname || "",
@@ -387,12 +395,14 @@ export default function HqMemberProfileModal({
         rrn_gender_digit: mEx.rrn_gender_digit || "",
         gender: (mEx.gender as "" | "남" | "여") || "",
         birth_date: member.birth_date || "",
+        birth_is_lunar: Boolean(mEx.birth_is_lunar),
         nationality: mEx.nationality || "대한민국(KOR)",
         phone: member.phone || "",
         extension_no: member.extension_no || "",
         emergency_contact: member.emergency_contact || "",
         postal_code: mEx.postal_code || "",
-        address: member.address || "",
+        address_base: savedBase,
+        address_detail: savedDetail,
         bank_name: member.bank_name || "",
         bank_account: member.bank_account || "",
         account_holder: member.account_holder || member.name,
@@ -518,6 +528,9 @@ export default function HqMemberProfileModal({
   };
 
   const openBasicEdit = () => {
+    const savedBase =
+      ex.address_base !== undefined ? ex.address_base : member.address || "";
+    const savedDetail = ex.address_detail || "";
     setBasicForm({
       name: member.name,
       nickname: ex.nickname || "",
@@ -531,12 +544,14 @@ export default function HqMemberProfileModal({
       rrn_gender_digit: ex.rrn_gender_digit || "",
       gender: (ex.gender as "" | "남" | "여") || "",
       birth_date: member.birth_date || "",
+      birth_is_lunar: Boolean(ex.birth_is_lunar),
       nationality: ex.nationality || "대한민국(KOR)",
       phone: member.phone || "",
       extension_no: member.extension_no || "",
       emergency_contact: member.emergency_contact || "",
       postal_code: ex.postal_code || "",
-      address: member.address || "",
+      address_base: savedBase,
+      address_detail: savedDetail,
       bank_name: member.bank_name || "",
       bank_account: member.bank_account || "",
       account_holder: member.account_holder || member.name,
@@ -1137,7 +1152,11 @@ export default function HqMemberProfileModal({
                             )}
                             <span className="text-slate-400 mr-1.5">생일</span>
                             <span className="text-slate-800">
-                              {birthdayShort || "미입력"}
+                              {birthdayShort
+                                ? `${birthdayShort}${
+                                    ex.birth_is_lunar ? " (음력)" : ""
+                                  }`
+                                : "미입력"}
                             </span>
                           </InfoRow>
 
@@ -2601,7 +2620,13 @@ export default function HqMemberProfileModal({
                     </div>
                     <div className="flex items-center gap-2.5">
                       <span className="text-slate-400 w-4 text-center">🎂</span>
-                      <span>{birthdayShort || "생일 미등록"}</span>
+                      <span>
+                        {birthdayShort
+                          ? `${birthdayShort}${
+                              ex.birth_is_lunar ? " (음력)" : ""
+                            }`
+                          : "생일 미등록"}
+                      </span>
                     </div>
                   </>
                 )}
@@ -2715,13 +2740,20 @@ export default function HqMemberProfileModal({
               effBirthDate = `${century}${yy}-${mm}-${dd}`;
             }
 
+            const combinedAddress = [
+              basicForm.address_base.trim(),
+              basicForm.address_detail.trim(),
+            ]
+              .filter(Boolean)
+              .join(" ");
+
             const payload: Record<string, unknown> = {
               phone: basicForm.phone,
               email: basicForm.email,
               extension_no: basicForm.extension_no,
               emergency_contact: basicForm.emergency_contact,
               birth_date: effBirthDate || null,
-              address: basicForm.address,
+              address: combinedAddress,
               bank_name: basicForm.bank_name,
               bank_account: basicForm.bank_account,
               account_holder: basicForm.account_holder,
@@ -2731,8 +2763,11 @@ export default function HqMemberProfileModal({
                 rrn_front: cleanFront,
                 rrn_gender_digit: cleanDigit,
                 gender: derivedGender,
+                birth_is_lunar: Boolean(basicForm.birth_is_lunar),
                 nationality: basicForm.nationality.trim() || "대한민국(KOR)",
                 postal_code: basicForm.postal_code.trim(),
+                address_base: basicForm.address_base.trim(),
+                address_detail: basicForm.address_detail.trim(),
                 ...(isHrManager
                   ? {
                       group_hire_date: basicForm.group_hire_date,
@@ -2843,7 +2878,7 @@ export default function HqMemberProfileModal({
               </div>
             )}
 
-            <Field label="주민등록번호 (앞 6자리 · 뒷 첫자리)">
+            <Field label="주민등록번호 (예: 000101 - 4)">
               <div className="flex items-center gap-1.5 min-w-0">
                 <input
                   maxLength={6}
@@ -2854,7 +2889,11 @@ export default function HqMemberProfileModal({
                       .slice(0, 6);
                     setBasicForm((prev) => {
                       let nextBirth = prev.birth_date;
-                      if (front.length === 6 && prev.rrn_gender_digit) {
+                      if (
+                        !prev.birth_is_lunar &&
+                        front.length === 6 &&
+                        prev.rrn_gender_digit
+                      ) {
                         const yy = front.slice(0, 2);
                         const mm = front.slice(2, 4);
                         const dd = front.slice(4, 6);
@@ -2872,7 +2911,7 @@ export default function HqMemberProfileModal({
                       };
                     });
                   }}
-                  placeholder="810201"
+                  placeholder="000101"
                   className="w-28 min-w-0 px-3 py-2.5 rounded-xl border border-slate-300 font-mono text-center font-semibold"
                 />
                 <span className="text-slate-400 font-mono shrink-0">-</span>
@@ -2885,7 +2924,11 @@ export default function HqMemberProfileModal({
                       .slice(0, 1);
                     setBasicForm((prev) => {
                       let nextBirth = prev.birth_date;
-                      if (digit && /^\d{6}$/.test(prev.rrn_front)) {
+                      if (
+                        !prev.birth_is_lunar &&
+                        digit &&
+                        /^\d{6}$/.test(prev.rrn_front)
+                      ) {
                         const yy = prev.rrn_front.slice(0, 2);
                         const mm = prev.rrn_front.slice(2, 4);
                         const dd = prev.rrn_front.slice(4, 6);
@@ -2901,7 +2944,7 @@ export default function HqMemberProfileModal({
                       };
                     });
                   }}
-                  placeholder="1"
+                  placeholder="4"
                   className="w-10 shrink-0 px-1 py-2.5 rounded-xl border border-slate-300 font-mono text-center font-bold"
                 />
                 <span className="text-slate-400 font-mono text-xs tracking-wider select-none shrink-0">
@@ -2910,7 +2953,25 @@ export default function HqMemberProfileModal({
               </div>
             </Field>
 
-            <Field label="생년월일">
+            <Field
+              label="생년월일"
+              rightSlot={
+                <label className="inline-flex items-center gap-1.5 text-[11px] font-bold text-slate-600 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={basicForm.birth_is_lunar}
+                    onChange={(e) =>
+                      setBasicForm({
+                        ...basicForm,
+                        birth_is_lunar: e.target.checked,
+                      })
+                    }
+                    className="w-3.5 h-3.5 rounded accent-brand cursor-pointer"
+                  />
+                  <span>음력</span>
+                </label>
+              }
+            >
               <input
                 type="date"
                 value={basicForm.birth_date}
@@ -2977,26 +3038,50 @@ export default function HqMemberProfileModal({
 
             <div className="sm:col-span-2">
               <Field label="주소 · 우편번호">
-                <div className="grid grid-cols-1 sm:grid-cols-12 gap-2.5">
+                <div className="space-y-2">
+                  <div className="flex flex-wrap sm:flex-nowrap items-center gap-2">
+                    <input
+                      value={basicForm.postal_code}
+                      maxLength={6}
+                      onChange={(e) =>
+                        setBasicForm({
+                          ...basicForm,
+                          postal_code: e.target.value.replace(/[^0-9]/g, ""),
+                        })
+                      }
+                      placeholder="우편번호"
+                      className="w-28 shrink-0 px-3 py-2.5 rounded-xl border border-slate-300 font-mono text-center font-bold bg-slate-50/60"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setPostcodeOpen(true)}
+                      className="px-3.5 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold shrink-0 whitespace-nowrap"
+                    >
+                      🔍 주소 검색
+                    </button>
+                    <input
+                      value={basicForm.address_base}
+                      onChange={(e) =>
+                        setBasicForm({
+                          ...basicForm,
+                          address_base: e.target.value,
+                        })
+                      }
+                      placeholder="도로명 / 지번 기본주소"
+                      className="flex-1 min-w-[200px] px-3 py-2.5 rounded-xl border border-slate-300"
+                    />
+                  </div>
                   <input
-                    value={basicForm.postal_code}
-                    maxLength={6}
+                    ref={addressDetailRef}
+                    value={basicForm.address_detail}
                     onChange={(e) =>
                       setBasicForm({
                         ...basicForm,
-                        postal_code: e.target.value.replace(/[^0-9]/g, ""),
+                        address_detail: e.target.value,
                       })
                     }
-                    placeholder="우편번호"
-                    className="sm:col-span-4 w-full min-w-0 px-3 py-2.5 rounded-xl border border-slate-300 font-mono"
-                  />
-                  <input
-                    value={basicForm.address}
-                    onChange={(e) =>
-                      setBasicForm({ ...basicForm, address: e.target.value })
-                    }
-                    placeholder="도로명 주소 및 상세주소"
-                    className="sm:col-span-8 w-full min-w-0 px-3 py-2.5 rounded-xl border border-slate-300"
+                    placeholder="상세주소 입력 (예: A동 1403호, 층·호수)"
+                    className="w-full min-w-0 px-3 py-2.5 rounded-xl border border-slate-300"
                   />
                 </div>
               </Field>
@@ -3041,6 +3126,21 @@ export default function HqMemberProfileModal({
           </div>
         </SubDialog>
       )}
+
+      <DaumPostcodeModal
+        open={postcodeOpen}
+        onClose={() => setPostcodeOpen(false)}
+        onSelect={({ postalCode, baseAddress }) => {
+          setBasicForm((prev) => ({
+            ...prev,
+            postal_code: postalCode,
+            address_base: baseAddress,
+          }));
+          setTimeout(() => {
+            addressDetailRef.current?.focus();
+          }, 80);
+        }}
+      />
 
       {/* 3. 근로계약 편집 */}
       {editModal === "labor" && (
@@ -4286,16 +4386,21 @@ function PlaceholderBtn({
 
 function Field({
   label,
+  rightSlot,
   children,
 }: {
   label: string;
+  rightSlot?: React.ReactNode;
   children: React.ReactNode;
 }) {
   return (
     <div className="min-w-0">
-      <label className="block text-[11px] font-bold text-slate-600 mb-1.5">
-        {label}
-      </label>
+      <div className="flex items-center justify-between gap-2 mb-1.5">
+        <label className="block text-[11px] font-bold text-slate-600">
+          {label}
+        </label>
+        {rightSlot}
+      </div>
       {children}
     </div>
   );
