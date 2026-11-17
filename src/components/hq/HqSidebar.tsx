@@ -140,10 +140,10 @@ export default function HqSidebar() {
           </div>
         </div>
 
-        {/* 2. 공지 · 구성원 · 조직도 · 근태 · 전자계약 */}
+        {/* 2. 공지 · 구성원 · 조직도 · 근태 · 워크플로우 · 전자계약 */}
         <div>
           <div className="px-3 mb-1 text-[10px] font-bold text-slate-500 uppercase tracking-wider">
-            인사(HR) · 근태 · 계약
+            인사(HR) · 근태 · 워크플로우
           </div>
           <div className="space-y-0.5">
             <Link href="/hq/notices" className={navItemClass("/hq/notices")}>
@@ -245,6 +245,21 @@ export default function HqSidebar() {
             </div>
 
             <Link
+              href="/hq/approvals"
+              className={navItemClass("/hq/approvals")}
+            >
+              <span className="flex items-center gap-2.5 truncate">
+                <span>📋</span>
+                <span>워크플로우</span>
+              </span>
+              {pendingApprovalCount > 0 && (
+                <span className="px-2 py-0.5 rounded-full bg-rose-500 text-white text-[11px] font-extrabold shrink-0">
+                  {pendingApprovalCount}
+                </span>
+              )}
+            </Link>
+
+            <Link
               href="/hq/contracts"
               className={navItemClass("/hq/contracts")}
             >
@@ -261,27 +276,12 @@ export default function HqSidebar() {
           </div>
         </div>
 
-        {/* 3. 결재 · 비용 · 급여/인세 */}
+        {/* 3. 비용 · 급여/인세 */}
         <div>
           <div className="px-3 mb-1 text-[10px] font-bold text-slate-500 uppercase tracking-wider">
-            결재 · 경비 · 정산
+            경비 · 급여 정산
           </div>
           <div className="space-y-0.5">
-            <Link
-              href="/hq/approvals"
-              className={navItemClass("/hq/approvals")}
-            >
-              <span className="flex items-center gap-2.5 truncate">
-                <span>✍️</span>
-                <span>전자결재 워크플로우</span>
-              </span>
-              {pendingApprovalCount > 0 && (
-                <span className="px-2 py-0.5 rounded-full bg-rose-500 text-white text-[11px] font-extrabold shrink-0">
-                  {pendingApprovalCount}
-                </span>
-              )}
-            </Link>
-
             <Link href="/hq/expenses" className={navItemClass("/hq/expenses")}>
               <span className="flex items-center gap-2.5 truncate">
                 <span>💳</span>

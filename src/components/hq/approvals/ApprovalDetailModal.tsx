@@ -4,12 +4,23 @@
 import React, { useState } from "react";
 import { APPROVAL_DOC_META, getRankLevel } from "@/lib/hq/constants";
 import { hqFetch, resolveStoragePublicUrl } from "@/lib/hq/clientApi";
-import type { HqApprovalDoc, HqApprovalStatus, HqMember } from "@/lib/hq/types";
+import type {
+  HqApprovalDoc,
+  HqApprovalStatus,
+  HqMember,
+  HqWorkflowDocMeta,
+} from "@/lib/hq/types";
 
 interface Props {
   doc: HqApprovalDoc | null;
   me: HqMember | null;
   isHqAdmin: boolean;
+  canDeleteCompanyDoc?: boolean;
+  isStarred?: boolean;
+  onToggleStar?: (approvalId: string) => void;
+  onFollowUpPostExpense?: (doc: HqApprovalDoc) => void;
+  onCloneDoc?: (doc: HqApprovalDoc) => void;
+  onOpenRefDoc?: (refDocId: string) => void;
   onClose: () => void;
   onUpdated: () => void;
 }
@@ -19,23 +30,23 @@ const STATUS_BADGE: Record<
   { label: string; className: string }
 > = {
   PENDING: {
-    label: "결재 대기",
-    className: "bg-amber-50 text-amber-800 border-amber-200",
+    label: "진행중",
+    className: "bg-blue-50 text-blue-700 border-blue-200",
   },
   IN_PROGRESS: {
-    label: "결재 진행중",
-    className: "bg-sky-50 text-sky-700 border-sky-200",
+    label: "진행중",
+    className: "bg-blue-50 text-blue-700 border-blue-200",
   },
   APPROVED: {
-    label: "최종 승인",
+    label: "승인",
     className: "bg-emerald-50 text-emerald-700 border-emerald-200",
   },
   REJECTED: {
-    label: "반려됨",
+    label: "반려",
     className: "bg-rose-50 text-rose-700 border-rose-200",
   },
   CANCELLED: {
-    label: "상신 회수",
+    label: "취소",
     className: "bg-slate-100 text-slate-600 border-slate-200",
   },
 };
@@ -44,15 +55,31 @@ export default function ApprovalDetailModal({
   doc,
   me,
   isHqAdmin,
+  canDeleteCompanyDoc = false,
+  isStarred = false,
+  onToggleStar,
+  onFollowUpPostExpense,
+  onCloneDoc,
+  onOpenRefDoc,
   onClose,
   onUpdated,
 }: Props) {
   const [comment, setComment] = useState("");
+  const [threadInput, setThreadInput] = useState("");
   const [acting, setActing] = useState(false);
+  const [postingThread, setPostingThread] = useState(false);
+  const [localMeta, setLocalMeta] = useState<HqWorkflowDocMeta | null>(null);
 
   if (!doc) return null;
 
+  const wfMeta =
+    localMeta && localMeta.approval_id === doc.approval_id
+      ? localMeta
+      : doc.workflow_meta || null;
+
   const meta = APPROVAL_DOC_META[doc.doc_type] || APPROVAL_DOC_META.GENERAL;
+  const formTitle = wfMeta?.form_title || meta.label;
+  const formIcon = wfMeta?.form_icon || meta.icon;
   const stBadge = STATUS_BADGE[doc.status] || STATUS_BADGE.PENDING;
   const receiptPublicUrl = resolveStoragePublicUrl(doc.receipt_url);
 
@@ -67,32 +94,36 @@ export default function ApprovalDetailModal({
     me && currentStep && currentStep.approver_id === me.instructor_id
   );
   const canExecutiveAct = Boolean(me && (myLevel >= 5 || isHqAdmin));
-  const canApproveNow = isPendingOrProgress && (isAssignedToMe || canExecutiveAct);
-  const canDelegatedFinal =
-    canApproveNow &&
-    myLevel >= 3 &&
-    Number(doc.current_step_order) < Number(doc.total_steps);
+  const canApproveNow =
+    isPendingOrProgress && (isAssignedToMe || canExecutiveAct);
   const canCancel = Boolean(
     me && doc.drafter_id === me.instructor_id && doc.status === "PENDING"
   );
 
+  // 사전 지출계획서 승인 건인 경우 [사후 지출품의서 이어서 작성] 노출
+  const isApprovedPreExpense =
+    doc.status === "APPROVED" &&
+    (wfMeta?.form_id === "wf-expense-pre" ||
+      formTitle.includes("지출계획서") ||
+      doc.doc_type === "PURCHASE");
+
   const runAction = async (
-    action: "APPROVE" | "FINAL_APPROVE" | "REJECT" | "CANCEL"
+    action: "APPROVE" | "REJECT" | "CANCEL" | "DELETE_DOC"
   ) => {
     if (action === "REJECT" && !comment.trim()) {
-      alert("반려 시에는 하단 결재 의견란에 반려 사유를 반드시 입력해주세요.");
+      alert("반려 시에는 하단 의견란에 반려 사유를 입력해 주세요.");
       return;
     }
     if (
       action === "CANCEL" &&
-      !confirm("기안한 결재 문서를 상신 회수하시겠습니까?")
+      !confirm("작성한 문서를 요청 취소(회수)하시겠습니까?")
     ) {
       return;
     }
     if (
-      action === "FINAL_APPROVE" &&
+      action === "DELETE_DOC" &&
       !confirm(
-        "상위 결재 단계를 생략하고 현재 직급 권한으로 [전결 최종 승인] 처리하시겠습니까?"
+        "이 문서를 회사 문서함에서 영구 삭제하시겠습니까? 삭제 후 복구할 수 없습니다."
       )
     ) {
       return;
@@ -113,9 +144,35 @@ export default function ApprovalDetailModal({
       onUpdated();
       onClose();
     } catch (err: any) {
-      alert(err?.message || "결재 처리 중 오류가 발생했습니다.");
+      alert(err?.message || "처리 중 오류가 발생했습니다.");
     } finally {
       setActing(false);
+    }
+  };
+
+  const handlePostThreadComment = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!threadInput.trim()) return;
+    setPostingThread(true);
+    try {
+      const res = await hqFetch<{
+        success: boolean;
+        data: { docMeta: HqWorkflowDocMeta };
+      }>("/api/hq/workflows", {
+        method: "POST",
+        body: {
+          action: "ADD_COMMENT",
+          approval_id: doc.approval_id,
+          content: threadInput.trim(),
+        },
+      });
+      setLocalMeta(res.data.docMeta);
+      setThreadInput("");
+      onUpdated();
+    } catch (err: any) {
+      alert(err?.message || "의견 등록 실패");
+    } finally {
+      setPostingThread(false);
     }
   };
 
@@ -141,77 +198,149 @@ export default function ApprovalDetailModal({
     });
   };
 
+  const customFieldEntries = Object.entries(wfMeta?.field_values || {}).filter(
+    ([, v]) => String(v || "").trim() !== ""
+  );
+
+  const attachmentList = wfMeta?.attachments || [];
+
   return (
-    <div className="fixed inset-0 bg-slate-900/65 backdrop-blur-sm z-50 flex items-center justify-center p-4 print:static print:bg-white print:p-0">
-      <div className="bg-white w-full max-w-3xl rounded-2xl shadow-2xl border border-slate-200 flex flex-col max-h-[92vh] overflow-hidden print:shadow-none print:border-none print:max-h-none print:max-w-none">
-        {/* 상단 바 */}
-        <div className="print:hidden px-6 py-4 bg-slate-900 text-white flex items-center justify-between gap-3 shrink-0">
+    <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-[2px] z-50 flex items-center justify-center p-4 print:static print:bg-white print:p-0">
+      <div className="bg-white w-full max-w-3xl rounded-3xl shadow-2xl border border-slate-200 flex flex-col max-h-[92vh] overflow-hidden print:shadow-none print:border-none print:max-h-none print:max-w-none">
+        {/* 상단 헤더 바 */}
+        <div className="print:hidden px-6 py-4 border-b border-slate-100 bg-white flex items-center justify-between gap-3 shrink-0">
           <div className="flex items-center gap-2 min-w-0">
-            <span className="text-lg">{meta.icon}</span>
-            <span className="font-bold text-sm truncate">{meta.label}</span>
-            <span className="text-xs text-slate-400 font-mono">{doc.doc_no}</span>
+            <span className="w-8 h-8 rounded-xl bg-slate-100 flex items-center justify-center text-base shrink-0">
+              {formIcon}
+            </span>
+            <span className="font-extrabold text-sm text-slate-900 truncate">
+              {formTitle}
+            </span>
+            <span className="text-xs text-slate-400 font-mono">
+              {doc.doc_no}
+            </span>
             {doc.urgent && (
-              <span className="px-2 py-0.5 rounded-full bg-rose-500 text-white text-[11px] font-extrabold">
+              <span className="px-2 py-0.5 rounded-full bg-rose-500 text-white text-[10px] font-extrabold">
                 긴급
               </span>
             )}
-            {doc.is_auto_delegated && (
-              <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 border border-emerald-400/40 text-emerald-200 text-[11px] font-bold">
-                ⚡ 전결규정
-              </span>
-            )}
           </div>
-          <div className="flex items-center gap-2 shrink-0">
+
+          <div className="flex items-center gap-1.5 shrink-0">
+            {onToggleStar && (
+              <button
+                type="button"
+                onClick={() => onToggleStar(doc.approval_id)}
+                className={`w-8 h-8 rounded-lg border flex items-center justify-center text-sm transition-colors ${
+                  isStarred
+                    ? "bg-amber-50 border-amber-200 text-amber-500"
+                    : "bg-white border-slate-200 text-slate-300 hover:text-amber-400"
+                }`}
+                title="중요 문서 표시"
+              >
+                {isStarred ? "★" : "☆"}
+              </button>
+            )}
+
+            {isApprovedPreExpense && onFollowUpPostExpense && (
+              <button
+                type="button"
+                onClick={() => {
+                  onClose();
+                  onFollowUpPostExpense(doc);
+                }}
+                className="px-3 py-1.5 rounded-lg bg-[#00c458] hover:bg-[#00b04f] text-white text-xs font-extrabold shadow-2xs"
+              >
+                💳 사후 지출품의서 이어서 작성
+              </button>
+            )}
+
+            {onCloneDoc && (
+              <button
+                type="button"
+                onClick={() => {
+                  onClose();
+                  onCloneDoc(doc);
+                }}
+                className="px-2.5 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold"
+              >
+                📋 재기안
+              </button>
+            )}
+
             <button
               type="button"
               onClick={() => window.print()}
-              className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold"
+              className="px-2.5 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold"
             >
               🖨️ 인쇄
             </button>
+
+            {canDeleteCompanyDoc && (
+              <button
+                type="button"
+                disabled={acting}
+                onClick={() => runAction("DELETE_DOC")}
+                className="px-2.5 py-1.5 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-600 text-xs font-bold"
+              >
+                삭제
+              </button>
+            )}
+
             <button
               type="button"
               onClick={onClose}
-              className="text-slate-400 hover:text-white text-2xl leading-none font-bold ml-1"
+              className="w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-600 flex items-center justify-center text-xs font-extrabold ml-1"
             >
-              &times;
+              ✕
             </button>
           </div>
         </div>
 
         {/* 문서 본문 */}
         <div className="p-6 sm:p-8 overflow-y-auto flex-1 space-y-6 custom-scroll text-[13px] text-slate-800">
-          {/* 타이틀 + 우측 결재 도장란 */}
+          {/* 제목 + 우측 승인 단계 도장 테이블 */}
           <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4 border-b border-slate-200 pb-5">
-            <div>
-              <div className="flex items-center gap-2 mb-2">
+            <div className="space-y-1.5">
+              <div className="flex flex-wrap items-center gap-2">
                 <span
-                  className={`px-2.5 py-0.5 rounded-full border text-xs font-extrabold ${stBadge.className}`}
+                  className={`px-2.5 py-0.5 rounded-md border text-xs font-extrabold ${stBadge.className}`}
                 >
-                  {stBadge.label}
+                  {isPendingOrProgress
+                    ? `진행중 ${doc.current_step_order}/${doc.total_steps}`
+                    : stBadge.label}
                 </span>
                 <span className="text-xs text-slate-400 font-mono">
-                  {doc.doc_no}
+                  문서번호: {doc.doc_no}
                 </span>
               </div>
               <h2 className="text-xl font-extrabold text-slate-900 leading-snug">
                 {doc.title}
               </h2>
-              <p className="text-xs text-slate-500 mt-1">
-                천종현수학연구소 본부 전자결재 시스템
-              </p>
+              {wfMeta?.cc_member_names && wfMeta.cc_member_names.length > 0 && (
+                <div className="flex flex-wrap items-center gap-1.5 pt-1 text-xs text-slate-500">
+                  <span className="font-bold text-slate-400">참조:</span>
+                  {wfMeta.cc_member_names.map((ccName, i) => (
+                    <span
+                      key={`${ccName}-${i}`}
+                      className="px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 text-[11px] font-bold"
+                    >
+                      {ccName}
+                    </span>
+                  ))}
+                </div>
+              )}
             </div>
 
-            {/* 결재 도장 테이블 */}
-            <div className="flex border border-slate-300 rounded-lg overflow-hidden shrink-0 self-start">
-              {/* 기안자 칸 */}
-              <div className="w-[74px] flex flex-col border-r border-slate-300 text-center">
+            {/* 승인 도장란 */}
+            <div className="flex border border-slate-300 rounded-xl overflow-hidden shrink-0 self-start">
+              <div className="w-[72px] flex flex-col border-r border-slate-300 text-center">
                 <div className="bg-slate-100 py-1 text-[10px] font-bold text-slate-600 border-b border-slate-300">
-                  기 안
+                  작 성
                 </div>
-                <div className="h-14 flex flex-col items-center justify-center px-1">
+                <div className="h-14 flex items-center justify-center px-1">
                   <span className="w-9 h-9 rounded-full border-2 border-blue-600 text-blue-700 flex items-center justify-center text-[10px] font-extrabold">
-                    상신
+                    작성
                   </span>
                 </div>
                 <div className="border-t border-slate-200 py-1 text-[10px] font-bold text-slate-700 truncate px-1 bg-slate-50">
@@ -222,46 +351,31 @@ export default function ApprovalDetailModal({
                 </div>
               </div>
 
-              {/* 결재선 단계 칸들 */}
               {doc.steps.map((st) => {
-                const isSelfApproved =
+                const isZeroStepSelf =
                   st.approver_id === doc.drafter_id && doc.steps.length === 1;
-                if (isSelfApproved) return null;
-
-                const headerLabel =
-                  st.step_role === "DELEGATED_FINAL"
-                    ? "전 결"
-                    : st.step_order === doc.total_steps
-                      ? "최 종"
-                      : `${st.step_order} 차`;
+                if (isZeroStepSelf) return null;
 
                 return (
                   <div
                     key={st.step_order}
-                    className="w-[74px] flex flex-col border-r last:border-r-0 border-slate-300 text-center"
+                    className="w-[72px] flex flex-col border-r last:border-r-0 border-slate-300 text-center"
                   >
                     <div className="bg-slate-100 py-1 text-[10px] font-bold text-slate-600 border-b border-slate-300 truncate px-1">
-                      {headerLabel}
+                      {st.step_order}단계
                     </div>
                     <div className="h-14 flex items-center justify-center px-1">
                       {st.status === "APPROVED" ? (
-                        <span className="w-10 h-10 rounded-full border-2 border-rose-600 text-rose-600 flex items-center justify-center text-[10px] font-extrabold rotate-[-6deg]">
-                          {st.comment?.includes("전결") ||
-                          st.step_role === "DELEGATED_FINAL"
-                            ? "전결"
-                            : "승인"}
+                        <span className="w-10 h-10 rounded-full border-2 border-emerald-600 text-emerald-700 flex items-center justify-center text-[10px] font-extrabold rotate-[-6deg]">
+                          승인
                         </span>
                       ) : st.status === "REJECTED" ? (
-                        <span className="w-10 h-10 rounded-full border-2 border-slate-700 text-slate-700 flex items-center justify-center text-[10px] font-extrabold">
+                        <span className="w-10 h-10 rounded-full border-2 border-rose-600 text-rose-600 flex items-center justify-center text-[10px] font-extrabold">
                           반려
                         </span>
-                      ) : st.status === "SKIPPED" ? (
-                        <span className="text-[11px] font-bold text-slate-300 line-through">
-                          전결생략
-                        </span>
                       ) : st.status === "CURRENT" ? (
-                        <span className="px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 text-[10px] font-extrabold">
-                          검토중
+                        <span className="px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 text-[10px] font-extrabold">
+                          승인대기
                         </span>
                       ) : (
                         <span className="text-[10px] text-slate-300 font-semibold">
@@ -273,7 +387,9 @@ export default function ApprovalDetailModal({
                       {st.approver_name}
                     </div>
                     <div className="text-[9px] text-slate-400 pb-1 bg-slate-50">
-                      {st.acted_at ? formatDateShort(st.acted_at) : st.approver_title}
+                      {st.acted_at
+                        ? formatDateShort(st.acted_at)
+                        : st.approver_title}
                     </div>
                   </div>
                 );
@@ -281,16 +397,42 @@ export default function ApprovalDetailModal({
             </div>
           </div>
 
-          {/* 기안 기본 정보 표 */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 bg-slate-50 p-4 rounded-xl border border-slate-200">
+          {/* 연결된 참조 문서 배너 */}
+          {wfMeta?.ref_doc_title && (
+            <div className="px-4 py-3 rounded-2xl bg-indigo-50/70 border border-indigo-200/80 flex items-center justify-between gap-3">
+              <div className="text-xs font-bold text-indigo-900">
+                🔗 참조 문서:{" "}
+                <span className="font-mono text-indigo-600">
+                  [{wfMeta.ref_doc_no || "문서"}]
+                </span>{" "}
+                {wfMeta.ref_doc_title}
+              </div>
+              {wfMeta.ref_doc_id && onOpenRefDoc && (
+                <button
+                  type="button"
+                  onClick={() => onOpenRefDoc(wfMeta.ref_doc_id!)}
+                  className="px-2.5 py-1 rounded-lg bg-white border border-indigo-200 text-[11px] font-extrabold text-indigo-700 hover:bg-indigo-50 shrink-0"
+                >
+                  참조 문서 열기 ›
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* 기본 정보 요약 */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 bg-slate-50 p-4 rounded-2xl border border-slate-200/80">
             <div>
-              <div className="text-[11px] text-slate-400 font-bold">기안자 / 부서</div>
+              <div className="text-[11px] text-slate-400 font-bold">
+                작성자 / 조직
+              </div>
               <div className="font-bold text-slate-800 mt-0.5">
                 {doc.drafter_name} {doc.drafter_title} ({doc.drafter_dept})
               </div>
             </div>
             <div>
-              <div className="text-[11px] text-slate-400 font-bold">상신 일시</div>
+              <div className="text-[11px] text-slate-400 font-bold">
+                작성 일시
+              </div>
               <div className="font-semibold text-slate-700 mt-0.5">
                 {formatDateTime(doc.submitted_at)}
               </div>
@@ -301,7 +443,7 @@ export default function ApprovalDetailModal({
                   ? "휴가 기간"
                   : doc.doc_type === "EXPENSE"
                     ? "지출 일자"
-                    : "시행 · 기준일"}
+                    : "기준 일자"}
               </div>
               <div className="font-semibold text-slate-700 mt-0.5">
                 {doc.effective_date || "-"}
@@ -313,9 +455,9 @@ export default function ApprovalDetailModal({
             </div>
             <div>
               <div className="text-[11px] text-slate-400 font-bold">
-                {doc.doc_type === "LEAVE" ? "신청 일수" : "결재 금액"}
+                {doc.doc_type === "LEAVE" ? "신청 일수" : "문서 금액"}
               </div>
-              <div className="font-extrabold text-brand mt-0.5">
+              <div className="font-extrabold text-slate-900 mt-0.5">
                 {doc.doc_type === "LEAVE"
                   ? `${doc.leave_days}일 (${doc.leave_type || "연차"})`
                   : doc.amount > 0
@@ -325,112 +467,149 @@ export default function ApprovalDetailModal({
             </div>
           </div>
 
-          {/* 양식별 세부 내역 블록 */}
-          {doc.doc_type === "LEAVE" && (
-            <div className="rounded-xl border border-emerald-200 bg-emerald-50/40 p-4 flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <div className="text-xs font-bold text-emerald-900">
-                  🌴 휴가 상세: {doc.leave_type} · 총 {doc.leave_days}일
+          {/* 커스텀 입력 항목 표 */}
+          {customFieldEntries.length > 0 && (
+            <div className="rounded-2xl border border-slate-200 overflow-hidden">
+              <div className="px-4 py-2.5 bg-slate-50 border-b border-slate-200 text-xs font-extrabold text-slate-700">
+                양식 입력 항목
+              </div>
+              <div className="divide-y divide-slate-100">
+                {customFieldEntries.map(([fldId, val]) => {
+                  const label = wfMeta?.field_labels?.[fldId] || fldId;
+                  if (wfMeta?.ref_doc_id && val === wfMeta.ref_doc_id) {
+                    return null;
+                  }
+                  return (
+                    <div
+                      key={fldId}
+                      className="grid grid-cols-12 px-4 py-2.5 text-xs"
+                    >
+                      <span className="col-span-4 font-bold text-slate-500">
+                        {label}
+                      </span>
+                      <span className="col-span-8 font-semibold text-slate-800">
+                        {val}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* 연동 모듈별 세부 블록 */}
+          {doc.doc_type === "PURCHASE" &&
+            doc.items_json &&
+            doc.items_json.length > 0 && (
+              <div className="rounded-2xl border border-slate-200 overflow-hidden">
+                <div className="px-4 py-2.5 bg-slate-50 border-b border-slate-200 flex items-center justify-between text-xs font-extrabold text-slate-700">
+                  <span>🛒 품목 명세</span>
+                  <span>거래처: {doc.merchant_name || "-"}</span>
                 </div>
-                <div className="text-xs text-slate-600 mt-1">
-                  업무 대행자(인수인계):{" "}
-                  <span className="font-bold text-slate-800">
-                    {doc.handover_name || "미지정"}
-                  </span>
-                </div>
+                <table className="w-full text-xs">
+                  <thead className="bg-slate-50/50 border-b border-slate-200 text-slate-500">
+                    <tr>
+                      <th className="px-4 py-2 text-left">품목명</th>
+                      <th className="px-4 py-2 text-right">수량</th>
+                      <th className="px-4 py-2 text-right">단가</th>
+                      <th className="px-4 py-2 text-right">금액</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {doc.items_json.map((it, i) => (
+                      <tr key={i}>
+                        <td className="px-4 py-2.5 font-semibold text-slate-800">
+                          {it.name}
+                        </td>
+                        <td className="px-4 py-2.5 text-right">{it.qty}</td>
+                        <td className="px-4 py-2.5 text-right">
+                          {Number(it.unitPrice || 0).toLocaleString()}원
+                        </td>
+                        <td className="px-4 py-2.5 text-right font-bold text-slate-900">
+                          {Number(it.amount || 0).toLocaleString()}원
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+          {doc.doc_type === "EXPENSE" && (
+            <div className="rounded-2xl border border-amber-200 bg-amber-50/40 p-4 flex flex-wrap items-center justify-between gap-2">
+              <div className="text-xs font-bold text-amber-900">
+                💳 지출 정산: [{doc.expense_category || "기타"}]{" "}
+                {doc.merchant_name || "-"} · {doc.payment_method || "법인카드"}
+                {doc.card_last4 ? ` (${doc.card_last4})` : ""}
               </div>
               {doc.status === "APPROVED" && (
-                <span className="px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-800 text-xs font-bold">
-                  ✅ 구성원 연차 사용일수에 자동 반영됨
+                <span className="px-2.5 py-1 rounded-full bg-amber-100 text-amber-900 text-[11px] font-extrabold">
+                  ✅ 비용·경비 정산 장부 연동 완료
                 </span>
               )}
             </div>
           )}
 
-          {doc.doc_type === "PURCHASE" && (
-            <div className="rounded-xl border border-slate-200 overflow-hidden">
-              <div className="px-4 py-2.5 bg-slate-100 border-b border-slate-200 flex items-center justify-between text-xs font-bold text-slate-700">
-                <span>🛒 구매 · 발주 품목 명세</span>
-                <span>공급처: {doc.merchant_name || "-"}</span>
+          {/* 상세 내용 본문 */}
+          {doc.content && (
+            <div>
+              <h4 className="text-xs font-extrabold text-slate-500 mb-2">
+                상세 내용
+              </h4>
+              <div className="min-h-[100px] p-4 rounded-2xl border border-slate-200 bg-white whitespace-pre-wrap leading-relaxed text-slate-800 font-medium">
+                {doc.content}
               </div>
-              <table className="w-full text-xs">
-                <thead className="bg-slate-50 border-b border-slate-200 text-slate-500">
-                  <tr>
-                    <th className="px-4 py-2 text-left">품목명</th>
-                    <th className="px-4 py-2 text-right">수량</th>
-                    <th className="px-4 py-2 text-right">단가</th>
-                    <th className="px-4 py-2 text-right">금액</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {(doc.items_json || []).map((it, i) => (
-                    <tr key={i}>
-                      <td className="px-4 py-2.5 font-semibold text-slate-800">
-                        {it.name}
-                      </td>
-                      <td className="px-4 py-2.5 text-right">{it.qty}</td>
-                      <td className="px-4 py-2.5 text-right">
-                        {Number(it.unitPrice || 0).toLocaleString()}원
-                      </td>
-                      <td className="px-4 py-2.5 text-right font-bold text-slate-900">
-                        {Number(it.amount || 0).toLocaleString()}원
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
             </div>
           )}
 
-          {doc.doc_type === "EXPENSE" && (
-            <div className="rounded-xl border border-amber-200 bg-amber-50/40 p-4 space-y-2">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div className="text-xs font-bold text-amber-900">
-                  💳 지출 내역: [{doc.expense_category || "기타"}]{" "}
-                  {doc.merchant_name || "-"} · {doc.payment_method || "법인카드"}
-                  {doc.card_last4 ? ` (${doc.card_last4})` : ""}
-                </div>
-                {doc.status === "APPROVED" && (
-                  <span className="px-2.5 py-1 rounded-full bg-amber-100 text-amber-900 text-xs font-bold">
-                    ✅ 비용·경비 정산 장부에 자동 등록됨
-                  </span>
-                )}
+          {/* 첨부 파일 목록 */}
+          {(attachmentList.length > 0 || receiptPublicUrl) && (
+            <div className="space-y-2">
+              <h4 className="text-xs font-extrabold text-slate-500">
+                첨부 파일
+              </h4>
+              <div className="flex flex-wrap gap-2">
+                {attachmentList.length > 0
+                  ? attachmentList.map((att, idx) => {
+                      const pub = resolveStoragePublicUrl(att.url);
+                      return (
+                        <a
+                          key={`${att.url}-${idx}`}
+                          href={pub || "#"}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="px-3 py-2 rounded-xl bg-slate-50 hover:bg-slate-100 border border-slate-200 text-xs font-bold text-blue-600 flex items-center gap-1.5"
+                        >
+                          <span>📎</span>
+                          <span>{att.name}</span>
+                        </a>
+                      );
+                    })
+                  : receiptPublicUrl && (
+                      <a
+                        href={receiptPublicUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="px-3 py-2 rounded-xl bg-slate-50 hover:bg-slate-100 border border-slate-200 text-xs font-bold text-blue-600 flex items-center gap-1.5"
+                      >
+                        <span>📎</span>
+                        <span>첨부 증빙 열람</span>
+                      </a>
+                    )}
               </div>
-              {receiptPublicUrl && (
-                <div>
-                  <a
-                    href={receiptPublicUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white border border-amber-300 text-xs font-bold text-blue-600 hover:underline"
-                  >
-                    📎 첨부된 영수증 · 증빙서류 열람
-                  </a>
-                </div>
-              )}
             </div>
           )}
 
-          {/* 기안 본문 */}
+          {/* 승인 진행 이력 */}
           <div>
-            <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">
-              상세 기안 내용
-            </h4>
-            <div className="min-h-[120px] p-4 rounded-xl border border-slate-200 bg-white whitespace-pre-wrap leading-relaxed text-slate-800 font-medium">
-              {doc.content || "상세 기재 내용 없음"}
-            </div>
-          </div>
-
-          {/* 결재선 진행 이력 및 코멘트 */}
-          <div>
-            <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">
-              결재 진행 이력 · 의견
+            <h4 className="text-xs font-extrabold text-slate-500 mb-2">
+              승인 진행 이력
             </h4>
             <div className="space-y-2">
               {doc.steps.map((st) => (
                 <div
                   key={st.step_order}
-                  className="p-3 rounded-xl border border-slate-200 bg-slate-50/70 flex flex-col sm:flex-row sm:items-center justify-between gap-2"
+                  className="p-3 rounded-xl border border-slate-200 bg-slate-50/70 flex items-center justify-between gap-2"
                 >
                   <div className="flex items-center gap-2.5">
                     <span className="w-6 h-6 rounded-full bg-slate-800 text-white text-xs font-bold flex items-center justify-center shrink-0">
@@ -458,18 +637,18 @@ export default function ApprovalDetailModal({
                           : st.status === "REJECTED"
                             ? "text-rose-600"
                             : st.status === "CURRENT"
-                              ? "text-amber-600"
+                              ? "text-blue-600"
                               : "text-slate-400"
                       }`}
                     >
                       {st.status === "APPROVED"
-                        ? "승인 완료"
+                        ? "승인"
                         : st.status === "REJECTED"
                           ? "반려"
                           : st.status === "CURRENT"
-                            ? "현재 결재 차례"
+                            ? "승인 대기중"
                             : st.status === "SKIPPED"
-                              ? "전결 생략"
+                              ? "취소"
                               : "대기"}
                     </span>
                     {st.acted_at && (
@@ -482,17 +661,69 @@ export default function ApprovalDetailModal({
               ))}
             </div>
           </div>
+
+          {/* 문서 의견 · 댓글 소통 스레드 */}
+          <div className="print:hidden pt-2 border-t border-slate-100 space-y-3">
+            <h4 className="text-xs font-extrabold text-slate-500">
+              의견 및 코멘트 ({wfMeta?.comments?.length || 0})
+            </h4>
+
+            {wfMeta?.comments && wfMeta.comments.length > 0 && (
+              <div className="space-y-2">
+                {wfMeta.comments.map((c) => (
+                  <div
+                    key={c.id}
+                    className="p-3 rounded-xl bg-slate-50 border border-slate-200/80 text-xs"
+                  >
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="font-extrabold text-slate-800">
+                        {c.author_name}{" "}
+                        <span className="font-normal text-slate-400">
+                          ({c.author_dept})
+                        </span>
+                      </span>
+                      <span className="text-[11px] text-slate-400">
+                        {formatDateTime(c.created_at)}
+                      </span>
+                    </div>
+                    <p className="text-slate-700 whitespace-pre-wrap">
+                      {c.content}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <form
+              onSubmit={handlePostThreadComment}
+              className="flex items-center gap-2"
+            >
+              <input
+                value={threadInput}
+                onChange={(e) => setThreadInput(e.target.value)}
+                placeholder="참조 의견이나 보충 메모를 남겨보세요..."
+                className="flex-1 px-3.5 py-2 rounded-xl border border-slate-200 text-xs font-medium focus:outline-none focus:border-[#00c458]"
+              />
+              <button
+                type="submit"
+                disabled={postingThread || !threadInput.trim()}
+                className="px-3.5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 disabled:opacity-40 text-white text-xs font-bold shrink-0"
+              >
+                의견 등록
+              </button>
+            </form>
+          </div>
         </div>
 
-        {/* 하단 결재 처리 액션 바 */}
+        {/* 하단 승인 / 반려 / 취소 액션 바 */}
         {(canApproveNow || canCancel) && (
           <div className="print:hidden px-6 py-4 bg-slate-50 border-t border-slate-200 space-y-3 shrink-0">
             {canApproveNow && (
               <input
                 value={comment}
                 onChange={(e) => setComment(e.target.value)}
-                placeholder="결재 의견 또는 반려 사유를 입력하세요 (반려 시 필수)"
-                className="w-full px-3.5 py-2 rounded-xl border border-slate-300 bg-white text-xs font-medium text-slate-800 focus:outline-none focus:border-brand"
+                placeholder="승인 의견 또는 반려 사유를 입력하세요 (반려 시 필수)"
+                className="w-full px-3.5 py-2 rounded-xl border border-slate-200 bg-white text-xs font-medium text-slate-800 focus:outline-none focus:border-[#00c458]"
               />
             )}
 
@@ -505,7 +736,7 @@ export default function ApprovalDetailModal({
                     onClick={() => runAction("CANCEL")}
                     className="px-3.5 py-2 rounded-xl bg-white border border-slate-300 hover:bg-slate-100 text-slate-600 text-xs font-bold"
                   >
-                    상신 회수
+                    요청 취소
                   </button>
                 )}
               </div>
@@ -516,30 +747,17 @@ export default function ApprovalDetailModal({
                     type="button"
                     disabled={acting}
                     onClick={() => runAction("REJECT")}
-                    className="px-4 py-2 rounded-xl bg-rose-50 hover:bg-rose-100 border border-rose-200 text-rose-700 text-xs font-bold"
+                    className="px-4 py-2 rounded-xl bg-rose-50 hover:bg-rose-100 border border-rose-200 text-rose-700 text-xs font-extrabold"
                   >
-                    ↩️ 반려
+                    반려
                   </button>
-
-                  {canDelegatedFinal && (
-                    <button
-                      type="button"
-                      disabled={acting}
-                      onClick={() => runAction("FINAL_APPROVE")}
-                      className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold shadow-sm"
-                      title="상위 결재 단계를 생략하고 현재 직급 전결 권한으로 즉시 최종 승인합니다."
-                    >
-                      ⚡ 전결 최종승인
-                    </button>
-                  )}
-
                   <button
                     type="button"
                     disabled={acting}
                     onClick={() => runAction("APPROVE")}
-                    className="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-sm"
+                    className="px-5 py-2 rounded-xl bg-[#00c458] hover:bg-[#00b04f] text-white text-xs font-extrabold shadow-xs"
                   >
-                    ✅ 결재 승인
+                    승인하기
                   </button>
                 </div>
               )}

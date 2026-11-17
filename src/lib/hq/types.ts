@@ -309,6 +309,7 @@ export interface HqApprovalDoc {
   completed_at: string | null;
   updated_at: string;
   steps: HqApprovalStep[];
+  workflow_meta?: HqWorkflowDocMeta | null;
 }
 
 export interface HqExpense {
@@ -1481,6 +1482,106 @@ export interface HqCompanyExtraSettings {
   permission_settings?: HqPermissionSettings;
   integration_settings?: HqIntegrationSettings;
   hr_lifecycle_state?: HqHrLifecycleState;
+}
+
+export type HqWorkflowFieldType =
+  | "TEXT"
+  | "NUMBER"
+  | "KRW"
+  | "USD"
+  | "JPY"
+  | "DATE"
+  | "SELECT"
+  | "MULTI_SELECT"
+  | "REF_DOC"
+  | "MEMBER_NAME"
+  | "MEMBER_NICKNAME"
+  | "MEMBER_ENG_NAME"
+  | "MEMBER_EMAIL"
+  | "MEMBER_PHONE"
+  | "MEMBER_BIRTH"
+  | "HR_EMP_NO"
+  | "HR_DEPT"
+  | "HR_TITLE"
+  | "HR_JOB"
+  | "HR_POSITION"
+  | "HR_HIRE_DATE";
+
+export interface HqWorkflowFieldDef {
+  id: string;
+  type: HqWorkflowFieldType;
+  label: string;
+  required?: boolean;
+  options?: string[];
+  placeholder?: string;
+}
+
+export interface HqWorkflowFormDef {
+  id: string;
+  category_name: string;
+  title: string;
+  description: string;
+  icon: string;
+  icon_bg?: string;
+  mapped_doc_type: HqApprovalDocType;
+  fields: HqWorkflowFieldDef[];
+  body_template: string;
+  ref_file_url?: string | null;
+  ref_file_name?: string | null;
+  attachment_mode: "NONE" | "OPTIONAL" | "REQUIRED";
+  use_body: boolean;
+  allow_doc_edit: boolean;
+  is_smart_form?: boolean;
+  allow_edit: boolean;
+  per_requester: boolean;
+  cc_list: HqPolicyAssignee[];
+  steps: HqPolicyStep[];
+  requester_rules?: HqPolicyRequesterRule[];
+  updated_at?: string;
+}
+
+export interface HqWorkflowDocAttachment {
+  name: string;
+  url: string;
+}
+
+export interface HqWorkflowDocComment {
+  id: string;
+  author_id: string;
+  author_name: string;
+  author_dept: string;
+  content: string;
+  created_at: string;
+}
+
+export interface HqWorkflowDocMeta {
+  approval_id: string;
+  form_id: string | null;
+  form_title: string;
+  form_icon: string;
+  cc_member_ids: string[];
+  cc_member_names: string[];
+  field_values: Record<string, string>;
+  field_labels?: Record<string, string>;
+  ref_doc_id?: string | null;
+  ref_doc_no?: string | null;
+  ref_doc_title?: string | null;
+  attachments: HqWorkflowDocAttachment[];
+  comments: HqWorkflowDocComment[];
+}
+
+export interface HqWorkflowSavedView {
+  id: string;
+  name: string;
+  scope: "MY" | "COMPANY";
+  subTab: string;
+  myRoleFilter: "ALL" | "MINE" | "MY_TURN";
+  drafterIds: string[];
+  approverIds: string[];
+  ccIds: string[];
+  formIds: string[];
+  statusFilters: HqApprovalStatus[];
+  datePreset: string;
 }
 
 export interface HqCompanySettings {

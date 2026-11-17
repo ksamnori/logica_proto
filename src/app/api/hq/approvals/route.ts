@@ -12,7 +12,16 @@ import {
   isMissingHqTableError,
   requireHqCaller,
 } from "@/lib/hq/serverAuth";
-import type { HqApprovalDoc, HqApprovalDocType, HqApprovalStep } from "@/lib/hq/types";
+import type {
+  HqApprovalDoc,
+  HqApprovalDocType,
+  HqApprovalStep,
+  HqWorkflowDocMeta,
+} from "@/lib/hq/types";
+import {
+  readWorkflowMetaPayload,
+  writeWorkflowMetaPayload,
+} from "@/lib/hq/workflowStorageServer";
 
 export const runtime = "nodejs";
 
@@ -88,7 +97,7 @@ async function applyPostApprovalSideEffects(
               worked_minutes: isHalf ? 240 : 0,
               overtime_minutes: 0,
               location_note: doc.leave_type || "연차휴가",
-              memo: `[전자결재 ${doc.doc_no}] ${doc.title}`,
+              memo: `[워크플로우 ${doc.doc_no}] ${doc.title}`,
               approval_id: doc.approval_id,
               updated_at: nowIso,
             });
@@ -126,10 +135,10 @@ async function applyPostApprovalSideEffects(
         amount: Number(doc.amount),
         tax_amount: Math.round(Number(doc.amount) / 11),
         card_last4: doc.card_last4 || null,
-        description: `[전자결재 ${doc.doc_no}] ${doc.title}${doc.content ? ` — ${doc.content}` : ""}`,
+        description: `[워크플로우 ${doc.doc_no}] ${doc.title}${doc.content ? ` — ${doc.content}` : ""}`,
         receipt_url: doc.receipt_url || null,
         settlement_status: isCorpCard ? "정산완료" : "정산대기",
-        settled_by: isCorpCard ? `${approverName} (결재승인)` : null,
+        settled_by: isCorpCard ? `${approverName} (승인)` : null,
         settled_at: isCorpCard ? nowIso : null,
         updated_at: nowIso,
       },
@@ -142,7 +151,7 @@ async function applyPostApprovalSideEffects(
   notifySlackIfEnabled(
     supabaseAdmin,
     doc.doc_type === "LEAVE" ? "LEAVE" : "APPROVAL",
-    `📌 *[전자결재 승인완료]* ${doc.drafter_name}(${doc.drafter_dept || "본부"}) — ${doc.title} (${doc.effective_date || ""}${doc.end_date && doc.end_date !== doc.effective_date ? ` ~ ${doc.end_date}` : ""})`
+    `📌 *[워크플로우 승인완료]* ${doc.drafter_name}(${doc.drafter_dept || "본부"}) — ${doc.title} (${doc.effective_date || ""}${doc.end_date && doc.end_date !== doc.effective_date ? ` ~ ${doc.end_date}` : ""})`
   ).catch(() => {});
 }
 
@@ -155,12 +164,18 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({
         success: true,
         schemaMissing: true,
-        data: { docs: [], myPendingCount: 0, meId: caller.userId },
+        data: {
+          docs: [],
+          myPendingCount: 0,
+          meId: caller.userId,
+          canViewCompanyArchive: false,
+          canDeleteCompanyDoc: false,
+        },
       });
     }
 
     const supabaseAdmin = getSupabaseAdmin();
-    const [docRes, stepRes] = await Promise.all([
+    const [docRes, stepRes, metaPayload] = await Promise.all([
       supabaseAdmin
         .from("hq_approval_doc")
         .select("*")
@@ -170,6 +185,7 @@ export async function GET(req: NextRequest) {
         .from("hq_approval_step")
         .select("*")
         .order("step_order", { ascending: true }),
+      readWorkflowMetaPayload(supabaseAdmin),
     ]);
 
     if (docRes.error) {
@@ -177,7 +193,13 @@ export async function GET(req: NextRequest) {
         return NextResponse.json({
           success: true,
           schemaMissing: true,
-          data: { docs: [], myPendingCount: 0, meId: caller.userId },
+          data: {
+            docs: [],
+            myPendingCount: 0,
+            meId: caller.userId,
+            canViewCompanyArchive: false,
+            canDeleteCompanyDoc: false,
+          },
         });
       }
       return apiFail(docRes.error.message, 500);
@@ -205,46 +227,64 @@ export async function GET(req: NextRequest) {
       stepsByDoc.set(key, list);
     });
 
-    const allDocs: HqApprovalDoc[] = (docRes.data || []).map((d: any) => ({
-      approval_id: String(d.approval_id),
-      doc_no: d.doc_no,
-      doc_type: d.doc_type,
-      title: d.title,
-      content: d.content || "",
-      drafter_id: String(d.drafter_id),
-      drafter_name: d.drafter_name,
-      drafter_dept: d.drafter_dept || "",
-      drafter_rank: d.drafter_rank || "STAFF",
-      drafter_title: d.drafter_title || "",
-      status: d.status,
-      current_step_order: Number(d.current_step_order || 1),
-      total_steps: Number(d.total_steps || 1),
-      is_auto_delegated: Boolean(d.is_auto_delegated),
-      amount: Number(d.amount || 0),
-      effective_date: d.effective_date || null,
-      end_date: d.end_date || null,
-      leave_type: d.leave_type || null,
-      leave_days: Number(d.leave_days || 0),
-      handover_name: d.handover_name || null,
-      expense_category: d.expense_category || null,
-      payment_method: d.payment_method || null,
-      merchant_name: d.merchant_name || null,
-      card_last4: d.card_last4 || null,
-      receipt_url: d.receipt_url || null,
-      items_json: Array.isArray(d.items_json) ? d.items_json : [],
-      urgent: Boolean(d.urgent),
-      submitted_at: d.submitted_at,
-      completed_at: d.completed_at || null,
-      updated_at: d.updated_at,
-      steps: stepsByDoc.get(String(d.approval_id)) || [],
-    }));
+    const allDocs: HqApprovalDoc[] = (docRes.data || []).map((d: any) => {
+      const idStr = String(d.approval_id);
+      return {
+        approval_id: idStr,
+        doc_no: d.doc_no,
+        doc_type: d.doc_type,
+        title: d.title,
+        content: d.content || "",
+        drafter_id: String(d.drafter_id),
+        drafter_name: d.drafter_name,
+        drafter_dept: d.drafter_dept || "",
+        drafter_rank: d.drafter_rank || "STAFF",
+        drafter_title: d.drafter_title || "",
+        status: d.status,
+        current_step_order: Number(d.current_step_order || 1),
+        total_steps: Number(d.total_steps || 1),
+        is_auto_delegated: Boolean(d.is_auto_delegated),
+        amount: Number(d.amount || 0),
+        effective_date: d.effective_date || null,
+        end_date: d.end_date || null,
+        leave_type: d.leave_type || null,
+        leave_days: Number(d.leave_days || 0),
+        handover_name: d.handover_name || null,
+        expense_category: d.expense_category || null,
+        payment_method: d.payment_method || null,
+        merchant_name: d.merchant_name || null,
+        card_last4: d.card_last4 || null,
+        receipt_url: d.receipt_url || null,
+        items_json: Array.isArray(d.items_json) ? d.items_json : [],
+        urgent: Boolean(d.urgent),
+        submitted_at: d.submitted_at,
+        completed_at: d.completed_at || null,
+        updated_at: d.updated_at,
+        steps: stepsByDoc.get(idStr) || [],
+        workflow_meta: metaPayload.docMetaById[idStr] || null,
+      };
+    });
 
-    // 직책/직급 맥락 기반 접근 제어
+    const canViewFullCompanyArchive =
+      caller.isHqAdmin || caller.isHrManager || caller.rankLevel >= 4;
+    const canViewDeptCompanyArchive = caller.rankLevel === 3;
+    const canViewCompanyArchive =
+      canViewFullCompanyArchive || canViewDeptCompanyArchive;
+    const canDeleteCompanyDoc =
+      caller.isHqAdmin || caller.isHrManager || caller.rankLevel >= 5;
+
     const visibleDocs = allDocs.filter((doc) => {
-      if (caller.isHrManager || caller.rankLevel >= 4) return true;
+      if (canViewFullCompanyArchive) return true;
       if (doc.drafter_id === caller.userId) return true;
       if (doc.steps.some((s) => s.approver_id === caller.userId)) return true;
-      if (caller.rankLevel === 3 && doc.drafter_dept === caller.department) return true;
+      const ccIds = doc.workflow_meta?.cc_member_ids || [];
+      const ccNames = doc.workflow_meta?.cc_member_names || [];
+      if (ccIds.includes(caller.userId) || ccNames.includes(caller.name)) {
+        return true;
+      }
+      if (canViewDeptCompanyArchive && doc.drafter_dept === caller.department) {
+        return true;
+      }
       return false;
     });
 
@@ -261,6 +301,8 @@ export async function GET(req: NextRequest) {
         meId: caller.userId,
         rankLevel: caller.rankLevel,
         isHrManager: caller.isHrManager,
+        canViewCompanyArchive,
+        canDeleteCompanyDoc,
         myPendingCount,
         docs: visibleDocs,
       },
@@ -286,14 +328,16 @@ export async function POST(req: NextRequest) {
       return apiFail("유효하지 않은 결재 양식입니다.");
     }
     if (!title) {
-      return apiFail("기안 제목을 입력해주세요.");
+      return apiFail("문서 제목을 입력해주세요.");
     }
 
     const rawSteps = Array.isArray(body?.steps) ? body.steps : [];
-    const instantSelfApprove = caller.rankLevel >= 5 && rawSteps.length === 0;
+    const allowZeroSteps = Boolean(body?.allow_zero_steps);
+    const instantComplete =
+      rawSteps.length === 0 && (allowZeroSteps || caller.rankLevel >= 5);
 
-    if (!instantSelfApprove && rawSteps.length === 0) {
-      return apiFail("최소 1명 이상의 결재자를 지정해야 합니다.");
+    if (!instantComplete && rawSteps.length === 0) {
+      return apiFail("최소 1명 이상의 승인자를 지정해야 합니다.");
     }
 
     const supabaseAdmin = getSupabaseAdmin();
@@ -310,10 +354,10 @@ export async function POST(req: NextRequest) {
       drafter_dept: caller.department,
       drafter_rank: caller.rankCode,
       drafter_title: caller.jobTitle,
-      status: instantSelfApprove ? "APPROVED" : "PENDING",
+      status: instantComplete ? "APPROVED" : "PENDING",
       current_step_order: 1,
-      total_steps: instantSelfApprove ? 1 : rawSteps.length,
-      is_auto_delegated: Boolean(body?.is_auto_delegated || instantSelfApprove),
+      total_steps: instantComplete ? 1 : rawSteps.length,
+      is_auto_delegated: false,
       amount: Math.max(0, Math.round(Number(body?.amount || 0))),
       effective_date: body?.effective_date || null,
       end_date: body?.end_date || null,
@@ -328,7 +372,7 @@ export async function POST(req: NextRequest) {
       items_json: Array.isArray(body?.items_json) ? body.items_json : [],
       urgent: Boolean(body?.urgent),
       submitted_at: nowIso,
-      completed_at: instantSelfApprove ? nowIso : null,
+      completed_at: instantComplete ? nowIso : null,
       updated_at: nowIso,
     };
 
@@ -339,29 +383,30 @@ export async function POST(req: NextRequest) {
       .single();
 
     if (docErr || !createdDoc) {
-      return apiFail(`결재 문서 상신 실패: ${docErr?.message || ""}`, 500);
+      return apiFail(`워크플로우 문서 작성 실패: ${docErr?.message || ""}`, 500);
     }
 
-    const stepRows = instantSelfApprove
+    const stepRows = instantComplete
       ? [
           {
             approval_id: createdDoc.approval_id,
             step_order: 1,
-            step_role: "DELEGATED_FINAL",
+            step_role: "FINAL_APPROVER",
             approver_id: caller.userId,
             approver_name: caller.name,
             approver_dept: caller.department,
             approver_rank: caller.rankCode,
             approver_title: caller.jobTitle,
             status: "APPROVED",
-            comment: "최고결재권자 기안 즉시 전결 승인",
+            comment: "승인 단계 없음 (작성 즉시 완료)",
             acted_at: nowIso,
           },
         ]
       : rawSteps.map((s: any, idx: number) => ({
           approval_id: createdDoc.approval_id,
           step_order: idx + 1,
-          step_role: s.step_role || (idx + 1 === rawSteps.length ? "FINAL_APPROVER" : "REVIEWER"),
+          step_role:
+            s.step_role || (idx + 1 === rawSteps.length ? "FINAL_APPROVER" : "REVIEWER"),
           approver_id: s.approver_id,
           approver_name: s.approver_name,
           approver_dept: s.approver_dept || "",
@@ -381,10 +426,50 @@ export async function POST(req: NextRequest) {
         .from("hq_approval_doc")
         .delete()
         .eq("approval_id", createdDoc.approval_id);
-      return apiFail(`결재선 저장 실패: ${stepErr.message}`, 500);
+      return apiFail(`승인 단계 저장 실패: ${stepErr.message}`, 500);
     }
 
-    if (instantSelfApprove) {
+    // 워크플로우 양식 메타데이터 (양식명, 참조자, 커스텀 필드값, 참조문서, 다중첨부) 저장
+    const rawMeta = body?.workflow_meta;
+    if (rawMeta && typeof rawMeta === "object") {
+      try {
+        const metaStore = await readWorkflowMetaPayload(supabaseAdmin);
+        const approvalIdStr = String(createdDoc.approval_id);
+        const docMeta: HqWorkflowDocMeta = {
+          approval_id: approvalIdStr,
+          form_id: rawMeta.form_id ? String(rawMeta.form_id) : null,
+          form_title: String(rawMeta.form_title || ""),
+          form_icon: String(rawMeta.form_icon || "📋"),
+          cc_member_ids: Array.isArray(rawMeta.cc_member_ids)
+            ? rawMeta.cc_member_ids.map(String)
+            : [],
+          cc_member_names: Array.isArray(rawMeta.cc_member_names)
+            ? rawMeta.cc_member_names.map(String)
+            : [],
+          field_values:
+            rawMeta.field_values && typeof rawMeta.field_values === "object"
+              ? rawMeta.field_values
+              : {},
+          field_labels:
+            rawMeta.field_labels && typeof rawMeta.field_labels === "object"
+              ? rawMeta.field_labels
+              : {},
+          ref_doc_id: rawMeta.ref_doc_id ? String(rawMeta.ref_doc_id) : null,
+          ref_doc_no: rawMeta.ref_doc_no ? String(rawMeta.ref_doc_no) : null,
+          ref_doc_title: rawMeta.ref_doc_title ? String(rawMeta.ref_doc_title) : null,
+          attachments: Array.isArray(rawMeta.attachments)
+            ? rawMeta.attachments
+            : [],
+          comments: [],
+        };
+        metaStore.docMetaById[approvalIdStr] = docMeta;
+        await writeWorkflowMetaPayload(supabaseAdmin, metaStore);
+      } catch {
+        // 메타 저장 실패 시에도 본문 상신 유지
+      }
+    }
+
+    if (instantComplete) {
       await applyPostApprovalSideEffects(supabaseAdmin, createdDoc, caller.name);
     }
 
@@ -411,13 +496,29 @@ export async function PATCH(req: NextRequest) {
     const action = String(body?.action || "").toUpperCase();
     const comment = String(body?.comment || "").trim();
 
-    if (!approvalId) return apiFail("결재 문서 ID가 없습니다.");
-    if (!["APPROVE", "FINAL_APPROVE", "REJECT", "CANCEL"].includes(action)) {
-      return apiFail("지원하지 않는 결재 처리 명령입니다.");
+    if (!approvalId) return apiFail("문서 ID가 없습니다.");
+    if (!["APPROVE", "REJECT", "CANCEL", "DELETE_DOC"].includes(action)) {
+      return apiFail("지원하지 않는 처리 명령입니다.");
     }
 
     const supabaseAdmin = getSupabaseAdmin();
     const nowIso = new Date().toISOString();
+
+    // 회사 문서함 관리자 문서 삭제
+    if (action === "DELETE_DOC") {
+      if (!caller.isHqAdmin && !caller.isHrManager && caller.rankLevel < 5) {
+        return apiFail("회사 문서함 삭제 권한이 없습니다.", 403);
+      }
+      await supabaseAdmin
+        .from("hq_approval_step")
+        .delete()
+        .eq("approval_id", approvalId);
+      await supabaseAdmin
+        .from("hq_approval_doc")
+        .delete()
+        .eq("approval_id", approvalId);
+      return NextResponse.json({ success: true, data: { deleted: true } });
+    }
 
     const [docRes, stepRes] = await Promise.all([
       supabaseAdmin
@@ -433,18 +534,21 @@ export async function PATCH(req: NextRequest) {
     ]);
 
     if (docRes.error || !docRes.data) {
-      return apiFail("결재 문서를 찾을 수 없습니다.", 404);
+      return apiFail("워크플로우 문서를 찾을 수 없습니다.", 404);
     }
     const doc = docRes.data;
     const steps = stepRes.data || [];
 
-    // 기안자 상신 회수 (1차 결재 시작 전 PENDING 상태에서만 허용)
+    // 작성자 문서 취소(회수) — 1단계 승인 전(PENDING) 상태에서만 가능
     if (action === "CANCEL") {
       if (String(doc.drafter_id) !== caller.userId) {
-        return apiFail("기안자 본인만 문서를 회수할 수 있습니다.", 403);
+        return apiFail("작성자 본인만 문서를 취소할 수 있습니다.", 403);
       }
       if (doc.status !== "PENDING") {
-        return apiFail("이미 결재가 진행 중이거나 완료된 문서는 회수할 수 없습니다.", 400);
+        return apiFail(
+          "이미 승인이 진행되었거나 완료된 문서는 취소할 수 없습니다.",
+          400
+        );
       }
       await supabaseAdmin
         .from("hq_approval_doc")
@@ -452,7 +556,7 @@ export async function PATCH(req: NextRequest) {
         .eq("approval_id", approvalId);
       await supabaseAdmin
         .from("hq_approval_step")
-        .update({ status: "SKIPPED", comment: "기안자 상신 회수" })
+        .update({ status: "SKIPPED", comment: "작성자 요청 취소" })
         .eq("approval_id", approvalId);
 
       return NextResponse.json({ success: true, data: { status: "CANCELLED" } });
@@ -466,14 +570,14 @@ export async function PATCH(req: NextRequest) {
       (s: any) => Number(s.step_order) === Number(doc.current_step_order)
     );
     if (!currentStep) {
-      return apiFail("현재 결재 단계 정보를 찾을 수 없습니다.", 400);
+      return apiFail("현재 승인 단계 정보를 찾을 수 없습니다.", 400);
     }
 
     const isAssignedApprover = String(currentStep.approver_id) === caller.userId;
     const isExecutiveOverride = caller.rankLevel >= 5 || caller.isHqAdmin;
 
     if (!isAssignedApprover && !isExecutiveOverride) {
-      return apiFail("현재 결재 순서의 결재권자만 처리할 수 있습니다.", 403);
+      return apiFail("현재 차례의 승인자만 처리할 수 있습니다.", 403);
     }
 
     const noteWithProxy =
@@ -483,7 +587,7 @@ export async function PATCH(req: NextRequest) {
 
     if (action === "REJECT") {
       if (!comment) {
-        return apiFail("반려 시에는 반려 사유(의견)를 반드시 입력해주세요.", 400);
+        return apiFail("반려 시에는 반려 사유를 입력해 주세요.", 400);
       }
       await supabaseAdmin
         .from("hq_approval_step")
@@ -512,39 +616,23 @@ export async function PATCH(req: NextRequest) {
       return NextResponse.json({ success: true, data: { status: "REJECTED" } });
     }
 
-    // APPROVE 또는 FINAL_APPROVE(전결)
+    // 순차 승인 (APPROVE)
     const isLastStep = Number(doc.current_step_order) >= Number(doc.total_steps);
-    const wantsDelegatedFinal = action === "FINAL_APPROVE" && caller.rankLevel >= 3;
 
-    if (isLastStep || wantsDelegatedFinal) {
+    if (isLastStep) {
       await supabaseAdmin
         .from("hq_approval_step")
         .update({
           status: "APPROVED",
-          comment:
-            wantsDelegatedFinal && !isLastStep
-              ? `${noteWithProxy ? `${noteWithProxy} · ` : ""}[전결 승인]`
-              : noteWithProxy,
+          comment: noteWithProxy,
           acted_at: nowIso,
         })
         .eq("step_id", currentStep.step_id);
-
-      if (!isLastStep) {
-        await supabaseAdmin
-          .from("hq_approval_step")
-          .update({
-            status: "SKIPPED",
-            comment: `${caller.name} ${caller.jobTitle} 전결 처리로 생략`,
-          })
-          .eq("approval_id", approvalId)
-          .gt("step_order", doc.current_step_order);
-      }
 
       await supabaseAdmin
         .from("hq_approval_doc")
         .update({
           status: "APPROVED",
-          is_auto_delegated: Boolean(doc.is_auto_delegated || wantsDelegatedFinal),
           completed_at: nowIso,
           updated_at: nowIso,
         })
@@ -555,7 +643,7 @@ export async function PATCH(req: NextRequest) {
       return NextResponse.json({ success: true, data: { status: "APPROVED" } });
     }
 
-    // 다음 결재 단계로 승급
+    // 다음 승인 단계로 이동
     const nextOrder = Number(doc.current_step_order) + 1;
     await supabaseAdmin
       .from("hq_approval_step")

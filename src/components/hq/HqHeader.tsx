@@ -49,8 +49,8 @@ const PAGE_TITLES: Record<string, { title: string; subtitle: string }> = {
     subtitle: "근로·연봉·비밀유지(NDA) 및 저자 출판권·외주 용역 전자서명",
   },
   "/hq/approvals": {
-    title: "전자결재 워크플로우",
-    subtitle: "직급별 3단계 결재선 · 금액/일수별 자동 전결 · 승인/반려 처리",
+    title: "워크플로우",
+    subtitle: "내 문서함 · 회사 문서함 · 문서 양식 관리 및 양식별 승인/참조 프로세스",
   },
   "/hq/expenses": {
     title: "비용 · 경비 정산 관리",
