@@ -2264,6 +2264,24 @@ export default function HqMemberProfileModal({
                           발급 미리보기 · 인쇄
                         </button>
                       </div>
+
+                      <div className="sm:col-span-2 p-4 rounded-2xl border border-slate-200 bg-slate-50/70 flex flex-wrap items-center justify-between gap-3">
+                        <div>
+                          <div className="font-bold text-slate-900 text-xs">
+                            🧾 근로소득 원천징수영수증 (연말정산)
+                          </div>
+                          <p className="text-[11px] text-slate-500 mt-0.5">
+                            금융기관 대출·청약 제출용 귀속연도별 근로소득 원천징수영수증 PDF를 내려받거나 간소화 자료를 제출합니다.
+                          </p>
+                        </div>
+                        <Link
+                          href={hqHref("/hq/year-end-tax")}
+                          onClick={onClose}
+                          className="px-3.5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold"
+                        >
+                          연말정산 보관함 이동 →
+                        </Link>
+                      </div>
                     </div>
                   ) : (
                     <div className="p-6 rounded-xl bg-slate-50 text-xs text-slate-500">

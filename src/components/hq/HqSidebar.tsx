@@ -74,6 +74,7 @@ export default function HqSidebar() {
       { href: "/hq/contracts", icon: "📑", label: "전자계약 · 저작권" },
       { href: "/hq/expenses", icon: "💳", label: "비용 · 경비 정산" },
       { href: "/hq/payroll", icon: "💰", label: "급여 · 인세 · 원천세" },
+      { href: "/hq/year-end-tax", icon: "🧾", label: "연말정산" },
       { href: "/hq/publishing", icon: "📚", label: "출판 공정 · ISBN 보드" },
       { href: "/hq/messenger", icon: "💬", label: "사내 메신저" },
     ];
@@ -369,6 +370,16 @@ export default function HqSidebar() {
               <span className="flex items-center gap-2.5 truncate">
                 <span>💰</span>
                 <span>급여 · 인세 · 원천세</span>
+              </span>
+            </Link>
+
+            <Link
+              href={hqHref("/hq/year-end-tax")}
+              className={navItemClass("/hq/year-end-tax")}
+            >
+              <span className="flex items-center gap-2.5 truncate">
+                <span>🧾</span>
+                <span>연말정산</span>
               </span>
             </Link>
           </div>

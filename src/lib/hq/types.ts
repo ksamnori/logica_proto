@@ -1651,3 +1651,46 @@ export interface HqCompanySettings {
   updated_by?: string | null;
   updated_at?: string | null;
 }
+
+// ============================================================================
+// 초경량 연말정산 (서류 수합 · 원천징수영수증 보관함)
+// ============================================================================
+
+export type HqYearEndTaxStatus =
+  | "NOT_SUBMITTED"
+  | "SUBMITTED"
+  | "SUPPLEMENT_REQ"
+  | "COMPLETED";
+
+export interface HqYearEndUploadedFile {
+  id: string;
+  category?: string;
+  file_name: string;
+  url: string;
+  uploaded_at: string;
+}
+
+export interface HqYearEndMemberSubmission {
+  member_id: string;
+  status: HqYearEndTaxStatus;
+  hometax_pdf: HqYearEndUploadedFile | null;
+  extra_files: HqYearEndUploadedFile[];
+  dependent_change_note: string;
+  tax_reduction_check: boolean;
+  prev_workplace_check: boolean;
+  employee_memo: string;
+  submitted_at: string | null;
+  admin_supplement_note: string;
+  settlement_tax_diff: number | null; // 음수(-): 환급, 양수(+): 추징(추가납부)
+  receipt_pdf: HqYearEndUploadedFile | null; // 근로소득 원천징수영수증 PDF
+  completed_at: string | null;
+  updated_at: string;
+}
+
+export interface HqYearEndTaxYearStore {
+  year: number;
+  deadline_date: string;
+  notice_memo: string;
+  submissions: Record<string, HqYearEndMemberSubmission>;
+  updated_at?: string;
+}
