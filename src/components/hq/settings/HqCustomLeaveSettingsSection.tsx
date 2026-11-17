@@ -1,7 +1,7 @@
 // src/components/hq/settings/HqCustomLeaveSettingsSection.tsx
 "use client";
 
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   DEFAULT_APPROVAL_POLICIES,
   PRESET_ASSIGNEES,
@@ -31,6 +31,20 @@ function shortAvatarText(name: string): string {
   const clean = name.trim();
   if (clean.length >= 2) return clean.slice(-2);
   return clean || "HQ";
+}
+
+/**
+ * 한국어 조사 '로 표시' / '으로 표시' 자동 판별 (받침 없거나 ㄹ 받침이면 '로', 그 외 받침이면 '으로')
+ */
+function formatRoParticle(word: string): string {
+  const trimmed = word.trim();
+  if (!trimmed) return "로 표시";
+  const clean = trimmed.replace(/[)\]]+$/g, "").trim();
+  const lastChar = clean.charCodeAt(clean.length - 1);
+  if (lastChar < 0xac00 || lastChar > 0xd7a3) return "로 표시";
+  const jong = (lastChar - 0xac00) % 28;
+  if (jong === 0 || jong === 8) return "로 표시";
+  return "으로 표시";
 }
 
 const AVATAR_PALETTE = [
@@ -69,10 +83,186 @@ const ROUTINE_GRANT_METHODS: HqCustomLeaveGrantMethod[] = [
   "근속 시 부여",
 ];
 
+const EXPIRE_RULE_OPTIONS = [
+  "기한 없음",
+  "30일",
+  "60일",
+  "90일",
+  "180일",
+  "1년",
+  "당해 연말까지",
+];
+
+const EXCLUDE_TARGET_OPTIONS = [
+  "없음",
+  "수습 기간 중인 구성원 제외",
+  "입사 3개월 미만 제외",
+  "입사 6개월 미만 제외",
+  "계약직 · 단시간 근로자 제외",
+];
+
+const STATUTORY_LEAVE_GUIDES: Record<
+  string,
+  {
+    badgeLabel: string;
+    tone: "amber" | "slate";
+    summary: string;
+  }
+> = {
+  "cl-subfertility": {
+    badgeLabel: "난임 치료 가이드",
+    tone: "amber",
+    summary:
+      "남녀고용평등법 제18조의3에 따라 인공수정·체외수정 등 난임치료를 받기 위한 휴가를 청구하는 경우 연간 최대 6일(최초 2일 유급) 범위 내에서 부여합니다.",
+  },
+  "cl-miscarriage": {
+    badgeLabel: "유산 · 사산 가이드",
+    tone: "amber",
+    summary:
+      "근로기준법 제74조 제3항에 따라 임신 기간에 따라 11주 이내 5일, 12~15주 10일, 16~21주 30일, 22~27주 60일, 28주 이상 90일의 보호휴가를 유급으로 부여합니다.",
+  },
+  "cl-miscarriage-multi": {
+    badgeLabel: "유산 · 사산(다태아) 가이드",
+    tone: "amber",
+    summary:
+      "다태아 임신 중 유산·사산의 경우 임신 주수 및 모성보호 기준에 따라 최대 120일(최초 75일 유급) 범위에서 관리자가 직접 일수를 산정해 부여할 수 있습니다.",
+  },
+  "cl-premature": {
+    badgeLabel: "산전후 - 본인 (미숙아) 가이드",
+    tone: "slate",
+    summary:
+      "미숙아 출산으로 신생아 중환자실에 입원하는 경우 출산전후휴가가 총 100일(유급 60일)로 부여되며, 휴일 포함 역일 기준으로 연속 사용합니다.",
+  },
+  "cl-spouse-miscarriage": {
+    badgeLabel: "배우자 유산 · 사산 가이드",
+    tone: "slate",
+    summary:
+      "배우자의 유산 또는 사산 시 회복 및 돌봄을 위해 신청 시 5일(최초 3일 유급)을 부여할 수 있습니다.",
+  },
+};
+
 function unitShortSuffix(unit: HqCustomLeaveItem["grant_unit"]): string {
   if (unit === "시간 단위 부여") return "시간";
   if (unit === "분 단위 부여") return "분";
   return "일";
+}
+
+function CalendarSharePopover({
+  value,
+  leaveName,
+  canEdit,
+  isOpen,
+  onToggle,
+  onSelect,
+}: {
+  value: "NONE" | "LEAVE_LABEL" | "EXACT_NAME";
+  leaveName: string;
+  canEdit: boolean;
+  isOpen: boolean;
+  onToggle: () => void;
+  onSelect: (next: "NONE" | "LEAVE_LABEL" | "EXACT_NAME") => void;
+}) {
+  const displayLeaveName = leaveName.trim() || "맞춤 휴가";
+  const exactParticle = formatRoParticle(displayLeaveName);
+
+  return (
+    <div
+      className="w-48 relative shrink-0"
+      onClick={(e) => e.stopPropagation()}
+    >
+      <button
+        type="button"
+        disabled={!canEdit}
+        onClick={onToggle}
+        className={`w-full px-3 py-2.5 rounded-xl border text-left font-bold text-slate-800 flex items-center justify-between transition-colors ${
+          isOpen
+            ? "bg-white border-[#00c458] ring-2 ring-[#00c458]/15"
+            : "bg-[#f8f9fa] hover:bg-slate-100 border-slate-200/80"
+        }`}
+      >
+        {value === "NONE" ? (
+          <span>노출 안 함</span>
+        ) : value === "EXACT_NAME" ? (
+          <span className="flex items-center gap-1.5 min-w-0">
+            <span className="px-1.5 py-0.5 rounded bg-slate-200/90 text-slate-700 text-[10px] font-extrabold truncate max-w-[92px]">
+              {displayLeaveName}
+            </span>
+            <span className="shrink-0">{exactParticle}</span>
+          </span>
+        ) : (
+          <span className="flex items-center gap-1.5">
+            <span className="px-1.5 py-0.5 rounded bg-slate-200/90 text-slate-700 text-[10px] font-extrabold">
+              휴가
+            </span>
+            <span>로 표시</span>
+          </span>
+        )}
+        <span className="text-slate-400 text-[10px] ml-1 shrink-0">▾</span>
+      </button>
+
+      {isOpen && (
+        <div className="absolute right-0 bottom-full mb-1.5 w-60 rounded-2xl bg-white border border-slate-200 shadow-2xl p-2 z-40 text-xs">
+          <button
+            type="button"
+            onClick={() => onSelect("NONE")}
+            className={`w-full px-3 py-2 rounded-xl text-left flex items-center gap-2 font-bold ${
+              value === "NONE"
+                ? "bg-slate-100 text-slate-900"
+                : "text-slate-700 hover:bg-slate-50"
+            }`}
+          >
+            <span className="w-4 text-[#00c458] font-extrabold">
+              {value === "NONE" ? "✓" : ""}
+            </span>
+            <span>노출 안 함</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => onSelect("LEAVE_LABEL")}
+            className={`w-full px-3 py-2 rounded-xl text-left flex items-center gap-2 font-bold ${
+              value === "LEAVE_LABEL"
+                ? "bg-slate-100 text-slate-900"
+                : "text-slate-700 hover:bg-slate-50"
+            }`}
+          >
+            <span className="w-4 text-[#00c458] font-extrabold">
+              {value === "LEAVE_LABEL" ? "✓" : ""}
+            </span>
+            <span className="px-1.5 py-0.5 rounded bg-slate-200/90 text-slate-700 text-[10px] font-extrabold">
+              휴가
+            </span>
+            <span>로 표시</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => onSelect("EXACT_NAME")}
+            className={`w-full px-3 py-2 rounded-xl text-left flex items-center gap-2 font-bold ${
+              value === "EXACT_NAME"
+                ? "bg-slate-100 text-slate-900"
+                : "text-slate-700 hover:bg-slate-50"
+            }`}
+          >
+            <span className="w-4 text-[#00c458] font-extrabold shrink-0">
+              {value === "EXACT_NAME" ? "✓" : ""}
+            </span>
+            <span className="px-1.5 py-0.5 rounded bg-slate-200/90 text-slate-700 text-[10px] font-extrabold truncate max-w-[110px]">
+              {displayLeaveName}
+            </span>
+            <span className="shrink-0">{exactParticle}</span>
+          </button>
+
+          <div className="mt-1.5 pt-2 px-2.5 pb-1 border-t border-slate-100 text-[10px] text-slate-400 leading-relaxed flex items-start gap-1.5">
+            <span className="shrink-0 mt-0.5">ⓘ</span>
+            <span>
+              사내 캘린더와 외부 캘린더에 해당 휴가를 어떻게 표시할지 설정합니다. 설정된 표현으로 동료들에게 공유돼요.
+            </span>
+          </div>
+        </div>
+      )}
+    </div>
+  );
 }
 
 function AssigneePreviewStack({
@@ -169,11 +359,14 @@ export default function HqCustomLeaveSettingsSection({
   // 맞춤 휴가 생성/수정 모달 상태
   const [draft, setDraft] = useState<HqCustomLeaveItem | null>(null);
   const [isNew, setIsNew] = useState(false);
+  const [isScrolled, setIsScrolled] = useState(false);
+  const [guideOpen, setGuideOpen] = useState(false);
   const [iconPickerOpen, setIconPickerOpen] = useState(false);
   const [grantMethodOpen, setGrantMethodOpen] = useState(false);
   const [repeatCycleOpen, setRepeatCycleOpen] = useState(false);
   const [payMenuOpen, setPayMenuOpen] = useState(false);
-  const [extraSettingsOpen, setExtraSettingsOpen] = useState(false);
+  const [calendarMenuOpen, setCalendarMenuOpen] = useState(false);
+  const [extraSettingsOpen, setExtraSettingsOpen] = useState(true);
   const [openCardMenuId, setOpenCardMenuId] = useState<string | null>(null);
   const [modalMenuOpen, setModalMenuOpen] = useState(false);
 
@@ -186,6 +379,23 @@ export default function HqCustomLeaveSettingsSection({
     null | { type: "CC" } | { type: "STEP"; stepIndex: number }
   >(null);
   const [pickerKeyword, setPickerKeyword] = useState("");
+
+  // ESC 키로 최상위 모달부터 순차 닫기
+  useEffect(() => {
+    if (!draft && !lineModalOpen && !pickerTarget) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      if (pickerTarget) {
+        setPickerTarget(null);
+      } else if (lineModalOpen) {
+        setLineModalOpen(false);
+      } else if (draft) {
+        setDraft(null);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [draft, lineModalOpen, pickerTarget]);
 
   const candidateAssignees = useMemo(() => {
     const map = new Map<string, HqPolicyAssignee>();
@@ -222,21 +432,25 @@ export default function HqCustomLeaveSettingsSection({
     setGrantMethodOpen(false);
     setRepeatCycleOpen(false);
     setPayMenuOpen(false);
+    setCalendarMenuOpen(false);
     setModalMenuOpen(false);
   };
 
   const openEditModal = (item: HqCustomLeaveItem) => {
     setOpenCardMenuId(null);
     closeAllDropdowns();
+    setIsScrolled(false);
+    setGuideOpen(false);
     const linked = policyMap.get(item.policy_id);
-    setDraft({ ...item });
+    setDraft({
+      calendar_share_mode: "LEAVE_LABEL",
+      exclude_target_rule: "없음",
+      expire_days_rule:
+        item.grant_method === "연차 소진 시 부여" ? "60일" : "기한 없음",
+      ...item,
+    });
     setIsNew(false);
-    // 여성 전용 또는 증빙 서류가 설정된 항목(보건·출산 등)은 확인하기 편하도록 자동 펼침 지원
-    setExtraSettingsOpen(
-      item.target_gender !== "모두" ||
-        item.proof_document_mode !== "없음" ||
-        item.deduct_on_holidays
-    );
+    setExtraSettingsOpen(true);
     setLineCcDraft(linked ? JSON.parse(JSON.stringify(linked.cc_list)) : []);
     setLineStepsDraft(linked ? JSON.parse(JSON.stringify(linked.steps)) : []);
     setLineAllowEditDraft(Boolean(linked?.allow_edit));
@@ -245,6 +459,8 @@ export default function HqCustomLeaveSettingsSection({
   const openCreateModal = () => {
     setOpenCardMenuId(null);
     closeAllDropdowns();
+    setIsScrolled(false);
+    setGuideOpen(false);
     setDraft({
       id: `cl-custom-${uid()}`,
       policy_id: `lv-custom-${uid()}`,
@@ -266,13 +482,17 @@ export default function HqCustomLeaveSettingsSection({
       request_on_cancel: false,
       allow_advance_register: false,
       target_gender: "모두",
+      expire_days_rule: "기한 없음",
       proof_document_mode: "없음",
       proof_document_guide: "",
+      exclude_target_rule: "없음",
       deduct_on_holidays: false,
+      calendar_share_mode: "LEAVE_LABEL",
       apply_to_existing_granted: false,
+      _flex_v2: true,
     });
     setIsNew(true);
-    setExtraSettingsOpen(false);
+    setExtraSettingsOpen(true);
     setLineCcDraft([]);
     setLineStepsDraft([]);
     setLineAllowEditDraft(false);
@@ -296,6 +516,8 @@ export default function HqCustomLeaveSettingsSection({
       grant_amount: Math.max(0.5, Number(draft.grant_amount || 1)),
       request_on_cancel:
         cleanedSteps.length > 0 ? draft.request_on_cancel : false,
+      calendar_share_mode: draft.calendar_share_mode || "LEAVE_LABEL",
+      _flex_v2: true,
     };
 
     const nextLeaves = isNew
@@ -357,6 +579,7 @@ export default function HqCustomLeaveSettingsSection({
       name: `${source.name} (복사본)`,
       is_mandatory: false,
       is_reward_type: false,
+      _flex_v2: true,
     };
     const clonedAp: HqApprovalPolicyItem = {
       id: newPolId,
@@ -441,14 +664,16 @@ export default function HqCustomLeaveSettingsSection({
   const hasAnyAssigneeInDraft =
     activeStepCountInDraft > 0 || lineCcDraft.length > 0;
 
+  const activeGuide = draft ? STATUTORY_LEAVE_GUIDES[draft.id] : undefined;
+
   return (
-    <>
+    <div onClick={() => setOpenCardMenuId(null)}>
       <div className="space-y-8">
         <h2 className="text-[22px] font-extrabold text-slate-900 tracking-tight">
           맞춤 휴가
         </h2>
 
-        {/* 상단 구성원 휴가 조회 권한 안내 배너 (145644.png 동일) */}
+        {/* 상단 구성원 휴가 조회 권한 안내 배너 */}
         {!annualLeaveSettings.hide_visibility_banner && (
           <div className="px-5 py-4 rounded-2xl bg-[#fffaf0] border border-amber-200/70 flex flex-wrap items-center justify-between gap-3">
             <div className="flex items-start gap-3">
@@ -483,7 +708,7 @@ export default function HqCustomLeaveSettingsSection({
         )}
 
         {/* =============================================================== */}
-        {/* 휴가 종류 리스트 (16종 + 맞춤 휴가 추가 — 145644, 145650)        */}
+        {/* 휴가 종류 리스트 (16종 + 맞춤 휴가 추가)                         */}
         {/* =============================================================== */}
         <section className="space-y-3.5">
           <div className="flex flex-wrap items-center justify-between gap-3">
@@ -542,6 +767,11 @@ export default function HqCustomLeaveSettingsSection({
                         {item.target_gender === "여성" && (
                           <span className="px-1.5 py-0.5 rounded bg-pink-50 text-pink-600 text-[10px] font-bold">
                             여성 전용
+                          </span>
+                        )}
+                        {item.target_gender === "남성" && (
+                          <span className="px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-600 text-[10px] font-bold">
+                            남성 전용
                           </span>
                         )}
                       </div>
@@ -643,7 +873,7 @@ export default function HqCustomLeaveSettingsSection({
           </div>
         </section>
 
-        {/* 하단 이전/다음 이동 카드 (연차 설정 ← / → 회사 정보) */}
+        {/* 하단 이전/다음 이동 카드 */}
         <div className="pt-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
           <button
             type="button"
@@ -676,60 +906,44 @@ export default function HqCustomLeaveSettingsSection({
       </div>
 
       {/* ================================================================= */}
-      {/* 맞춤 휴가 생성 / 수정 모달 (145704 ~ 145910 100% 대응)            */}
+      {/* 맞춤 휴가 생성 / 수정 모달 (플렉스 100% 대응 + 상단 고정 + 바깥 클릭 닫기) */}
       {/* ================================================================= */}
       {draft && (
-        <div className="fixed inset-0 bg-slate-900/45 z-[75] flex items-center justify-center p-4">
-          <div className="bg-white w-full max-w-[540px] max-h-[90vh] rounded-2xl shadow-2xl border border-slate-200 flex flex-col overflow-hidden p-7 text-xs">
-            {/* 상단 우측 ⋯ & ✕ */}
-            <div className="flex items-center justify-end gap-2 shrink-0 relative">
-              {!isNew && canEdit && (
-                <button
-                  type="button"
-                  onClick={() => setModalMenuOpen((p) => !p)}
-                  className="w-7 h-7 rounded-lg hover:bg-slate-100 text-slate-400 hover:text-slate-700 font-bold text-sm"
+        <div
+          className="fixed inset-0 bg-slate-900/45 z-[80] flex items-center justify-center p-4"
+          onMouseDown={() => {
+            setDraft(null);
+            closeAllDropdowns();
+          }}
+        >
+          <div
+            onMouseDown={(e) => e.stopPropagation()}
+            onClick={() => closeAllDropdowns()}
+            className="bg-white w-full max-w-[540px] max-h-[90vh] rounded-3xl shadow-2xl border border-slate-200 flex flex-col overflow-hidden text-xs"
+          >
+            {/* ------------------------------------------------------------- */}
+            {/* 상단 고정 헤더 (스크롤 시에도 휴가 종류 큰 제목이 절대 위로 딸려 올라가지 않음) */}
+            {/* ------------------------------------------------------------- */}
+            <div
+              className={`px-7 pt-5 pb-3.5 shrink-0 bg-white z-20 transition-all ${
+                isScrolled
+                  ? "border-b border-slate-100 shadow-[0_2px_10px_rgba(15,23,42,0.04)]"
+                  : ""
+              }`}
+            >
+              <div className="flex items-center justify-between gap-3 relative">
+                {/* 좌측: 아이콘 + 큰 글씨 휴가 종류 이름 (고정) */}
+                <div
+                  className="flex items-center gap-2.5 min-w-0 flex-1"
+                  onClick={(e) => e.stopPropagation()}
                 >
-                  ⋯
-                </button>
-              )}
-              <button
-                type="button"
-                onClick={() => setDraft(null)}
-                className="w-6 h-6 rounded-full bg-slate-200/80 hover:bg-slate-300 text-slate-500 flex items-center justify-center text-xs font-bold"
-              >
-                ✕
-              </button>
-
-              {modalMenuOpen && (
-                <div className="absolute right-7 top-8 w-36 rounded-xl bg-white border border-slate-200 shadow-xl py-1.5 z-30 text-xs">
-                  <button
-                    type="button"
-                    onClick={() => handleDuplicate(draft)}
-                    className="w-full px-3.5 py-1.5 text-left font-semibold text-slate-700 hover:bg-slate-50"
-                  >
-                    정책 복제
-                  </button>
-                  {!draft.is_mandatory && (
-                    <button
-                      type="button"
-                      onClick={() => handleDelete(draft)}
-                      className="w-full px-3.5 py-1.5 text-left font-semibold text-rose-500 hover:bg-rose-50"
-                    >
-                      삭제하기
-                    </button>
-                  )}
-                </div>
-              )}
-            </div>
-
-            <div className="flex-1 overflow-y-auto custom-scroll pr-0.5 space-y-5">
-              {/* 아이콘 + 이름 + 설명 */}
-              <div className="relative">
-                <div className="flex items-center gap-2.5">
                   <button
                     type="button"
                     disabled={!canEdit}
-                    onClick={() => setIconPickerOpen((p) => !p)}
+                    onClick={() => {
+                      closeAllDropdowns();
+                      setIconPickerOpen((p) => !p);
+                    }}
                     className="w-8 h-8 rounded-lg bg-slate-50 hover:bg-slate-100 border border-slate-100 flex items-center justify-center text-lg shrink-0"
                   >
                     {draft.icon}
@@ -742,15 +956,75 @@ export default function HqCustomLeaveSettingsSection({
                       setDraft({ ...draft, name: e.target.value })
                     }
                     placeholder="맞춤 휴가 이름"
-                    className="flex-1 text-xl font-extrabold text-slate-900 placeholder:text-slate-300 focus:outline-none"
+                    className={`min-w-0 flex-1 font-extrabold text-slate-900 placeholder:text-slate-300 focus:outline-none bg-transparent transition-all ${
+                      isScrolled ? "text-[16px]" : "text-[20px]"
+                    }`}
                   />
-                  {!isNew && (
-                    <span className="text-slate-300 text-xs">✏️</span>
+                  {!isNew && !isScrolled && (
+                    <span className="text-slate-300 text-xs shrink-0">✏️</span>
                   )}
                 </div>
 
+                {/* 우측: 법정 가이드 배지 + ⋯ + ✕ */}
+                <div
+                  className="flex items-center gap-2 shrink-0"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  {activeGuide && (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => setGuideOpen((v) => !v)}
+                        className={`px-2.5 py-1 rounded-full border text-[11px] font-bold flex items-center gap-1 transition-colors ${
+                          activeGuide.tone === "amber"
+                            ? "bg-[#fff8eb] hover:bg-amber-100/70 border-amber-200/80 text-amber-800"
+                            : "bg-slate-100 hover:bg-slate-200/70 border-slate-200 text-slate-600"
+                        }`}
+                      >
+                        <span
+                          className={`w-3.5 h-3.5 rounded-full inline-flex items-center justify-center text-[9px] font-extrabold text-white ${
+                            activeGuide.tone === "amber"
+                              ? "bg-amber-600"
+                              : "bg-slate-400"
+                          }`}
+                        >
+                          {activeGuide.tone === "amber" ? "!" : "✓"}
+                        </span>
+                        <span>{activeGuide.badgeLabel}</span>
+                      </button>
+                      <span className="h-3.5 w-px bg-slate-200" />
+                    </>
+                  )}
+
+                  {!isNew && canEdit && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const next = !modalMenuOpen;
+                        closeAllDropdowns();
+                        setModalMenuOpen(next);
+                      }}
+                      className="w-7 h-7 rounded-lg hover:bg-slate-100 text-slate-400 hover:text-slate-700 font-bold text-sm"
+                    >
+                      ⋯
+                    </button>
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={() => setDraft(null)}
+                    className="w-6 h-6 rounded-full bg-slate-200/80 hover:bg-slate-300 text-slate-500 flex items-center justify-center text-xs font-bold"
+                  >
+                    ✕
+                  </button>
+                </div>
+
+                {/* 아이콘 피커 */}
                 {iconPickerOpen && (
-                  <div className="absolute left-0 top-10 z-30 p-2 rounded-xl bg-white border border-slate-200 shadow-xl flex flex-wrap items-center gap-1 max-w-xs">
+                  <div
+                    onClick={(e) => e.stopPropagation()}
+                    className="absolute left-0 top-10 z-30 p-2 rounded-xl bg-white border border-slate-200 shadow-xl flex flex-wrap items-center gap-1 max-w-xs"
+                  >
                     {LEAVE_ICONS.map((ic) => (
                       <button
                         key={ic}
@@ -771,6 +1045,48 @@ export default function HqCustomLeaveSettingsSection({
                   </div>
                 )}
 
+                {/* 우측 상단 ⋯ 메뉴 */}
+                {modalMenuOpen && (
+                  <div
+                    onClick={(e) => e.stopPropagation()}
+                    className="absolute right-7 top-9 w-36 rounded-xl bg-white border border-slate-200 shadow-xl py-1.5 z-30 text-xs"
+                  >
+                    <button
+                      type="button"
+                      onClick={() => handleDuplicate(draft)}
+                      className="w-full px-3.5 py-1.5 text-left font-semibold text-slate-700 hover:bg-slate-50"
+                    >
+                      정책 복제
+                    </button>
+                    {!draft.is_mandatory && (
+                      <button
+                        type="button"
+                        onClick={() => handleDelete(draft)}
+                        className="w-full px-3.5 py-1.5 text-left font-semibold text-rose-500 hover:bg-rose-50"
+                      >
+                        삭제하기
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {guideOpen && activeGuide && (
+                <div className="mt-2.5 p-3 rounded-xl bg-slate-50 border border-slate-200/80 text-[11px] text-slate-600 leading-relaxed">
+                  {activeGuide.summary}
+                </div>
+              )}
+            </div>
+
+            {/* ------------------------------------------------------------- */}
+            {/* 스크롤 본문 영역                                               */}
+            {/* ------------------------------------------------------------- */}
+            <div
+              onScroll={(e) => setIsScrolled(e.currentTarget.scrollTop > 8)}
+              className="flex-1 overflow-y-auto custom-scroll px-7 pb-4 space-y-5"
+            >
+              {/* 정책 설명 */}
+              <div>
                 <input
                   disabled={!canEdit}
                   value={draft.description}
@@ -778,12 +1094,12 @@ export default function HqCustomLeaveSettingsSection({
                     setDraft({ ...draft, description: e.target.value })
                   }
                   placeholder="이 맞춤 휴가 정책에 대한 설명을 입력해주세요"
-                  className="mt-2 w-full pb-1 border-b border-slate-200 text-xs text-slate-600 placeholder:text-slate-400 placeholder:underline focus:outline-none"
+                  className="w-full pb-1.5 border-b border-transparent focus:border-slate-200 text-xs text-slate-600 placeholder:text-slate-400 placeholder:underline focus:outline-none"
                 />
               </div>
 
               {/* --------------------------------------------------------- */}
-              {/* A) 보상 휴가 전용 필드 (145910.png 동일)                  */}
+              {/* A) 보상 휴가 전용 필드 (img_42, img_43 100% 대응)         */}
               {/* --------------------------------------------------------- */}
               {draft.is_reward_type ? (
                 <div className="divide-y divide-slate-100 border-t border-slate-100">
@@ -807,7 +1123,7 @@ export default function HqCustomLeaveSettingsSection({
                             e.target.value as HqCustomLeaveItem["usage_unit"],
                         })
                       }
-                      className="w-48 px-3 py-2.5 rounded-xl bg-[#f5f6f8] font-bold text-slate-800 focus:outline-none"
+                      className="w-48 px-3 py-2.5 rounded-xl bg-[#f8f9fa] border border-slate-200/80 font-bold text-slate-800 focus:outline-none"
                     >
                       <option value="시간차 사용 (제한없음)">
                         시간차 사용 (제한없음)
@@ -963,14 +1279,47 @@ export default function HqCustomLeaveSettingsSection({
                       />
                     </button>
                   </div>
+
+                  {/* 캘린더 공유 설정 (img_42, img_43) */}
+                  <div className="py-4 flex items-center justify-between gap-4">
+                    <div>
+                      <div className="font-bold text-slate-800 text-[13px] flex items-center gap-1">
+                        <span>캘린더 공유 설정</span>
+                        <span
+                          title="캘린더 노출 여부 및 동료들에게 보이는 휴가 표기 방식을 설정합니다."
+                          className="text-slate-300 text-xs cursor-help"
+                        >
+                          ⓘ
+                        </span>
+                      </div>
+                      <div className="text-[11px] text-slate-400 mt-0.5">
+                        캘린더 노출 여부 및 표현 방식을 설정할 수 있어요.
+                      </div>
+                    </div>
+                    <CalendarSharePopover
+                      value={draft.calendar_share_mode || "LEAVE_LABEL"}
+                      leaveName={draft.name}
+                      canEdit={canEdit}
+                      isOpen={calendarMenuOpen}
+                      onToggle={() => {
+                        const next = !calendarMenuOpen;
+                        closeAllDropdowns();
+                        setCalendarMenuOpen(next);
+                      }}
+                      onSelect={(next) => {
+                        setDraft({ ...draft, calendar_share_mode: next });
+                        setCalendarMenuOpen(false);
+                      }}
+                    />
+                  </div>
                 </div>
               ) : (
                 /* --------------------------------------------------------- */
-                /* B) 일반 · 보건 · 출산 · 경조 맞춤 휴가 필드 (145704~145906) */
+                /* B) 일반 · 보건 · 출산 · 경조 · 병가 · 군소집 맞춤 휴가 필드 */
                 /* --------------------------------------------------------- */
                 <>
                   <div className="divide-y divide-slate-100 border-t border-slate-100">
-                    {/* 1) 부여 방법 (145709.png 그룹형 드롭다운) */}
+                    {/* 1) 부여 방법 */}
                     <div className="py-3.5 flex items-center justify-between gap-4 relative">
                       <div>
                         <div className="font-bold text-slate-800 text-[13px]">
@@ -981,16 +1330,19 @@ export default function HqCustomLeaveSettingsSection({
                         </div>
                       </div>
 
-                      <div className="w-48 relative">
+                      <div
+                        className="w-48 relative shrink-0"
+                        onClick={(e) => e.stopPropagation()}
+                      >
                         <button
                           type="button"
                           disabled={!canEdit}
                           onClick={() => {
-                            setGrantMethodOpen((p) => !p);
-                            setRepeatCycleOpen(false);
-                            setPayMenuOpen(false);
+                            const next = !grantMethodOpen;
+                            closeAllDropdowns();
+                            setGrantMethodOpen(next);
                           }}
-                          className="w-full px-3 py-2.5 rounded-xl bg-[#f5f6f8] hover:bg-slate-200/60 font-bold text-slate-800 flex items-center justify-between"
+                          className="w-full px-3 py-2.5 rounded-xl bg-[#f8f9fa] hover:bg-slate-100 border border-slate-200/80 font-bold text-slate-800 flex items-center justify-between"
                         >
                           <span>{draft.grant_method}</span>
                           <span className="text-slate-400 text-[10px]">▾</span>
@@ -1006,7 +1358,16 @@ export default function HqCustomLeaveSettingsSection({
                                 key={gm}
                                 type="button"
                                 onClick={() => {
-                                  setDraft({ ...draft, grant_method: gm });
+                                  const nextUnit =
+                                    gm !== "신청 시 부여" &&
+                                    draft.grant_unit === "신청하는 만큼 부여"
+                                      ? "일 단위 부여"
+                                      : draft.grant_unit;
+                                  setDraft({
+                                    ...draft,
+                                    grant_method: gm,
+                                    grant_unit: nextUnit,
+                                  });
                                   setGrantMethodOpen(false);
                                 }}
                                 className="w-full px-3.5 py-1.5 text-left hover:bg-slate-50 flex items-center justify-between font-semibold text-slate-800"
@@ -1027,7 +1388,14 @@ export default function HqCustomLeaveSettingsSection({
                                 key={gm}
                                 type="button"
                                 onClick={() => {
-                                  setDraft({ ...draft, grant_method: gm });
+                                  setDraft({
+                                    ...draft,
+                                    grant_method: gm,
+                                    grant_unit:
+                                      draft.grant_unit === "신청하는 만큼 부여"
+                                        ? "일 단위 부여"
+                                        : draft.grant_unit,
+                                  });
                                   setGrantMethodOpen(false);
                                 }}
                                 className="w-full px-3.5 py-1.5 text-left hover:bg-slate-50 flex items-center justify-between font-semibold text-slate-800"
@@ -1043,7 +1411,7 @@ export default function HqCustomLeaveSettingsSection({
                       </div>
                     </div>
 
-                    {/* 2-A) 반복 주기 (반복 부여 시 — 145713.png 동일) */}
+                    {/* 2-A) 반복 주기 (반복 부여 시) */}
                     {draft.grant_method === "반복 부여" && (
                       <div className="py-3.5 flex items-center justify-between gap-4 relative">
                         <div>
@@ -1055,12 +1423,19 @@ export default function HqCustomLeaveSettingsSection({
                           </div>
                         </div>
 
-                        <div className="w-48 relative">
+                        <div
+                          className="w-48 relative shrink-0"
+                          onClick={(e) => e.stopPropagation()}
+                        >
                           <button
                             type="button"
                             disabled={!canEdit}
-                            onClick={() => setRepeatCycleOpen((p) => !p)}
-                            className="w-full px-3 py-2.5 rounded-xl bg-[#f5f6f8] hover:bg-slate-200/60 font-bold text-slate-800 flex items-center justify-between"
+                            onClick={() => {
+                              const next = !repeatCycleOpen;
+                              closeAllDropdowns();
+                              setRepeatCycleOpen(next);
+                            }}
+                            className="w-full px-3 py-2.5 rounded-xl bg-[#f8f9fa] hover:bg-slate-100 border border-slate-200/80 font-bold text-slate-800 flex items-center justify-between"
                           >
                             <span className="truncate">
                               {draft.repeat_cycle || "입사 월부터 매월"}
@@ -1173,7 +1548,7 @@ export default function HqCustomLeaveSettingsSection({
                               tenure_years_rule: e.target.value,
                             })
                           }
-                          className="w-48 px-3 py-2.5 rounded-xl bg-[#f5f6f8] font-bold text-slate-800 focus:outline-none"
+                          className="w-48 px-3 py-2.5 rounded-xl bg-[#f8f9fa] border border-slate-200/80 font-bold text-slate-800 focus:outline-none shrink-0"
                         >
                           <option value="만 3년 · 5년 · 10년 근속 시">
                             만 3년 · 5년 · 10년 근속 시
@@ -1184,64 +1559,74 @@ export default function HqCustomLeaveSettingsSection({
                       </div>
                     )}
 
-                    {/* 3) 부여 단위 (145716.png) */}
-                    <div className="py-3.5 flex items-center justify-between gap-4">
-                      <div>
-                        <div className="font-bold text-slate-800 text-[13px]">
-                          부여 단위
+                    {/* 3) 부여 단위 ('관리자가 직접 부여'일 때는 숨김 — img_05 동일 / '신청 시 부여'일 때는 '신청하는 만큼 부여' 포함 — img_21 동일) */}
+                    {draft.grant_method !== "관리자가 직접 부여" && (
+                      <div className="py-3.5 flex items-center justify-between gap-4">
+                        <div>
+                          <div className="font-bold text-slate-800 text-[13px]">
+                            부여 단위
+                          </div>
+                          <div className="text-[11px] text-slate-400 mt-0.5">
+                            어떻게 부여할지 방식을 선택해보세요.
+                          </div>
                         </div>
-                        <div className="text-[11px] text-slate-400 mt-0.5">
-                          어떻게 부여할지 방식을 선택해보세요.
-                        </div>
-                      </div>
-                      <select
-                        disabled={!canEdit}
-                        value={draft.grant_unit}
-                        onChange={(e) =>
-                          setDraft({
-                            ...draft,
-                            grant_unit:
-                              e.target.value as HqCustomLeaveItem["grant_unit"],
-                          })
-                        }
-                        className="w-48 px-3 py-2.5 rounded-xl bg-[#f5f6f8] font-bold text-slate-800 focus:outline-none"
-                      >
-                        <option value="분 단위 부여">분 단위 부여</option>
-                        <option value="시간 단위 부여">시간 단위 부여</option>
-                        <option value="일 단위 부여">일 단위 부여</option>
-                      </select>
-                    </div>
-
-                    {/* 4) 부여 시간 */}
-                    <div className="py-3.5 flex items-center justify-between gap-4">
-                      <div>
-                        <div className="font-bold text-slate-800 text-[13px]">
-                          부여 시간
-                        </div>
-                        <div className="text-[11px] text-slate-400 mt-0.5">
-                          얼마나 부여할 지 입력해주세요.
-                        </div>
-                      </div>
-                      <div className="w-48 px-3.5 py-2.5 rounded-xl bg-[#f5f6f8] flex items-center justify-between">
-                        <input
-                          type="number"
-                          min={0.5}
-                          step={0.5}
+                        <select
                           disabled={!canEdit}
-                          value={draft.grant_amount}
+                          value={draft.grant_unit}
                           onChange={(e) =>
                             setDraft({
                               ...draft,
-                              grant_amount: Number(e.target.value),
+                              grant_unit:
+                                e.target.value as HqCustomLeaveItem["grant_unit"],
                             })
                           }
-                          className="w-28 bg-transparent font-bold text-slate-900 focus:outline-none"
-                        />
-                        <span className="text-slate-500 font-semibold">
-                          {unitShortSuffix(draft.grant_unit)}
-                        </span>
+                          className="w-48 px-3 py-2.5 rounded-xl bg-[#f8f9fa] border border-slate-200/80 font-bold text-slate-800 focus:outline-none shrink-0"
+                        >
+                          {draft.grant_method === "신청 시 부여" && (
+                            <option value="신청하는 만큼 부여">
+                              신청하는 만큼 부여
+                            </option>
+                          )}
+                          <option value="일 단위 부여">일 단위 부여</option>
+                          <option value="시간 단위 부여">시간 단위 부여</option>
+                          <option value="분 단위 부여">분 단위 부여</option>
+                        </select>
                       </div>
-                    </div>
+                    )}
+
+                    {/* 4) 부여 시간 ('관리자가 직접 부여' 및 '신청하는 만큼 부여'가 아닐 때만 표시) */}
+                    {draft.grant_method !== "관리자가 직접 부여" &&
+                      draft.grant_unit !== "신청하는 만큼 부여" && (
+                        <div className="py-3.5 flex items-center justify-between gap-4">
+                          <div>
+                            <div className="font-bold text-slate-800 text-[13px]">
+                              부여 시간
+                            </div>
+                            <div className="text-[11px] text-slate-400 mt-0.5">
+                              얼마나 부여할 지 입력해주세요.
+                            </div>
+                          </div>
+                          <div className="w-48 px-3.5 py-2.5 rounded-xl bg-[#f8f9fa] border border-slate-200/80 flex items-center justify-between shrink-0">
+                            <input
+                              type="number"
+                              min={0.5}
+                              step={0.5}
+                              disabled={!canEdit}
+                              value={draft.grant_amount}
+                              onChange={(e) =>
+                                setDraft({
+                                  ...draft,
+                                  grant_amount: Number(e.target.value),
+                                })
+                              }
+                              className="w-28 bg-transparent font-bold text-slate-900 focus:outline-none"
+                            />
+                            <span className="text-slate-500 font-semibold">
+                              {unitShortSuffix(draft.grant_unit)}
+                            </span>
+                          </div>
+                        </div>
+                      )}
 
                     {/* 5) 사용 단위 */}
                     <div className="py-3.5 flex items-center justify-between gap-4">
@@ -1263,7 +1648,7 @@ export default function HqCustomLeaveSettingsSection({
                               e.target.value as HqCustomLeaveItem["usage_unit"],
                           })
                         }
-                        className="w-48 px-3 py-2.5 rounded-xl bg-[#f5f6f8] font-bold text-slate-800 focus:outline-none"
+                        className="w-48 px-3 py-2.5 rounded-xl bg-[#f8f9fa] border border-slate-200/80 font-bold text-slate-800 focus:outline-none shrink-0"
                       >
                         <option value="한번에 모두 사용">한번에 모두 사용</option>
                         <option value="일 단위 사용">일 단위 사용</option>
@@ -1280,7 +1665,7 @@ export default function HqCustomLeaveSettingsSection({
                       </select>
                     </div>
 
-                    {/* 6) 급여 지급 유무 (145724, 145754, 145828 — 유급 / 무급 / 일부 유급(N일)) */}
+                    {/* 6) 급여 지급 유무 */}
                     <div className="py-3.5 flex items-center justify-between gap-4 relative">
                       <div>
                         <div className="font-bold text-slate-800 text-[13px]">
@@ -1291,12 +1676,19 @@ export default function HqCustomLeaveSettingsSection({
                         </div>
                       </div>
 
-                      <div className="w-48 relative">
+                      <div
+                        className="w-48 relative shrink-0"
+                        onClick={(e) => e.stopPropagation()}
+                      >
                         <button
                           type="button"
                           disabled={!canEdit}
-                          onClick={() => setPayMenuOpen((p) => !p)}
-                          className="w-full px-3 py-2.5 rounded-xl bg-[#f5f6f8] hover:bg-slate-200/60 font-bold text-slate-800 flex items-center justify-between"
+                          onClick={() => {
+                            const next = !payMenuOpen;
+                            closeAllDropdowns();
+                            setPayMenuOpen(next);
+                          }}
+                          className="w-full px-3 py-2.5 rounded-xl bg-[#f8f9fa] hover:bg-slate-100 border border-slate-200/80 font-bold text-slate-800 flex items-center justify-between"
                         >
                           <span>
                             {draft.pay_type === "일부 유급"
@@ -1335,7 +1727,7 @@ export default function HqCustomLeaveSettingsSection({
                                     ...draft,
                                     pay_type: "일부 유급",
                                     partial_paid_days:
-                                      draft.partial_paid_days || 60,
+                                      draft.partial_paid_days || 3,
                                   })
                                 }
                                 className="w-full text-left flex items-center justify-between font-bold text-slate-800 hover:text-[#00a84b]"
@@ -1493,12 +1885,12 @@ export default function HqCustomLeaveSettingsSection({
                     </div>
                   </div>
 
-                  {/* 8) 접이식 추가 설정 (성별 · 증명자료 제출 · 휴일 차감 — 145734, 145743, 145814) */}
+                  {/* 8) 접이식 추가 설정 (플렉스 전체 추가 옵션 완벽 대응) */}
                   <div className="pt-2">
                     <button
                       type="button"
                       onClick={() => setExtraSettingsOpen((p) => !p)}
-                      className="flex items-center gap-1.5 text-sm font-extrabold text-slate-900"
+                      className="flex items-center gap-1.5 text-[14px] font-extrabold text-slate-900"
                     >
                       <span>추가 설정</span>
                       <span className="text-slate-400 text-xs">
@@ -1511,7 +1903,7 @@ export default function HqCustomLeaveSettingsSection({
 
                     {extraSettingsOpen && (
                       <div className="mt-3 divide-y divide-slate-100 border-t border-slate-100">
-                        {/* 사용 가능 성별 */}
+                        {/* 8-1) 사용 가능 성별 */}
                         <div className="py-3.5 flex items-center justify-between gap-4">
                           <div>
                             <div className="font-bold text-slate-800">
@@ -1531,7 +1923,7 @@ export default function HqCustomLeaveSettingsSection({
                                   e.target.value as HqCustomLeaveItem["target_gender"],
                               })
                             }
-                            className="w-48 px-3 py-2.5 rounded-xl bg-[#f5f6f8] font-bold text-slate-800 focus:outline-none"
+                            className="w-48 px-3 py-2.5 rounded-xl bg-[#f8f9fa] border border-slate-200/80 font-bold text-slate-800 focus:outline-none shrink-0"
                           >
                             <option value="모두">모두</option>
                             <option value="여성">여성</option>
@@ -1539,18 +1931,65 @@ export default function HqCustomLeaveSettingsSection({
                           </select>
                         </div>
 
-                        {/* 증명 자료 제출 */}
+                        {/* 8-2) 사용 만료 기한 ('연차 소진 시 부여' / '입사 시 부여' / '반복 부여' / '근속 시 부여' — img_25 병가 60일 동일) */}
+                        {[
+                          "연차 소진 시 부여",
+                          "입사 시 부여",
+                          "반복 부여",
+                          "근속 시 부여",
+                        ].includes(draft.grant_method) && (
+                          <div className="py-3.5 flex items-center justify-between gap-4">
+                            <div>
+                              <div className="font-bold text-slate-800">
+                                사용 만료 기한
+                              </div>
+                              <div className="text-[11px] text-slate-400 mt-0.5">
+                                휴가의 소멸 기한을 설정할 수 있어요.
+                              </div>
+                            </div>
+                            <select
+                              disabled={!canEdit}
+                              value={
+                                draft.expire_days_rule ||
+                                (draft.grant_method === "연차 소진 시 부여"
+                                  ? "60일"
+                                  : "기한 없음")
+                              }
+                              onChange={(e) =>
+                                setDraft({
+                                  ...draft,
+                                  expire_days_rule: e.target.value,
+                                })
+                              }
+                              className="w-48 px-3 py-2.5 rounded-xl bg-[#f8f9fa] border border-slate-200/80 font-bold text-slate-800 focus:outline-none shrink-0"
+                            >
+                              {EXPIRE_RULE_OPTIONS.map((opt) => (
+                                <option key={opt} value={opt}>
+                                  {opt}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        )}
+
+                        {/* 8-3) 증명 자료 제출 */}
                         <div className="py-3.5 flex items-start justify-between gap-4">
                           <div>
-                            <div className="font-bold text-slate-800">
-                              증명 자료 제출
+                            <div className="font-bold text-slate-800 flex items-center gap-1">
+                              <span>증명 자료 제출</span>
+                              <span
+                                title="사전 제출: 신청 시 증빙 첨부 필수 / 사후 제출: 사용 후 제출 안내"
+                                className="text-slate-300 text-xs cursor-help"
+                              >
+                                ?
+                              </span>
                             </div>
                             <div className="text-[11px] text-slate-400 mt-0.5">
                               휴가 사용 전이나 후에 증명자료를 받을 수 있어요.
                             </div>
                           </div>
 
-                          <div className="w-48 space-y-2">
+                          <div className="w-48 space-y-2 shrink-0">
                             <select
                               disabled={!canEdit}
                               value={draft.proof_document_mode}
@@ -1561,7 +2000,7 @@ export default function HqCustomLeaveSettingsSection({
                                     e.target.value as HqCustomLeaveItem["proof_document_mode"],
                                 })
                               }
-                              className="w-full px-3 py-2.5 rounded-xl bg-[#f5f6f8] font-bold text-slate-800 focus:outline-none"
+                              className="w-full px-3 py-2.5 rounded-xl bg-[#f8f9fa] border border-slate-200/80 font-bold text-slate-800 focus:outline-none"
                             >
                               <option value="없음">없음</option>
                               <option value="사전 제출">사전 제출</option>
@@ -1580,14 +2019,47 @@ export default function HqCustomLeaveSettingsSection({
                                     proof_document_guide: e.target.value,
                                   })
                                 }
-                                placeholder="제출해야 할 증명 자료를 작성해 주세요. (ex. 병원 소견서, 청첩장 사진 등..)"
-                                className="w-full p-2.5 rounded-xl bg-[#f5f6f8] text-[11px] text-slate-700 placeholder:text-slate-400 focus:outline-none resize-none"
+                                placeholder={`제출해야 할 증명 자료를 작성해 주세요.\n(ex. 병원 소견서, 청첩장 사진 등..)`}
+                                className="w-full px-3 py-2 rounded-xl bg-[#f8f9fa] border border-slate-200/80 text-[11px] font-medium text-slate-800 placeholder:text-slate-400 focus:outline-none resize-none leading-relaxed"
                               />
                             )}
                           </div>
                         </div>
 
-                        {/* 휴일에 등록된 휴가 차감 */}
+                        {/* 8-4) 제외 대상 설정 (비법정 일반/경조/병가 항목 — img_25, 31, 34, 37, 40 동일) */}
+                        {!draft.is_mandatory && (
+                          <div className="py-3.5 flex items-center justify-between gap-4">
+                            <div>
+                              <div className="font-bold text-slate-800">
+                                제외 대상 설정
+                              </div>
+                              <div className="text-[11px] text-slate-400 mt-0.5 leading-relaxed">
+                                제외 대상은 해당 휴가가 부여되지 않아요.
+                                <br />
+                                구성원 정보 변경에 따라 제외 대상이 달라질 수 있어요.
+                              </div>
+                            </div>
+                            <select
+                              disabled={!canEdit}
+                              value={draft.exclude_target_rule || "없음"}
+                              onChange={(e) =>
+                                setDraft({
+                                  ...draft,
+                                  exclude_target_rule: e.target.value,
+                                })
+                              }
+                              className="w-48 px-3 py-2.5 rounded-xl bg-[#f8f9fa] border border-slate-200/80 font-bold text-slate-800 focus:outline-none shrink-0"
+                            >
+                              {EXCLUDE_TARGET_OPTIONS.map((opt) => (
+                                <option key={opt} value={opt}>
+                                  {opt}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        )}
+
+                        {/* 8-5) 휴일에 등록된 휴가 차감 */}
                         <div className="py-3.5 flex items-center justify-between gap-4">
                           <div>
                             <div className="font-bold text-slate-800">
@@ -1623,11 +2095,82 @@ export default function HqCustomLeaveSettingsSection({
                             />
                           </button>
                         </div>
+
+                        {/* 8-6) 휴가 사전 등록 가능 ('관리자가 직접 부여'일 때 — img_01, 03, 06 동일) */}
+                        {draft.grant_method === "관리자가 직접 부여" && (
+                          <div className="py-3.5 flex items-center justify-between gap-4">
+                            <div>
+                              <div className="font-bold text-slate-800">
+                                휴가 사전 등록 가능
+                              </div>
+                              <div className="text-[11px] text-slate-400 mt-0.5">
+                                휴가 사용 가능 기간 전에 미리 등록할 수 있어요.
+                              </div>
+                            </div>
+                            <button
+                              type="button"
+                              disabled={!canEdit}
+                              onClick={() =>
+                                setDraft({
+                                  ...draft,
+                                  allow_advance_register:
+                                    !draft.allow_advance_register,
+                                })
+                              }
+                              className={`relative inline-flex h-6 w-11 shrink-0 rounded-full border-2 border-transparent transition-colors ${
+                                draft.allow_advance_register
+                                  ? "bg-[#00c458]"
+                                  : "bg-slate-200"
+                              }`}
+                            >
+                              <span
+                                className={`inline-block h-5 w-5 transform rounded-full bg-white shadow-sm transition ${
+                                  draft.allow_advance_register
+                                    ? "translate-x-5"
+                                    : "translate-x-0"
+                                }`}
+                              />
+                            </button>
+                          </div>
+                        )}
+
+                        {/* 8-7) 캘린더 공유 설정 (모든 맞춤 휴가 공통 — img_01 ~ img_43 동일) */}
+                        <div className="py-3.5 flex items-center justify-between gap-4">
+                          <div>
+                            <div className="font-bold text-slate-800 flex items-center gap-1">
+                              <span>캘린더 공유 설정</span>
+                              <span
+                                title="캘린더 노출 여부 및 동료들에게 보이는 휴가 표기 방식을 설정합니다."
+                                className="text-slate-300 text-xs cursor-help"
+                              >
+                                ⓘ
+                              </span>
+                            </div>
+                            <div className="text-[11px] text-slate-400 mt-0.5">
+                              캘린더 노출 여부 및 표현 방식을 설정할 수 있어요.
+                            </div>
+                          </div>
+                          <CalendarSharePopover
+                            value={draft.calendar_share_mode || "LEAVE_LABEL"}
+                            leaveName={draft.name}
+                            canEdit={canEdit}
+                            isOpen={calendarMenuOpen}
+                            onToggle={() => {
+                              const next = !calendarMenuOpen;
+                              closeAllDropdowns();
+                              setCalendarMenuOpen(next);
+                            }}
+                            onSelect={(next) => {
+                              setDraft({ ...draft, calendar_share_mode: next });
+                              setCalendarMenuOpen(false);
+                            }}
+                          />
+                        </div>
                       </div>
                     )}
                   </div>
 
-                  {/* 기존 부여된 휴가에도 반영하기 (반복/입사/근속 부여 편집 시 — 145743.png) */}
+                  {/* 기존 부여된 휴가에도 반영하기 */}
                   {!isNew &&
                     ["반복 부여", "근속 시 부여", "입사 시 부여"].includes(
                       draft.grant_method
@@ -1667,7 +2210,7 @@ export default function HqCustomLeaveSettingsSection({
             </div>
 
             {canEdit && (
-              <div className="pt-5 shrink-0">
+              <div className="px-7 pt-4 pb-6 shrink-0 bg-white">
                 <button
                   type="button"
                   disabled={saving}
@@ -1677,8 +2220,8 @@ export default function HqCustomLeaveSettingsSection({
                   {saving
                     ? "저장 중..."
                     : isNew
-                    ? "맞춤 휴가 추가하기"
-                    : "변경하기"}
+                      ? "맞춤 휴가 추가하기"
+                      : "변경하기"}
                 </button>
               </div>
             )}
@@ -1687,11 +2230,17 @@ export default function HqCustomLeaveSettingsSection({
       )}
 
       {/* ================================================================= */}
-      {/* 중첩 결재선 모달: 승인 · 참조자 선택                               */}
+      {/* 중첩 결재선 모달: 승인 · 참조자 선택 (바깥 클릭 닫기 지원)        */}
       {/* ================================================================= */}
       {lineModalOpen && (
-        <div className="fixed inset-0 bg-slate-900/50 z-[85] flex items-center justify-center p-4">
-          <div className="bg-white w-full max-w-[430px] max-h-[85vh] rounded-2xl shadow-2xl border border-slate-200 flex flex-col overflow-hidden p-6 text-xs">
+        <div
+          className="fixed inset-0 bg-slate-900/50 z-[90] flex items-center justify-center p-4"
+          onMouseDown={() => setLineModalOpen(false)}
+        >
+          <div
+            onMouseDown={(e) => e.stopPropagation()}
+            className="bg-white w-full max-w-[430px] max-h-[85vh] rounded-2xl shadow-2xl border border-slate-200 flex flex-col overflow-hidden p-6 text-xs"
+          >
             <div className="flex items-center justify-between shrink-0">
               <span className="px-2.5 py-1 rounded-md border border-slate-200 text-[11px] font-bold text-slate-700">
                 승인 · 참조
@@ -1764,10 +2313,16 @@ export default function HqCustomLeaveSettingsSection({
         </div>
       )}
 
-      {/* 승인자 / 참조자 피커 */}
+      {/* 승인자 / 참조자 피커 (바깥 클릭 닫기 지원) */}
       {pickerTarget && (
-        <div className="fixed inset-0 bg-slate-900/40 z-[95] flex items-center justify-center p-4">
-          <div className="bg-white w-full max-w-sm rounded-2xl shadow-2xl border border-slate-200 overflow-hidden flex flex-col max-h-[72vh] text-xs">
+        <div
+          className="fixed inset-0 bg-slate-900/40 z-[100] flex items-center justify-center p-4"
+          onMouseDown={() => setPickerTarget(null)}
+        >
+          <div
+            onMouseDown={(e) => e.stopPropagation()}
+            className="bg-white w-full max-w-sm rounded-2xl shadow-2xl border border-slate-200 overflow-hidden flex flex-col max-h-[72vh] text-xs"
+          >
             <div className="px-5 py-3.5 border-b border-slate-100 flex items-center justify-between">
               <h4 className="text-sm font-extrabold text-slate-900">
                 {pickerTarget.type === "CC"
@@ -1869,6 +2424,6 @@ export default function HqCustomLeaveSettingsSection({
           </div>
         </div>
       )}
-    </>
+    </div>
   );
 }

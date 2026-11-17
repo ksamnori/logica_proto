@@ -691,7 +691,8 @@ export default function HqMemberLeaveDetailView({
                     ? `${remainGranted}일 보유`
                     : item.grant_method === "반복 부여"
                       ? `매월 ${item.grant_amount}일 부여`
-                      : item.id === "cl-military"
+                      : item.id === "cl-military" ||
+                          item.grant_unit === "신청하는 만큼 부여"
                         ? "신청 시 부여"
                         : `신청 시 ${item.grant_amount}일 부여`;
 

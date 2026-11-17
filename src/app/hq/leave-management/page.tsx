@@ -1450,7 +1450,8 @@ export default function HqLeaveManagementPage() {
                             }`
                           : c.grant_method === "연차 소진 시 부여"
                             ? `소진 시 부여(${c.grant_amount}일)`
-                            : c.id === "cl-military"
+                            : c.id === "cl-military" ||
+                                c.grant_unit === "신청하는 만큼 부여"
                               ? "신청 시 부여"
                               : c.grant_method === "반복 부여"
                                 ? `매월 부여(${c.grant_amount}일)`

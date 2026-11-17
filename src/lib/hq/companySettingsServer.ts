@@ -152,52 +152,28 @@ export function normalizeCompanySettings(raw: any): HqCompanySettings {
         Array.isArray(incomingExtra.custom_leaves) &&
         incomingExtra.custom_leaves.length > 0
           ? (() => {
+              const defList = def.extra_settings.custom_leaves || [];
+              const defById = new Map(defList.map((d) => [d.id, d]));
+
               const upgraded = incomingExtra.custom_leaves.map((cl: any) => {
                 if (!cl || typeof cl !== "object") return cl;
-                let next = { ...cl };
-                if (
-                  (next.id === "cl-paternity" ||
-                    next.id === "cl-spouse-miscarriage" ||
-                    next.id === "cl-military") &&
-                  next.target_gender === "모두"
-                ) {
-                  next.target_gender = "남성";
+                // 플렉스 v2 기본값 동기화 전 구버전 시드 항목은 플렉스 표준 기본값으로 1회 업그레이드하고, 이후 사용자 저장본(_flex_v2: true)은 그대로 존중
+                const matchedDef = defById.get(String(cl.id || ""));
+                if (matchedDef && !cl._flex_v2) {
+                  return { ...matchedDef };
                 }
-                if (
-                  next.id === "cl-spouse-miscarriage" &&
-                  next.grant_amount === 3
-                ) {
-                  next.grant_amount = 5;
-                }
-                if (
-                  next.id === "cl-subfertility" &&
-                  next.grant_method === "반복 부여"
-                ) {
-                  next.grant_method = "관리자가 직접 부여";
-                }
-                if (
-                  (next.id === "cl-miscarriage" ||
-                    next.id === "cl-miscarriage-multi") &&
-                  next.grant_method === "신청 시 부여"
-                ) {
-                  next.grant_method = "관리자가 직접 부여";
-                }
-                if (
-                  next.id === "cl-sick" &&
-                  next.grant_method === "신청 시 부여"
-                ) {
-                  next.grant_method = "연차 소진 시 부여";
-                  if (next.grant_amount === 30) next.grant_amount = 60;
-                }
-                return next;
+                return {
+                  calendar_share_mode: "LEAVE_LABEL",
+                  ...cl,
+                };
               });
-              // 필수 시드 항목 중 누락된 항목이 있다면 기본값 보충
+
               const existingIds = new Set(
                 upgraded.map((c: any) => String(c?.id || ""))
               );
-              const missingDefaults = (
-                def.extra_settings.custom_leaves || []
-              ).filter((d) => d.is_mandatory && !existingIds.has(d.id));
+              const missingDefaults = defList.filter(
+                (d) => d.is_mandatory && !existingIds.has(d.id)
+              );
               return [...upgraded, ...missingDefaults];
             })()
           : def.extra_settings.custom_leaves,

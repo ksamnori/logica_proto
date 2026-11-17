@@ -898,7 +898,11 @@ export interface HqCustomLeaveItem {
   repeat_cycle?: string; // "입사 월부터 매월" | "매월 1일 부여" | "매년 1월 1일 부여" | "입사일 기준 매년"
   repeat_use_group_hire?: boolean;
   tenure_years_rule?: string; // 근속 시 부여 기준 (예: "만 3년 · 5년 · 10년 근속 시")
-  grant_unit: "일 단위 부여" | "시간 단위 부여" | "분 단위 부여";
+  grant_unit:
+    | "신청하는 만큼 부여"
+    | "일 단위 부여"
+    | "시간 단위 부여"
+    | "분 단위 부여";
   grant_amount: number; // 예: 보건 1, 산전후 본인 90, 다태아 120, 배우자출산 10, 결혼 5, 조의 3/2
   usage_unit:
     | "한번에 모두 사용"
@@ -908,16 +912,20 @@ export interface HqCustomLeaveItem {
     | "시간차 사용 (1시간 단위)"
     | "시간차 사용 (제한없음)";
   pay_type: "유급" | "무급" | "일부 유급";
-  partial_paid_days?: number; // 일부 유급일 때 유급 일수 (예: 산전후 본인 60일, 다태아 75일)
+  partial_paid_days?: number; // 일부 유급일 때 유급 일수 (예: 산전후 본인 60일, 다태아 75일, 배우자 유산·사산 3일)
   request_on_register: boolean;
   request_on_cancel: boolean;
-  allow_advance_register?: boolean; // 보상 휴가: 휴가 사전 등록 가능
+  allow_advance_register?: boolean; // 휴가 사전 등록 가능 (관리자가 직접 부여 / 보상 휴가)
   // 추가 설정
   target_gender: "모두" | "여성" | "남성";
+  expire_days_rule?: string; // 사용 만료 기한 (예: "60일", "기한 없음", "1년")
   proof_document_mode: "없음" | "사전 제출" | "사후 제출" | "선택 제출";
   proof_document_guide?: string;
+  exclude_target_rule?: string; // 제외 대상 설정 (예: "없음", "수습 기간 중인 구성원 제외" 등)
   deduct_on_holidays: boolean; // 휴일에 등록된 휴가 차감
+  calendar_share_mode?: "NONE" | "LEAVE_LABEL" | "EXACT_NAME"; // 캘린더 공유 설정 (노출 안 함 | 휴가로 표시 | 이름으로 표시)
   apply_to_existing_granted?: boolean; // 기존 부여된 휴가에도 반영하기
+  _flex_v2?: boolean; // 플렉스 v2 기본 옵션 동기화 완료 플래그
 }
 
 export type HqPayrollRoundingMode = "올림" | "반올림" | "버림";

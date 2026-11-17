@@ -929,7 +929,8 @@ export default function HqLeavesPage() {
               {/* 맞춤 휴가 카드 목록 */}
               {displayedCustomLeaves.map((item) => {
                 const subText =
-                  item.id === "cl-military"
+                  item.id === "cl-military" ||
+                  item.grant_unit === "신청하는 만큼 부여"
                     ? "신청 시 부여"
                     : item.grant_method === "신청 시 부여"
                     ? `신청 시 ${item.grant_amount}${
