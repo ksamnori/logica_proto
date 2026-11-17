@@ -1184,16 +1184,20 @@ export interface HqPermissionGroupItem {
   is_system?: boolean; // "SUPER_ADMIN" | "ORG_HEAD" | "DEFAULT_MEMBER" 구분용
   system_kind?: "SUPER_ADMIN" | "ORG_HEAD" | "DEFAULT_MEMBER";
   member_names: string[]; // 그룹에 배정된 구성원 이름 목록 (예: ["천종현", "김근식", "이웅행"])
+  member_ids?: string[]; // 동명이인 구분 및 신규 가입 계정 매칭 보조 ID 목록
   permissions: Record<string, boolean>; // permKey -> 허용 여부
   scopes: Record<string, HqPermissionScope>; // 범위 지정형 permKey -> 범위
 }
 
 export interface HqPermissionSettings {
+  menu_linked_v2?: boolean;
   super_admin_names: string[];
+  super_admin_ids?: string[];
   org_head_permissions: Record<string, boolean>;
   org_head_scopes: Record<string, HqPermissionScope>;
   default_member_permissions: Record<string, boolean>;
   groups: HqPermissionGroupItem[];
+  member_overrides?: Record<string, Record<string, boolean>>; // memberId 또는 name 기준 개별 ON/OFF 오버라이드
 }
 
 export type HqAccessTerminalProvider = "secom" | "adt_caps" | "kt_telecop";

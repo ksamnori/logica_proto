@@ -1,0 +1,532 @@
+// src/lib/hq/hqPermissionEngine.ts
+import { DEFAULT_PERMISSION_SETTINGS } from "./defaultPermissionSettings";
+import type {
+  HqMember,
+  HqPermissionGroupItem,
+  HqPermissionSettings,
+} from "./types";
+
+export interface HqSidebarMenuPermDef {
+  permKey: string;
+  route: string;
+  icon: string;
+  label: string;
+  sectionLabel: string;
+  description: string;
+  defaultForMember: boolean;
+  defaultForOrgHead: boolean;
+}
+
+/**
+ * 본부(HQ) 좌측 사이드바 전체 메뉴 정의 (표시 순서 동일)
+ * - '/hq' (본부 홈 대시보드) 및 '내 프로필'은 로그인한 모든 본부 구성원 기본 진입점입니다.
+ */
+export const HQ_SIDEBAR_MENU_PERM_ITEMS: HqSidebarMenuPermDef[] = [
+  {
+    permKey: "menu.notices",
+    route: "/hq/notices",
+    icon: "📢",
+    label: "공지",
+    sectionLabel: "인사(HR) · 근태 · 워크플로우",
+    description: "사내 공지사항 좌측 메뉴 노출 및 게시글 열람을 허용합니다.",
+    defaultForMember: true,
+    defaultForOrgHead: true,
+  },
+  {
+    permKey: "menu.members",
+    route: "/hq/members",
+    icon: "👥",
+    label: "구성원",
+    sectionLabel: "인사(HR) · 근태 · 워크플로우",
+    description: "구성원 디렉토리 · 인사 정보 관리 메뉴 노출 및 접근을 허용합니다.",
+    defaultForMember: false,
+    defaultForOrgHead: true,
+  },
+  {
+    permKey: "menu.org_chart",
+    route: "/hq/org-chart",
+    icon: "🏢",
+    label: "조직도",
+    sectionLabel: "인사(HR) · 근태 · 워크플로우",
+    description: "본부 부서 트리 및 조직도 메뉴 접근을 허용합니다.",
+    defaultForMember: true,
+    defaultForOrgHead: true,
+  },
+  {
+    permKey: "menu.meetings",
+    route: "/hq/meetings",
+    icon: "💬",
+    label: "미팅",
+    sectionLabel: "인사(HR) · 근태 · 워크플로우",
+    description: "사내 미팅 · 회의록 공유 메뉴 접근을 허용합니다.",
+    defaultForMember: true,
+    defaultForOrgHead: true,
+  },
+  {
+    permKey: "menu.attendance",
+    route: "/hq/attendance",
+    icon: "⏱️",
+    label: "근무 (내 출퇴근)",
+    sectionLabel: "인사(HR) · 근태 · 워크플로우",
+    description: "본인 출퇴근 기록 및 유연근무 타임라인 메뉴 접근을 허용합니다.",
+    defaultForMember: true,
+    defaultForOrgHead: true,
+  },
+  {
+    permKey: "menu.leaves",
+    route: "/hq/leaves",
+    icon: "🏖️",
+    label: "휴가 (내 휴가)",
+    sectionLabel: "인사(HR) · 근태 · 워크플로우",
+    description: "본인 연차·맞춤휴가 신청 및 사용 원장 메뉴 접근을 허용합니다.",
+    defaultForMember: true,
+    defaultForOrgHead: true,
+  },
+  {
+    permKey: "menu.work_management",
+    route: "/hq/work-management",
+    icon: "🕒",
+    label: "근태 관리 > 근무 관리",
+    sectionLabel: "인사(HR) · 근태 · 워크플로우",
+    description: "관리자·조직장용 근무 관리(초과근무 보상 · 근태 마감) 메뉴 접근을 허용합니다.",
+    defaultForMember: false,
+    defaultForOrgHead: true,
+  },
+  {
+    permKey: "menu.leave_management",
+    route: "/hq/leave-management",
+    icon: "🗓️",
+    label: "근태 관리 > 휴가 관리",
+    sectionLabel: "인사(HR) · 근태 · 워크플로우",
+    description: "관리자·조직장용 전사/부서 휴가 보유현황 · 맞춤휴가 부여 · 연차 조정 메뉴 접근을 허용합니다.",
+    defaultForMember: false,
+    defaultForOrgHead: true,
+  },
+  {
+    permKey: "menu.approvals",
+    route: "/hq/approvals",
+    icon: "📋",
+    label: "워크플로우",
+    sectionLabel: "인사(HR) · 근태 · 워크플로우",
+    description: "전자결재 기안 · 승인 및 문서함 메뉴 접근을 허용합니다.",
+    defaultForMember: true,
+    defaultForOrgHead: true,
+  },
+  {
+    permKey: "menu.contracts",
+    route: "/hq/contracts",
+    icon: "📑",
+    label: "전자계약 · 저작권",
+    sectionLabel: "인사(HR) · 근태 · 워크플로우",
+    description: "근로·연봉·외주·출판권 전자계약 메뉴 접근을 허용합니다.",
+    defaultForMember: true,
+    defaultForOrgHead: true,
+  },
+  {
+    permKey: "menu.expenses",
+    route: "/hq/expenses",
+    icon: "💳",
+    label: "비용 · 경비 정산",
+    sectionLabel: "경비 · 급여 · 경영",
+    description: "법인카드·영수증 비용 청구 및 경비 정산 메뉴 접근을 허용합니다.",
+    defaultForMember: true,
+    defaultForOrgHead: true,
+  },
+  {
+    permKey: "menu.payroll",
+    route: "/hq/payroll",
+    icon: "💰",
+    label: "급여 · 인세 · 원천세",
+    sectionLabel: "경비 · 급여 · 경영",
+    description: "급여 메뉴 접근을 허용합니다 (일반 직원은 본인 급여명세서만 조회, 급여관리 권한자는 전체 정산 가능).",
+    defaultForMember: true,
+    defaultForOrgHead: true,
+  },
+  {
+    permKey: "menu.year_end_tax",
+    route: "/hq/year-end-tax",
+    icon: "🧾",
+    label: "연말정산",
+    sectionLabel: "경비 · 급여 · 경영",
+    description: "연말정산 간소화 PDF 제출 및 원천징수영수증 보관함 메뉴 접근을 허용합니다.",
+    defaultForMember: true,
+    defaultForOrgHead: true,
+  },
+  {
+    permKey: "menu.insights",
+    route: "/hq/insights",
+    icon: "📈",
+    label: "인사이트",
+    sectionLabel: "경비 · 급여 · 경영",
+    description: "인력·근태·인건비/인세·출판 공정 핵심 경영 지표 대시보드 메뉴 접근을 허용합니다.",
+    defaultForMember: false,
+    defaultForOrgHead: false,
+  },
+  {
+    permKey: "menu.publishing",
+    route: "/hq/publishing",
+    icon: "📚",
+    label: "출판 공정 · ISBN 보드",
+    sectionLabel: "출판 제작 · 연구 DB",
+    description: "도서 기획·교정·디자인·인쇄하판 공정 파이프라인 보드 메뉴 접근을 허용합니다.",
+    defaultForMember: false,
+    defaultForOrgHead: true,
+  },
+  {
+    permKey: "menu.analytics",
+    route: "/hq/analytics",
+    icon: "📊",
+    label: "진단평가 분석",
+    sectionLabel: "출판 제작 · 연구 DB",
+    description: "전국 가맹점 진단평가 성취도 및 문항 통계 메뉴 접근을 허용합니다.",
+    defaultForMember: false,
+    defaultForOrgHead: false,
+  },
+  {
+    permKey: "menu.contest_db",
+    route: "/hq/contest-db",
+    icon: "📐",
+    label: "사고력·문장제 문제 DB",
+    sectionLabel: "출판 제작 · 연구 DB",
+    description: "출판 연구소 전용 문항 검색 및 번역 관리 메뉴 접근을 허용합니다.",
+    defaultForMember: false,
+    defaultForOrgHead: false,
+  },
+  {
+    permKey: "menu.messenger",
+    route: "/hq/messenger",
+    icon: "💬",
+    label: "사내 메신저",
+    sectionLabel: "소통 · 시스템",
+    description: "전사 임직원 실시간 대화 메신저 메뉴 접근을 허용합니다.",
+    defaultForMember: true,
+    defaultForOrgHead: true,
+  },
+  {
+    permKey: "menu.permissions",
+    route: "/hq/permissions",
+    icon: "🔐",
+    label: "포털 권한 관리",
+    sectionLabel: "소통 · 시스템",
+    description: "직급 및 연구 문제 DB 세부 접근 등급 제어 패널 메뉴 접근을 허용합니다.",
+    defaultForMember: false,
+    defaultForOrgHead: false,
+  },
+  {
+    permKey: "menu.settings",
+    route: "/hq/settings",
+    icon: "⚙️",
+    label: "설정",
+    sectionLabel: "소통 · 시스템",
+    description: "회사 정보 · 인사 · 근태 · 급여 · 보안 · 권한 설정 메뉴 접근을 허용합니다.",
+    defaultForMember: false,
+    defaultForOrgHead: false,
+  },
+];
+
+export const ROUTE_TO_MENU_PERM_KEY: Record<string, string> = Object.fromEntries(
+  HQ_SIDEBAR_MENU_PERM_ITEMS.map((item) => [item.route, item.permKey])
+);
+
+function inferLegacyGroupMenuPerms(perms: Record<string, boolean>): Record<string, boolean> {
+  const next = { ...perms };
+  if (perms["member.directory_access"] || perms["hr.employment_manage"]) {
+    next["menu.members"] = true;
+  }
+  if (perms["work.record_view"] || perms["work.stats_view"] || perms["work.record_edit"]) {
+    next["menu.work_management"] = true;
+  }
+  if (perms["leave.balance_view"] || perms["leave.view"] || perms["leave.edit"]) {
+    next["menu.leave_management"] = true;
+  }
+  if (perms["payroll.run"] || perms["hr.payslip_view"]) {
+    next["menu.payroll"] = true;
+  }
+  if (perms["payroll.year_end"]) {
+    next["menu.year_end_tax"] = true;
+  }
+  if (perms["insight.view"] || perms["payroll.run"]) {
+    next["menu.insights"] = true;
+  }
+  if (perms["permission.manage"]) {
+    next["menu.permissions"] = true;
+  }
+  if (
+    perms["company.basic_manage"] ||
+    perms["permission.manage"] ||
+    perms["security.login_manage"]
+  ) {
+    next["menu.settings"] = true;
+  }
+  return next;
+}
+
+/**
+ * DB에 저장된 기존 permission_settings(v1)에 좌측 메뉴 권한 키가 아직 없을 때
+ * 최초 1회 합리적인 기본 배분을 자동 주입하고, menu_linked_v2 저장 이후에는
+ * 관리자가 설정한 ON/OFF 값을 100% 그대로 유지합니다.
+ */
+export function normalizeHqPermissionSettings(
+  raw?: HqPermissionSettings | null
+): HqPermissionSettings {
+  const base = raw || DEFAULT_PERMISSION_SETTINGS;
+
+  const superNames =
+    Array.isArray(base.super_admin_names) && base.super_admin_names.length > 0
+      ? base.super_admin_names
+      : DEFAULT_PERMISSION_SETTINGS.super_admin_names;
+
+  const superIds = Array.isArray(base.super_admin_ids) ? base.super_admin_ids : [];
+  const overrides = base.member_overrides || {};
+
+  if (base.menu_linked_v2) {
+    return {
+      ...DEFAULT_PERMISSION_SETTINGS,
+      ...base,
+      menu_linked_v2: true,
+      super_admin_names: superNames,
+      super_admin_ids: superIds,
+      org_head_permissions: base.org_head_permissions || {},
+      org_head_scopes: base.org_head_scopes || {},
+      default_member_permissions: base.default_member_permissions || {},
+      groups: Array.isArray(base.groups) ? base.groups : [],
+      member_overrides: overrides,
+    };
+  }
+
+  // v1 -> v2 초기 자동 배분 (일반 신입/테스트 계정에 관리자 메뉴가 노출되지 않도록 정리)
+  const migratedDefaultMember: Record<string, boolean> = {
+    ...(base.default_member_permissions || {}),
+  };
+  HQ_SIDEBAR_MENU_PERM_ITEMS.forEach((item) => {
+    if (migratedDefaultMember[item.permKey] === undefined) {
+      migratedDefaultMember[item.permKey] = item.defaultForMember;
+    }
+  });
+
+  const migratedOrgHead: Record<string, boolean> = {
+    ...(base.org_head_permissions || {}),
+  };
+  HQ_SIDEBAR_MENU_PERM_ITEMS.forEach((item) => {
+    if (item.defaultForOrgHead && migratedOrgHead[item.permKey] === undefined) {
+      migratedOrgHead[item.permKey] = true;
+    }
+  });
+
+  const rawGroups = Array.isArray(base.groups)
+    ? base.groups
+    : DEFAULT_PERMISSION_SETTINGS.groups;
+
+  const migratedGroups: HqPermissionGroupItem[] = rawGroups.map((g) => ({
+    ...g,
+    member_ids: Array.isArray(g.member_ids) ? g.member_ids : [],
+    permissions: inferLegacyGroupMenuPerms(g.permissions || {}),
+  }));
+
+  // 출판·편집 실무 그룹이 없으면 기본 추가 (기존 집필·디자인·마케팅 실무진 배정)
+  const hasPubGroup = migratedGroups.some(
+    (g) => g.id === "pg-publishing-team" || g.permissions?.["menu.publishing"]
+  );
+  if (!hasPubGroup) {
+    migratedGroups.push({
+      id: "pg-publishing-team",
+      name: "출판 · 편집 제작",
+      description: "출판 공정 · ISBN 보드 실무 접근 그룹",
+      member_names: [
+        "김동현",
+        "김문수",
+        "민세리",
+        "박주원",
+        "백시연",
+        "심혜영",
+        "원종준",
+        "조원형",
+        "최수연",
+        "한민서",
+      ],
+      member_ids: [],
+      permissions: {
+        "menu.publishing": true,
+      },
+      scopes: {},
+    });
+  }
+
+  return {
+    ...DEFAULT_PERMISSION_SETTINGS,
+    ...base,
+    menu_linked_v2: true,
+    super_admin_names: superNames,
+    super_admin_ids: superIds,
+    org_head_permissions: migratedOrgHead,
+    org_head_scopes:
+      base.org_head_scopes || DEFAULT_PERMISSION_SETTINGS.org_head_scopes,
+    default_member_permissions: migratedDefaultMember,
+    groups: migratedGroups,
+    member_overrides: overrides,
+  };
+}
+
+export function isMemberInGroup(
+  member: { instructor_id?: string; name?: string },
+  group: HqPermissionGroupItem
+): boolean {
+  if (
+    member.instructor_id &&
+    Array.isArray(group.member_ids) &&
+    group.member_ids.includes(member.instructor_id)
+  ) {
+    return true;
+  }
+  const cleanName = (member.name || "").trim();
+  if (cleanName && Array.isArray(group.member_names)) {
+    return group.member_names.includes(cleanName);
+  }
+  return false;
+}
+
+export interface ResolvedMemberPermissionState {
+  isSuperAdmin: boolean;
+  isOrgHead: boolean;
+  assignedGroups: HqPermissionGroupItem[];
+  inheritedPermissions: Record<string, boolean>; // 개인 오버라이드 적용 전 (기본 + 조직장 + 소속그룹)
+  personalOverrides: Record<string, boolean>; // 구성원 권한 탭에서 직접 지정한 ON/OFF
+  effectivePermissions: Record<string, boolean>; // 최종 권한 맵
+  canAccessRoute: (canonicalHqPath: string) => boolean;
+}
+
+export function resolveMemberPermissions(params: {
+  member: Pick<
+    HqMember,
+    "instructor_id" | "name" | "is_dept_head" | "rank_code"
+  > | null;
+  rawSettings?: HqPermissionSettings | null;
+  isDbHqAdmin?: boolean;
+  canAccessAnalyticsRpc?: boolean;
+  hasContestAccess?: boolean;
+}): ResolvedMemberPermissionState {
+  const settings = normalizeHqPermissionSettings(params.rawSettings);
+  const mem = params.member;
+
+  if (!mem) {
+    return {
+      isSuperAdmin: false,
+      isOrgHead: false,
+      assignedGroups: [],
+      inheritedPermissions: {},
+      personalOverrides: {},
+      effectivePermissions: {},
+      canAccessRoute: (p) =>
+        p === "/hq" || p === "/hq/login" || p === "/hq/signup",
+    };
+  }
+
+  const cleanName = (mem.name || "").trim();
+  const inSuperList =
+    (Boolean(mem.instructor_id) &&
+      Boolean(settings.super_admin_ids?.includes(mem.instructor_id))) ||
+    (Boolean(cleanName) && settings.super_admin_names.includes(cleanName));
+
+  // DB 최고관리자(시스템 오너) 또는 최고 관리자 그룹 포함자
+  const isSuperAdmin = Boolean(params.isDbHqAdmin || inSuperList);
+
+  const isOrgHead = Boolean(
+    mem.is_dept_head ||
+      mem.rank_code === "TEAM_LEAD" ||
+      mem.rank_code === "DIRECTOR" ||
+      mem.rank_code === "CEO"
+  );
+
+  const assignedGroups = settings.groups.filter((g) => isMemberInGroup(mem, g));
+
+  const inherited: Record<string, boolean> = {};
+
+  if (isSuperAdmin) {
+    HQ_SIDEBAR_MENU_PERM_ITEMS.forEach((m) => {
+      inherited[m.permKey] = true;
+    });
+    inherited["company.basic_manage"] = true;
+    inherited["hr.employment_manage"] = true;
+    inherited["payroll.run"] = true;
+    inherited["payroll.year_end"] = true;
+    inherited["insight.view"] = true;
+    inherited["permission.manage"] = true;
+  } else {
+    Object.entries(settings.default_member_permissions || {}).forEach(
+      ([k, v]) => {
+        if (v) inherited[k] = true;
+      }
+    );
+
+    if (isOrgHead) {
+      Object.entries(settings.org_head_permissions || {}).forEach(([k, v]) => {
+        if (v) inherited[k] = true;
+      });
+    }
+
+    assignedGroups.forEach((g) => {
+      Object.entries(g.permissions || {}).forEach(([k, v]) => {
+        if (v) inherited[k] = true;
+      });
+    });
+
+    if (params.canAccessAnalyticsRpc) {
+      inherited["menu.analytics"] = true;
+    }
+    if (params.hasContestAccess) {
+      inherited["menu.contest_db"] = true;
+    }
+  }
+
+  // 개인별 오버라이드 (ID 우선, 이름 폴백 병합)
+  const byNameOverride = cleanName
+    ? settings.member_overrides?.[cleanName] || {}
+    : {};
+  const byIdOverride = mem.instructor_id
+    ? settings.member_overrides?.[mem.instructor_id] || {}
+    : {};
+  const personalOverrides: Record<string, boolean> = {
+    ...byNameOverride,
+    ...byIdOverride,
+  };
+
+  const effective: Record<string, boolean> = { ...inherited };
+  if (!isSuperAdmin) {
+    Object.entries(personalOverrides).forEach(([k, val]) => {
+      if (typeof val === "boolean") {
+        effective[k] = val;
+      }
+    });
+  }
+
+  const canAccessRoute = (canonicalPath: string): boolean => {
+    if (
+      !canonicalPath ||
+      canonicalPath === "/hq" ||
+      canonicalPath === "/hq/login" ||
+      canonicalPath === "/hq/signup"
+    ) {
+      return true;
+    }
+    if (isSuperAdmin) return true;
+
+    // 하위 경로 매칭 (예: /hq/approvals/123 -> /hq/approvals)
+    const matchedMenu = HQ_SIDEBAR_MENU_PERM_ITEMS.find(
+      (item) =>
+        canonicalPath === item.route ||
+        canonicalPath.startsWith(`${item.route}/`)
+    );
+    if (!matchedMenu) return true;
+    return Boolean(effective[matchedMenu.permKey]);
+  };
+
+  return {
+    isSuperAdmin,
+    isOrgHead,
+    assignedGroups,
+    inheritedPermissions: inherited,
+    personalOverrides,
+    effectivePermissions: effective,
+    canAccessRoute,
+  };
+}

@@ -5,9 +5,11 @@ import React from "react";
 import { useRouter } from "next/navigation";
 import AdmissionAnalyticsPage from "@/app/(dashboard)/admission/analytics/page";
 import { useHqShell } from "@/components/hq/HqShellContext";
+import { useHqHref } from "@/lib/hq/hqRoutes";
 
 export default function HqAnalyticsRoutePage() {
   const router = useRouter();
+  const hqHref = useHqHref();
   const { canAccessAnalytics } = useHqShell();
 
   if (!canAccessAnalytics) {
@@ -20,11 +22,11 @@ export default function HqAnalyticsRoutePage() {
           </h3>
           <p className="text-xs text-slate-500 leading-relaxed">
             전국 가맹점 진단평가 데이터 분석 메뉴는 권한이 부여된 본부 계정만 접근할 수 있습니다.
-            포털 권한 관리자에게 권한 등록을 요청해 주세요.
+            권한 설정에서 열람 권한을 부여해 주세요.
           </p>
           <button
             type="button"
-            onClick={() => router.push("/hq")}
+            onClick={() => router.push(hqHref("/hq"))}
             className="px-4 py-2 rounded-xl bg-brand text-white text-xs font-bold"
           >
             본부 홈으로 돌아가기

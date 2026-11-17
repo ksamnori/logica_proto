@@ -66,6 +66,10 @@ const PAGE_TITLES: Record<string, { title: string; subtitle: string }> = {
     title: "연말정산 (서류 수합 · 원천징수영수증)",
     subtitle: "홈택스 간소화 PDF · 추가 증빙 간편 제출 및 근로소득 원천징수영수증 상시 보관함",
   },
+  "/hq/insights": {
+    title: "인사이트 (인력 · 인건비/경비 · 출판 지표)",
+    subtitle: "본부 조직·연차 소진율, 급여·외주(3.3%)·저자인세·경비 추이 및 출판 공정 핵심 데이터",
+  },
   "/hq/publishing": {
     title: "출판 기획 · 편집 마감 & ISBN 공정 보드",
     subtitle: "기획·원고검수·교정(1~3교)·디자인·인쇄하판·출간 파이프라인 관리",

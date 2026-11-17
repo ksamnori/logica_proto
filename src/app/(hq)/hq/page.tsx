@@ -40,6 +40,7 @@ export default function HqHomeDashboardPage() {
     myWeeklyMinutes,
     unreadChatCount,
     schemaMissing,
+    canAccessMenu,
     refreshMembers,
     refreshApprovalBadge,
   } = useHqShell();
@@ -279,7 +280,7 @@ export default function HqHomeDashboardPage() {
         (1000 * 60 * 60 * 24);
       return diff <= 7;
     });
-    if (urgentBooks.length > 0) {
+    if (urgentBooks.length > 0 && canAccessMenu("/hq/publishing")) {
       items.push({
         id: "urgent-press-deadline",
         tone: "urgent",
@@ -324,6 +325,7 @@ export default function HqHomeDashboardPage() {
     unsignedContractCount,
     books,
     unreadChatCount,
+    canAccessMenu,
     goHq,
   ]);
 
@@ -368,27 +370,42 @@ export default function HqHomeDashboardPage() {
 
             {/* 빠른 기안 · 셀프서비스 실행 바 */}
             <div className="flex flex-wrap items-center gap-2">
-              <button
-                type="button"
-                onClick={() => goHq("/hq/attendance")}
-                className="px-3.5 py-2.5 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-300/30 text-emerald-100 text-xs font-extrabold transition-colors whitespace-nowrap"
-              >
-                ⏱️ 출퇴근·유연근무
-              </button>
-              <button
-                type="button"
-                onClick={() => goHq("/hq/contracts")}
-                className="px-3.5 py-2.5 rounded-xl bg-white/10 hover:bg-white/20 border border-white/15 text-white text-xs font-bold transition-colors whitespace-nowrap"
-              >
-                📑 전자계약·저작권
-              </button>
-              <button
-                type="button"
-                onClick={() => goHq("/hq/publishing")}
-                className="px-3.5 py-2.5 rounded-xl bg-white/10 hover:bg-white/20 border border-white/15 text-white text-xs font-bold transition-colors whitespace-nowrap"
-              >
-                📚 출판 공정 보드
-              </button>
+              {canAccessMenu("/hq/attendance") && (
+                <button
+                  type="button"
+                  onClick={() => goHq("/hq/attendance")}
+                  className="px-3.5 py-2.5 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-300/30 text-emerald-100 text-xs font-extrabold transition-colors whitespace-nowrap"
+                >
+                  ⏱️ 출퇴근·유연근무
+                </button>
+              )}
+              {canAccessMenu("/hq/contracts") && (
+                <button
+                  type="button"
+                  onClick={() => goHq("/hq/contracts")}
+                  className="px-3.5 py-2.5 rounded-xl bg-white/10 hover:bg-white/20 border border-white/15 text-white text-xs font-bold transition-colors whitespace-nowrap"
+                >
+                  📑 전자계약·저작권
+                </button>
+              )}
+              {canAccessMenu("/hq/publishing") && (
+                <button
+                  type="button"
+                  onClick={() => goHq("/hq/publishing")}
+                  className="px-3.5 py-2.5 rounded-xl bg-white/10 hover:bg-white/20 border border-white/15 text-white text-xs font-bold transition-colors whitespace-nowrap"
+                >
+                  📚 출판 공정 보드
+                </button>
+              )}
+              {canAccessMenu("/hq/insights") && (
+                <button
+                  type="button"
+                  onClick={() => goHq("/hq/insights")}
+                  className="px-3.5 py-2.5 rounded-xl bg-white/10 hover:bg-white/20 border border-white/15 text-white text-xs font-bold transition-colors whitespace-nowrap"
+                >
+                  📈 인사이트
+                </button>
+              )}
               {(
                 [
                   { type: "LEAVE", label: "🌴 휴가신청" },

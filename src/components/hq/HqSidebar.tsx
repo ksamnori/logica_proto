@@ -18,9 +18,7 @@ export default function HqSidebar() {
   const {
     me,
     companySettings,
-    isHqAdmin,
-    canAccessAnalytics,
-    contestAccess,
+    canAccessMenu,
     pendingApprovalCount,
     unsignedContractCount,
     unreadChatCount,
@@ -59,9 +57,40 @@ export default function HqSidebar() {
         : "text-slate-300 hover:bg-slate-800 hover:text-white"
     }`;
 
+  const showWorkMgmt = canAccessMenu("/hq/work-management");
+  const showLeaveMgmt = canAccessMenu("/hq/leave-management");
+  const showTimeMgmtGroup = showWorkMgmt || showLeaveMgmt;
+
+  const showHrSection =
+    canAccessMenu("/hq/notices") ||
+    canAccessMenu("/hq/members") ||
+    canAccessMenu("/hq/org-chart") ||
+    canAccessMenu("/hq/meetings") ||
+    canAccessMenu("/hq/attendance") ||
+    canAccessMenu("/hq/leaves") ||
+    showTimeMgmtGroup ||
+    canAccessMenu("/hq/approvals") ||
+    canAccessMenu("/hq/contracts");
+
+  const showFinanceSection =
+    canAccessMenu("/hq/expenses") ||
+    canAccessMenu("/hq/payroll") ||
+    canAccessMenu("/hq/year-end-tax") ||
+    canAccessMenu("/hq/insights");
+
+  const showPubSection =
+    canAccessMenu("/hq/publishing") ||
+    canAccessMenu("/hq/analytics") ||
+    canAccessMenu("/hq/contest-db");
+
+  const showSystemSection =
+    canAccessMenu("/hq/messenger") ||
+    canAccessMenu("/hq/permissions") ||
+    canAccessMenu("/hq/settings");
+
   if (sidebarCollapsed) {
-    const compactLinks = [
-      { href: "/hq", icon: "🏠", label: "본부 홈 대시보드" },
+    const allCompactLinks = [
+      { href: "/hq", icon: "🏠", label: "본부 홈 대시보드", always: true },
       { href: "/hq/notices", icon: "📢", label: "공지" },
       { href: "/hq/members", icon: "👥", label: "구성원" },
       { href: "/hq/org-chart", icon: "🏢", label: "조직도" },
@@ -75,9 +104,17 @@ export default function HqSidebar() {
       { href: "/hq/expenses", icon: "💳", label: "비용 · 경비 정산" },
       { href: "/hq/payroll", icon: "💰", label: "급여 · 인세 · 원천세" },
       { href: "/hq/year-end-tax", icon: "🧾", label: "연말정산" },
+      { href: "/hq/insights", icon: "📈", label: "인사이트" },
       { href: "/hq/publishing", icon: "📚", label: "출판 공정 · ISBN 보드" },
+      { href: "/hq/analytics", icon: "📊", label: "진단평가 분석" },
+      { href: "/hq/contest-db", icon: "📐", label: "사고력·문장제 문제 DB" },
       { href: "/hq/messenger", icon: "💬", label: "사내 메신저" },
+      { href: "/hq/permissions", icon: "🔐", label: "포털 권한 관리" },
     ];
+    const compactLinks = allCompactLinks.filter(
+      (item) => item.always || canAccessMenu(item.href)
+    );
+
     return (
       <aside className="print:hidden w-[64px] bg-slate-900 text-slate-200 flex flex-col items-center border-r border-slate-800 shrink-0 z-20 select-none py-3 gap-2">
         <button
@@ -104,14 +141,16 @@ export default function HqSidebar() {
               {item.icon}
             </Link>
           ))}
-          <button
-            type="button"
-            onClick={() => openSettingsModal("company")}
-            title="설정"
-            className="w-10 h-10 rounded-xl flex items-center justify-center text-base text-slate-300 hover:bg-slate-800 hover:text-white transition-all shrink-0"
-          >
-            ⚙️
-          </button>
+          {canAccessMenu("/hq/settings") && (
+            <button
+              type="button"
+              onClick={() => openSettingsModal("company")}
+              title="설정"
+              className="w-10 h-10 rounded-xl flex items-center justify-center text-base text-slate-300 hover:bg-slate-800 hover:text-white transition-all shrink-0"
+            >
+              ⚙️
+            </button>
+          )}
         </nav>
       </aside>
     );
@@ -192,7 +231,7 @@ export default function HqSidebar() {
           </div>
         )}
 
-        {/* 1. 워크스페이스 홈 */}
+        {/* 1. 워크스페이스 홈 (항상 표시) */}
         <div>
           <div className="px-3 mb-1 text-[10px] font-bold text-slate-500 uppercase tracking-wider">
             워크스페이스
@@ -217,281 +256,326 @@ export default function HqSidebar() {
           </div>
         </div>
 
-        {/* 2. 공지 · 구성원 · 조직도 · 근태 · 워크플로우 · 전자계약 */}
-        <div>
-          <div className="px-3 mb-1 text-[10px] font-bold text-slate-500 uppercase tracking-wider">
-            인사(HR) · 근태 · 워크플로우
-          </div>
-          <div className="space-y-0.5">
-            <Link href={hqHref("/hq/notices")} className={navItemClass("/hq/notices")}>
-              <span className="flex items-center gap-2.5 truncate">
-                <span>📢</span>
-                <span>공지</span>
-              </span>
-            </Link>
+        {/* 2. 인사(HR) · 근태 · 워크플로우 */}
+        {showHrSection && (
+          <div>
+            <div className="px-3 mb-1 text-[10px] font-bold text-slate-500 uppercase tracking-wider">
+              인사(HR) · 근태 · 워크플로우
+            </div>
+            <div className="space-y-0.5">
+              {canAccessMenu("/hq/notices") && (
+                <Link
+                  href={hqHref("/hq/notices")}
+                  className={navItemClass("/hq/notices")}
+                >
+                  <span className="flex items-center gap-2.5 truncate">
+                    <span>📢</span>
+                    <span>공지</span>
+                  </span>
+                </Link>
+              )}
 
-            <Link href={hqHref("/hq/members")} className={navItemClass("/hq/members")}>
-              <span className="flex items-center gap-2.5 truncate">
-                <span>👥</span>
-                <span>구성원</span>
-              </span>
-            </Link>
+              {canAccessMenu("/hq/members") && (
+                <Link
+                  href={hqHref("/hq/members")}
+                  className={navItemClass("/hq/members")}
+                >
+                  <span className="flex items-center gap-2.5 truncate">
+                    <span>👥</span>
+                    <span>구성원</span>
+                  </span>
+                </Link>
+              )}
 
-            <Link
-              href={hqHref("/hq/org-chart")}
-              className={navItemClass("/hq/org-chart")}
-            >
-              <span className="flex items-center gap-2.5 truncate">
-                <span>🏢</span>
-                <span>조직도</span>
-              </span>
-            </Link>
+              {canAccessMenu("/hq/org-chart") && (
+                <Link
+                  href={hqHref("/hq/org-chart")}
+                  className={navItemClass("/hq/org-chart")}
+                >
+                  <span className="flex items-center gap-2.5 truncate">
+                    <span>🏢</span>
+                    <span>조직도</span>
+                  </span>
+                </Link>
+              )}
 
-            <Link
-              href={hqHref("/hq/meetings")}
-              className={navItemClass("/hq/meetings")}
-            >
-              <span className="flex items-center gap-2.5 truncate">
-                <span>💬</span>
-                <span>미팅</span>
-              </span>
-            </Link>
+              {canAccessMenu("/hq/meetings") && (
+                <Link
+                  href={hqHref("/hq/meetings")}
+                  className={navItemClass("/hq/meetings")}
+                >
+                  <span className="flex items-center gap-2.5 truncate">
+                    <span>💬</span>
+                    <span>미팅</span>
+                  </span>
+                </Link>
+              )}
 
-            <Link
-              href={hqHref("/hq/attendance")}
-              className={navItemClass("/hq/attendance")}
-            >
-              <span className="flex items-center gap-2.5 truncate">
-                <span>⏱️</span>
-                <span>근무</span>
-              </span>
-            </Link>
+              {canAccessMenu("/hq/attendance") && (
+                <Link
+                  href={hqHref("/hq/attendance")}
+                  className={navItemClass("/hq/attendance")}
+                >
+                  <span className="flex items-center gap-2.5 truncate">
+                    <span>⏱️</span>
+                    <span>근무</span>
+                  </span>
+                </Link>
+              )}
 
-            <Link
-              href={hqHref("/hq/leaves")}
-              className={navItemClass("/hq/leaves")}
-            >
-              <span className="flex items-center gap-2.5 truncate">
-                <span>🏖️</span>
-                <span>휴가</span>
-              </span>
-            </Link>
+              {canAccessMenu("/hq/leaves") && (
+                <Link
+                  href={hqHref("/hq/leaves")}
+                  className={navItemClass("/hq/leaves")}
+                >
+                  <span className="flex items-center gap-2.5 truncate">
+                    <span>🏖️</span>
+                    <span>휴가</span>
+                  </span>
+                </Link>
+              )}
 
-            {/* 근태 관리 ▾ (근무 관리 / 휴가 관리) */}
-            <div>
-              <button
-                type="button"
-                onClick={() => setTimeMgmtOpen((v) => !v)}
-                className={`w-full flex items-center justify-between px-3.5 py-2 rounded-xl font-bold text-[13px] transition-all ${
-                  isTimeMgmtRoute && !timeMgmtOpen
-                    ? "bg-slate-800 text-white"
-                    : "text-slate-300 hover:bg-slate-800 hover:text-white"
-                }`}
-              >
-                <span className="flex items-center gap-2.5 truncate">
-                  <span>🧳</span>
-                  <span>근태 관리</span>
-                </span>
-                <span className="text-[10px] text-slate-400">
-                  {timeMgmtOpen ? "▾" : "▸"}
-                </span>
-              </button>
-
-              {timeMgmtOpen && (
-                <div className="mt-0.5 ml-3 pl-2.5 border-l border-slate-800 space-y-0.5">
-                  <Link
-                    href={hqHref("/hq/work-management")}
-                    className={navItemClass("/hq/work-management")}
+              {showTimeMgmtGroup && (
+                <div>
+                  <button
+                    type="button"
+                    onClick={() => setTimeMgmtOpen((v) => !v)}
+                    className={`w-full flex items-center justify-between px-3.5 py-2 rounded-xl font-bold text-[13px] transition-all ${
+                      isTimeMgmtRoute && !timeMgmtOpen
+                        ? "bg-slate-800 text-white"
+                        : "text-slate-300 hover:bg-slate-800 hover:text-white"
+                    }`}
                   >
-                    <span className="flex items-center gap-2 truncate">
-                      <span>🕒</span>
-                      <span>근무 관리</span>
+                    <span className="flex items-center gap-2.5 truncate">
+                      <span>🧳</span>
+                      <span>근태 관리</span>
                     </span>
-                  </Link>
-                  <Link
-                    href={hqHref("/hq/leave-management")}
-                    className={navItemClass("/hq/leave-management")}
-                  >
-                    <span className="flex items-center gap-2 truncate">
-                      <span>🏖️</span>
-                      <span>휴가 관리</span>
+                    <span className="text-[10px] text-slate-400">
+                      {timeMgmtOpen ? "▾" : "▸"}
                     </span>
-                  </Link>
+                  </button>
+
+                  {timeMgmtOpen && (
+                    <div className="mt-0.5 ml-3 pl-2.5 border-l border-slate-800 space-y-0.5">
+                      {showWorkMgmt && (
+                        <Link
+                          href={hqHref("/hq/work-management")}
+                          className={navItemClass("/hq/work-management")}
+                        >
+                          <span className="flex items-center gap-2 truncate">
+                            <span>🕒</span>
+                            <span>근무 관리</span>
+                          </span>
+                        </Link>
+                      )}
+                      {showLeaveMgmt && (
+                        <Link
+                          href={hqHref("/hq/leave-management")}
+                          className={navItemClass("/hq/leave-management")}
+                        >
+                          <span className="flex items-center gap-2 truncate">
+                            <span>🏖️</span>
+                            <span>휴가 관리</span>
+                          </span>
+                        </Link>
+                      )}
+                    </div>
+                  )}
                 </div>
               )}
+
+              {canAccessMenu("/hq/approvals") && (
+                <Link
+                  href={hqHref("/hq/approvals")}
+                  className={navItemClass("/hq/approvals")}
+                >
+                  <span className="flex items-center gap-2.5 truncate">
+                    <span>📋</span>
+                    <span>워크플로우</span>
+                  </span>
+                  {pendingApprovalCount > 0 && (
+                    <span className="px-2 py-0.5 rounded-full bg-rose-500 text-white text-[11px] font-extrabold shrink-0">
+                      {pendingApprovalCount}
+                    </span>
+                  )}
+                </Link>
+              )}
+
+              {canAccessMenu("/hq/contracts") && (
+                <Link
+                  href={hqHref("/hq/contracts")}
+                  className={navItemClass("/hq/contracts")}
+                >
+                  <span className="flex items-center gap-2.5 truncate">
+                    <span>📑</span>
+                    <span>전자계약 · 저작권</span>
+                  </span>
+                  {unsignedContractCount > 0 && (
+                    <span className="px-2 py-0.5 rounded-full bg-amber-500 text-slate-950 text-[11px] font-extrabold shrink-0">
+                      {unsignedContractCount}
+                    </span>
+                  )}
+                </Link>
+              )}
             </div>
+          </div>
+        )}
 
-            <Link
-              href={hqHref("/hq/approvals")}
-              className={navItemClass("/hq/approvals")}
-            >
-              <span className="flex items-center gap-2.5 truncate">
-                <span>📋</span>
-                <span>워크플로우</span>
-              </span>
-              {pendingApprovalCount > 0 && (
-                <span className="px-2 py-0.5 rounded-full bg-rose-500 text-white text-[11px] font-extrabold shrink-0">
-                  {pendingApprovalCount}
-                </span>
+        {/* 3. 경비 · 급여 · 경영 */}
+        {showFinanceSection && (
+          <div>
+            <div className="px-3 mb-1 text-[10px] font-bold text-slate-500 uppercase tracking-wider">
+              경비 · 급여 · 경영
+            </div>
+            <div className="space-y-0.5">
+              {canAccessMenu("/hq/expenses") && (
+                <Link
+                  href={hqHref("/hq/expenses")}
+                  className={navItemClass("/hq/expenses")}
+                >
+                  <span className="flex items-center gap-2.5 truncate">
+                    <span>💳</span>
+                    <span>비용 · 경비 정산</span>
+                  </span>
+                </Link>
               )}
-            </Link>
 
-            <Link
-              href={hqHref("/hq/contracts")}
-              className={navItemClass("/hq/contracts")}
-            >
-              <span className="flex items-center gap-2.5 truncate">
-                <span>📑</span>
-                <span>전자계약 · 저작권</span>
-              </span>
-              {unsignedContractCount > 0 && (
-                <span className="px-2 py-0.5 rounded-full bg-amber-500 text-slate-950 text-[11px] font-extrabold shrink-0">
-                  {unsignedContractCount}
-                </span>
+              {canAccessMenu("/hq/payroll") && (
+                <Link
+                  href={hqHref("/hq/payroll")}
+                  className={navItemClass("/hq/payroll")}
+                >
+                  <span className="flex items-center gap-2.5 truncate">
+                    <span>💰</span>
+                    <span>급여 · 인세 · 원천세</span>
+                  </span>
+                </Link>
               )}
-            </Link>
-          </div>
-        </div>
 
-        {/* 3. 비용 · 급여/인세 */}
-        <div>
-          <div className="px-3 mb-1 text-[10px] font-bold text-slate-500 uppercase tracking-wider">
-            경비 · 급여 정산
-          </div>
-          <div className="space-y-0.5">
-            <Link href={hqHref("/hq/expenses")} className={navItemClass("/hq/expenses")}>
-              <span className="flex items-center gap-2.5 truncate">
-                <span>💳</span>
-                <span>비용 · 경비 정산</span>
-              </span>
-            </Link>
+              {canAccessMenu("/hq/year-end-tax") && (
+                <Link
+                  href={hqHref("/hq/year-end-tax")}
+                  className={navItemClass("/hq/year-end-tax")}
+                >
+                  <span className="flex items-center gap-2.5 truncate">
+                    <span>🧾</span>
+                    <span>연말정산</span>
+                  </span>
+                </Link>
+              )}
 
-            <Link href={hqHref("/hq/payroll")} className={navItemClass("/hq/payroll")}>
-              <span className="flex items-center gap-2.5 truncate">
-                <span>💰</span>
-                <span>급여 · 인세 · 원천세</span>
-              </span>
-            </Link>
-
-            <Link
-              href={hqHref("/hq/year-end-tax")}
-              className={navItemClass("/hq/year-end-tax")}
-            >
-              <span className="flex items-center gap-2.5 truncate">
-                <span>🧾</span>
-                <span>연말정산</span>
-              </span>
-            </Link>
+              {canAccessMenu("/hq/insights") && (
+                <Link
+                  href={hqHref("/hq/insights")}
+                  className={navItemClass("/hq/insights")}
+                >
+                  <span className="flex items-center gap-2.5 truncate">
+                    <span>📈</span>
+                    <span>인사이트</span>
+                  </span>
+                </Link>
+              )}
+            </div>
           </div>
-        </div>
+        )}
 
         {/* 4. 출판 제작 · 연구 DB */}
-        <div>
-          <div className="px-3 mb-1 text-[10px] font-bold text-slate-500 uppercase tracking-wider">
-            출판 제작 · 연구 DB
-          </div>
-          <div className="space-y-0.5">
-            <Link
-              href={hqHref("/hq/publishing")}
-              className={navItemClass("/hq/publishing")}
-            >
-              <span className="flex items-center gap-2.5 truncate">
-                <span>📚</span>
-                <span>출판 공정 · ISBN 보드</span>
-              </span>
-            </Link>
-
-            <button
-              type="button"
-              onClick={() => {
-                if (!canAccessAnalytics) {
-                  alert(
-                    "⛔ 진단평가 분석 권한이 등록된 본부 계정만 열 수 있습니다.\n필요 시 권한 관리자에게 요청하세요."
-                  );
-                  return;
-                }
-                router.push(hqHref("/hq/analytics"));
-              }}
-              className={navItemClass("/hq/analytics")}
-            >
-              <span className="flex items-center gap-2.5 truncate">
-                <span>📊</span>
-                <span className="truncate">진단평가 분석</span>
-              </span>
-              {!canAccessAnalytics && (
-                <span className="text-xs text-slate-500 shrink-0">🔒</span>
+        {showPubSection && (
+          <div>
+            <div className="px-3 mb-1 text-[10px] font-bold text-slate-500 uppercase tracking-wider">
+              출판 제작 · 연구 DB
+            </div>
+            <div className="space-y-0.5">
+              {canAccessMenu("/hq/publishing") && (
+                <Link
+                  href={hqHref("/hq/publishing")}
+                  className={navItemClass("/hq/publishing")}
+                >
+                  <span className="flex items-center gap-2.5 truncate">
+                    <span>📚</span>
+                    <span>출판 공정 · ISBN 보드</span>
+                  </span>
+                </Link>
               )}
-            </button>
 
-            <button
-              type="button"
-              onClick={() => {
-                if (!contestAccess) {
-                  alert(
-                    "⛔ 문제 DB 열람 권한이 등록된 본부 계정만 열 수 있습니다.\n필요 시 권한 관리자에게 요청하세요."
-                  );
-                  return;
-                }
-                router.push(hqHref("/hq/contest-db"));
-              }}
-              className={navItemClass("/hq/contest-db")}
-            >
-              <span className="flex items-center gap-2.5 truncate">
-                <span>📐</span>
-                <span className="truncate">사고력·문장제 문제 DB</span>
-              </span>
-              {!contestAccess && (
-                <span className="text-xs text-slate-500 shrink-0">🔒</span>
+              {canAccessMenu("/hq/analytics") && (
+                <Link
+                  href={hqHref("/hq/analytics")}
+                  className={navItemClass("/hq/analytics")}
+                >
+                  <span className="flex items-center gap-2.5 truncate">
+                    <span>📊</span>
+                    <span className="truncate">진단평가 분석</span>
+                  </span>
+                </Link>
               )}
-            </button>
-          </div>
-        </div>
 
-        {/* 5. 전사 소통 & 시스템 관리 */}
-        <div>
-          <div className="px-3 mb-1 text-[10px] font-bold text-slate-500 uppercase tracking-wider">
-            소통 · 시스템
-          </div>
-          <div className="space-y-0.5">
-            <Link
-              href={hqHref("/hq/messenger")}
-              className={navItemClass("/hq/messenger")}
-            >
-              <span className="flex items-center gap-2.5 truncate">
-                <span>💬</span>
-                <span>사내 메신저</span>
-              </span>
-              {unreadChatCount > 0 && (
-                <span className="px-2 py-0.5 rounded-full bg-rose-500 text-white text-[11px] font-extrabold shrink-0">
-                  {unreadChatCount}
-                </span>
+              {canAccessMenu("/hq/contest-db") && (
+                <Link
+                  href={hqHref("/hq/contest-db")}
+                  className={navItemClass("/hq/contest-db")}
+                >
+                  <span className="flex items-center gap-2.5 truncate">
+                    <span>📐</span>
+                    <span className="truncate">사고력·문장제 문제 DB</span>
+                  </span>
+                </Link>
               )}
-            </Link>
-
-            {isHqAdmin && (
-              <Link
-                href={hqHref("/hq/permissions")}
-                className={navItemClass("/hq/permissions")}
-              >
-                <span className="flex items-center gap-2.5 truncate">
-                  <span>🔐</span>
-                  <span>포털 권한 관리</span>
-                </span>
-              </Link>
-            )}
-
-            <button
-              type="button"
-              onClick={() => openSettingsModal("company")}
-              className={navItemClass("/hq/settings")}
-            >
-              <span className="flex items-center gap-2.5 truncate">
-                <span>⚙️</span>
-                <span>설정</span>
-              </span>
-            </button>
+            </div>
           </div>
-        </div>
+        )}
+
+        {/* 5. 소통 · 시스템 */}
+        {showSystemSection && (
+          <div>
+            <div className="px-3 mb-1 text-[10px] font-bold text-slate-500 uppercase tracking-wider">
+              소통 · 시스템
+            </div>
+            <div className="space-y-0.5">
+              {canAccessMenu("/hq/messenger") && (
+                <Link
+                  href={hqHref("/hq/messenger")}
+                  className={navItemClass("/hq/messenger")}
+                >
+                  <span className="flex items-center gap-2.5 truncate">
+                    <span>💬</span>
+                    <span>사내 메신저</span>
+                  </span>
+                  {unreadChatCount > 0 && (
+                    <span className="px-2 py-0.5 rounded-full bg-rose-500 text-white text-[11px] font-extrabold shrink-0">
+                      {unreadChatCount}
+                    </span>
+                  )}
+                </Link>
+              )}
+
+              {canAccessMenu("/hq/permissions") && (
+                <Link
+                  href={hqHref("/hq/permissions")}
+                  className={navItemClass("/hq/permissions")}
+                >
+                  <span className="flex items-center gap-2.5 truncate">
+                    <span>🔐</span>
+                    <span>포털 권한 관리</span>
+                  </span>
+                </Link>
+              )}
+
+              {canAccessMenu("/hq/settings") && (
+                <button
+                  type="button"
+                  onClick={() => openSettingsModal("company")}
+                  className={navItemClass("/hq/settings")}
+                >
+                  <span className="flex items-center gap-2.5 truncate">
+                    <span>⚙️</span>
+                    <span>설정</span>
+                  </span>
+                </button>
+              )}
+            </div>
+          </div>
+        )}
       </nav>
 
       {/* 하단 상태 표시 */}

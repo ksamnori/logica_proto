@@ -10,6 +10,7 @@ import {
   inferRankFromPosition,
 } from "./constants";
 import { isIpMatchedByRule } from "./defaultSecuritySettings";
+import { resolveMemberPermissions } from "./hqPermissionEngine";
 import type { HqRankCode } from "./types";
 
 export function getSupabaseAdmin(): SupabaseClient {
@@ -181,25 +182,33 @@ export async function requireHqCaller(
     const callerName = String(inst.name || "").trim();
     const permCfg = settings.extra_settings?.permission_settings;
     if (permCfg && callerName) {
-      if (
-        Array.isArray(permCfg.super_admin_names) &&
-        permCfg.super_admin_names.includes(callerName)
-      ) {
+      const resolved = resolveMemberPermissions({
+        member: {
+          instructor_id: String(user.id),
+          name: callerName,
+          is_dept_head: Boolean(prof?.is_dept_head || inferred.isDeptHead),
+          rank_code: rankCode,
+        },
+        rawSettings: permCfg,
+        isDbHqAdmin: isHqAdmin,
+      });
+
+      if (resolved.isSuperAdmin) {
         isHqAdmin = true;
         isHrManager = true;
-      } else if (Array.isArray(permCfg.groups)) {
-        const myGroups = permCfg.groups.filter(
-          (g) => Array.isArray(g.member_names) && g.member_names.includes(callerName)
+      } else {
+        const ep = resolved.effectivePermissions;
+        const hasAdminPerm = Boolean(
+          ep["company.basic_manage"] ||
+            ep["hr.employment_manage"] ||
+            ep["payroll.run"] ||
+            ep["payroll.year_end"] ||
+            ep["permission.manage"] ||
+            ep["audit.view"] ||
+            ep["menu.settings"] ||
+            ep["menu.insights"]
         );
-        const hasAdminGroupPerm = myGroups.some(
-          (g) =>
-            g.permissions?.["company.basic_manage"] ||
-            g.permissions?.["hr.employment_manage"] ||
-            g.permissions?.["payroll.run"] ||
-            g.permissions?.["permission.manage"] ||
-            g.permissions?.["audit.view"]
-        );
-        if (hasAdminGroupPerm) {
+        if (hasAdminPerm) {
           if (!isHrManager) isDelegatedHrAdmin = true;
           isHrManager = true;
         }

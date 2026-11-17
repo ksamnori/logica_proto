@@ -6,6 +6,7 @@ import React, {
   useCallback,
   useContext,
   useEffect,
+  useMemo,
   useState,
 } from "react";
 import { useRouter } from "next/navigation";
@@ -18,6 +19,10 @@ import {
 import type { ContestAccessLevel } from "@/app/(dashboard)/contest-db/contestUtils";
 import { hqFetch } from "@/lib/hq/clientApi";
 import { DEFAULT_HQ_COMPANY_SETTINGS } from "@/lib/hq/defaultCompanySettings";
+import {
+  type ResolvedMemberPermissionState,
+  resolveMemberPermissions,
+} from "@/lib/hq/hqPermissionEngine";
 import { useHqHref } from "@/lib/hq/hqRoutes";
 import type {
   HqAttendanceRecord,
@@ -35,6 +40,9 @@ interface HqShellState {
   isHqAdmin: boolean;
   canAccessAnalytics: boolean;
   contestAccess: ContestAccessLevel;
+  myPermissions: ResolvedMemberPermissionState;
+  canAccessMenu: (canonicalHqPath: string) => boolean;
+  hasHqPerm: (permKey: string) => boolean;
   pendingApprovalCount: number;
   unsignedContractCount: number;
   unreadChatCount: number;
@@ -440,6 +448,46 @@ export function HqShellProvider({
     return () => window.clearInterval(timer);
   }, [instId, logout]);
 
+  const myPermissions = useMemo(
+    () =>
+      resolveMemberPermissions({
+        member: me,
+        rawSettings: companySettings.extra_settings?.permission_settings,
+        isDbHqAdmin: isHqAdmin,
+        canAccessAnalyticsRpc: canAccessAnalytics,
+        hasContestAccess: Boolean(contestAccess),
+      }),
+    [
+      me,
+      companySettings.extra_settings?.permission_settings,
+      isHqAdmin,
+      canAccessAnalytics,
+      contestAccess,
+    ]
+  );
+
+  const effectiveIsHqAdmin = isHqAdmin || myPermissions.isSuperAdmin;
+  const effectiveIsHrManager =
+    isHrManager ||
+    effectiveIsHqAdmin ||
+    Boolean(
+      myPermissions.effectivePermissions["hr.employment_manage"] ||
+        myPermissions.effectivePermissions["payroll.run"] ||
+        myPermissions.effectivePermissions["company.basic_manage"] ||
+        myPermissions.effectivePermissions["permission.manage"]
+    );
+
+  const canAccessMenu = useCallback(
+    (canonicalPath: string) => myPermissions.canAccessRoute(canonicalPath),
+    [myPermissions]
+  );
+
+  const hasHqPerm = useCallback(
+    (permKey: string) =>
+      effectiveIsHqAdmin || Boolean(myPermissions.effectivePermissions[permKey]),
+    [effectiveIsHqAdmin, myPermissions]
+  );
+
   const openSettingsModal = useCallback(
     (initialTab?: string) => {
       if (onOpenSettings) {
@@ -462,10 +510,14 @@ export function HqShellProvider({
         me,
         members,
         companySettings,
-        isHrManager,
-        isHqAdmin,
-        canAccessAnalytics,
+        isHrManager: effectiveIsHrManager,
+        isHqAdmin: effectiveIsHqAdmin,
+        canAccessAnalytics:
+          canAccessAnalytics || myPermissions.canAccessRoute("/hq/analytics"),
         contestAccess,
+        myPermissions,
+        canAccessMenu,
+        hasHqPerm,
         pendingApprovalCount,
         unsignedContractCount,
         unreadChatCount,

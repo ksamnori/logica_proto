@@ -49,6 +49,7 @@ export const HQ_ROUTE_TAB_TITLES: Record<string, string> = {
   "/hq/expenses": "비용 · 경비 정산",
   "/hq/payroll": "급여 · 인세 · 원천세",
   "/hq/year-end-tax": "연말정산",
+  "/hq/insights": "인사이트",
   "/hq/publishing": "출판 공정 · ISBN 보드",
   "/hq/messenger": "사내 메신저",
   "/hq/analytics": "진단평가 분석",

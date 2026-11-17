@@ -22,8 +22,115 @@ export const PERMISSION_SCOPE_OPTIONS: HqPermissionScope[] = [
   "소속 조직",
 ];
 
-// 스크린샷 190151 ~ 190704 전체 카테고리·세부 권한 완벽 수록
+// 스크린샷 190151 ~ 190704 전체 카테고리·세부 권한 완벽 수록 + 좌측 메뉴 ON/OFF 직접 연동
 export const PERMISSION_CATEGORIES: HqPermissionCatalogCategory[] = [
+  {
+    id: "cat-sidebar-menu",
+    label: "좌측 메뉴 (ON/OFF)",
+    items: [
+      {
+        key: "menu.notices",
+        title: "📢 공지 메뉴 표시 · 열람",
+        description: "좌측 사이드바에 [공지] 메뉴를 표시하고 사내 공지 열람을 허용해요.",
+      },
+      {
+        key: "menu.members",
+        title: "👥 구성원 메뉴 표시 · 접근",
+        description: "좌측 사이드바에 [구성원] 메뉴를 표시하고 임직원 인사 디렉토리 접근을 허용해요.",
+      },
+      {
+        key: "menu.org_chart",
+        title: "🏢 조직도 메뉴 표시 · 열람",
+        description: "좌측 사이드바에 [조직도] 메뉴를 표시하고 부서 트리 열람을 허용해요.",
+      },
+      {
+        key: "menu.meetings",
+        title: "💬 미팅 메뉴 표시 · 참여",
+        description: "좌측 사이드바에 [미팅] 메뉴를 표시하고 회의록·일정 공유를 허용해요.",
+      },
+      {
+        key: "menu.attendance",
+        title: "⏱️ 근무 (내 출퇴근) 메뉴 표시",
+        description: "좌측 사이드바에 [근무] 메뉴를 표시하고 출퇴근 기록을 허용해요.",
+      },
+      {
+        key: "menu.leaves",
+        title: "🏖️ 휴가 (내 휴가) 메뉴 표시",
+        description: "좌측 사이드바에 [휴가] 메뉴를 표시하고 연차·맞춤휴가 신청을 허용해요.",
+      },
+      {
+        key: "menu.work_management",
+        title: "🕒 근태 관리 > 근무 관리 메뉴 표시",
+        description: "좌측 [근태 관리 > 근무 관리] 관리자 메뉴 노출 및 접근을 허용해요.",
+      },
+      {
+        key: "menu.leave_management",
+        title: "🗓️ 근태 관리 > 휴가 관리 메뉴 표시",
+        description: "좌측 [근태 관리 > 휴가 관리] 관리자 메뉴 노출 및 접근을 허용해요.",
+      },
+      {
+        key: "menu.approvals",
+        title: "📋 워크플로우 메뉴 표시",
+        description: "좌측 사이드바에 [워크플로우] 전자결재 메뉴를 표시해요.",
+      },
+      {
+        key: "menu.contracts",
+        title: "📑 전자계약 · 저작권 메뉴 표시",
+        description: "좌측 사이드바에 [전자계약 · 저작권] 메뉴를 표시해요.",
+      },
+      {
+        key: "menu.expenses",
+        title: "💳 비용 · 경비 정산 메뉴 표시",
+        description: "좌측 사이드바에 [비용 · 경비 정산] 메뉴를 표시해요.",
+      },
+      {
+        key: "menu.payroll",
+        title: "💰 급여 · 인세 · 원천세 메뉴 표시",
+        description: "좌측 사이드바에 [급여 · 인세 · 원천세] 메뉴를 표시해요 (일반 구성원은 본인 급여명세서만 열람).",
+      },
+      {
+        key: "menu.year_end_tax",
+        title: "🧾 연말정산 메뉴 표시",
+        description: "좌측 사이드바에 [연말정산] 메뉴를 표시해요 (간소화 PDF 제출 및 원천징수영수증 발급).",
+      },
+      {
+        key: "menu.insights",
+        title: "📈 인사이트 메뉴 표시 · 열람",
+        description: "좌측 사이드바에 [인사이트] 경영·인력·비용·출판 지표 대시보드를 표시해요.",
+        warningText: "주의: 인건비·경비 추이 등 경영 지표가 포함되므로 권한 대상을 확인해 주세요.",
+      },
+      {
+        key: "menu.publishing",
+        title: "📚 출판 공정 · ISBN 보드 메뉴 표시",
+        description: "좌측 사이드바에 [출판 공정 · ISBN 보드] 메뉴를 표시해요.",
+      },
+      {
+        key: "menu.analytics",
+        title: "📊 진단평가 분석 메뉴 표시",
+        description: "좌측 사이드바에 [진단평가 분석] 메뉴를 표시해요.",
+      },
+      {
+        key: "menu.contest_db",
+        title: "📐 사고력·문장제 문제 DB 메뉴 표시",
+        description: "좌측 사이드바에 [사고력·문장제 문제 DB] 메뉴를 표시해요.",
+      },
+      {
+        key: "menu.messenger",
+        title: "💬 사내 메신저 메뉴 표시",
+        description: "좌측 사이드바에 [사내 메신저] 메뉴를 표시해요.",
+      },
+      {
+        key: "menu.permissions",
+        title: "🔐 포털 권한 관리 메뉴 표시",
+        description: "좌측 사이드바에 [포털 권한 관리] 메뉴를 표시해요.",
+      },
+      {
+        key: "menu.settings",
+        title: "⚙️ 설정 메뉴 표시 · 접근",
+        description: "좌측 하단에 [설정] 메뉴를 표시하고 회사·인사·근태·권한 설정 접근을 허용해요.",
+      },
+    ],
+  },
   {
     id: "cat-company",
     label: "회사 정보",
@@ -766,8 +873,14 @@ export const PERMISSION_CATEGORIES: HqPermissionCatalogCategory[] = [
 
 // 스크린샷 190110, 190122, 190734와 100% 일치하는 우리 회사 초기 권한 그룹 구성
 export const DEFAULT_PERMISSION_SETTINGS: HqPermissionSettings = {
+  menu_linked_v2: true,
   super_admin_names: ["천종현", "김근식", "이웅행"],
+  super_admin_ids: [],
   org_head_permissions: {
+    "menu.members": true,
+    "menu.work_management": true,
+    "menu.leave_management": true,
+    "menu.publishing": true,
     "member.directory_access": true,
     "hr.employment_view": true,
     "work.record_view": true,
@@ -789,8 +902,19 @@ export const DEFAULT_PERMISSION_SETTINGS: HqPermissionSettings = {
     "approval.substitute_manage": "소속 조직",
   },
   default_member_permissions: {
-    "member.directory_access": true,
+    "menu.notices": true,
+    "menu.org_chart": true,
+    "menu.meetings": true,
+    "menu.attendance": true,
+    "menu.leaves": true,
+    "menu.approvals": true,
+    "menu.contracts": true,
+    "menu.expenses": true,
+    "menu.payroll": true,
+    "menu.year_end_tax": true,
+    "menu.messenger": true,
   },
+  member_overrides: {},
   groups: [
     {
       id: "pg-v1-work",
