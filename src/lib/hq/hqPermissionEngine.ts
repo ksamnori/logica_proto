@@ -289,6 +289,10 @@ export function normalizeHqPermissionSettings(
       org_head_permissions: base.org_head_permissions || {},
       org_head_scopes: base.org_head_scopes || {},
       default_member_permissions: base.default_member_permissions || {},
+      default_member_scopes: {
+        ...(DEFAULT_PERMISSION_SETTINGS.default_member_scopes || {}),
+        ...(base.default_member_scopes || {}),
+      },
       groups: Array.isArray(base.groups) ? base.groups : [],
       member_overrides: overrides,
     };
@@ -362,6 +366,10 @@ export function normalizeHqPermissionSettings(
     org_head_scopes:
       base.org_head_scopes || DEFAULT_PERMISSION_SETTINGS.org_head_scopes,
     default_member_permissions: migratedDefaultMember,
+    default_member_scopes: {
+      ...(DEFAULT_PERMISSION_SETTINGS.default_member_scopes || {}),
+      ...(base.default_member_scopes || {}),
+    },
     groups: migratedGroups,
     member_overrides: overrides,
   };

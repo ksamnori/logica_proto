@@ -4,8 +4,11 @@
 import React, { useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
+  buildPrereqSatisfyingPatch,
+  getAllowedScopeOptionsForItem,
+  getMissingPrerequisitesForPerm,
+  normalizePermissionScope,
   PERMISSION_CATEGORIES,
-  PERMISSION_SCOPE_OPTIONS,
 } from "@/lib/hq/defaultPermissionSettings";
 import {
   HQ_SIDEBAR_MENU_PERM_ITEMS,
@@ -103,6 +106,7 @@ type MatrixEditorMode =
   | {
       kind: "DEFAULT_MEMBER";
       permissions: Record<string, boolean>;
+      scopes: Record<string, HqPermissionScope>;
     };
 
 export default function HqPermissionSettingsSection({
@@ -148,6 +152,9 @@ export default function HqPermissionSettingsSection({
   const [memberPickerOpen, setMemberPickerOpen] = useState(false);
   const [memberPickerQuery, setMemberPickerQuery] = useState("");
   const [openScopePermKey, setOpenScopePermKey] = useState<string | null>(null);
+  const [openPrereqPermKey, setOpenPrereqPermKey] = useState<string | null>(
+    null
+  );
 
   const catTabsScrollRef = useRef<HTMLDivElement>(null);
   const matrixScrollRef = useRef<HTMLDivElement>(null);
@@ -219,6 +226,7 @@ export default function HqPermissionSettingsSection({
     setShowRightMemberPane(true);
     setMemberPickerOpen(false);
     setOpenScopePermKey(null);
+    setOpenPrereqPermKey(null);
     setMatrixState({
       kind: "CUSTOM",
       isNew: true,
@@ -241,6 +249,7 @@ export default function HqPermissionSettingsSection({
     setShowRightMemberPane(true);
     setMemberPickerOpen(false);
     setOpenScopePermKey(null);
+    setOpenPrereqPermKey(null);
     setMatrixState({
       kind: "CUSTOM",
       isNew: false,
@@ -274,6 +283,37 @@ export default function HqPermissionSettingsSection({
 
   const handleSaveMatrixModal = async () => {
     if (!matrixState) return;
+
+    const curPerms =
+      matrixState.kind === "CUSTOM"
+        ? matrixState.group.permissions
+        : matrixState.permissions;
+    const curScopes =
+      matrixState.kind === "CUSTOM" ? matrixState.group.scopes : matrixState.scopes;
+
+    const unresolvedKeys = Object.keys(curPerms).filter(
+      (k) =>
+        curPerms[k] &&
+        getMissingPrerequisitesForPerm(k, curPerms, curScopes).length > 0
+    );
+
+    let finalPerms = curPerms;
+    let finalScopes = curScopes;
+
+    if (unresolvedKeys.length > 0) {
+      const ok = confirm(
+        `체크한 권한 중 상위(필수) 권한이 아직 선택되지 않은 항목이 ${unresolvedKeys.length}건 있습니다.\n\n[확인]을 누르면 필요한 상위 권한과 범위를 자동으로 함께 적용하여 저장합니다.`
+      );
+      if (!ok) return;
+      const patched = buildPrereqSatisfyingPatch(
+        unresolvedKeys,
+        curPerms,
+        curScopes
+      );
+      finalPerms = patched.nextPerms;
+      finalScopes = patched.nextScopes;
+    }
+
     if (matrixState.kind === "CUSTOM") {
       const cleanName = matrixState.group.name.trim();
       if (!cleanName) {
@@ -293,6 +333,8 @@ export default function HqPermissionSettingsSection({
         name: cleanName,
         description: matrixState.group.description.trim(),
         member_ids: matchedIds,
+        permissions: finalPerms,
+        scopes: finalScopes,
       };
       const nextGroups = matrixState.isNew
         ? [...permSettings.groups, saved]
@@ -307,15 +349,16 @@ export default function HqPermissionSettingsSection({
     } else if (matrixState.kind === "ORG_HEAD") {
       await patchPermSettings(
         {
-          org_head_permissions: matrixState.permissions,
-          org_head_scopes: matrixState.scopes,
+          org_head_permissions: finalPerms,
+          org_head_scopes: finalScopes,
         },
         "조직장 전용 권한 설정이 좌측 메뉴에 반영되었습니다."
       );
     } else {
       await patchPermSettings(
         {
-          default_member_permissions: matrixState.permissions,
+          default_member_permissions: finalPerms,
+          default_member_scopes: finalScopes,
         },
         "전 구성원 기본 메뉴 · 권한 설정이 반영되었습니다."
       );
@@ -482,34 +525,83 @@ export default function HqPermissionSettingsSection({
       ? matrixState.group.scopes
       : matrixState?.kind === "ORG_HEAD"
         ? matrixState.scopes
-        : {};
+        : matrixState?.kind === "DEFAULT_MEMBER"
+          ? matrixState.scopes
+          : {};
 
-  const applyPermPatchInMatrix = (patch: Record<string, boolean>) => {
+  const applyMatrixPermsAndScopes = (
+    nextPerms: Record<string, boolean>,
+    nextScopes: Record<string, HqPermissionScope>
+  ) => {
     if (!matrixState || !canEdit) return;
     if (matrixState.kind === "CUSTOM") {
       setMatrixState({
         ...matrixState,
         group: {
           ...matrixState.group,
-          permissions: { ...matrixState.group.permissions, ...patch },
+          permissions: nextPerms,
+          scopes: nextScopes,
         },
       });
     } else if (matrixState.kind === "ORG_HEAD") {
       setMatrixState({
         ...matrixState,
-        permissions: { ...matrixState.permissions, ...patch },
+        permissions: nextPerms,
+        scopes: nextScopes,
       });
     } else {
       setMatrixState({
         ...matrixState,
-        permissions: { ...matrixState.permissions, ...patch },
+        permissions: nextPerms,
+        scopes: nextScopes,
       });
     }
   };
 
-  const toggleMatrixPermission = (key: string) => {
-    applyPermPatchInMatrix({ [key]: !activePerms[key] });
+  const applyPermPatchInMatrix = (patch: Record<string, boolean>) => {
+    applyMatrixPermsAndScopes({ ...activePerms, ...patch }, activeScopes);
   };
+
+  const toggleMatrixPermission = (key: string) => {
+    if (!matrixState || !canEdit) return;
+    const nextChecked = !activePerms[key];
+    const nextPerms = { ...activePerms, [key]: nextChecked };
+    applyMatrixPermsAndScopes(nextPerms, activeScopes);
+
+    if (nextChecked) {
+      const missing = getMissingPrerequisitesForPerm(
+        key,
+        nextPerms,
+        activeScopes
+      );
+      if (missing.length > 0) {
+        setOpenScopePermKey(null);
+        setOpenPrereqPermKey(key);
+      }
+    } else if (openPrereqPermKey === key) {
+      setOpenPrereqPermKey(null);
+    }
+  };
+
+  const applyPrereqsForPermKeys = (targetKeys: string[]) => {
+    if (!matrixState || !canEdit || targetKeys.length === 0) return;
+    const { nextPerms, nextScopes } = buildPrereqSatisfyingPatch(
+      targetKeys,
+      activePerms,
+      activeScopes
+    );
+    applyMatrixPermsAndScopes(nextPerms, nextScopes);
+    setOpenPrereqPermKey(null);
+  };
+
+  const unresolvedMatrixPermKeys = useMemo(() => {
+    if (!matrixState) return [];
+    return Object.keys(activePerms).filter(
+      (k) =>
+        activePerms[k] &&
+        getMissingPrerequisitesForPerm(k, activePerms, activeScopes).length > 0
+    );
+  }, [matrixState, activePerms, activeScopes]);
 
   const setAllSidebarMenusInMatrix = (mode: "ALL_ON" | "BASIC_ONLY" | "ALL_OFF") => {
     const patch: Record<string, boolean> = {};
@@ -526,21 +618,16 @@ export default function HqPermissionSettingsSection({
 
   const setMatrixScope = (key: string, scope: HqPermissionScope) => {
     if (!matrixState || !canEdit) return;
-    if (matrixState.kind === "CUSTOM") {
-      setMatrixState({
-        ...matrixState,
-        group: {
-          ...matrixState.group,
-          scopes: { ...matrixState.group.scopes, [key]: scope },
-        },
-      });
-    } else if (matrixState.kind === "ORG_HEAD") {
-      setMatrixState({
-        ...matrixState,
-        scopes: { ...matrixState.scopes, [key]: scope },
-      });
-    }
+    const nextScopes = { ...activeScopes, [key]: scope };
+    applyMatrixPermsAndScopes(activePerms, nextScopes);
     setOpenScopePermKey(null);
+
+    if (
+      activePerms[key] &&
+      getMissingPrerequisitesForPerm(key, activePerms, nextScopes).length > 0
+    ) {
+      setOpenPrereqPermKey(key);
+    }
   };
 
   const renderAvatarCluster = (names: string[]) => {
@@ -689,7 +776,9 @@ export default function HqPermissionSettingsSection({
                 onClick={() => {
                   setPermKeyword("");
                   setActiveCatId(PERMISSION_CATEGORIES[0].id);
+                  setShowRightMemberPane(true);
                   setOpenScopePermKey(null);
+                  setOpenPrereqPermKey(null);
                   setMatrixState({
                     kind: "ORG_HEAD",
                     permissions: { ...permSettings.org_head_permissions },
@@ -727,10 +816,13 @@ export default function HqPermissionSettingsSection({
                 onClick={() => {
                   setPermKeyword("");
                   setActiveCatId(PERMISSION_CATEGORIES[0].id);
+                  setShowRightMemberPane(true);
                   setOpenScopePermKey(null);
+                  setOpenPrereqPermKey(null);
                   setMatrixState({
                     kind: "DEFAULT_MEMBER",
                     permissions: { ...permSettings.default_member_permissions },
+                    scopes: { ...(permSettings.default_member_scopes || {}) },
                   });
                 }}
                 className="px-5 py-4 rounded-2xl border border-slate-200/90 bg-white hover:border-slate-300 flex items-center justify-between gap-3 cursor-pointer shadow-2xs transition-colors"
@@ -1172,8 +1264,10 @@ export default function HqPermissionSettingsSection({
             onClick={(e) => {
               e.stopPropagation();
               if (openScopePermKey) setOpenScopePermKey(null);
+              if (openPrereqPermKey) setOpenPrereqPermKey(null);
+              if (memberPickerOpen) setMemberPickerOpen(false);
             }}
-            className="bg-white w-full max-w-[920px] h-[90vh] max-h-[860px] rounded-2xl shadow-2xl border border-slate-200 flex flex-col overflow-hidden text-xs"
+            className="bg-white w-full max-w-[980px] h-[90vh] max-h-[860px] rounded-2xl shadow-2xl border border-slate-200 flex flex-col overflow-hidden text-xs"
           >
             {/* 상단 헤더 바 */}
             <div className="px-6 py-3.5 border-b border-slate-100 flex items-center justify-between shrink-0">
@@ -1186,25 +1280,23 @@ export default function HqPermissionSettingsSection({
                     ? matrixState.group.name || "새 권한 그룹"
                     : matrixState.kind === "ORG_HEAD"
                       ? "조직장 전용 권한"
-                      : "모든 구성원 기본 권한"}
+                      : "기본 권한"}
                 </span>
               </div>
 
               <div className="flex items-center gap-2">
-                {matrixState.kind === "CUSTOM" && (
-                  <button
-                    type="button"
-                    onClick={() => setShowRightMemberPane((p) => !p)}
-                    className={`w-7 h-7 rounded-lg border flex items-center justify-center text-xs ${
-                      showRightMemberPane
-                        ? "border-slate-300 bg-slate-100 text-slate-700"
-                        : "border-slate-200 text-slate-400 hover:bg-slate-50"
-                    }`}
-                    title="우측 구성원 패널 열기/닫기"
-                  >
-                    ◨
-                  </button>
-                )}
+                <button
+                  type="button"
+                  onClick={() => setShowRightMemberPane((p) => !p)}
+                  className={`w-7 h-7 rounded-lg border flex items-center justify-center text-xs ${
+                    showRightMemberPane
+                      ? "border-slate-300 bg-slate-100 text-slate-700"
+                      : "border-slate-200 text-slate-400 hover:bg-slate-50"
+                  }`}
+                  title="우측 안내 · 구성원 패널 열기/닫기"
+                >
+                  ◨
+                </button>
                 <button
                   type="button"
                   onClick={() => setMatrixState(null)}
@@ -1338,7 +1430,7 @@ export default function HqPermissionSettingsSection({
                   </div>
 
                   {/* 카테고리별 권한 체크리스트 */}
-                  <div className="space-y-8">
+                  <div className="space-y-8 pb-64">
                     {PERMISSION_CATEGORIES.map((cat) => {
                       const kw = permKeyword.trim();
                       const visibleItems = cat.items.filter(
@@ -1398,13 +1490,30 @@ export default function HqPermissionSettingsSection({
                           <div className="divide-y divide-slate-100">
                             {visibleItems.map((item) => {
                               const checked = Boolean(activePerms[item.key]);
-                              const curScope =
-                                activeScopes[item.key] || "전체 구성원";
+                              const scopeOptions =
+                                getAllowedScopeOptionsForItem(item);
+                              const isLockedFull = Boolean(
+                                item.scopeMode === "LOCKED_FULL" ||
+                                  item.lockedFullScope
+                              );
+                              const curScope = normalizePermissionScope(
+                                activeScopes[item.key],
+                                item
+                              );
+                              const missingPrereqs = checked
+                                ? getMissingPrerequisitesForPerm(
+                                    item.key,
+                                    activePerms,
+                                    activeScopes
+                                  )
+                                : [];
+                              const hasMissingPrereq =
+                                missingPrereqs.length > 0;
 
                               return (
                                 <div
                                   key={item.key}
-                                  className="py-3.5 flex items-center justify-between gap-4"
+                                  className="py-3.5 flex items-center justify-between gap-4 relative"
                                 >
                                   <div className="min-w-0">
                                     <div className="text-xs font-bold text-slate-800">
@@ -1420,64 +1529,205 @@ export default function HqPermissionSettingsSection({
                                     )}
                                   </div>
 
-                                  <div className="flex items-center gap-3 shrink-0">
-                                    {item.supportsScope &&
-                                      matrixState.kind !== "DEFAULT_MEMBER" && (
+                                  <div className="flex items-center gap-2.5 shrink-0 relative">
+                                    {/* 상위(필수) 권한 누락 알림 배지 + 팝오버 */}
+                                    {hasMissingPrereq && (
+                                      <>
                                         <div
                                           className="relative"
                                           onClick={(e) => e.stopPropagation()}
                                         >
                                           <button
                                             type="button"
-                                            disabled={!canEdit}
-                                            onClick={() =>
-                                              setOpenScopePermKey(
-                                                openScopePermKey === item.key
+                                            onClick={() => {
+                                              setOpenScopePermKey(null);
+                                              setOpenPrereqPermKey(
+                                                openPrereqPermKey === item.key
                                                   ? null
                                                   : item.key
-                                              )
-                                            }
-                                            className="text-[11px] font-semibold text-slate-700 hover:text-slate-900 flex items-center gap-1"
+                                              );
+                                            }}
+                                            className="px-2.5 py-1 rounded-md bg-rose-50 hover:bg-rose-100 text-rose-600 text-[11px] font-extrabold flex items-center gap-1 transition-colors"
                                           >
-                                            <span>{curScope}</span>
-                                            <span className="text-[9px] text-slate-400">
-                                              ▾
+                                            <span className="text-[10px]">
+                                              ▲
                                             </span>
+                                            <span>추가 권한 필요</span>
                                           </button>
 
-                                          {openScopePermKey === item.key && (
-                                            <div className="absolute right-0 top-full mt-1 w-[135px] bg-white rounded-xl shadow-xl border border-slate-200 py-1 z-40">
-                                              {PERMISSION_SCOPE_OPTIONS.map(
-                                                (sc) => (
+                                          {openPrereqPermKey === item.key && (
+                                            <div className="absolute right-0 top-full mt-2 w-[330px] sm:w-[390px] bg-white rounded-2xl shadow-2xl border border-slate-200 z-50 overflow-hidden">
+                                              <div className="px-4 py-3 border-b border-slate-100 font-extrabold text-xs text-slate-700">
+                                                추가로 필요한 권한
+                                              </div>
+
+                                              <div className="divide-y divide-slate-100 max-h-[260px] overflow-y-auto custom-scroll">
+                                                {missingPrereqs.map((mp) => (
+                                                  <div
+                                                    key={mp.permKey}
+                                                    className="px-4 py-3.5 flex items-center justify-between gap-3"
+                                                  >
+                                                    <div className="min-w-0">
+                                                      <div className="text-xs font-extrabold text-slate-800">
+                                                        {mp.title}
+                                                      </div>
+                                                      <p className="text-[11px] text-slate-400 mt-0.5 leading-relaxed">
+                                                        {mp.description}
+                                                      </p>
+                                                    </div>
+                                                    {mp.hasScopeDisplay &&
+                                                      mp.requiredScope && (
+                                                        <span className="text-[11px] font-semibold text-slate-500 flex items-center gap-1 shrink-0 whitespace-nowrap">
+                                                          <span>
+                                                            {mp.requiredScope}
+                                                          </span>
+                                                          <span className="text-[9px] text-slate-400">
+                                                            ▾
+                                                          </span>
+                                                        </span>
+                                                      )}
+                                                  </div>
+                                                ))}
+                                              </div>
+
+                                              <div className="px-4 py-3 border-t border-slate-100 bg-slate-50/50 flex items-center justify-end gap-2">
+                                                <button
+                                                  type="button"
+                                                  onClick={() =>
+                                                    setOpenPrereqPermKey(null)
+                                                  }
+                                                  className="px-3.5 py-1.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-xs font-bold text-slate-700"
+                                                >
+                                                  닫기
+                                                </button>
+                                                {canEdit && (
                                                   <button
-                                                    key={sc}
                                                     type="button"
                                                     onClick={() =>
-                                                      setMatrixScope(
+                                                      applyPrereqsForPermKeys([
                                                         item.key,
-                                                        sc
-                                                      )
+                                                      ])
                                                     }
-                                                    className={`w-full px-3 py-1.5 text-left text-[11px] ${
-                                                      curScope === sc
-                                                        ? "bg-slate-100 font-bold text-slate-900"
-                                                        : "hover:bg-slate-50 text-slate-700"
-                                                    }`}
+                                                    className="px-3.5 py-1.5 rounded-xl bg-[#00b843] hover:bg-[#00a33b] text-white text-xs font-extrabold shadow-2xs"
                                                   >
-                                                    {sc}
+                                                    적용하기
                                                   </button>
-                                                )
-                                              )}
+                                                )}
+                                              </div>
                                             </div>
                                           )}
                                         </div>
-                                      )}
 
-                                    {item.lockedFullScope && (
-                                      <span className="text-[11px] text-slate-300 font-medium flex items-center gap-1 select-none">
-                                        <span>전체 구성원</span>
-                                        <span className="text-[9px]">▾</span>
-                                      </span>
+                                        <span className="w-px h-3.5 bg-slate-200" />
+                                      </>
+                                    )}
+
+                                    {/* 세분화된 대상 범위 드롭다운 (6종 / 5종 / 2종) */}
+                                    {scopeOptions.length > 0 && (
+                                      <div
+                                        className="relative"
+                                        onClick={(e) => e.stopPropagation()}
+                                      >
+                                        <button
+                                          type="button"
+                                          disabled={!canEdit}
+                                          onClick={() => {
+                                            setOpenPrereqPermKey(null);
+                                            setOpenScopePermKey(
+                                              openScopePermKey === item.key
+                                                ? null
+                                                : item.key
+                                            );
+                                          }}
+                                          className="px-2 py-1 rounded-lg hover:bg-slate-100 text-[11px] font-bold text-slate-700 hover:text-slate-900 flex items-center gap-1 transition-colors disabled:opacity-60"
+                                        >
+                                          <span>{curScope}</span>
+                                          <span className="text-[9px] text-slate-400">
+                                            ▾
+                                          </span>
+                                        </button>
+
+                                        {openScopePermKey === item.key && (
+                                          <div className="absolute right-0 top-full mt-1.5 w-[310px] sm:w-[345px] bg-white rounded-2xl shadow-2xl border border-slate-200 p-1.5 z-50">
+                                            {scopeOptions.map((opt) => {
+                                              const selected =
+                                                curScope === opt.value;
+                                              return (
+                                                <button
+                                                  key={opt.value}
+                                                  type="button"
+                                                  onClick={() =>
+                                                    setMatrixScope(
+                                                      item.key,
+                                                      opt.value
+                                                    )
+                                                  }
+                                                  className={`w-full px-3 py-2.5 rounded-xl text-left flex items-start gap-2.5 transition-colors ${
+                                                    selected
+                                                      ? "bg-slate-100/90"
+                                                      : "hover:bg-slate-50"
+                                                  }`}
+                                                >
+                                                  <span className="w-4 text-[#00c458] font-extrabold text-xs leading-5 shrink-0">
+                                                    {selected ? "✓" : ""}
+                                                  </span>
+                                                  <div className="min-w-0">
+                                                    <div className="text-xs font-extrabold text-slate-800">
+                                                      {opt.label}
+                                                    </div>
+                                                    <div className="text-[11px] text-slate-400 mt-0.5 leading-snug">
+                                                      {opt.description}
+                                                    </div>
+                                                  </div>
+                                                </button>
+                                              );
+                                            })}
+                                          </div>
+                                        )}
+                                      </div>
+                                    )}
+
+                                    {/* 전체 구성원 고정 관리 권한 안내 드롭다운 */}
+                                    {isLockedFull && (
+                                      <div
+                                        className="relative"
+                                        onClick={(e) => e.stopPropagation()}
+                                      >
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            setOpenPrereqPermKey(null);
+                                            setOpenScopePermKey(
+                                              openScopePermKey === item.key
+                                                ? null
+                                                : item.key
+                                            );
+                                          }}
+                                          className="px-2 py-1 rounded-lg hover:bg-slate-50 text-[11px] text-slate-400 font-semibold flex items-center gap-1 transition-colors"
+                                          title="전체 구성원 대상으로만 부여되는 관리 권한입니다."
+                                        >
+                                          <span>전체 구성원</span>
+                                          <span className="text-[9px]">▾</span>
+                                        </button>
+
+                                        {openScopePermKey === item.key && (
+                                          <div className="absolute right-0 top-full mt-1.5 w-[290px] bg-white rounded-2xl shadow-2xl border border-slate-200 p-2 z-50">
+                                            <div className="px-3 py-2.5 rounded-xl bg-slate-50 flex items-start gap-2.5">
+                                              <span className="w-4 text-[#00c458] font-extrabold text-xs leading-5 shrink-0">
+                                                ✓
+                                              </span>
+                                              <div>
+                                                <div className="text-xs font-extrabold text-slate-800">
+                                                  전체 구성원 (고정)
+                                                </div>
+                                                <p className="text-[11px] text-slate-400 mt-0.5 leading-snug">
+                                                  이 관리 권한은 회사 전체 구성원을 대상으로만 설정할 수 있어요.
+                                                </p>
+                                              </div>
+                                            </div>
+                                          </div>
+                                        )}
+                                      </div>
                                     )}
 
                                     <input
@@ -1487,7 +1737,11 @@ export default function HqPermissionSettingsSection({
                                       onChange={() =>
                                         toggleMatrixPermission(item.key)
                                       }
-                                      className="w-4 h-4 rounded border-slate-300 accent-[#00c458] cursor-pointer"
+                                      className={`w-4.5 h-4.5 rounded border-slate-300 cursor-pointer ${
+                                        hasMissingPrereq
+                                          ? "accent-[#e11d48]"
+                                          : "accent-[#00c458]"
+                                      }`}
                                     />
                                   </div>
                                 </div>
@@ -1501,176 +1755,284 @@ export default function HqPermissionSettingsSection({
                 </div>
 
                 {canEdit && (
-                  <div className="px-7 py-4 border-t border-slate-100 bg-white shrink-0">
+                  <div className="px-7 py-3.5 border-t border-slate-100 bg-white shrink-0 space-y-2">
+                    {unresolvedMatrixPermKeys.length > 0 && (
+                      <div className="px-3.5 py-2 rounded-xl bg-rose-50 border border-rose-200 flex items-center justify-between gap-2 text-[11px]">
+                        <span className="font-bold text-rose-700">
+                          ⚠️ 상위(필수) 권한이 필요한 항목이{" "}
+                          <b>{unresolvedMatrixPermKeys.length}건</b> 있습니다.
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            applyPrereqsForPermKeys(unresolvedMatrixPermKeys)
+                          }
+                          className="px-2.5 py-1 rounded-lg bg-rose-600 hover:bg-rose-700 text-white font-extrabold shrink-0"
+                        >
+                          필요한 상위 권한 일괄 적용
+                        </button>
+                      </div>
+                    )}
                     <button
                       type="button"
                       disabled={saving}
                       onClick={handleSaveMatrixModal}
-                      className="w-full py-3 rounded-xl bg-gradient-to-r from-[#00c73c] to-[#00c49a] hover:opacity-95 text-white text-xs font-extrabold shadow-sm disabled:opacity-50"
+                      className={`w-full py-3 rounded-xl text-white text-xs font-extrabold shadow-sm disabled:opacity-50 transition-all ${
+                        unresolvedMatrixPermKeys.length > 0
+                          ? "bg-gradient-to-r from-[#ff6b00] to-[#ec4899] hover:opacity-95"
+                          : "bg-gradient-to-r from-[#00c73c] to-[#00c49a] hover:opacity-95"
+                      }`}
                     >
-                      저장 및 좌측 메뉴 반영
+                      저장
                     </button>
                   </div>
                 )}
               </div>
 
-              {/* 우측 권한 그룹 구성원 사이드바 */}
-              {matrixState.kind === "CUSTOM" && showRightMemberPane && (
+              {/* 우측 권한 그룹 구성원 사이드바 (커스텀 그룹: 구성원 추가 드롭다운 / 기본·조직장: 적용 대상 및 주의 안내) */}
+              {showRightMemberPane && (
                 <aside
-                  onClick={(e) => e.stopPropagation()}
-                  className="w-[245px] border-l border-slate-100 p-5 flex flex-col shrink-0 bg-white relative"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (memberPickerOpen) setMemberPickerOpen(false);
+                  }}
+                  className="w-[240px] sm:w-[258px] border-l border-slate-100 p-5 flex flex-col shrink-0 bg-white relative"
                 >
-                  <div>
-                    <div className="text-xs font-extrabold text-slate-800">
-                      권한 그룹 구성원{" "}
-                      <span className="text-[#00c458]">
-                        {matrixState.group.member_names.length}
-                      </span>
-                    </div>
-                    <p className="text-[11px] text-slate-400 mt-1">
-                      그룹에 포함할 구성원을 추가해 주세요.
-                    </p>
-                  </div>
-
-                  {canEdit && (
-                    <div className="mt-3 pt-3 border-t border-slate-100 relative">
-                      <button
-                        type="button"
-                        onClick={() => setMemberPickerOpen((p) => !p)}
-                        className="text-xs font-bold text-slate-600 hover:text-slate-900 flex items-center gap-1.5"
-                      >
-                        <span className="text-slate-400 text-sm leading-none">
-                          +
-                        </span>
-                        <span>추가하기</span>
-                      </button>
-
-                      {memberPickerOpen && (
-                        <div className="absolute right-0 top-full mt-2 w-[225px] bg-white rounded-2xl shadow-2xl border border-slate-200 p-2.5 z-40">
-                          <input
-                            autoFocus
-                            value={memberPickerQuery}
-                            onChange={(e) =>
-                              setMemberPickerQuery(e.target.value)
-                            }
-                            placeholder="🔍 구성원 검색"
-                            className="w-full px-2.5 py-1.5 rounded-lg border border-[#00c458] text-[11px] focus:outline-none mb-2"
-                          />
-                          <div className="max-h-[220px] overflow-y-auto custom-scroll space-y-0.5">
-                            {directoryPeople
-                              .filter(
-                                (p) =>
-                                  !memberPickerQuery.trim() ||
-                                  p.name.includes(memberPickerQuery.trim()) ||
-                                  p.jobOrDept.includes(memberPickerQuery.trim())
-                              )
-                              .map((p) => {
-                                const exists =
-                                  matrixState.group.member_names.includes(
-                                    p.name
-                                  );
-                                return (
-                                  <button
-                                    key={p.key}
-                                    type="button"
-                                    onClick={() => {
-                                      const cur =
-                                        matrixState.group.member_names;
-                                      const next = exists
-                                        ? cur.filter((x) => x !== p.name)
-                                        : [...cur, p.name];
-                                      setMatrixState({
-                                        ...matrixState,
-                                        group: {
-                                          ...matrixState.group,
-                                          member_names: next,
-                                        },
-                                      });
-                                    }}
-                                    className={`w-full px-2 py-1.5 rounded-lg flex items-center justify-between text-left ${
-                                      exists
-                                        ? "bg-emerald-50"
-                                        : "hover:bg-slate-50"
-                                    }`}
-                                  >
-                                    <span className="flex items-center gap-2 min-w-0">
-                                      <span
-                                        style={{
-                                          backgroundColor: colorForName(p.name),
-                                        }}
-                                        className="w-5 h-5 rounded-md text-white text-[9px] font-extrabold flex items-center justify-center shrink-0"
-                                      >
-                                        {shortAvatarText(p.name)}
-                                      </span>
-                                      <span className="font-bold text-slate-800 shrink-0">
-                                        {p.name}
-                                      </span>
-                                      <span className="text-[10px] text-slate-400 truncate">
-                                        {p.jobOrDept}
-                                      </span>
-                                    </span>
-                                    {exists && (
-                                      <span className="text-[#00c458] font-bold">
-                                        ✓
-                                      </span>
-                                    )}
-                                  </button>
-                                );
-                              })}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  <div className="flex-1 overflow-y-auto custom-scroll mt-3 space-y-1.5">
-                    {matrixState.group.member_names.map((nm) => {
-                      const info = directoryPeople.find((d) => d.name === nm);
-                      return (
-                        <div
-                          key={nm}
-                          className="px-2.5 py-2 rounded-xl bg-slate-50 flex items-center justify-between gap-2"
-                        >
-                          <span className="flex items-center gap-2 min-w-0">
-                            <span
-                              style={{ backgroundColor: colorForName(nm) }}
-                              className="w-6 h-6 rounded-lg text-white text-[9px] font-extrabold flex items-center justify-center shrink-0"
-                            >
-                              {shortAvatarText(nm)}
-                            </span>
-                            <span className="font-bold text-slate-800 truncate">
-                              {nm}
-                            </span>
-                            {info?.jobOrDept && (
-                              <span className="text-[10px] text-slate-400 truncate">
-                                {info.jobOrDept}
-                              </span>
-                            )}
+                  {matrixState.kind === "CUSTOM" ? (
+                    <>
+                      <div>
+                        <div className="text-xs font-extrabold text-slate-800">
+                          권한 그룹 구성원{" "}
+                          <span className="text-[#00c458]">
+                            {matrixState.group.member_names.length}
                           </span>
-                          {canEdit && (
-                            <button
-                              type="button"
-                              onClick={() =>
-                                setMatrixState({
-                                  ...matrixState,
-                                  group: {
-                                    ...matrixState.group,
-                                    member_names:
-                                      matrixState.group.member_names.filter(
-                                        (x) => x !== nm
-                                      ),
-                                  },
-                                })
-                              }
-                              className="text-slate-400 hover:text-rose-500 font-bold"
-                            >
-                              ✕
-                            </button>
+                        </div>
+                        <p className="text-[11px] text-slate-400 mt-1">
+                          그룹에 포함할 구성원을 드롭다운에서 선택해 추가해 주세요.
+                        </p>
+                      </div>
+
+                      {canEdit && (
+                        <div
+                          className="mt-3 pt-3 border-t border-slate-100 relative"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <button
+                            type="button"
+                            onClick={() => setMemberPickerOpen((p) => !p)}
+                            className="w-full px-3 py-2 rounded-xl border border-slate-200 hover:border-[#00c458] bg-slate-50/70 hover:bg-white text-xs font-bold text-slate-700 flex items-center justify-between transition-colors"
+                          >
+                            <span className="flex items-center gap-1.5">
+                              <span className="text-[#00c458] font-extrabold text-sm leading-none">
+                                +
+                              </span>
+                              <span>구성원 선택 · 추가</span>
+                            </span>
+                            <span className="text-[10px] text-slate-400">
+                              {memberPickerOpen ? "▲" : "▾"}
+                            </span>
+                          </button>
+
+                          {memberPickerOpen && (
+                            <div className="absolute right-0 top-full mt-2 w-[230px] bg-white rounded-2xl shadow-2xl border border-slate-200 p-2.5 z-50">
+                              <input
+                                autoFocus
+                                value={memberPickerQuery}
+                                onChange={(e) =>
+                                  setMemberPickerQuery(e.target.value)
+                                }
+                                placeholder="🔍 이름 · 부서 검색"
+                                className="w-full px-2.5 py-1.5 rounded-lg border border-[#00c458] text-[11px] focus:outline-none mb-2"
+                              />
+                              <div className="max-h-[240px] overflow-y-auto custom-scroll space-y-0.5">
+                                {directoryPeople
+                                  .filter(
+                                    (p) =>
+                                      !memberPickerQuery.trim() ||
+                                      p.name.includes(
+                                        memberPickerQuery.trim()
+                                      ) ||
+                                      p.jobOrDept.includes(
+                                        memberPickerQuery.trim()
+                                      )
+                                  )
+                                  .map((p) => {
+                                    const exists =
+                                      matrixState.group.member_names.includes(
+                                        p.name
+                                      );
+                                    return (
+                                      <button
+                                        key={p.key}
+                                        type="button"
+                                        onClick={() => {
+                                          const cur =
+                                            matrixState.group.member_names;
+                                          const next = exists
+                                            ? cur.filter((x) => x !== p.name)
+                                            : [...cur, p.name];
+                                          setMatrixState({
+                                            ...matrixState,
+                                            group: {
+                                              ...matrixState.group,
+                                              member_names: next,
+                                            },
+                                          });
+                                        }}
+                                        className={`w-full px-2 py-1.5 rounded-lg flex items-center justify-between text-left ${
+                                          exists
+                                            ? "bg-emerald-50"
+                                            : "hover:bg-slate-50"
+                                        }`}
+                                      >
+                                        <span className="flex items-center gap-2 min-w-0">
+                                          <span
+                                            style={{
+                                              backgroundColor: colorForName(
+                                                p.name
+                                              ),
+                                            }}
+                                            className="w-5 h-5 rounded-md text-white text-[9px] font-extrabold flex items-center justify-center shrink-0"
+                                          >
+                                            {shortAvatarText(p.name)}
+                                          </span>
+                                          <span className="font-bold text-slate-800 shrink-0">
+                                            {p.name}
+                                          </span>
+                                          <span className="text-[10px] text-slate-400 truncate">
+                                            {p.jobOrDept}
+                                          </span>
+                                        </span>
+                                        {exists && (
+                                          <span className="text-[#00c458] font-bold">
+                                            ✓
+                                          </span>
+                                        )}
+                                      </button>
+                                    );
+                                  })}
+                              </div>
+                            </div>
                           )}
                         </div>
-                      );
-                    })}
-                  </div>
+                      )}
+
+                      <div className="flex-1 overflow-y-auto custom-scroll mt-3 space-y-1.5">
+                        {matrixState.group.member_names.map((nm) => {
+                          const info = directoryPeople.find(
+                            (d) => d.name === nm
+                          );
+                          return (
+                            <div
+                              key={nm}
+                              className="px-2.5 py-2 rounded-xl bg-slate-50 flex items-center justify-between gap-2"
+                            >
+                              <span className="flex items-center gap-2 min-w-0">
+                                <span
+                                  style={{ backgroundColor: colorForName(nm) }}
+                                  className="w-6 h-6 rounded-lg text-white text-[9px] font-extrabold flex items-center justify-center shrink-0"
+                                >
+                                  {shortAvatarText(nm)}
+                                </span>
+                                <span className="font-bold text-slate-800 truncate">
+                                  {nm}
+                                </span>
+                                {info?.jobOrDept && (
+                                  <span className="text-[10px] text-slate-400 truncate">
+                                    {info.jobOrDept}
+                                  </span>
+                                )}
+                              </span>
+                              {canEdit && (
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setMatrixState({
+                                      ...matrixState,
+                                      group: {
+                                        ...matrixState.group,
+                                        member_names:
+                                          matrixState.group.member_names.filter(
+                                            (x) => x !== nm
+                                          ),
+                                      },
+                                    })
+                                  }
+                                  className="text-slate-400 hover:text-rose-500 font-bold"
+                                >
+                                  ✕
+                                </button>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </>
+                  ) : (
+                    <div className="flex-1 flex flex-col min-h-0 space-y-4">
+                      <div className="rounded-xl bg-slate-50 border border-slate-200/80 p-3.5 space-y-2 text-[11px] text-slate-600 leading-relaxed">
+                        <div className="font-extrabold text-slate-800">
+                          {matrixState.kind === "DEFAULT_MEMBER"
+                            ? "👥 모든 사용자 적용 안내"
+                            : "📢 조직장 자동 적용 안내"}
+                        </div>
+                        <ul className="list-disc pl-4 space-y-1.5 text-slate-500">
+                          <li>
+                            내용을 저장하면{" "}
+                            <b className="text-slate-700">
+                              {matrixState.kind === "DEFAULT_MEMBER"
+                                ? "모든 구성원에게 즉시 권한이 활성화"
+                                : "조직장(부서장·팀장)에게 즉시 권한이 활성화"}
+                            </b>
+                            되니 설정 시 주의가 필요해요.
+                          </li>
+                          <li>
+                            권한 범위가 잘못 설정되면 의도치 않은 정보 열람 및 관리 기능 접근이 가능해질 수 있어요.
+                          </li>
+                        </ul>
+                      </div>
+
+                      <div className="flex-1 flex flex-col min-h-0">
+                        <div className="text-xs font-extrabold text-slate-800 mb-2">
+                          자동 적용 대상{" "}
+                          <span className="text-[#00c458]">
+                            {matrixState.kind === "DEFAULT_MEMBER"
+                              ? directoryPeople.length
+                              : directoryPeople.filter((p) => p.isDeptHead)
+                                  .length}
+                          </span>
+                        </div>
+                        <div className="flex-1 overflow-y-auto custom-scroll space-y-1.5">
+                          {(matrixState.kind === "DEFAULT_MEMBER"
+                            ? directoryPeople
+                            : directoryPeople.filter((p) => p.isDeptHead)
+                          ).map((p) => (
+                            <div
+                              key={p.key}
+                              className="px-2.5 py-2 rounded-xl bg-slate-50 flex items-center gap-2"
+                            >
+                              <span
+                                style={{
+                                  backgroundColor: colorForName(p.name),
+                                }}
+                                className="w-6 h-6 rounded-lg text-white text-[9px] font-extrabold flex items-center justify-center shrink-0"
+                              >
+                                {shortAvatarText(p.name)}
+                              </span>
+                              <span className="font-bold text-slate-800 truncate">
+                                {p.name}
+                              </span>
+                              {p.jobOrDept && (
+                                <span className="text-[10px] text-slate-400 truncate">
+                                  {p.jobOrDept}
+                                </span>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </aside>
               )}
             </div>

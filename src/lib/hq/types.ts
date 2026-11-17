@@ -1176,6 +1176,11 @@ export interface HqAuditLogItem {
 }
 
 export type HqPermissionScope =
+  | "본인만"
+  | "소속 주조직"
+  | "소속 조직 전체"
+  | "소속 주조직 및 하위 조직"
+  | "소속 조직 전체 및 하위 조직"
   | "전체 구성원"
   | "하위 조직 포함"
   | "소속 조직";
@@ -1199,6 +1204,7 @@ export interface HqPermissionSettings {
   org_head_permissions: Record<string, boolean>;
   org_head_scopes: Record<string, HqPermissionScope>;
   default_member_permissions: Record<string, boolean>;
+  default_member_scopes?: Record<string, HqPermissionScope>;
   groups: HqPermissionGroupItem[];
   member_overrides?: Record<string, Record<string, boolean>>; // memberId 또는 name 기준 개별 ON/OFF 오버라이드
 }

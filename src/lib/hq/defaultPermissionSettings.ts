@@ -1,13 +1,38 @@
 // src/lib/hq/defaultPermissionSettings.ts
 import type { HqPermissionScope, HqPermissionSettings } from "./types";
 
+export type CanonicalPermissionScope =
+  | "본인만"
+  | "소속 주조직"
+  | "소속 조직 전체"
+  | "소속 주조직 및 하위 조직"
+  | "소속 조직 전체 및 하위 조직"
+  | "전체 구성원";
+
+export type HqPermissionScopeMode =
+  | "NONE" // 드롭다운 없음 (전사 단일 정책 또는 본인이 요청한 건만 고정인 항목)
+  | "WITH_SELF" // 6종: 본인만 ~ 전체 구성원
+  | "ORG_AND_ALL" // 5종: 소속 주조직 ~ 전체 구성원 ('본인만' 없음)
+  | "INSIGHT" // 2종: 소속 조직 전체 및 하위 조직 / 전체 구성원
+  | "LOCKED_FULL"; // '전체 구성원'으로만 고정 표기되는 관리 권한
+
+export interface HqPermissionPrerequisiteRule {
+  permKey: string;
+  requiredScope?: CanonicalPermissionScope;
+  matchChildScope?: boolean;
+  skipWhenChildIsSelf?: boolean;
+}
+
 export interface HqPermissionCatalogItem {
   key: string;
   title: string;
   description: string;
   warningText?: string;
+  scopeMode?: HqPermissionScopeMode;
+  defaultScope?: CanonicalPermissionScope;
   supportsScope?: boolean;
-  lockedFullScope?: boolean; // '관리' 항목처럼 범위 드롭다운이 전체 구성원으로 고정 표기되는 항목
+  lockedFullScope?: boolean;
+  prerequisites?: HqPermissionPrerequisiteRule[];
 }
 
 export interface HqPermissionCatalogCategory {
@@ -16,13 +41,49 @@ export interface HqPermissionCatalogCategory {
   items: HqPermissionCatalogItem[];
 }
 
-export const PERMISSION_SCOPE_OPTIONS: HqPermissionScope[] = [
-  "전체 구성원",
-  "하위 조직 포함",
-  "소속 조직",
+export interface PermissionScopeOptionMeta {
+  value: CanonicalPermissionScope;
+  label: CanonicalPermissionScope;
+  description: string;
+}
+
+export const PERMISSION_SCOPE_DETAILS: PermissionScopeOptionMeta[] = [
+  {
+    value: "본인만",
+    label: "본인만",
+    description: "구성원 본인의 정보만 접근할 수 있어요.",
+  },
+  {
+    value: "소속 주조직",
+    label: "소속 주조직",
+    description: "소속된 주조직의 구성원 정보에 접근할 수 있어요.",
+  },
+  {
+    value: "소속 조직 전체",
+    label: "소속 조직 전체",
+    description: "소속된 주조직과 겸조직의 구성원 정보에 접근할 수 있어요.",
+  },
+  {
+    value: "소속 주조직 및 하위 조직",
+    label: "소속 주조직 및 하위 조직",
+    description: "소속된 주조직 및 하위 조직의 구성원 정보에 접근할 수 있어요.",
+  },
+  {
+    value: "소속 조직 전체 및 하위 조직",
+    label: "소속 조직 전체 및 하위 조직",
+    description:
+      "소속된 주조직·겸조직 및 하위 조직의 구성원 정보에 접근할 수 있어요.",
+  },
+  {
+    value: "전체 구성원",
+    label: "전체 구성원",
+    description: "모든 구성원 정보를 접근할 수 있어요.",
+  },
 ];
 
-// 스크린샷 190151 ~ 190704 전체 카테고리·세부 권한 완벽 수록 + 좌측 메뉴 ON/OFF 직접 연동
+export const PERMISSION_SCOPE_OPTIONS: CanonicalPermissionScope[] =
+  PERMISSION_SCOPE_DETAILS.map((d) => d.value);
+
 export const PERMISSION_CATEGORIES: HqPermissionCatalogCategory[] = [
   {
     id: "cat-sidebar-menu",
@@ -31,103 +92,124 @@ export const PERMISSION_CATEGORIES: HqPermissionCatalogCategory[] = [
       {
         key: "menu.notices",
         title: "📢 공지 메뉴 표시 · 열람",
-        description: "좌측 사이드바에 [공지] 메뉴를 표시하고 사내 공지 열람을 허용해요.",
+        description:
+          "좌측 사이드바에 [공지] 메뉴를 표시하고 사내 공지 열람을 허용해요.",
       },
       {
         key: "menu.members",
         title: "👥 구성원 메뉴 표시 · 접근",
-        description: "좌측 사이드바에 [구성원] 메뉴를 표시하고 임직원 인사 디렉토리 접근을 허용해요.",
+        description:
+          "좌측 사이드바에 [구성원] 메뉴를 표시하고 임직원 인사 디렉토리 접근을 허용해요.",
       },
       {
         key: "menu.org_chart",
         title: "🏢 조직도 메뉴 표시 · 열람",
-        description: "좌측 사이드바에 [조직도] 메뉴를 표시하고 부서 트리 열람을 허용해요.",
+        description:
+          "좌측 사이드바에 [조직도] 메뉴를 표시하고 부서 트리 열람을 허용해요.",
       },
       {
         key: "menu.meetings",
         title: "💬 미팅 메뉴 표시 · 참여",
-        description: "좌측 사이드바에 [미팅] 메뉴를 표시하고 회의록·일정 공유를 허용해요.",
+        description:
+          "좌측 사이드바에 [미팅] 메뉴를 표시하고 회의록·일정 공유를 허용해요.",
       },
       {
         key: "menu.attendance",
         title: "⏱️ 근무 (내 출퇴근) 메뉴 표시",
-        description: "좌측 사이드바에 [근무] 메뉴를 표시하고 출퇴근 기록을 허용해요.",
+        description:
+          "좌측 사이드바에 [근무] 메뉴를 표시하고 출퇴근 기록을 허용해요.",
       },
       {
         key: "menu.leaves",
         title: "🏖️ 휴가 (내 휴가) 메뉴 표시",
-        description: "좌측 사이드바에 [휴가] 메뉴를 표시하고 연차·맞춤휴가 신청을 허용해요.",
+        description:
+          "좌측 사이드바에 [휴가] 메뉴를 표시하고 연차·맞춤휴가 신청을 허용해요.",
       },
       {
         key: "menu.work_management",
         title: "🕒 근태 관리 > 근무 관리 메뉴 표시",
-        description: "좌측 [근태 관리 > 근무 관리] 관리자 메뉴 노출 및 접근을 허용해요.",
+        description:
+          "좌측 [근태 관리 > 근무 관리] 관리자 메뉴 노출 및 접근을 허용해요.",
       },
       {
         key: "menu.leave_management",
         title: "🗓️ 근태 관리 > 휴가 관리 메뉴 표시",
-        description: "좌측 [근태 관리 > 휴가 관리] 관리자 메뉴 노출 및 접근을 허용해요.",
+        description:
+          "좌측 [근태 관리 > 휴가 관리] 관리자 메뉴 노출 및 접근을 허용해요.",
       },
       {
         key: "menu.approvals",
         title: "📋 워크플로우 메뉴 표시",
-        description: "좌측 사이드바에 [워크플로우] 전자결재 메뉴를 표시해요.",
+        description:
+          "좌측 사이드바에 [워크플로우] 전자결재 메뉴를 표시해요.",
       },
       {
         key: "menu.contracts",
         title: "📑 전자계약 · 저작권 메뉴 표시",
-        description: "좌측 사이드바에 [전자계약 · 저작권] 메뉴를 표시해요.",
+        description:
+          "좌측 사이드바에 [전자계약 · 저작권] 메뉴를 표시해요.",
       },
       {
         key: "menu.expenses",
         title: "💳 비용 · 경비 정산 메뉴 표시",
-        description: "좌측 사이드바에 [비용 · 경비 정산] 메뉴를 표시해요.",
+        description:
+          "좌측 사이드바에 [비용 · 경비 정산] 메뉴를 표시해요.",
       },
       {
         key: "menu.payroll",
         title: "💰 급여 · 인세 · 원천세 메뉴 표시",
-        description: "좌측 사이드바에 [급여 · 인세 · 원천세] 메뉴를 표시해요 (일반 구성원은 본인 급여명세서만 열람).",
+        description:
+          "좌측 사이드바에 [급여 · 인세 · 원천세] 메뉴를 표시해요 (일반 구성원은 본인 급여명세서만 열람).",
       },
       {
         key: "menu.year_end_tax",
         title: "🧾 연말정산 메뉴 표시",
-        description: "좌측 사이드바에 [연말정산] 메뉴를 표시해요 (간소화 PDF 제출 및 원천징수영수증 발급).",
+        description:
+          "좌측 사이드바에 [연말정산] 메뉴를 표시해요 (간소화 PDF 제출 및 원천징수영수증 발급).",
       },
       {
         key: "menu.insights",
         title: "📈 인사이트 메뉴 표시 · 열람",
-        description: "좌측 사이드바에 [인사이트] 경영·인력·비용·출판 지표 대시보드를 표시해요.",
-        warningText: "주의: 인건비·경비 추이 등 경영 지표가 포함되므로 권한 대상을 확인해 주세요.",
+        description:
+          "좌측 사이드바에 [인사이트] 경영·인력·비용·출판 지표 대시보드를 표시해요.",
+        warningText:
+          "주의: 인건비·경비 추이 등 경영 지표가 포함되므로 권한 대상을 확인해 주세요.",
       },
       {
         key: "menu.publishing",
         title: "📚 출판 공정 · ISBN 보드 메뉴 표시",
-        description: "좌측 사이드바에 [출판 공정 · ISBN 보드] 메뉴를 표시해요.",
+        description:
+          "좌측 사이드바에 [출판 공정 · ISBN 보드] 메뉴를 표시해요.",
       },
       {
         key: "menu.analytics",
         title: "📊 진단평가 분석 메뉴 표시",
-        description: "좌측 사이드바에 [진단평가 분석] 메뉴를 표시해요.",
+        description:
+          "좌측 사이드바에 [진단평가 분석] 메뉴를 표시해요.",
       },
       {
         key: "menu.contest_db",
         title: "📐 사고력·문장제 문제 DB 메뉴 표시",
-        description: "좌측 사이드바에 [사고력·문장제 문제 DB] 메뉴를 표시해요.",
+        description:
+          "좌측 사이드바에 [사고력·문장제 문제 DB] 메뉴를 표시해요.",
       },
       {
         key: "menu.messenger",
         title: "💬 사내 메신저 메뉴 표시",
-        description: "좌측 사이드바에 [사내 메신저] 메뉴를 표시해요.",
+        description:
+          "좌측 사이드바에 [사내 메신저] 메뉴를 표시해요.",
       },
       {
         key: "menu.permissions",
         title: "🔐 포털 권한 관리 메뉴 표시",
-        description: "좌측 사이드바에 [포털 권한 관리] 메뉴를 표시해요.",
+        description:
+          "좌측 사이드바에 [포털 권한 관리] 메뉴를 표시해요.",
       },
       {
         key: "menu.settings",
         title: "⚙️ 설정 메뉴 표시 · 접근",
-        description: "좌측 하단에 [설정] 메뉴를 표시하고 회사·인사·근태·권한 설정 접근을 허용해요.",
+        description:
+          "좌측 하단에 [설정] 메뉴를 표시하고 회사·인사·근태·권한 설정 접근을 허용해요.",
       },
     ],
   },
@@ -216,6 +298,7 @@ export const PERMISSION_CATEGORIES: HqPermissionCatalogCategory[] = [
         key: "member.retiree_view",
         title: "퇴직자 조회",
         description: "구성원 관리 메뉴에서 퇴직자를 포함해 조회할 수 있어요.",
+        prerequisites: [{ permKey: "member.directory_access" }],
       },
     ],
   },
@@ -228,6 +311,7 @@ export const PERMISSION_CATEGORIES: HqPermissionCatalogCategory[] = [
         title: "구성원 개인 정보 조회",
         description:
           "선택 범위 구성원들의 주민등록번호, 주소, 계좌 등을 조회할 수 있어요.",
+        scopeMode: "ORG_AND_ALL",
         supportsScope: true,
       },
       {
@@ -235,12 +319,18 @@ export const PERMISSION_CATEGORIES: HqPermissionCatalogCategory[] = [
         title: "구성원 개인 정보 관리",
         description:
           "전체 구성원 개인 정보를 편집하거나 변경 승인, 다운로드할 수 있어요.",
+        scopeMode: "LOCKED_FULL",
         lockedFullScope: true,
+        prerequisites: [
+          { permKey: "personal.basic_view", requiredScope: "전체 구성원" },
+          { permKey: "member.directory_access" },
+        ],
       },
       {
         key: "personal.family_view",
         title: "구성원 가족 정보 조회",
         description: "선택 범위 구성원들의 가족 정보를 조회할 수 있어요.",
+        scopeMode: "ORG_AND_ALL",
         supportsScope: true,
       },
       {
@@ -248,13 +338,19 @@ export const PERMISSION_CATEGORIES: HqPermissionCatalogCategory[] = [
         title: "구성원 가족 정보 관리",
         description:
           "전체 구성원 가족 정보를 편집하거나 변경 승인, 다운로드할 수 있어요.",
+        scopeMode: "LOCKED_FULL",
         lockedFullScope: true,
+        prerequisites: [
+          { permKey: "personal.family_view", requiredScope: "전체 구성원" },
+          { permKey: "member.directory_access" },
+        ],
       },
       {
         key: "personal.career_edu_view",
         title: "구성원 경력/학력 조회",
         description:
           "선택 범위 구성원들의 경력과 학력 정보를 조회할 수 있어요.",
+        scopeMode: "ORG_AND_ALL",
         supportsScope: true,
       },
       {
@@ -262,13 +358,19 @@ export const PERMISSION_CATEGORIES: HqPermissionCatalogCategory[] = [
         title: "구성원 경력/학력 관리",
         description:
           "전체 구성원들의 경력과 학력 정보를 편집하거나 변경 승인, 검색, 다운로드할 수 있어요.",
+        scopeMode: "LOCKED_FULL",
         lockedFullScope: true,
+        prerequisites: [
+          { permKey: "personal.career_edu_view", requiredScope: "전체 구성원" },
+          { permKey: "member.directory_access" },
+        ],
       },
       {
         key: "personal.doc_view",
         title: "구성원 문서 조회",
         description:
           "선택 범위 구성원들 및 가족에 관련한 제출 문서들을 조회할 수 있어요.",
+        scopeMode: "ORG_AND_ALL",
         supportsScope: true,
       },
       {
@@ -276,7 +378,11 @@ export const PERMISSION_CATEGORIES: HqPermissionCatalogCategory[] = [
         title: "구성원 문서 관리",
         description:
           "비밀문서를 포함하여 전체 구성원 문서들을 편집하거나 변경 승인할 수 있어요.",
+        scopeMode: "LOCKED_FULL",
         lockedFullScope: true,
+        prerequisites: [
+          { permKey: "personal.doc_view", requiredScope: "전체 구성원" },
+        ],
       },
     ],
   },
@@ -289,6 +395,7 @@ export const PERMISSION_CATEGORIES: HqPermissionCatalogCategory[] = [
         title: "구성원 재직 정보 조회",
         description:
           "선택 범위 구성원들의 기본 인사정보와 휴직, 퇴직, 쉬는 날, 포상 및 징계 등의 정보를 조회할 수 있어요.",
+        scopeMode: "ORG_AND_ALL",
         supportsScope: true,
       },
       {
@@ -296,13 +403,21 @@ export const PERMISSION_CATEGORIES: HqPermissionCatalogCategory[] = [
         title: "구성원 재직 정보 관리",
         description:
           "전체 구성원의 재직 정보를 편집 및 삭제하거나 변경 승인, 검색, 다운로드할 수 있어요.",
+        scopeMode: "LOCKED_FULL",
         lockedFullScope: true,
+        prerequisites: [
+          { permKey: "company.holiday_manage" },
+          { permKey: "company.hr_structure" },
+          { permKey: "hr.employment_view", requiredScope: "전체 구성원" },
+          { permKey: "member.directory_access" },
+        ],
       },
       {
         key: "hr.labor_contract_view",
         title: "구성원 근로 계약 정보 조회",
         description:
           "선택 범위 구성원들의 근로 계약, 수습 계약 등의 정보를 조회할 수 있어요.",
+        scopeMode: "ORG_AND_ALL",
         supportsScope: true,
       },
       {
@@ -310,12 +425,18 @@ export const PERMISSION_CATEGORIES: HqPermissionCatalogCategory[] = [
         title: "구성원 근로 계약 정보 관리",
         description:
           "전체 구성원 근로 계약 정보를 편집하거나 검색, 다운로드할 수 있어요.",
+        scopeMode: "LOCKED_FULL",
         lockedFullScope: true,
+        prerequisites: [
+          { permKey: "hr.labor_contract_view", requiredScope: "전체 구성원" },
+          { permKey: "member.directory_access" },
+        ],
       },
       {
         key: "hr.wage_contract_view",
         title: "구성원 임금 계약 정보 조회",
         description: "선택 범위 구성원들의 임금 계약 정보를 조회할 수 있어요.",
+        scopeMode: "ORG_AND_ALL",
         supportsScope: true,
       },
       {
@@ -323,31 +444,47 @@ export const PERMISSION_CATEGORIES: HqPermissionCatalogCategory[] = [
         title: "구성원 임금 계약 정보 관리",
         description:
           "전체 구성원 임금 계약 정보를 편집하거나 검색, 다운로드할 수 있어요.",
+        scopeMode: "LOCKED_FULL",
         lockedFullScope: true,
+        prerequisites: [
+          { permKey: "hr.wage_contract_view", requiredScope: "전체 구성원" },
+          { permKey: "member.directory_access" },
+        ],
       },
       {
         key: "hr.pay_info_view",
         title: "구성원 지급 정보 조회",
         description: "선택 범위 구성원들의 급여 지급 정보를 조회할 수 있어요.",
+        scopeMode: "ORG_AND_ALL",
         supportsScope: true,
+        prerequisites: [
+          { permKey: "hr.wage_contract_view", matchChildScope: true },
+        ],
       },
       {
         key: "hr.pay_info_manage",
         title: "구성원 지급 정보 관리",
         description:
           "전체 구성원의 급여 지급 정보를 편집하고 다운로드할 수 있어요.",
+        scopeMode: "LOCKED_FULL",
         lockedFullScope: true,
+        prerequisites: [
+          { permKey: "member.directory_access" },
+          { permKey: "hr.pay_info_view", requiredScope: "전체 구성원" },
+        ],
       },
       {
         key: "hr.payslip_view",
         title: "구성원 급여 정보 조회",
         description: "선택 범위 구성원들의 급여 명세서를 조회할 수 있어요.",
+        scopeMode: "ORG_AND_ALL",
         supportsScope: true,
       },
       {
         key: "hr.custom_info_view",
         title: "구성원 커스텀 정보 조회",
         description: "선택 범위 구성원들의 커스텀 정보를 조회할 수 있어요.",
+        scopeMode: "ORG_AND_ALL",
         supportsScope: true,
       },
       {
@@ -355,13 +492,19 @@ export const PERMISSION_CATEGORIES: HqPermissionCatalogCategory[] = [
         title: "구성원 커스텀 정보 관리",
         description:
           "전체 구성원의 커스텀 정보를 편집하고 다운로드할 수 있어요.",
+        scopeMode: "LOCKED_FULL",
         lockedFullScope: true,
+        prerequisites: [
+          { permKey: "hr.custom_info_view", requiredScope: "전체 구성원" },
+          { permKey: "member.directory_access" },
+        ],
       },
       {
         key: "hr.training_view",
         title: "구성원 교육 및 역량 조회",
         description:
           "선택 범위 구성원들의 자격증, 외국어, 사내 교육, 사내 경력 등의 정보를 조회할 수 있어요.",
+        scopeMode: "ORG_AND_ALL",
         supportsScope: true,
       },
       {
@@ -369,34 +512,48 @@ export const PERMISSION_CATEGORIES: HqPermissionCatalogCategory[] = [
         title: "구성원 교육 및 역량 관리",
         description:
           "전체 구성원의 교육, 자격증 정보 등을 편집하거나 변경 승인, 검색, 다운로드할 수 있어요.",
+        scopeMode: "LOCKED_FULL",
         lockedFullScope: true,
+        prerequisites: [
+          { permKey: "hr.training_view", requiredScope: "전체 구성원" },
+          { permKey: "member.directory_access" },
+        ],
       },
       {
         key: "hr.note_view",
         title: "구성원 인사노트 조회",
         description:
           "선택 범위 구성원들에게 작성된 인사노트를 조회할 수 있어요.",
+        scopeMode: "ORG_AND_ALL",
         supportsScope: true,
       },
       {
         key: "hr.note_manage",
         title: "구성원 인사노트 관리",
         description: "전체 구성원의 인사노트를 편집할 수 있어요.",
+        scopeMode: "LOCKED_FULL",
         lockedFullScope: true,
+        prerequisites: [
+          { permKey: "hr.note_view", requiredScope: "전체 구성원" },
+        ],
       },
       {
         key: "hr.checklist_manage",
         title: "구성원 입퇴사 체크리스트 관리",
         description:
           "전체 구성원의 입퇴사 시 체크리스트를 할당하고 편집할 수 있어요.",
+        scopeMode: "LOCKED_FULL",
         lockedFullScope: true,
+        prerequisites: [{ permKey: "member.directory_access" }],
       },
       {
         key: "hr.cert_issue_manage",
         title: "구성원 증명서 발급 관리",
         description:
           "전체 구성원의 재직증명서 및 경력증명서 발급 내역을 조회하고 편집할 수 있어요.",
+        scopeMode: "LOCKED_FULL",
         lockedFullScope: true,
+        prerequisites: [{ permKey: "member.directory_access" }],
       },
       {
         key: "hr.invite_manage",
@@ -408,6 +565,7 @@ export const PERMISSION_CATEGORIES: HqPermissionCatalogCategory[] = [
         title: "구성원 초대 템플릿 관리",
         description:
           "새로운 구성원 초대를 위한 메일 템플릿을 편집할 수 있어요.",
+        prerequisites: [{ permKey: "hr.invite_manage" }],
       },
     ],
   },
@@ -419,25 +577,40 @@ export const PERMISSION_CATEGORIES: HqPermissionCatalogCategory[] = [
         key: "work.record_view",
         title: "근무 조회",
         description: "선택 범위 구성원들의 근무 기록을 조회할 수 있어요.",
+        scopeMode: "ORG_AND_ALL",
         supportsScope: true,
       },
       {
         key: "work.approval_view",
         title: "구성원 근무 승인 조회",
         description: "선택 범위 구성원들의 근무 승인 문서를 조회할 수 있어요.",
+        scopeMode: "ORG_AND_ALL",
         supportsScope: true,
+        prerequisites: [
+          { permKey: "work.record_view", matchChildScope: true },
+        ],
       },
       {
         key: "work.record_edit",
         title: "근무 편집",
         description: "선택 범위 구성원들의 근무 기록을 편집할 수 있어요.",
+        scopeMode: "WITH_SELF",
+        defaultScope: "본인만",
         supportsScope: true,
+        prerequisites: [
+          {
+            permKey: "work.record_view",
+            matchChildScope: true,
+            skipWhenChildIsSelf: true,
+          },
+        ],
       },
       {
         key: "work.realtime_view",
         title: "구성원 실시간 근무 기록 조회",
         description:
           "선택 범위 구성원들의 실시간 근무 기록을 조회할 수 있어요.",
+        scopeMode: "WITH_SELF",
         supportsScope: true,
       },
       {
@@ -445,14 +618,22 @@ export const PERMISSION_CATEGORIES: HqPermissionCatalogCategory[] = [
         title: "구성원 실시간 근무 기록 편집",
         description:
           "선택 범위 구성원들의 실시간 근무 기록을 편집할 수 있어요.",
+        scopeMode: "WITH_SELF",
         supportsScope: true,
+        prerequisites: [
+          { permKey: "work.realtime_view", matchChildScope: true },
+        ],
       },
       {
         key: "work.stats_view",
         title: "구성원 근태 통계 조회",
         description:
           "선택 범위 구성원들의 근태 관련 통계 정보를 근태 대시보드와 근무 기록 다운로드를 통해 조회할 수 있어요.",
+        scopeMode: "ORG_AND_ALL",
         supportsScope: true,
+        prerequisites: [
+          { permKey: "work.record_view", matchChildScope: true },
+        ],
       },
       {
         key: "work.shift_manage",
@@ -471,6 +652,7 @@ export const PERMISSION_CATEGORIES: HqPermissionCatalogCategory[] = [
         title: "초과 근무 및 보상 정책 관리",
         description:
           "회사의 초과 근무 정책과 이에 대한 구성원별 보상 정책을 설정할 수 있어요.",
+        scopeMode: "LOCKED_FULL",
         lockedFullScope: true,
       },
       {
@@ -478,12 +660,14 @@ export const PERMISSION_CATEGORIES: HqPermissionCatalogCategory[] = [
         title: "보상 휴가 관리",
         description:
           "전체 구성원의 초과 근무에 따른 보상 휴가를 관리할 수 있어요.",
+        scopeMode: "LOCKED_FULL",
         lockedFullScope: true,
       },
       {
         key: "work.holiday_sub_manage",
         title: "휴일 대체 관리",
         description: "전체 구성원의 휴일 대체 정보를 관리할 수 있어요.",
+        scopeMode: "LOCKED_FULL",
         lockedFullScope: true,
       },
       {
@@ -491,6 +675,7 @@ export const PERMISSION_CATEGORIES: HqPermissionCatalogCategory[] = [
         title: "근태 마감 관리",
         description:
           "전체 구성원의 등록된 근무 기록 마감 처리를 관리할 수 있어요.",
+        scopeMode: "LOCKED_FULL",
         lockedFullScope: true,
       },
     ],
@@ -504,6 +689,7 @@ export const PERMISSION_CATEGORIES: HqPermissionCatalogCategory[] = [
         title: "구성원 휴가 조회",
         description:
           "선택 범위 구성원들의 휴가 부여와 사용 내용을 조회할 수 있어요.",
+        scopeMode: "ORG_AND_ALL",
         supportsScope: true,
       },
       {
@@ -511,14 +697,18 @@ export const PERMISSION_CATEGORIES: HqPermissionCatalogCategory[] = [
         title: "구성원 휴가 편집",
         description:
           "선택 범위 구성원들의 휴가 부여와 사용 내용을 편집할 수 있어요.",
+        scopeMode: "ORG_AND_ALL",
         supportsScope: true,
+        prerequisites: [{ permKey: "leave.view", matchChildScope: true }],
       },
       {
         key: "leave.balance_view",
         title: "휴가 보유 현황, 사용 내역 조회",
         description:
           "선택 범위 구성원들의 휴가 보유 현황 및 사용 내역을 근태 관리 메뉴에서 조회할 수 있어요.",
+        scopeMode: "ORG_AND_ALL",
         supportsScope: true,
+        prerequisites: [{ permKey: "leave.view", matchChildScope: true }],
       },
       {
         key: "leave.annual_policy",
@@ -546,6 +736,7 @@ export const PERMISSION_CATEGORIES: HqPermissionCatalogCategory[] = [
         title: "회사 문서함 관리",
         description:
           "회사에서 작성된 모든 워크플로우 문서를 조회하고 삭제할 수 있어요.",
+        prerequisites: [{ permKey: "workflow.template_manage" }],
       },
     ],
   },
@@ -564,6 +755,8 @@ export const PERMISSION_CATEGORIES: HqPermissionCatalogCategory[] = [
         title: "대결 설정 관리",
         description:
           "선택 범위 구성원이 부재 시, 대신 승인할 대결자를 지정할 수 있어요.",
+        scopeMode: "WITH_SELF",
+        defaultScope: "본인만",
         supportsScope: true,
       },
     ],
@@ -592,43 +785,70 @@ export const PERMISSION_CATEGORIES: HqPermissionCatalogCategory[] = [
         key: "payroll.run",
         title: "급여정산",
         description: "급여정산 템플릿을 관리하고 급여정산을 실행할 수 있어요.",
+        prerequisites: [
+          { permKey: "member.retiree_view" },
+          { permKey: "member.directory_access" },
+          { permKey: "hr.payslip_view", requiredScope: "전체 구성원" },
+        ],
       },
       {
         key: "payroll.severance",
         title: "퇴직소득 관리",
         description: "퇴직소득 정보를 관리하고 퇴직금 정산을 실행할 수 있어요.",
+        prerequisites: [
+          { permKey: "payroll.run" },
+          { permKey: "hr.payslip_view", requiredScope: "전체 구성원" },
+        ],
       },
       {
         key: "payroll.social_insurance",
         title: "사회보험 관리",
         description:
           "전체 구성원의 사회보험 자격과 납부 및 신고 내역을 관리할 수 있어요.",
+        prerequisites: [
+          { permKey: "payroll.run" },
+          { permKey: "hr.payslip_view", requiredScope: "전체 구성원" },
+        ],
       },
       {
         key: "payroll.cert_issue",
         title: "증명서 발급",
         description: "구성원들의 근로소득 증명서를 발급할 수 있어요.",
+        prerequisites: [
+          { permKey: "payroll.run" },
+          { permKey: "hr.payslip_view", requiredScope: "전체 구성원" },
+        ],
       },
       {
         key: "payroll.file_vault",
         title: "급여 파일 관리",
         description: "파일 보관함에 파일을 업로드하고 삭제할 수 있어요.",
+        prerequisites: [{ permKey: "payroll.run" }],
       },
       {
         key: "payroll.migration",
         title: "급여자료 이관",
         description: "과거의 급여 정산 결과를 이관할 수 있어요.",
+        prerequisites: [{ permKey: "payroll.run" }],
       },
       {
         key: "payroll.year_end",
         title: "연말정산 관리",
         description:
           "연말정산 처리를 위한 구성원 정보와 공제자료를 조회하고 편집할 수 있어요.",
+        prerequisites: [
+          { permKey: "payroll.run" },
+          { permKey: "hr.payslip_view", requiredScope: "전체 구성원" },
+        ],
       },
       {
         key: "payroll.year_end_installment",
         title: "연말정산 분납 관리",
         description: "연말 정산 분납 정보를 조회하고 편집할 수 있어요.",
+        prerequisites: [
+          { permKey: "payroll.year_end" },
+          { permKey: "payroll.run" },
+        ],
       },
       {
         key: "payroll.pay_item_manage",
@@ -645,12 +865,14 @@ export const PERMISSION_CATEGORIES: HqPermissionCatalogCategory[] = [
         title: "급여 정산 설정",
         description:
           "급여 업무 처리를 위한 회사정보, 사회보험 설정, 공동인증서, 계산 설정 등을 변경할 수 있어요.",
+        prerequisites: [{ permKey: "payroll.run" }],
       },
       {
         key: "payroll.tax_filing",
         title: "세금 신고 관리",
         description:
           "원천세, 지방소득세 신고서를 작성 및 관리할 수 있으며 소득에 대한 지급명세서를 받을 수 있어요.",
+        prerequisites: [{ permKey: "payroll.run" }],
       },
       {
         key: "payroll.other_income",
@@ -746,6 +968,7 @@ export const PERMISSION_CATEGORIES: HqPermissionCatalogCategory[] = [
           "선택 범위 구성원들이 포함된 인사이트 정보를 조회할 수 있어요.",
         warningText:
           "주의: 권한 부여 시 급여 등 민감 정보가 노출될 수 있으니 주의해주세요.",
+        scopeMode: "INSIGHT",
         supportsScope: true,
       },
       {
@@ -755,6 +978,7 @@ export const PERMISSION_CATEGORIES: HqPermissionCatalogCategory[] = [
           "인사이트에서 구성원들의 인사 정보, 개인 정보, 근무 및 휴가 정보 등을 참조한 상세 조회를 할 수 있어요.",
         warningText:
           "주의: 권한 부여 시 급여 등 민감 정보가 노출될 수 있으니 주의해주세요.",
+        prerequisites: [{ permKey: "insight.view" }],
       },
     ],
   },
@@ -772,11 +996,16 @@ export const PERMISSION_CATEGORIES: HqPermissionCatalogCategory[] = [
         key: "retiree.doc_history_view",
         title: "퇴직자 문서 발급 이력 조회",
         description: "퇴직자의 서류 발급 이력을 조회할 수 있어요.",
+        prerequisites: [{ permKey: "retiree.account_manage" }],
       },
       {
         key: "retiree.doc_policy_manage",
         title: "퇴직자 서류 발급 정책 관리",
         description: "퇴직자 서류의 발급 정책을 관리할 수 있어요.",
+        prerequisites: [
+          { permKey: "retiree.doc_history_view" },
+          { permKey: "retiree.account_manage" },
+        ],
       },
     ],
   },
@@ -843,6 +1072,7 @@ export const PERMISSION_CATEGORIES: HqPermissionCatalogCategory[] = [
         title: "단체 보험 관리",
         description:
           "단체 보험 가입자 목록을 관리하고, 가입 시 입력한 개인 정보를 조회하거나 계약을 갱신할 수 있어요.",
+        prerequisites: [{ permKey: "insurance.quote_view" }],
       },
     ],
   },
@@ -871,7 +1101,306 @@ export const PERMISSION_CATEGORIES: HqPermissionCatalogCategory[] = [
   },
 ];
 
-// 스크린샷 190110, 190122, 190734와 100% 일치하는 우리 회사 초기 권한 그룹 구성
+export const PERMISSION_ITEM_BY_KEY: Record<string, HqPermissionCatalogItem> =
+  Object.fromEntries(
+    PERMISSION_CATEGORIES.flatMap((cat) => cat.items.map((it) => [it.key, it]))
+  );
+
+/**
+ * 권한 항목의 scopeMode에 따라 실제 선택 가능한 드롭다운 옵션 목록 반환
+ */
+export function getAllowedScopeOptionsForItem(
+  item: HqPermissionCatalogItem
+): PermissionScopeOptionMeta[] {
+  const mode: HqPermissionScopeMode =
+    item.scopeMode ||
+    (item.lockedFullScope
+      ? "LOCKED_FULL"
+      : item.supportsScope
+        ? "ORG_AND_ALL"
+        : "NONE");
+
+  if (mode === "WITH_SELF") {
+    return PERMISSION_SCOPE_DETAILS;
+  }
+  if (mode === "ORG_AND_ALL") {
+    return PERMISSION_SCOPE_DETAILS.filter((d) => d.value !== "본인만");
+  }
+  if (mode === "INSIGHT") {
+    return PERMISSION_SCOPE_DETAILS.filter(
+      (d) =>
+        d.value === "소속 조직 전체 및 하위 조직" || d.value === "전체 구성원"
+    );
+  }
+  return [];
+}
+
+/**
+ * 구버전 저장값("하위 조직 포함", "소속 조직")을 6단계 정식 범위로 정규화하고,
+ * 해당 권한에서 허용하지 않는 범위(예: '본인만' 불가 항목)일 경우 안전한 기본값 반환
+ */
+export function normalizePermissionScope(
+  rawScope: HqPermissionScope | string | undefined,
+  item: HqPermissionCatalogItem
+): CanonicalPermissionScope {
+  if (item.scopeMode === "LOCKED_FULL" || item.lockedFullScope) {
+    return "전체 구성원";
+  }
+
+  let mapped: CanonicalPermissionScope | undefined;
+  if (rawScope === "하위 조직 포함") {
+    mapped =
+      item.scopeMode === "INSIGHT"
+        ? "소속 조직 전체 및 하위 조직"
+        : "소속 주조직 및 하위 조직";
+  } else if (rawScope === "소속 조직") {
+    mapped = "소속 주조직";
+  } else if (
+    rawScope === "본인만" ||
+    rawScope === "소속 주조직" ||
+    rawScope === "소속 조직 전체" ||
+    rawScope === "소속 주조직 및 하위 조직" ||
+    rawScope === "소속 조직 전체 및 하위 조직" ||
+    rawScope === "전체 구성원"
+  ) {
+    mapped = rawScope;
+  }
+
+  const allowed = getAllowedScopeOptionsForItem(item).map((o) => o.value);
+  if (allowed.length === 0) return "전체 구성원";
+  if (mapped && allowed.includes(mapped)) return mapped;
+  if (item.defaultScope && allowed.includes(item.defaultScope)) {
+    return item.defaultScope;
+  }
+  return "전체 구성원";
+}
+
+/**
+ * 부분순서(Partial-Order) 범위 포함 관계 판별:
+ * grantedScope가 requiredScope 이상의 구성원 범위를 포괄하는지 검사
+ */
+export function doesScopeCover(
+  grantedScope: CanonicalPermissionScope,
+  requiredScope: CanonicalPermissionScope
+): boolean {
+  if (grantedScope === requiredScope) return true;
+  if (grantedScope === "전체 구성원") return true;
+  if (grantedScope === "소속 조직 전체 및 하위 조직") {
+    return requiredScope !== "전체 구성원";
+  }
+  if (grantedScope === "소속 주조직 및 하위 조직") {
+    return (
+      requiredScope === "소속 주조직" ||
+      requiredScope === "본인만"
+    );
+  }
+  if (grantedScope === "소속 조직 전체") {
+    return (
+      requiredScope === "소속 주조직" ||
+      requiredScope === "본인만"
+    );
+  }
+  if (grantedScope === "소속 주조직") {
+    return requiredScope === "본인만";
+  }
+  return false;
+}
+
+/**
+ * 기존 범위와 필수 요구 범위를 모두 포괄하는 최소 상위 범위 계산
+ */
+export function mergeScopeToCover(
+  currentScope: CanonicalPermissionScope | undefined,
+  requiredScope: CanonicalPermissionScope,
+  targetItem: HqPermissionCatalogItem
+): CanonicalPermissionScope {
+  const normTargetReq = normalizePermissionScope(requiredScope, targetItem);
+  if (!currentScope) return normTargetReq;
+  const normCur = normalizePermissionScope(currentScope, targetItem);
+  if (doesScopeCover(normCur, normTargetReq)) return normCur;
+  if (doesScopeCover(normTargetReq, normCur)) return normTargetReq;
+
+  // '소속 조직 전체'(겸직 포함) + '소속 주조직 및 하위 조직'(하위 포함) -> '소속 조직 전체 및 하위 조직'
+  if (
+    (normCur === "소속 조직 전체" &&
+      normTargetReq === "소속 주조직 및 하위 조직") ||
+    (normCur === "소속 주조직 및 하위 조직" &&
+      normTargetReq === "소속 조직 전체")
+  ) {
+    return normalizePermissionScope("소속 조직 전체 및 하위 조직", targetItem);
+  }
+  return "전체 구성원";
+}
+
+export interface MissingPrerequisiteDetail {
+  permKey: string;
+  title: string;
+  description: string;
+  requiredScope?: CanonicalPermissionScope;
+  hasScopeDisplay: boolean;
+}
+
+/**
+ * 특정 권한(permKey)이 체크된 상태에서 현재 누락된 상위(필수) 권한 목록 계산 (연쇄 상위 권한 포함)
+ */
+export function getMissingPrerequisitesForPerm(
+  permKey: string,
+  activePerms: Record<string, boolean>,
+  activeScopes: Record<string, HqPermissionScope>
+): MissingPrerequisiteDetail[] {
+  if (!activePerms[permKey]) return [];
+  const rootItem = PERMISSION_ITEM_BY_KEY[permKey];
+  if (!rootItem?.prerequisites || rootItem.prerequisites.length === 0) {
+    return [];
+  }
+
+  const requiredMap = new Map<
+    string,
+    { item: HqPermissionCatalogItem; reqScope?: CanonicalPermissionScope }
+  >();
+  const visited = new Set<string>();
+
+  const walk = (
+    curKey: string,
+    effectiveChildScope: CanonicalPermissionScope
+  ) => {
+    const visitToken = `${curKey}@${effectiveChildScope}`;
+    if (visited.has(visitToken)) return;
+    visited.add(visitToken);
+
+    const curItem = PERMISSION_ITEM_BY_KEY[curKey];
+    if (!curItem?.prerequisites) return;
+
+    for (const rule of curItem.prerequisites) {
+      if (rule.skipWhenChildIsSelf && effectiveChildScope === "본인만") {
+        continue;
+      }
+      const parentItem = PERMISSION_ITEM_BY_KEY[rule.permKey];
+      if (!parentItem) continue;
+
+      const parentSupportsScope =
+        getAllowedScopeOptionsForItem(parentItem).length > 0 ||
+        Boolean(parentItem.lockedFullScope || parentItem.scopeMode === "LOCKED_FULL");
+
+      let neededScope: CanonicalPermissionScope | undefined;
+      if (rule.requiredScope) {
+        neededScope = normalizePermissionScope(rule.requiredScope, parentItem);
+      } else if (rule.matchChildScope && parentSupportsScope) {
+        neededScope = normalizePermissionScope(effectiveChildScope, parentItem);
+      } else if (parentItem.lockedFullScope || parentItem.scopeMode === "LOCKED_FULL") {
+        neededScope = "전체 구성원";
+      }
+
+      const prev = requiredMap.get(parentItem.key);
+      const mergedReq =
+        neededScope && prev?.reqScope
+          ? mergeScopeToCover(prev.reqScope, neededScope, parentItem)
+          : neededScope || prev?.reqScope;
+
+      requiredMap.set(parentItem.key, {
+        item: parentItem,
+        reqScope: mergedReq,
+      });
+
+      const nextWalkScope =
+        mergedReq ||
+        normalizePermissionScope(activeScopes[parentItem.key], parentItem);
+      walk(parentItem.key, nextWalkScope);
+    }
+  };
+
+  const rootScope = normalizePermissionScope(activeScopes[permKey], rootItem);
+  walk(permKey, rootScope);
+
+  const missing: MissingPrerequisiteDetail[] = [];
+  requiredMap.forEach(({ item: pItem, reqScope }) => {
+    const isChecked = Boolean(activePerms[pItem.key]);
+    const pAllowed = getAllowedScopeOptionsForItem(pItem);
+    const hasScopeDisplay =
+      pAllowed.length > 0 ||
+      Boolean(pItem.lockedFullScope || pItem.scopeMode === "LOCKED_FULL");
+
+    if (!isChecked) {
+      missing.push({
+        permKey: pItem.key,
+        title: pItem.title,
+        description: pItem.description,
+        requiredScope: reqScope,
+        hasScopeDisplay: Boolean(reqScope && hasScopeDisplay),
+      });
+      return;
+    }
+
+    if (reqScope && pAllowed.length > 0) {
+      const currentGrant = normalizePermissionScope(
+        activeScopes[pItem.key],
+        pItem
+      );
+      if (!doesScopeCover(currentGrant, reqScope)) {
+        missing.push({
+          permKey: pItem.key,
+          title: pItem.title,
+          description: pItem.description,
+          requiredScope: mergeScopeToCover(currentGrant, reqScope, pItem),
+          hasScopeDisplay: true,
+        });
+      }
+    }
+  });
+
+  return missing;
+}
+
+/**
+ * [적용하기] 클릭 시 해당 권한(또는 전체 권한)의 상위 필수 권한 및 범위를 한 번에 채워주는 패치 생성
+ */
+export function buildPrereqSatisfyingPatch(
+  targetPermKeys: string[],
+  activePerms: Record<string, boolean>,
+  activeScopes: Record<string, HqPermissionScope>
+): {
+  nextPerms: Record<string, boolean>;
+  nextScopes: Record<string, HqPermissionScope>;
+} {
+  const nextPerms: Record<string, boolean> = { ...activePerms };
+  const nextScopes: Record<string, HqPermissionScope> = { ...activeScopes };
+
+  let changed = true;
+  let guard = 0;
+  while (changed && guard < 10) {
+    changed = false;
+    guard++;
+    const keysToInspect =
+      guard === 1
+        ? targetPermKeys
+        : Object.keys(nextPerms).filter((k) => nextPerms[k]);
+
+    for (const k of keysToInspect) {
+      const missing = getMissingPrerequisitesForPerm(k, nextPerms, nextScopes);
+      for (const m of missing) {
+        const pItem = PERMISSION_ITEM_BY_KEY[m.permKey];
+        if (!nextPerms[m.permKey]) {
+          nextPerms[m.permKey] = true;
+          changed = true;
+        }
+        if (m.requiredScope && pItem && getAllowedScopeOptionsForItem(pItem).length > 0) {
+          const merged = mergeScopeToCover(
+            nextScopes[m.permKey] as CanonicalPermissionScope | undefined,
+            m.requiredScope,
+            pItem
+          );
+          if (nextScopes[m.permKey] !== merged) {
+            nextScopes[m.permKey] = merged;
+            changed = true;
+          }
+        }
+      }
+    }
+  }
+
+  return { nextPerms, nextScopes };
+}
+
 export const DEFAULT_PERMISSION_SETTINGS: HqPermissionSettings = {
   menu_linked_v2: true,
   super_admin_names: ["천종현", "김근식", "이웅행"],
@@ -892,14 +1421,14 @@ export const DEFAULT_PERMISSION_SETTINGS: HqPermissionSettings = {
     "approval.substitute_manage": true,
   },
   org_head_scopes: {
-    "hr.employment_view": "하위 조직 포함",
-    "work.record_view": "하위 조직 포함",
-    "work.approval_view": "하위 조직 포함",
-    "work.realtime_view": "하위 조직 포함",
-    "work.stats_view": "하위 조직 포함",
-    "leave.view": "하위 조직 포함",
-    "leave.balance_view": "하위 조직 포함",
-    "approval.substitute_manage": "소속 조직",
+    "hr.employment_view": "소속 주조직 및 하위 조직",
+    "work.record_view": "소속 주조직 및 하위 조직",
+    "work.approval_view": "소속 주조직 및 하위 조직",
+    "work.realtime_view": "소속 주조직 및 하위 조직",
+    "work.stats_view": "소속 주조직 및 하위 조직",
+    "leave.view": "소속 주조직 및 하위 조직",
+    "leave.balance_view": "소속 주조직 및 하위 조직",
+    "approval.substitute_manage": "소속 주조직",
   },
   default_member_permissions: {
     "menu.notices": true,
@@ -913,6 +1442,12 @@ export const DEFAULT_PERMISSION_SETTINGS: HqPermissionSettings = {
     "menu.payroll": true,
     "menu.year_end_tax": true,
     "menu.messenger": true,
+    "work.record_edit": true,
+    "approval.substitute_manage": true,
+  },
+  default_member_scopes: {
+    "work.record_edit": "본인만",
+    "approval.substitute_manage": "본인만",
   },
   member_overrides: {},
   groups: [
@@ -939,7 +1474,9 @@ export const DEFAULT_PERMISSION_SETTINGS: HqPermissionSettings = {
         "leave.annual_policy": true,
         "leave.custom_policy": true,
       },
-      scopes: {},
+      scopes: {
+        "work.record_edit": "전체 구성원",
+      },
     },
     {
       id: "pg-v1-payroll-yearend",
@@ -947,6 +1484,9 @@ export const DEFAULT_PERMISSION_SETTINGS: HqPermissionSettings = {
       description: "migrated from v1",
       member_names: ["천종현", "김근식"],
       permissions: {
+        "member.directory_access": true,
+        "member.retiree_view": true,
+        "hr.payslip_view": true,
         "payroll.run": true,
         "payroll.severance": true,
         "payroll.social_insurance": true,
@@ -958,7 +1498,9 @@ export const DEFAULT_PERMISSION_SETTINGS: HqPermissionSettings = {
         "payroll.settlement_setting": true,
         "payroll.workplace_setting": true,
       },
-      scopes: {},
+      scopes: {
+        "hr.payslip_view": "전체 구성원",
+      },
     },
     {
       id: "pg-v1-settings",
@@ -977,6 +1519,8 @@ export const DEFAULT_PERMISSION_SETTINGS: HqPermissionSettings = {
         "company.doc_box_setting": true,
         "workflow.template_manage": true,
         "approval.policy_manage": true,
+        "retiree.account_manage": true,
+        "retiree.doc_history_view": true,
         "retiree.doc_policy_manage": true,
         "security.otp_manage": true,
         "security.ip_manage": true,
@@ -991,12 +1535,17 @@ export const DEFAULT_PERMISSION_SETTINGS: HqPermissionSettings = {
       description: "migrated from v1",
       member_names: ["천종현", "김근식"],
       permissions: {
+        "member.directory_access": true,
+        "hr.wage_contract_view": true,
         "hr.pay_info_view": true,
         "hr.pay_info_manage": true,
         "payroll.pay_item_manage": true,
         "payroll.deduction_item_manage": true,
       },
-      scopes: {},
+      scopes: {
+        "hr.wage_contract_view": "전체 구성원",
+        "hr.pay_info_view": "전체 구성원",
+      },
     },
     {
       id: "pg-v1-viewer-career",
@@ -1032,6 +1581,7 @@ export const DEFAULT_PERMISSION_SETTINGS: HqPermissionSettings = {
       description: "migrated from v1",
       member_names: [],
       permissions: {
+        "hr.wage_contract_view": true,
         "hr.pay_info_view": true,
         "hr.payslip_view": true,
       },
@@ -1043,6 +1593,8 @@ export const DEFAULT_PERMISSION_SETTINGS: HqPermissionSettings = {
       description: "migrated from v1",
       member_names: ["천종현", "김근식"],
       permissions: {
+        "company.holiday_manage": true,
+        "company.hr_structure": true,
         "member.directory_access": true,
         "member.retiree_view": true,
         "personal.basic_view": true,
