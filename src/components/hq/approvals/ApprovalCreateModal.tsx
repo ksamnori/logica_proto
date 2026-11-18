@@ -15,7 +15,10 @@ import {
   resolveStoragePublicUrl,
   uploadHqReceiptFile,
 } from "@/lib/hq/clientApi";
-import { DEFAULT_APPROVAL_POLICIES } from "@/lib/hq/defaultApprovalPolicies";
+import {
+  DEFAULT_APPROVAL_POLICIES,
+  PRESET_ASSIGNEES,
+} from "@/lib/hq/defaultApprovalPolicies";
 import {
   DEFAULT_ANNUAL_LEAVE_SETTINGS,
   DEFAULT_CUSTOM_LEAVES,
@@ -76,9 +79,12 @@ export default function ApprovalCreateModal({
   }, [shell?.companySettings?.extra_settings?.approval_policies]);
 
   const effectiveForms = useMemo(() => {
-    if (workflowForms && workflowForms.length > 0) return workflowForms;
     const wfPols = allApprovalPolicies.filter((p) => p.category === "workflow");
-    return mergeFormsWithPolicies(DEFAULT_WORKFLOW_FORMS, wfPols);
+    const baseForms =
+      workflowForms && workflowForms.length > 0
+        ? workflowForms
+        : DEFAULT_WORKFLOW_FORMS;
+    return mergeFormsWithPolicies(baseForms, wfPols);
   }, [workflowForms, allApprovalPolicies]);
 
   const workPolicies = useMemo(
@@ -478,6 +484,44 @@ export default function ApprovalCreateModal({
       return a.name.localeCompare(b.name, "ko");
     });
 
+  // 실제 재직 구성원 + 승인 정책 관리 프리셋(더미) 구성원 통합 후보 목록
+  const selectableApproverOptions = (() => {
+    const list: {
+      id: string;
+      name: string;
+      dept: string;
+      rank_code: string;
+      job_title: string;
+    }[] = eligibleApprovers.map((m) => ({
+      id: m.instructor_id,
+      name: m.name,
+      dept: m.department,
+      rank_code: m.rank_code,
+      job_title: m.job_title,
+    }));
+    const existingNames = new Set(
+      members.filter((m) => m.work_status === "재직").map((m) => m.name.trim())
+    );
+    [
+      PRESET_ASSIGNEES.CHUN,
+      PRESET_ASSIGNEES.KIM_GS,
+      PRESET_ASSIGNEES.JO_WH,
+      PRESET_ASSIGNEES.KIM_MS,
+    ].forEach((p) => {
+      if (existingNames.has(p.name.trim()) || p.name.trim() === me.name.trim()) {
+        return;
+      }
+      list.push({
+        id: `preset:${p.name}`,
+        name: p.name,
+        dept: p.sub_label || "본부",
+        rank_code: p.sub_label?.includes("대표") ? "CEO" : "TEAM_LEAD",
+        job_title: p.sub_label || "",
+      });
+    });
+    return list;
+  })();
+
   const approvedRefCandidates = availableRefDocs.filter(
     (d) =>
       d.status === "APPROVED" ||
@@ -500,11 +544,11 @@ export default function ApprovalCreateModal({
   };
 
   const handleAddStep = () => {
-    if (!allowLineEdit || eligibleApprovers.length === 0) return;
+    if (!allowLineEdit || selectableApproverOptions.length === 0) return;
     const used = new Set(steps.map((s) => s.approver_id));
     const candidate =
-      eligibleApprovers.find((m) => !used.has(m.instructor_id)) ||
-      eligibleApprovers[0];
+      selectableApproverOptions.find((m) => !used.has(m.id)) ||
+      selectableApproverOptions[0];
     setSteps((prev) => {
       const next = [
         ...prev,
@@ -512,9 +556,9 @@ export default function ApprovalCreateModal({
           step_order: prev.length + 1,
           step_role: "FINAL_APPROVER" as const,
           role_label: `${prev.length + 1}단계 승인`,
-          approver_id: candidate.instructor_id,
+          approver_id: candidate.id,
           approver_name: candidate.name,
-          approver_dept: candidate.department,
+          approver_dept: candidate.dept,
           approver_rank: candidate.rank_code,
           approver_title: candidate.job_title,
         },
@@ -533,16 +577,16 @@ export default function ApprovalCreateModal({
 
   const handleStepMemberChange = (idx: number, memberId: string) => {
     if (!allowLineEdit) return;
-    const found = members.find((m) => m.instructor_id === memberId);
+    const found = selectableApproverOptions.find((m) => m.id === memberId);
     if (!found) return;
     setSteps((prev) =>
       prev.map((s, i) =>
         i === idx
           ? {
               ...s,
-              approver_id: found.instructor_id,
+              approver_id: found.id,
               approver_name: found.name,
-              approver_dept: found.department,
+              approver_dept: found.dept,
               approver_rank: found.rank_code,
               approver_title: found.job_title,
             }
@@ -1469,13 +1513,17 @@ export default function ApprovalCreateModal({
               <select
                 defaultValue=""
                 onChange={(e) => {
-                  const m = members.find(
-                    (item) => item.instructor_id === e.target.value
+                  const m = selectableApproverOptions.find(
+                    (item) => item.id === e.target.value
                   );
                   if (m && !ccMembers.some((c) => c.name === m.name)) {
                     setCcMembers((prev) => [
                       ...prev,
-                      { id: m.instructor_id, name: m.name, dept: m.department },
+                      {
+                        id: m.id.startsWith("preset:") ? "" : m.id,
+                        name: m.name,
+                        dept: m.dept,
+                      },
                     ]);
                   }
                   setAddingCc(false);
@@ -1485,9 +1533,9 @@ export default function ApprovalCreateModal({
                 <option value="" disabled>
                   참조할 구성원 선택...
                 </option>
-                {eligibleApprovers.map((m) => (
-                  <option key={m.instructor_id} value={m.instructor_id}>
-                    {m.name} ({m.department})
+                {selectableApproverOptions.map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.name} ({m.dept})
                   </option>
                 ))}
               </select>
@@ -1578,9 +1626,25 @@ export default function ApprovalCreateModal({
                         }
                         className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 bg-slate-50 text-xs font-bold text-slate-800"
                       >
-                        {eligibleApprovers.map((m) => (
-                          <option key={m.instructor_id} value={m.instructor_id}>
-                            {m.name} {m.job_title} ({m.department})
+                        {!selectableApproverOptions.some(
+                          (m) => m.id === st.approver_id
+                        ) && (
+                          <option value={st.approver_id}>
+                            {st.approver_name}
+                            {st.approver_title &&
+                            st.approver_title !== st.approver_dept
+                              ? ` ${st.approver_title}`
+                              : ""}{" "}
+                            ({st.approver_dept || "본부"})
+                          </option>
+                        )}
+                        {selectableApproverOptions.map((m) => (
+                          <option key={m.id} value={m.id}>
+                            {m.name}
+                            {m.job_title && m.job_title !== m.dept
+                              ? ` ${m.job_title}`
+                              : ""}{" "}
+                            ({m.dept})
                           </option>
                         ))}
                       </select>

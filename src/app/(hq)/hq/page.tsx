@@ -437,15 +437,6 @@ export default function HqHomeDashboardPage() {
                   📑 전자계약·저작권
                 </button>
               )}
-              {me && (
-                <button
-                  type="button"
-                  onClick={() => setCertModalOpen(true)}
-                  className="px-3.5 py-2.5 rounded-xl bg-white text-slate-900 hover:bg-blue-50 text-xs font-extrabold shadow-sm transition-colors whitespace-nowrap"
-                >
-                  🪪 증명서 발급
-                </button>
-              )}
               {canAccessMenu("/hq/publishing") && (
                 <button
                   type="button"
@@ -462,6 +453,15 @@ export default function HqHomeDashboardPage() {
                   className="px-3.5 py-2.5 rounded-xl bg-white/10 hover:bg-white/20 border border-white/15 text-white text-xs font-bold transition-colors whitespace-nowrap"
                 >
                   📈 인사이트
+                </button>
+              )}
+              {me && (
+                <button
+                  type="button"
+                  onClick={() => setCertModalOpen(true)}
+                  className="px-3.5 py-2.5 rounded-xl bg-white text-slate-900 hover:bg-blue-50 text-xs font-extrabold shadow-sm transition-colors whitespace-nowrap"
+                >
+                  🪪 증명서 발급
                 </button>
               )}
             </div>

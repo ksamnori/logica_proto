@@ -505,6 +505,58 @@ export async function POST(req: NextRequest) {
     const nowIso = new Date().toISOString();
     const docNo = generateDocNo("APR");
 
+    // 프리셋(더미) 구성원(예: preset:천종현)이 승인자에 포함된 경우 FK(uuid) 안전 매핑 (이름·직함은 그대로 보존!)
+    const uuidRegex =
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    const hasNonUuidStep = rawSteps.some(
+      (s: any) => !uuidRegex.test(String(s?.approver_id || "").trim())
+    );
+    let instByName = new Map<string, string>();
+    let fallbackApproverUuid = caller.userId;
+
+    if (hasNonUuidStep) {
+      const { data: instRows } = await supabaseAdmin
+        .from("instructor")
+        .select("instructor_id, name, position, role, status, tenant_id")
+        .neq("status", "퇴사")
+        .neq("status", "퇴직");
+
+      const hqCandidates = (instRows || []).filter((r: any) => {
+        const tid = r.tenant_id ? String(r.tenant_id) : "";
+        return (
+          caller.hqTenantIds.has(tid) ||
+          String(r.role || "").toUpperCase() === "HQ"
+        );
+      });
+      const pool = hqCandidates.length > 0 ? hqCandidates : instRows || [];
+      pool.forEach((r: any) => {
+        if (r?.name && r?.instructor_id) {
+          instByName.set(String(r.name).trim(), String(r.instructor_id));
+        }
+      });
+
+      const nonSelfExec = pool.find(
+        (r: any) =>
+          String(r.instructor_id) !== caller.userId &&
+          /대표|원장|본부장|이사/.test(String(r.position || ""))
+      );
+      const nonSelfAny = pool.find(
+        (r: any) => String(r.instructor_id) !== caller.userId
+      );
+      fallbackApproverUuid = String(
+        nonSelfExec?.instructor_id ||
+          nonSelfAny?.instructor_id ||
+          caller.userId
+      );
+    }
+
+    const resolveValidApproverUuid = (s: any): string => {
+      const rawId = String(s?.approver_id || "").trim();
+      if (uuidRegex.test(rawId)) return rawId;
+      const byName = instByName.get(String(s?.approver_name || "").trim());
+      return byName || fallbackApproverUuid;
+    };
+
     const docPayload = {
       doc_no: docNo,
       doc_type: docType,
@@ -568,7 +620,7 @@ export async function POST(req: NextRequest) {
           step_order: idx + 1,
           step_role:
             s.step_role || (idx + 1 === rawSteps.length ? "FINAL_APPROVER" : "REVIEWER"),
-          approver_id: s.approver_id,
+          approver_id: resolveValidApproverUuid(s),
           approver_name: s.approver_name,
           approver_dept: s.approver_dept || "",
           approver_rank: s.approver_rank || "TEAM_LEAD",

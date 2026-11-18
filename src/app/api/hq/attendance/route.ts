@@ -1454,10 +1454,19 @@ export async function POST(req: NextRequest) {
               .single();
 
             if (!docErr && createdDoc) {
+              const uuidRe =
+                /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+              const fallbackExecId =
+                Array.from(permGuard.subjectById.values()).find(
+                  (m) => m.instructor_id !== caller.userId
+                )?.instructor_id || caller.userId;
+
               const stepRows = nonSelfSteps.map((st, idx) => ({
                 approval_id: createdDoc.approval_id,
                 step_order: idx + 1,
-                approver_id: st.approver_id,
+                approver_id: uuidRe.test(String(st.approver_id || ""))
+                  ? st.approver_id
+                  : fallbackExecId,
                 approver_name: st.approver_name,
                 approver_rank: st.approver_rank || "TEAM_LEAD",
                 approver_title: st.approver_title || "승인자",

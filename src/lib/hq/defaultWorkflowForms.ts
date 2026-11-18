@@ -261,7 +261,7 @@ export const DEFAULT_WORKFLOW_FORMS: HqWorkflowFormDef[] = [
     category_name: "일반 · 계정",
     title: "계정 신청",
     description:
-      "Google Workspace, Adobe CC, Gemini/ChatGPT, AWS, 노션 등 업무용 소프트웨어 계정을 신청합니다.",
+      "Google Workspace, Adobe CC, Gemini/ChatGPT, Claude, AWS, 노션 등 업무용 소프트웨어 계정을 신청합니다.",
     icon: "🔑",
     icon_bg: "#dcfce7",
     mapped_doc_type: "GENERAL",
@@ -275,6 +275,7 @@ export const DEFAULT_WORKFLOW_FORMS: HqWorkflowFormDef[] = [
           "Google Workspace (사내 메일)",
           "Adobe Creative Cloud (인디자인/일러스트)",
           "Google Gemini / ChatGPT 유료 계정",
+          "Claude (Anthropic) 유료 계정",
           "AWS / 클라우드 인프라",
           "Slack / 협업툴",
           "기타 업무용 SW",
@@ -487,7 +488,45 @@ export function mergeFormsWithPolicies(
     }
   });
 
-  return Array.from(byId.values());
+  return Array.from(byId.values()).map(ensureSeedFieldOptions);
+}
+
+/**
+ * 이미 저장된(커스텀) 양식에도 새로 추가된 기본 선택지를 보강
+ * - 계정 신청: "Claude (Anthropic) 유료 계정"
+ */
+const SEED_OPTION_PATCHES: {
+  formId: string;
+  fieldId: string;
+  option: string;
+  insertAfter?: string;
+}[] = [
+  {
+    formId: "wf-account-req",
+    fieldId: "fld-acc-service",
+    option: "Claude (Anthropic) 유료 계정",
+    insertAfter: "Google Gemini / ChatGPT 유료 계정",
+  },
+];
+
+function ensureSeedFieldOptions(form: HqWorkflowFormDef): HqWorkflowFormDef {
+  const patches = SEED_OPTION_PATCHES.filter((p) => p.formId === form.id);
+  if (patches.length === 0 || !Array.isArray(form.fields)) return form;
+  let changed = false;
+  const fields = form.fields.map((fld) => {
+    const fp = patches.filter((p) => p.fieldId === fld.id);
+    if (fp.length === 0 || !Array.isArray(fld.options)) return fld;
+    const options = [...fld.options];
+    fp.forEach((p) => {
+      if (options.includes(p.option)) return;
+      const idx = p.insertAfter ? options.indexOf(p.insertAfter) : -1;
+      if (idx >= 0) options.splice(idx + 1, 0, p.option);
+      else options.push(p.option);
+      changed = true;
+    });
+    return changed ? { ...fld, options } : fld;
+  });
+  return changed ? { ...form, fields } : form;
 }
 
 export interface ResolvedWorkflowStep {
@@ -551,6 +590,21 @@ function resolveAssigneeToMember(
   return activeMembers.find((m) => m.name === asg.name);
 }
 
+function inferRankCodeFromSubLabel(subLabel?: string): string {
+  const s = (subLabel || "").trim();
+  if (s.includes("대표") || s.includes("원장")) return "CEO";
+  if (s.includes("본부장") || s.includes("이사") || s.includes("부원장")) {
+    return "DIRECTOR";
+  }
+  if (s.includes("팀장") || s.includes("실장") || s.includes("파트장")) {
+    return "TEAM_LEAD";
+  }
+  if (s.includes("선임") || s.includes("수석") || s.includes("책임")) {
+    return "SENIOR";
+  }
+  return "TEAM_LEAD";
+}
+
 export function resolvePolicyApprovalLine(params: {
   policy: Pick<
     HqApprovalPolicyItem,
@@ -580,13 +634,15 @@ export function resolvePolicyApprovalLine(params: {
   );
 
   const resolvedSteps: ResolvedWorkflowStep[] = [];
-  const seenApproverIds = new Set<string>();
+  const seenApproverKeys = new Set<string>();
 
   targetSteps.forEach((st) => {
     (st.assignees || []).forEach((asg) => {
       let member = resolveAssigneeToMember(asg, me, members);
       let isSubbed = false;
-      const baseName = member?.name || asg.name;
+      let fallbackName = (asg.name || "").trim();
+      let fallbackSubLabel = (asg.sub_label || "").trim();
+      const baseName = member?.name || fallbackName;
 
       const subHit = activeSubs.find(
         (sr) => sr.original_approver_name === baseName
@@ -604,29 +660,61 @@ export function resolvePolicyApprovalLine(params: {
         if (subMember) {
           member = subMember;
           isSubbed = true;
+        } else if (subName) {
+          member = undefined;
+          fallbackName = subName.trim();
+          fallbackSubLabel = "대결승인";
+          isSubbed = true;
         }
       }
 
-      // 본인 기안 시 본인이 결재자로 중복 지정된 경우 제외 (대표 단독 결재 양식을 대표 본인이 작성한 경우 즉시 완료 가능)
-      if (member && me && member.instructor_id === me.instructor_id) {
+      if (member) {
+        // 본인 기안 시 본인이 결재자로 중복 지정된 경우 제외
+        if (me && member.instructor_id === me.instructor_id) {
+          return;
+        }
+        if (!seenApproverKeys.has(member.instructor_id)) {
+          seenApproverKeys.add(member.instructor_id);
+          resolvedSteps.push({
+            step_order: resolvedSteps.length + 1,
+            step_role: "FINAL_APPROVER",
+            role_label: isSubbed
+              ? `${resolvedSteps.length + 1}단계 대결승인`
+              : `${resolvedSteps.length + 1}단계 승인`,
+            approver_id: member.instructor_id,
+            approver_name: member.name,
+            approver_dept: member.department,
+            approver_rank: member.rank_code,
+            approver_title: member.job_title,
+          });
+        }
         return;
       }
 
-      if (member && !seenApproverIds.has(member.instructor_id)) {
-        seenApproverIds.add(member.instructor_id);
-        resolvedSteps.push({
-          step_order: resolvedSteps.length + 1,
-          step_role: "FINAL_APPROVER",
-          role_label: isSubbed
-            ? `${resolvedSteps.length + 1}단계 대결승인`
-            : `${resolvedSteps.length + 1}단계 승인`,
-          approver_id: member.instructor_id,
-          approver_name: member.name,
-          approver_dept: member.department,
-          approver_rank: member.rank_code,
-          approver_title: member.job_title,
-        });
+      // 프리셋(더미) 구성원 또는 아직 실제 DB 계정이 매칭되지 않은 지정 승인자도 누락 없이 단계에 유지!
+      if (!fallbackName) return;
+      if (asg.kind === "ROLE" && asg.role_key === "SELF") return;
+      if (me && asg.kind !== "ROLE" && me.name.trim() === fallbackName) {
+        return;
       }
+
+      const presetKey = `preset:${fallbackName}`;
+      if (seenApproverKeys.has(presetKey)) return;
+      seenApproverKeys.add(presetKey);
+
+      resolvedSteps.push({
+        step_order: resolvedSteps.length + 1,
+        step_role: "FINAL_APPROVER",
+        role_label: isSubbed
+          ? `${resolvedSteps.length + 1}단계 대결승인`
+          : `${resolvedSteps.length + 1}단계 승인`,
+        approver_id: presetKey,
+        approver_name: fallbackName,
+        approver_dept: fallbackSubLabel || "본부",
+        approver_rank: inferRankCodeFromSubLabel(fallbackSubLabel),
+        approver_title:
+          fallbackSubLabel || (asg.kind === "ROLE" ? fallbackName : ""),
+      });
     });
   });
 

@@ -134,8 +134,8 @@ export default function HqLayout({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     const label = HQ_ROUTE_TAB_TITLES[canonicalPath];
     document.title = label
-      ? `${label} | Logica HQ`
-      : "Logica HQ | 천종현수학연구소 본부";
+      ? `${label} | HQ`
+      : "HQ | 천종현수학연구소 본부";
   }, [canonicalPath]);
 
   // 로그인·가입 화면은 쉘(사이드바·헤더·세션 가드) 없이 단독 렌더링

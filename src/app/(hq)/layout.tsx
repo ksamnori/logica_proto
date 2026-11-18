@@ -7,8 +7,8 @@ import { isHqSubdomainHost } from "@/lib/hq/hqRouteUtils";
 
 export const metadata: Metadata = {
   title: {
-    template: "%s | Logica HQ",
-    default: "Logica HQ | 천종현수학연구소 본부",
+    template: "%s | HQ",
+    default: "HQ | 천종현수학연구소 본부",
   },
   description: "(주)천종현수학연구소 출판·연구 본부 통합 관리 시스템",
   icons: {
