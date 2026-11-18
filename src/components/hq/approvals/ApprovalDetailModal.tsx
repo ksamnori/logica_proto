@@ -4,6 +4,7 @@
 import React, { useState } from "react";
 import { APPROVAL_DOC_META, getRankLevel } from "@/lib/hq/constants";
 import { hqFetch, resolveStoragePublicUrl } from "@/lib/hq/clientApi";
+import { formatMinutesToKoreanAmPm } from "@/lib/hq/defaultWorkRules";
 import type {
   HqApprovalDoc,
   HqApprovalStatus,
@@ -69,6 +70,7 @@ export default function ApprovalDetailModal({
   const [acting, setActing] = useState(false);
   const [postingThread, setPostingThread] = useState(false);
   const [localMeta, setLocalMeta] = useState<HqWorkflowDocMeta | null>(null);
+  const [compareBeforeOpen, setCompareBeforeOpen] = useState(true);
 
   if (!doc) return null;
 
@@ -466,6 +468,188 @@ export default function ApprovalDetailModal({
               </div>
             </div>
           </div>
+
+          {/* 플렉스식 [근무 미리보기 + 이전 기록 비교] 블록 (Screenshot 7472646d 재현) */}
+          {wfMeta?.work_edit_payload && (() => {
+            const wp = wfMeta.work_edit_payload;
+            const fmtDur = (mins: number) => {
+              const safe = Math.max(0, Math.round(mins || 0));
+              if (safe === 0) return "없음";
+              const h = Math.floor(safe / 60);
+              const m = safe % 60;
+              if (h > 0 && m > 0) return `${h}시간 ${m}분`;
+              if (h > 0) return `${h}시간`;
+              return `${m}분`;
+            };
+            const renderMiniBar = (
+              snap: typeof wp.before,
+              badgeLabel: string
+            ) => {
+              if (!snap.exists) {
+                return (
+                  <div className="relative h-14 px-3 flex items-center border-b border-slate-100 last:border-b-0">
+                    <span className="px-1.5 py-0.5 rounded bg-slate-100 text-[10px] font-bold text-slate-500 mr-4">
+                      {badgeLabel}
+                    </span>
+                    <span className="text-[11px] font-semibold text-slate-400">
+                      등록된 근무 기록 없음
+                    </span>
+                  </div>
+                );
+              }
+              const leftPct = Math.max(
+                0,
+                Math.min(92, (snap.in_minutes / 1440) * 100)
+              );
+              const span = Math.max(30, snap.out_minutes - snap.in_minutes);
+              const widthPct = Math.min(100 - leftPct, (span / 1440) * 100);
+              const otPct =
+                snap.overtime_minutes > 0
+                  ? Math.min(100, (snap.overtime_minutes / span) * 100)
+                  : 0;
+              return (
+                <div className="relative h-16 border-b border-slate-100 last:border-b-0">
+                  <span className="absolute left-2.5 top-2 z-10 px-1.5 py-0.5 rounded bg-slate-100 text-[10px] font-bold text-slate-500">
+                    {badgeLabel}
+                  </span>
+                  <div className="grid grid-cols-24 h-full pointer-events-none">
+                    {Array.from({ length: 24 }, (_, h) => (
+                      <div key={h} className="h-full border-r border-slate-100" />
+                    ))}
+                  </div>
+                  <div
+                    style={{ left: `${leftPct}%`, width: `${widthPct}%` }}
+                    className="absolute top-3.5"
+                  >
+                    <div className="relative h-6 rounded-[5px] border border-[#2dd4bf] bg-[#aef4e8]/95 px-2 flex items-center justify-between overflow-hidden text-[#0f766e]">
+                      {otPct > 0 && (
+                        <div
+                          style={{ width: `${otPct}%` }}
+                          className="absolute top-0 right-0 h-[3px] bg-[#f05638]"
+                        />
+                      )}
+                      <span className="text-[10.5px] font-extrabold">💼</span>
+                      {snap.break_minutes > 0 && (
+                        <span className="px-1.5 py-0.5 rounded bg-white/90 border border-slate-200 text-[9.5px] text-slate-500">
+                          ☕
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex items-center justify-between text-[9.5px] text-slate-500 font-semibold mt-0.5 whitespace-nowrap">
+                      <span>
+                        {formatMinutesToKoreanAmPm(snap.in_minutes)}
+                        {snap.break_minutes > 0 && (
+                          <span className="text-slate-400 ml-1">휴게 1건</span>
+                        )}
+                      </span>
+                      <span className={otPct > 0 ? "text-[#e85d3f] font-bold" : undefined}>
+                        {formatMinutesToKoreanAmPm(snap.out_minutes)}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              );
+            };
+
+            return (
+              <div className="rounded-2xl border border-slate-200 bg-white overflow-hidden">
+                <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between">
+                  <div className="text-xs font-extrabold text-slate-800">
+                    근무 미리보기
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setCompareBeforeOpen((v) => !v)}
+                    className={`px-2.5 py-1 rounded-lg border text-[11px] font-bold transition-colors ${
+                      compareBeforeOpen
+                        ? "bg-slate-800 text-white border-slate-800"
+                        : "bg-white text-slate-700 border-slate-200 hover:bg-slate-50"
+                    }`}
+                  >
+                    🗂 이전 기록 비교
+                  </button>
+                </div>
+
+                {/* 24시간 눈금 헤더 */}
+                <div className="grid grid-cols-24 px-0 py-1.5 border-b border-slate-100 text-[9.5px] text-slate-400 tabular-nums">
+                  {Array.from({ length: 24 }, (_, h) => (
+                    <div key={h} className="text-center">
+                      {h === 0 ? "" : h === 12 ? "정오" : h > 12 ? h - 12 : h}
+                    </div>
+                  ))}
+                </div>
+
+                {compareBeforeOpen && renderMiniBar(wp.before, "기록 전")}
+                {renderMiniBar(
+                  wp.action_mode === "DELETE"
+                    ? { ...wp.after, exists: false }
+                    : wp.after,
+                  compareBeforeOpen ? "기록 후" : "변경 일정"
+                )}
+
+                <div className="p-4 bg-slate-50/50 border-t border-slate-100 space-y-2 text-xs">
+                  <div className="grid grid-cols-12 items-center">
+                    <span className="col-span-3 text-slate-500 font-semibold">
+                      근무 시간
+                    </span>
+                    <span className="col-span-4 text-slate-400">
+                      총 {fmtDur(wp.before.exists ? wp.before.worked_minutes + wp.before.break_minutes : 0)}
+                    </span>
+                    <span className="col-span-1 text-slate-300">→</span>
+                    <span className="col-span-4 font-extrabold text-slate-900">
+                      {wp.action_mode === "DELETE"
+                        ? "삭제"
+                        : `총 ${fmtDur(wp.after.worked_minutes + wp.after.break_minutes)}`}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-12 items-center">
+                    <span className="col-span-3 text-slate-500 font-semibold">
+                      연장 근무
+                    </span>
+                    <span className="col-span-4 text-slate-400">
+                      {fmtDur(wp.before.exists ? wp.before.overtime_minutes : 0)}
+                    </span>
+                    <span className="col-span-1 text-slate-300">→</span>
+                    <span className="col-span-4 font-extrabold text-slate-900">
+                      {wp.action_mode === "DELETE"
+                        ? "없음"
+                        : fmtDur(wp.after.overtime_minutes)}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-12 items-center">
+                    <span className="col-span-3 text-slate-500 font-semibold">
+                      휴게 시간
+                    </span>
+                    <span className="col-span-4 text-slate-400">
+                      {fmtDur(wp.before.exists ? wp.before.break_minutes : 0)}
+                    </span>
+                    <span className="col-span-1 text-slate-300">→</span>
+                    <span className="col-span-4 font-extrabold text-slate-900">
+                      {wp.action_mode === "DELETE"
+                        ? "없음"
+                        : fmtDur(wp.after.break_minutes)}
+                    </span>
+                  </div>
+                  <div className="pt-2 border-t border-slate-200/70 grid grid-cols-12 items-center">
+                    <span className="col-span-3 text-slate-500 font-semibold">
+                      {wp.after.policy_name || "근무"}
+                    </span>
+                    <span className="col-span-4 text-slate-400 tabular-nums">
+                      {wp.before.exists
+                        ? `${formatMinutesToKoreanAmPm(wp.before.in_minutes)} – ${formatMinutesToKoreanAmPm(wp.before.out_minutes)}`
+                        : "없음"}
+                    </span>
+                    <span className="col-span-1 text-slate-300">→</span>
+                    <span className="col-span-4 font-extrabold text-slate-900 tabular-nums">
+                      {wp.action_mode === "DELETE"
+                        ? "일정 삭제"
+                        : `${formatMinutesToKoreanAmPm(wp.after.in_minutes)} – ${formatMinutesToKoreanAmPm(wp.after.out_minutes)}`}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
 
           {/* 커스텀 입력 항목 표 */}
           {customFieldEntries.length > 0 && (

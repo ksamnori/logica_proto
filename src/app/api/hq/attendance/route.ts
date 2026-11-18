@@ -9,7 +9,11 @@ import {
   resolveMemberPermissions,
 } from "@/lib/hq/hqPermissionEngine";
 import { notifySlackIfEnabled } from "@/lib/hq/integrationServer";
-import { readWorkMgmtStateServer } from "@/lib/hq/leavesLedgerServer";
+import {
+  readRealtimeWorkLogsServer,
+  readWorkMgmtStateServer,
+  writeRealtimeWorkLogsServer,
+} from "@/lib/hq/leavesLedgerServer";
 import {
   apiFail,
   getSupabaseAdmin,
@@ -21,9 +25,17 @@ import type {
   HqAttendanceStatus,
   HqCompanySettings,
   HqRankCode,
+  HqRealtimeBreakSpan,
+  HqRealtimeModeSegment,
+  HqRealtimeWorkLog,
+  HqWorkEditApprovalPayload,
   HqWorkMode,
   HqWorkRuleItem,
 } from "@/lib/hq/types";
+import {
+  readWorkflowMetaPayload,
+  writeWorkflowMetaPayload,
+} from "@/lib/hq/workflowStorageServer";
 
 export const runtime = "nodejs";
 
@@ -242,36 +254,68 @@ async function buildWorkPermissionGuard(
 
   const orgNodes = settings?.extra_settings?.org_chart_nodes;
 
-  const canViewMemberWork = (targetId: string): boolean => {
+  const getTargetSubject = (targetId: string): MemberPermissionSubject | null =>
+    subjectById.get(targetId) ||
+    (targetId === caller.userId ? callerSubject : null);
+
+  // 1) 인정 근무(굵은 막대) 조회: 본인은 항상 조회 가능, 타인은 [근무 조회] 또는 [근무 편집] 범위 적용
+  const canViewRecognizedWork = (targetId: string): boolean => {
     if (!targetId) return false;
     if (targetId === caller.userId) return true;
     if (resolved.isSuperAdmin) return true;
-    const target = subjectById.get(targetId);
+    const target = getTargetSubject(targetId);
     if (!target) return false;
     return (
       resolved.canAccessTargetMember("work.record_view", target, orgNodes) ||
-      resolved.canAccessTargetMember("work.realtime_view", target, orgNodes)
+      resolved.canAccessTargetMember("work.record_edit", target, orgNodes)
     );
   };
 
-  const canEditMemberWork = (targetId: string): boolean => {
+  // 2) 지나간 실시간 근무 기록(얇은 줄) 조회: 본인 포함 [구성원 실시간 근무 기록 조회/편집] 범위 적용 (Flex e97c4fe6 규칙 동일)
+  const canViewPastRealtimeWork = (targetId: string): boolean => {
     if (!targetId) return false;
     if (resolved.isSuperAdmin) return true;
-    const target =
-      subjectById.get(targetId) ||
-      (targetId === caller.userId ? callerSubject : null);
+    const target = getTargetSubject(targetId);
     if (!target) return false;
     return (
-      resolved.canAccessTargetMember("work.record_edit", target, orgNodes) ||
+      resolved.canAccessTargetMember("work.realtime_view", target, orgNodes) ||
       resolved.canAccessTargetMember("work.realtime_edit", target, orgNodes)
+    );
+  };
+
+  const canViewMemberWork = (targetId: string): boolean =>
+    canViewRecognizedWork(targetId) || canViewPastRealtimeWork(targetId);
+
+  // 3) 인정 근무(굵은 막대) 편집: [근무 편집(work.record_edit)]만 독립 적용 (실시간 편집과 분리!)
+  const canEditRecognizedWork = (targetId: string): boolean => {
+    if (!targetId) return false;
+    if (resolved.isSuperAdmin) return true;
+    const target = getTargetSubject(targetId);
+    if (!target) return false;
+    return resolved.canAccessTargetMember("work.record_edit", target, orgNodes);
+  };
+
+  // 4) 실시간 근무 기록(얇은 줄) 편집: [구성원 실시간 근무 기록 편집(work.realtime_edit)]만 독립 적용
+  const canEditRealtimeWork = (targetId: string): boolean => {
+    if (!targetId) return false;
+    if (resolved.isSuperAdmin) return true;
+    const target = getTargetSubject(targetId);
+    if (!target) return false;
+    return resolved.canAccessTargetMember(
+      "work.realtime_edit",
+      target,
+      orgNodes
     );
   };
 
   return {
     resolved,
     subjectById,
+    canViewRecognizedWork,
+    canViewPastRealtimeWork,
     canViewMemberWork,
-    canEditMemberWork,
+    canEditRecognizedWork,
+    canEditRealtimeWork,
   };
 }
 
@@ -751,12 +795,75 @@ export async function GET(req: NextRequest) {
       (r: any) =>
         r.work_date >= rangeStart &&
         r.work_date <= rangeEnd &&
-        permGuard.canViewMemberWork(String(r.instructor_id))
+        permGuard.canViewRecognizedWork(String(r.instructor_id))
     );
 
     const visibleLeaveApprovals = leaveApprovals.filter((doc: any) =>
       permGuard.canViewMemberWork(String(doc.drafter_id))
     );
+
+    // 실시간 근무 기록(얇은 줄) 조회 — 당일 진행분은 허용 대상에게 표시, 지나간 날짜는 [구성원 실시간 근무 기록 조회] 보유자에게만 표시
+    let visibleRealtimeLogs: HqRealtimeWorkLog[] = [];
+    let pendingWorkApprovals: {
+      approval_id: string;
+      doc_no: string;
+      title: string;
+      status: string;
+      target_member_id: string;
+      work_date: string;
+      after_in_minutes: number;
+      after_out_minutes: number;
+      after_policy_name: string;
+    }[] = [];
+
+    try {
+      const [rtLogsByKey, wfStore, pendingGenRes] = await Promise.all([
+        readRealtimeWorkLogsServer(supabaseAdmin).catch(() => ({})),
+        readWorkflowMetaPayload(supabaseAdmin).catch(() => ({
+          docMetaById: {} as Record<string, any>,
+          starredByUser: {},
+          savedViewsByUser: {},
+        })),
+        supabaseAdmin
+          .from("hq_approval_doc")
+          .select("approval_id, doc_no, title, status, effective_date")
+          .eq("doc_type", "GENERAL")
+          .in("status", ["PENDING", "IN_PROGRESS"])
+          .gte("effective_date", rangeStart)
+          .lte("effective_date", rangeEnd),
+      ]);
+
+      visibleRealtimeLogs = Object.values(rtLogsByKey).filter((log) => {
+        if (!log || log.work_date < rangeStart || log.work_date > rangeEnd) {
+          return false;
+        }
+        const tid = String(log.instructor_id || "");
+        if (log.work_date === todayStr) {
+          return permGuard.canViewMemberWork(tid);
+        }
+        return permGuard.canViewPastRealtimeWork(tid);
+      });
+
+      (pendingGenRes.data || []).forEach((doc: any) => {
+        const meta = wfStore.docMetaById?.[String(doc.approval_id)];
+        const wp = meta?.work_edit_payload;
+        if (!wp) return;
+        if (!permGuard.canViewRecognizedWork(wp.target_member_id)) return;
+        pendingWorkApprovals.push({
+          approval_id: String(doc.approval_id),
+          doc_no: String(doc.doc_no || ""),
+          title: String(doc.title || ""),
+          status: String(doc.status || "PENDING"),
+          target_member_id: wp.target_member_id,
+          work_date: wp.work_date,
+          after_in_minutes: wp.after.in_minutes,
+          after_out_minutes: wp.after.out_minutes,
+          after_policy_name: wp.after.policy_name,
+        });
+      });
+    } catch {
+      visibleRealtimeLogs = [];
+    }
 
     return NextResponse.json({
       success: true,
@@ -773,6 +880,8 @@ export async function GET(req: NextRequest) {
         weeklySummary,
         records: rangeRecords,
         leaveApprovals: visibleLeaveApprovals,
+        realtimeLogs: visibleRealtimeLogs,
+        pendingWorkApprovals,
       },
     });
   } catch (e: any) {
@@ -788,7 +897,7 @@ export async function POST(req: NextRequest) {
 
     const body = await req.json();
     const action = String(body?.action || "CHECK_IN").toUpperCase();
-    const { nowIso, todayStr } = getKstNowParts();
+    const { nowIso, todayStr, nowKstMinutes } = getKstNowParts();
     const supabaseAdmin = getSupabaseAdmin();
 
     if (action === "CHECK_IN") {
@@ -837,6 +946,39 @@ export async function POST(req: NextRequest) {
         .single();
 
       if (saveErr) return apiFail(`출근 기록 실패: ${saveErr.message}`, 500);
+
+      // 실시간 근무 기록(얇은 줄) 저장소에 출근 타각 기록
+      try {
+        const rtLogs = await readRealtimeWorkLogsServer(supabaseAdmin);
+        const rtKey = `${caller.userId}__${todayStr}`;
+        const polName =
+          workMode === "REMOTE"
+            ? "원격근무"
+            : workMode === "OUTSIDE"
+              ? "외근"
+              : "근무";
+        rtLogs[rtKey] = {
+          key: rtKey,
+          instructor_id: caller.userId,
+          member_name: caller.name,
+          department: caller.department,
+          work_date: todayStr,
+          start_min: rtLogs[rtKey]?.start_min ?? nowKstMinutes,
+          end_min: null,
+          policy_name: polName,
+          work_mode: workMode,
+          transitions: rtLogs[rtKey]?.transitions || [],
+          breaks: rtLogs[rtKey]?.breaks || [
+            { id: "brk-lunch", start_min: 720, end_min: 780 },
+          ],
+          is_active: true,
+          updated_at: nowIso,
+        };
+        await writeRealtimeWorkLogsServer(supabaseAdmin, rtLogs);
+      } catch {
+        // 실시간 로그 보조 저장 오류 무시
+      }
+
       notifySlackIfEnabled(
         supabaseAdmin,
         "ATTENDANCE",
@@ -887,6 +1029,50 @@ export async function POST(req: NextRequest) {
         .single();
 
       if (saveErr) return apiFail(`퇴근 기록 실패: ${saveErr.message}`, 500);
+
+      // 실시간 근무 기록(얇은 줄) 종료 시각 확정
+      try {
+        const rtLogs = await readRealtimeWorkLogsServer(supabaseAdmin);
+        const rtKey = `${caller.userId}__${todayStr}`;
+        const kstIn = new Date(
+          new Date(existing.check_in_at).getTime() + 9 * 60 * 60 * 1000
+        );
+        const fallbackStartMin =
+          kstIn.getUTCHours() * 60 + kstIn.getUTCMinutes();
+        const prev = rtLogs[rtKey];
+        rtLogs[rtKey] = {
+          key: rtKey,
+          instructor_id: caller.userId,
+          member_name: caller.name,
+          department: caller.department,
+          work_date: todayStr,
+          start_min: prev?.start_min ?? fallbackStartMin,
+          end_min: Math.max(
+            (prev?.start_min ?? fallbackStartMin) + 5,
+            nowKstMinutes
+          ),
+          policy_name:
+            prev?.policy_name ||
+            (existing.work_mode === "REMOTE"
+              ? "원격근무"
+              : existing.work_mode === "OUTSIDE"
+                ? "외근"
+                : "근무"),
+          work_mode: prev?.work_mode || existing.work_mode || "OFFICE",
+          transitions: prev?.transitions || [],
+          breaks:
+            prev?.breaks ||
+            (breakMinutes > 0
+              ? [{ id: "brk-lunch", start_min: 720, end_min: 720 + breakMinutes }]
+              : []),
+          is_active: false,
+          updated_at: nowIso,
+        };
+        await writeRealtimeWorkLogsServer(supabaseAdmin, rtLogs);
+      } catch {
+        // ignore
+      }
+
       notifySlackIfEnabled(
         supabaseAdmin,
         "ATTENDANCE",
@@ -920,17 +1106,156 @@ export async function POST(req: NextRequest) {
         .single();
 
       if (saveErr) return apiFail(`근무형태 변경 실패: ${saveErr.message}`, 500);
+
+      try {
+        const rtLogs = await readRealtimeWorkLogsServer(supabaseAdmin);
+        const rtKey = `${caller.userId}__${todayStr}`;
+        if (rtLogs[rtKey]) {
+          const polName =
+            workMode === "REMOTE"
+              ? "원격근무"
+              : workMode === "OUTSIDE"
+                ? "외근"
+                : "근무";
+          const transitions = [...(rtLogs[rtKey].transitions || [])];
+          transitions.push({
+            id: `tr-${Date.now()}`,
+            at_min: nowKstMinutes,
+            policy_name: polName,
+            work_mode: workMode,
+          });
+          rtLogs[rtKey] = {
+            ...rtLogs[rtKey],
+            transitions,
+            updated_at: nowIso,
+          };
+          await writeRealtimeWorkLogsServer(supabaseAdmin, rtLogs);
+        }
+      } catch {
+        // ignore
+      }
+
       return NextResponse.json({ success: true, data: saved });
+    }
+
+    // =========================================================================
+    // [구성원 실시간 근무 기록 편집(work.realtime_edit)] 전용 — 얇은 줄(실시간 기록)만 독립 수정!
+    // 인정 근무(굵은 막대 / hq_attendance)에는 영향을 주지 않으며, 승인 없이 즉시 반영됨.
+    // =========================================================================
+    if (action === "UPSERT_REALTIME_LOG" || action === "DELETE_REALTIME_LOG") {
+      const permGuard = await buildWorkPermissionGuard(supabaseAdmin, caller);
+      const targetId = String(body?.instructor_id || caller.userId);
+      if (!permGuard.canEditRealtimeWork(targetId)) {
+        return apiFail(
+          targetId === caller.userId
+            ? "실시간 근무 기록(얇은 줄) 편집 권한이 없습니다. [구성원 실시간 근무 기록 편집] 권한을 확인해 주세요."
+            : "선택한 구성원의 실시간 근무 기록을 편집할 권한(또는 허용 범위)이 없습니다.",
+          403
+        );
+      }
+
+      const workDate = String(body?.work_date || "");
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(workDate)) {
+        return apiFail("유효한 근무 날짜가 필요합니다.");
+      }
+
+      const rtLogs = await readRealtimeWorkLogsServer(supabaseAdmin);
+      const rtKey = `${targetId}__${workDate}`;
+
+      // Flex 정책: 실시간 근무가 현재 진행 중인 상태(활성 상태)에서는 편집 불가, 종료 이후에만 가능
+      if (workDate === todayStr) {
+        const { data: todayAtt } = await supabaseAdmin
+          .from("hq_attendance")
+          .select("status, check_out_at")
+          .eq("instructor_id", targetId)
+          .eq("work_date", todayStr)
+          .maybeSingle();
+
+        const stillRecordingLive =
+          Boolean(rtLogs[rtKey]?.is_active) ||
+          Boolean(todayAtt?.status === "WORKING" && !todayAtt?.check_out_at);
+
+        if (stillRecordingLive) {
+          return apiFail(
+            "실시간 근무가 진행 중인 상태에서는 실시간 기록을 편집할 수 없어요. 근무 종료(퇴근) 이후에 수정해 주세요.",
+            400
+          );
+        }
+      }
+
+      if (action === "DELETE_REALTIME_LOG") {
+        delete rtLogs[rtKey];
+        await writeRealtimeWorkLogsServer(supabaseAdmin, rtLogs);
+        return NextResponse.json({ success: true });
+      }
+
+      const targetSubject = permGuard.subjectById.get(targetId);
+      const startMin = Math.max(
+        0,
+        Math.min(1439, Number(body?.start_min ?? 540))
+      );
+      const rawEnd =
+        body?.end_min === null || body?.end_min === undefined || body?.end_min === ""
+          ? null
+          : Math.max(0, Math.min(1440, Number(body.end_min)));
+      const policyName = String(body?.policy_name || "근무").trim() || "근무";
+      const workMode = (body?.work_mode || "OFFICE") as HqWorkMode;
+
+      const rawBreaks: HqRealtimeBreakSpan[] = Array.isArray(body?.breaks)
+        ? body.breaks
+            .map((b: any, idx: number) => ({
+              id: String(b?.id || `brk-${idx}`),
+              start_min: Math.max(0, Math.min(1439, Number(b?.start_min ?? 720))),
+              end_min: Math.max(0, Math.min(1440, Number(b?.end_min ?? 780))),
+            }))
+            .filter((b: HqRealtimeBreakSpan) => b.end_min > b.start_min)
+        : [];
+
+      const rawTransitions: HqRealtimeModeSegment[] = Array.isArray(
+        body?.transitions
+      )
+        ? body.transitions.map((t: any, idx: number) => ({
+            id: String(t?.id || `tr-${idx}`),
+            at_min: Math.max(0, Math.min(1439, Number(t?.at_min ?? 780))),
+            policy_name: String(t?.policy_name || "근무"),
+            work_mode: (t?.work_mode || "OFFICE") as HqWorkMode,
+          }))
+        : [];
+
+      const nextLog: HqRealtimeWorkLog = {
+        key: rtKey,
+        instructor_id: targetId,
+        member_name: String(
+          body?.member_name || targetSubject?.name || caller.name
+        ),
+        department: String(
+          body?.department || targetSubject?.department || caller.department
+        ),
+        work_date: workDate,
+        start_min: startMin,
+        end_min: rawEnd,
+        policy_name: policyName,
+        work_mode: workMode,
+        transitions: rawTransitions,
+        breaks: rawBreaks,
+        is_active: false,
+        updated_at: nowIso,
+      };
+
+      rtLogs[rtKey] = nextLog;
+      await writeRealtimeWorkLogsServer(supabaseAdmin, rtLogs);
+
+      return NextResponse.json({ success: true, data: nextLog });
     }
 
     if (action === "MANUAL_UPSERT") {
       const permGuard = await buildWorkPermissionGuard(supabaseAdmin, caller);
       const targetId = String(body?.instructor_id || caller.userId);
-      if (!permGuard.canEditMemberWork(targetId)) {
+      if (!permGuard.canEditRecognizedWork(targetId)) {
         return apiFail(
           targetId === caller.userId
-            ? "근무 시간 편집 권한이 없습니다. 권한 설정에서 [근무 편집] 권한을 확인해 주세요."
-            : "선택한 구성원의 근무 기록을 편집할 권한(또는 허용 범위)이 없습니다.",
+            ? "인정 근무(굵은 막대) 편집 권한이 없습니다. 권한 설정에서 [근무 편집] 권한을 확인해 주세요."
+            : "선택한 구성원의 인정 근무 기록을 편집할 권한(또는 허용 범위)이 없습니다.",
           403
         );
       }
@@ -1040,14 +1365,15 @@ export async function POST(req: NextRequest) {
 
       const upserts: any[] = [];
       const deleteKeys: { instructor_id: string; work_date: string; attendance_id?: string }[] = [];
+      let submittedApprovals = 0;
 
       for (const item of items.slice(0, 200)) {
         const targetId = String(item?.instructor_id || caller.userId);
-        if (!permGuard.canEditMemberWork(targetId)) {
+        if (!permGuard.canEditRecognizedWork(targetId)) {
           return apiFail(
             targetId === caller.userId
-              ? "근무 시간 편집 권한이 없습니다. 권한 설정에서 [근무 편집] 권한을 확인해 주세요."
-              : "선택한 구성원의 근무 기록을 편집할 권한(또는 허용 범위)이 없습니다.",
+              ? "인정 근무(굵은 막대) 편집 권한이 없습니다. 권한 설정에서 [근무 편집] 권한을 확인해 주세요."
+              : "선택한 구성원의 인정 근무 기록을 편집할 권한(또는 허용 범위)이 없습니다.",
             403
           );
         }
@@ -1071,6 +1397,111 @@ export async function POST(req: NextRequest) {
               `근태 마감(${lockedHit.title}: ${lockedHit.start_date}~${lockedHit.end_date})된 기간의 기록은 수정할 수 없습니다.`,
               403
             );
+          }
+        }
+
+        // 승인 정책(연장근무 / 휴일근무 / 야간근무 / 과거근무 수정 / 근무정책 등)이 발동한 경우 워크플로우 결재 문서 생성
+        const approvalSteps: {
+          approver_id: string;
+          approver_name: string;
+          approver_rank: HqRankCode;
+          approver_title: string;
+        }[] = Array.isArray(item?.approval_steps) ? item.approval_steps : [];
+
+        if (
+          item?.requires_approval &&
+          approvalSteps.length > 0 &&
+          item?.work_edit_payload
+        ) {
+          const wp = item.work_edit_payload as HqWorkEditApprovalPayload;
+          const nonSelfSteps = approvalSteps.filter(
+            (s) => s.approver_id && s.approver_id !== caller.userId
+          );
+
+          if (nonSelfSteps.length > 0) {
+            const ym = `${nowIso.slice(0, 4)}${nowIso.slice(5, 7)}`;
+            const docNo = `WRK-${ym}-${String(
+              Math.floor(1000 + Math.random() * 9000)
+            )}`;
+            const reasonSummary =
+              wp.triggered_reasons.length > 1
+                ? `${wp.triggered_reasons[0]} 외 ${wp.triggered_reasons.length - 1}건`
+                : wp.triggered_reasons[0] || "근무 일정 변경";
+
+            const { data: createdDoc, error: docErr } = await supabaseAdmin
+              .from("hq_approval_doc")
+              .insert({
+                doc_no: docNo,
+                doc_type: "GENERAL",
+                title: `[근무 승인] ${reasonSummary} (${workDate})`,
+                content:
+                  wp.reason_note ||
+                  `${wp.target_member_name} 님의 ${workDate} 인정 근무 일정 승인 요청입니다.`,
+                drafter_id: caller.userId,
+                drafter_name: caller.name,
+                drafter_dept: caller.department,
+                drafter_rank: caller.rankCode,
+                drafter_title: caller.jobTitle,
+                status: "PENDING",
+                current_step_order: 1,
+                effective_date: workDate,
+                end_date: workDate,
+                amount: 0,
+                submitted_at: nowIso,
+                updated_at: nowIso,
+              })
+              .select("*")
+              .single();
+
+            if (!docErr && createdDoc) {
+              const stepRows = nonSelfSteps.map((st, idx) => ({
+                approval_id: createdDoc.approval_id,
+                step_order: idx + 1,
+                approver_id: st.approver_id,
+                approver_name: st.approver_name,
+                approver_rank: st.approver_rank || "TEAM_LEAD",
+                approver_title: st.approver_title || "승인자",
+                status: idx === 0 ? "CURRENT" : "WAITING",
+              }));
+              await supabaseAdmin.from("hq_approval_step").insert(stepRows);
+
+              try {
+                const wfStore = await readWorkflowMetaPayload(supabaseAdmin);
+                const ccIds: string[] = Array.isArray(item?.cc_member_ids)
+                  ? item.cc_member_ids
+                  : [];
+                const ccNames: string[] = Array.isArray(item?.cc_member_names)
+                  ? item.cc_member_names
+                  : [];
+                wfStore.docMetaById[String(createdDoc.approval_id)] = {
+                  approval_id: String(createdDoc.approval_id),
+                  form_id: "wk-work-approval",
+                  form_title: reasonSummary,
+                  form_icon: "⏱️",
+                  cc_member_ids: ccIds,
+                  cc_member_names: ccNames,
+                  field_values: {
+                    근무일: workDate,
+                    발생사유: wp.triggered_reasons.join(", "),
+                    요청사유: wp.reason_note || "-",
+                  },
+                  field_labels: {
+                    근무일: "근무일",
+                    발생사유: "승인 조건",
+                    요청사유: "사유",
+                  },
+                  work_edit_payload: wp,
+                  attachments: [],
+                  comments: [],
+                };
+                await writeWorkflowMetaPayload(supabaseAdmin, wfStore);
+              } catch {
+                // ignore meta write error
+              }
+
+              submittedApprovals += 1;
+              continue;
+            }
           }
         }
 
@@ -1165,14 +1596,18 @@ export async function POST(req: NextRequest) {
 
       return NextResponse.json({
         success: true,
-        data: { upserted: upserts.length, deleted: deleteKeys.length },
+        data: {
+          upserted: upserts.length,
+          deleted: deleteKeys.length,
+          submittedApprovals,
+        },
       });
     }
 
     if (action === "BATCH_RECURRING_UPSERT") {
       const permGuard = await buildWorkPermissionGuard(supabaseAdmin, caller);
       const targetId = String(body?.instructor_id || caller.userId);
-      if (!permGuard.canEditMemberWork(targetId)) {
+      if (!permGuard.canEditRecognizedWork(targetId)) {
         return apiFail(
           targetId === caller.userId
             ? "근무 편집 권한이 없어 반복 근무 일정을 등록할 수 없습니다."
@@ -1269,7 +1704,9 @@ export async function POST(req: NextRequest) {
 
       const unauthorizedRow = rows
         .slice(0, 500)
-        .find((r) => !permGuard.canEditMemberWork(String(r.instructor_id || "")));
+        .find(
+          (r) => !permGuard.canEditRecognizedWork(String(r.instructor_id || ""))
+        );
       if (unauthorizedRow) {
         return apiFail(
           `업로드 데이터 중 '${unauthorizedRow.member_name || "구성원"}' 님의 근무 기록을 편집할 권한이 없습니다.`,
@@ -1363,7 +1800,7 @@ export async function POST(req: NextRequest) {
         return apiFail("이미 삭제되었거나 존재하지 않는 기록입니다.", 404);
       }
       const permGuard = await buildWorkPermissionGuard(supabaseAdmin, caller);
-      if (!permGuard.canEditMemberWork(String(existing.instructor_id))) {
+      if (!permGuard.canEditRecognizedWork(String(existing.instructor_id))) {
         return apiFail(
           existing.instructor_id === caller.userId
             ? "근무 편집 권한이 없어 근무 기록을 삭제할 수 없습니다."

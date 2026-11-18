@@ -10,13 +10,17 @@ import type {
   HqLeaveAdjustmentItem,
   HqLeavePromotionCampaign,
   HqLeavePromotionTargetItem,
+  HqRealtimeWorkLog,
   HqUploadedMonthlyUsageItem,
 } from "./types";
 
 export const LEAVES_LEDGER_SETTING_KEY = "LEAVES_LEDGER";
 export const WORK_MGMT_SETTING_KEY = "WORK_MGMT_STATE";
+export const REALTIME_LOGS_SETTING_KEY = "HQ_REALTIME_WORK_LOGS";
 export const LEAVES_LEDGER_PATH = "hq_system_config/leaves_ledger.json";
 export const WORK_MGMT_STORAGE_PATH = "hq_system_config/work_management.json";
+export const REALTIME_LOGS_STORAGE_PATH =
+  "hq_system_config/realtime_work_logs.json";
 
 export interface StoredLeavesLedger {
   adjustments: HqLeaveAdjustmentItem[];
@@ -127,5 +131,35 @@ export async function writeWorkMgmtStateServer(
     WORK_MGMT_SETTING_KEY,
     state,
     WORK_MGMT_STORAGE_PATH
+  );
+}
+
+export interface StoredRealtimeWorkLogs {
+  logsByKey: Record<string, HqRealtimeWorkLog>;
+}
+
+export async function readRealtimeWorkLogsServer(
+  supabaseAdmin: SupabaseClient
+): Promise<Record<string, HqRealtimeWorkLog>> {
+  const parsed = await readHqKvPayload<Partial<StoredRealtimeWorkLogs>>(
+    supabaseAdmin,
+    REALTIME_LOGS_SETTING_KEY,
+    REALTIME_LOGS_STORAGE_PATH
+  );
+  if (!parsed || !parsed.logsByKey || typeof parsed.logsByKey !== "object") {
+    return {};
+  }
+  return parsed.logsByKey;
+}
+
+export async function writeRealtimeWorkLogsServer(
+  supabaseAdmin: SupabaseClient,
+  logsByKey: Record<string, HqRealtimeWorkLog>
+): Promise<void> {
+  await writeHqKvPayload(
+    supabaseAdmin,
+    REALTIME_LOGS_SETTING_KEY,
+    { logsByKey },
+    REALTIME_LOGS_STORAGE_PATH
   );
 }

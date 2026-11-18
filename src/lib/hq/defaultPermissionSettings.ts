@@ -609,16 +609,18 @@ export const PERMISSION_CATEGORIES: HqPermissionCatalogCategory[] = [
         key: "work.realtime_view",
         title: "구성원 실시간 근무 기록 조회",
         description:
-          "선택 범위 구성원들의 실시간 근무 기록을 조회할 수 있어요.",
+          "선택 범위 구성원들의 지나간 실시간 근무 기록(얇은 줄)을 조회할 수 있어요.",
         scopeMode: "WITH_SELF",
+        defaultScope: "본인만",
         supportsScope: true,
       },
       {
         key: "work.realtime_edit",
         title: "구성원 실시간 근무 기록 편집",
         description:
-          "선택 범위 구성원들의 실시간 근무 기록을 편집할 수 있어요.",
+          "선택 범위 구성원들의 실시간 근무 기록(얇은 줄)을 종료 후 사후 편집할 수 있어요.",
         scopeMode: "WITH_SELF",
+        defaultScope: "본인만",
         supportsScope: true,
         prerequisites: [
           { permKey: "work.realtime_view", matchChildScope: true },

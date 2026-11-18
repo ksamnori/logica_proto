@@ -20,9 +20,12 @@ import {
 import {
   calcDraftNetWorkedMinutes,
   type DraftWorkEdit,
+  evaluateDraftsApprovalSummary,
   FlexApprovalSidePanel,
   FlexDraftFloatingBar,
   FlexInlineWorkPopover,
+  FlexRealtimeHoverTooltip,
+  FlexRealtimeRecordEditModal,
   type InlineWorkPopoverTarget,
   minutesToHm24,
 } from "@/components/hq/attendance/HqFlexInlineWorkEditor";
@@ -41,6 +44,8 @@ import type {
   HqCustomLeaveItem,
   HqHolidayItem,
   HqMember,
+  HqRealtimeBreakSpan,
+  HqRealtimeWorkLog,
   HqWorkFormPolicy,
   HqWorkMode,
   HqWorkRuleItem,
@@ -63,6 +68,53 @@ interface LeaveApprovalLite {
   end_date: string | null;
   leave_type: string | null;
   leave_days: number;
+}
+
+interface PendingWorkApprovalLite {
+  approval_id: string;
+  doc_no: string;
+  title: string;
+  status: string;
+  target_member_id: string;
+  work_date: string;
+  after_in_minutes: number;
+  after_out_minutes: number;
+  after_policy_name: string;
+}
+
+function buildRealtimeSubSegments(
+  startMin: number,
+  endMin: number,
+  breaks: HqRealtimeBreakSpan[]
+): { from: number; to: number; isBreak: boolean }[] {
+  const safeEnd = Math.max(startMin + 1, endMin);
+  const validBreaks = [...(breaks || [])]
+    .map((b) => ({
+      start: Math.max(startMin, b.start_min),
+      end: Math.min(safeEnd, b.end_min),
+    }))
+    .filter((b) => b.end > b.start)
+    .sort((a, b) => a.start - b.start);
+
+  const segments: { from: number; to: number; isBreak: boolean }[] = [];
+  let cursor = startMin;
+  for (const brk of validBreaks) {
+    if (brk.start > cursor) {
+      segments.push({ from: cursor, to: brk.start, isBreak: false });
+    }
+    if (brk.end > Math.max(cursor, brk.start)) {
+      segments.push({
+        from: Math.max(cursor, brk.start),
+        to: brk.end,
+        isBreak: true,
+      });
+      cursor = brk.end;
+    }
+  }
+  if (cursor < safeEnd) {
+    segments.push({ from: cursor, to: safeEnd, isBreak: false });
+  }
+  return segments;
 }
 
 const WEEKDAY_KO = ["일", "월", "화", "수", "목", "금", "토"] as const;
@@ -265,6 +317,10 @@ export default function HqAttendancePage() {
   const [myWeeklyMinutes, setMyWeeklyMinutes] = useState(0);
   const [records, setRecords] = useState<HqAttendanceRecord[]>([]);
   const [leaveApprovals, setLeaveApprovals] = useState<LeaveApprovalLite[]>([]);
+  const [realtimeLogs, setRealtimeLogs] = useState<HqRealtimeWorkLog[]>([]);
+  const [pendingWorkApprovals, setPendingWorkApprovals] = useState<
+    PendingWorkApprovalLite[]
+  >([]);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
 
@@ -275,13 +331,35 @@ export default function HqAttendancePage() {
   );
   const [memo, setMemo] = useState("");
 
-  // 플렉스 인라인 실시간 근무 편집 팝오버 + 변경 드래프트 + 승인·참조 우측 패널 상태
+  // 플렉스 인라인 인정 근무(굵은 막대) 편집 팝오버 + 변경 드래프트 + 승인·참조 우측 패널 상태
   const [inlineTarget, setInlineTarget] =
     useState<InlineWorkPopoverTarget | null>(null);
   const [draftEdits, setDraftEdits] = useState<Record<string, DraftWorkEdit>>(
     {}
   );
   const [approvalPanelOpen, setApprovalPanelOpen] = useState(false);
+  const [approvalReasonByKey, setApprovalReasonByKey] = useState<
+    Record<string, string>
+  >({});
+
+  // 플렉스 실시간 근무 기록(굵은 막대 위의 가느다란 막대) 툴팁 & [실시간 기록 수정] 모달 상태
+  const [hoveredRealtimeTip, setHoveredRealtimeTip] = useState<{
+    key: string;
+    startMin: number;
+    endMin: number | null;
+    isActiveNow: boolean;
+    breaks: HqRealtimeBreakSpan[];
+    canEdit: boolean;
+    x: number;
+    y: number;
+  } | null>(null);
+  const [realtimeEditModal, setRealtimeEditModal] = useState<{
+    member: HqMember;
+    workDate: string;
+    existingLog: HqRealtimeWorkLog | null;
+    defaultStartMin: number;
+    defaultEndMin: number;
+  } | null>(null);
 
   // 모달 상태
   const [recurringOpen, setRecurringOpen] = useState(false);
@@ -316,14 +394,17 @@ export default function HqAttendancePage() {
     return () => document.removeEventListener("mousedown", onDocClick);
   }, []);
 
-  // 권한 설정(permission_settings) 기반 열람 · 편집 범위 정밀 판정
+  // =========================================================================
+  // 권한 설정(permission_settings) 4종 독립 판정 (Flex 90c09d61 / 8e9c06fa / 6c7699e3 동일!)
+  // 1) [근무 편집 (work.record_edit)] -> 굵은 막대(인정 근무)만 수정 가능 (+ 반복 일정 활성화)
+  // 2) [구성원 실시간 근무 기록 편집 (work.realtime_edit)] -> 가느다란 막대(실시간 기록)만 수정 가능
+  // 3) [구성원 실시간 근무 기록 조회 (work.realtime_view)] -> 지나간 날짜의 가느다란 막대 조회 가능
+  // 4) [근무 조회 (work.record_view)] -> 타 구성원의 굵은 막대(인정 근무) 조회 가능
+  // =========================================================================
   const canEditTargetWork = useCallback(
     (target: HqMember | null | undefined): boolean => {
       if (!target) return false;
-      return Boolean(
-        canAccessTargetPerm("work.record_edit", target) ||
-          canAccessTargetPerm("work.realtime_edit", target)
-      );
+      return Boolean(canAccessTargetPerm("work.record_edit", target));
     },
     [canAccessTargetPerm]
   );
@@ -333,16 +414,43 @@ export default function HqAttendancePage() {
     [canEditTargetWork, me]
   );
 
-  const canViewTargetWork = useCallback(
+  const canEditRealtimeWork = useCallback(
+    (target: HqMember | null | undefined): boolean => {
+      if (!target) return false;
+      return Boolean(canAccessTargetPerm("work.realtime_edit", target));
+    },
+    [canAccessTargetPerm]
+  );
+
+  const canViewPastRealtime = useCallback(
+    (target: HqMember | null | undefined): boolean => {
+      if (!target) return false;
+      return Boolean(
+        canAccessTargetPerm("work.realtime_view", target) ||
+          canAccessTargetPerm("work.realtime_edit", target)
+      );
+    },
+    [canAccessTargetPerm]
+  );
+
+  const canViewRecognizedWork = useCallback(
     (target: HqMember | null | undefined): boolean => {
       if (!target) return false;
       if (target.instructor_id === me?.instructor_id) return true;
       return Boolean(
         canAccessTargetPerm("work.record_view", target) ||
-          canAccessTargetPerm("work.realtime_view", target)
+          canAccessTargetPerm("work.record_edit", target)
       );
     },
     [canAccessTargetPerm, me?.instructor_id]
+  );
+
+  const canViewTargetWork = useCallback(
+    (target: HqMember | null | undefined): boolean => {
+      if (!target) return false;
+      return Boolean(canViewRecognizedWork(target) || canViewPastRealtime(target));
+    },
+    [canViewPastRealtime, canViewRecognizedWork]
   );
 
   const canViewAnyOtherMember = useMemo(
@@ -350,7 +458,9 @@ export default function HqAttendancePage() {
       Boolean(
         isHqAdmin ||
           hasHqPerm("work.record_view") ||
-          hasHqPerm("work.realtime_view")
+          hasHqPerm("work.record_edit") ||
+          hasHqPerm("work.realtime_view") ||
+          hasHqPerm("work.realtime_edit")
       ),
     [hasHqPerm, isHqAdmin]
   );
@@ -506,6 +616,8 @@ export default function HqAttendancePage() {
           myWeeklyMinutes: number;
           records: HqAttendanceRecord[];
           leaveApprovals?: LeaveApprovalLite[];
+          realtimeLogs?: HqRealtimeWorkLog[];
+          pendingWorkApprovals?: PendingWorkApprovalLite[];
         };
       }>(
         `/api/hq/attendance?start_date=${activeQueryRange.start}&end_date=${activeQueryRange.end}`
@@ -515,6 +627,8 @@ export default function HqAttendancePage() {
       setMyWeeklyMinutes(res.data?.myWeeklyMinutes || 0);
       setRecords(res.data?.records || []);
       setLeaveApprovals(res.data?.leaveApprovals || []);
+      setRealtimeLogs(res.data?.realtimeLogs || []);
+      setPendingWorkApprovals(res.data?.pendingWorkApprovals || []);
 
       if (res.data?.myToday) {
         const m = res.data.myToday.work_mode;
@@ -537,7 +651,11 @@ export default function HqAttendancePage() {
     loadAttendance();
     const onSync = () => loadAttendance();
     window.addEventListener("hq:attendance-updated", onSync);
-    return () => window.removeEventListener("hq:attendance-updated", onSync);
+    window.addEventListener("hq:approval-updated", onSync);
+    return () => {
+      window.removeEventListener("hq:attendance-updated", onSync);
+      window.removeEventListener("hq:approval-updated", onSync);
+    };
   }, [loadAttendance]);
 
   // (instructor_id + work_date) 빠른 조회 맵
@@ -546,6 +664,20 @@ export default function HqAttendancePage() {
     records.forEach((r) => m.set(`${r.instructor_id}__${r.work_date}`, r));
     return m;
   }, [records]);
+
+  const realtimeLogByMemberDate = useMemo(() => {
+    const m = new Map<string, HqRealtimeWorkLog>();
+    realtimeLogs.forEach((rt) => m.set(`${rt.instructor_id}__${rt.work_date}`, rt));
+    return m;
+  }, [realtimeLogs]);
+
+  const pendingWorkApprovalByMemberDate = useMemo(() => {
+    const m = new Map<string, PendingWorkApprovalLite>();
+    pendingWorkApprovals.forEach((pa) =>
+      m.set(`${pa.target_member_id}__${pa.work_date}`, pa)
+    );
+    return m;
+  }, [pendingWorkApprovals]);
 
   const leaveApprovalByMemberDate = useMemo(() => {
     const m = new Map<string, LeaveApprovalLite>();
@@ -570,7 +702,7 @@ export default function HqAttendancePage() {
     [nowMinutesOfDay]
   );
 
-  // 오늘 내 실시간 경과 근무분 계산
+  // 오늘 내 실시간 경과 근무분 계산 (상단 체크인 스튜디오 배지용)
   const liveTodayElapsedMinutes = useMemo(() => {
     if (!myToday) return 0;
     if (myToday.status === "WORKING" && myToday.check_in_at) {
@@ -597,7 +729,7 @@ export default function HqAttendancePage() {
 
   const draftList = useMemo(() => Object.values(draftEdits), [draftEdits]);
 
-  // 내 근무 주기(주간) 총 시간 계산 (계획 + 실기록 + 실시간 편집 드래프트 통합)
+  // 내 근무 주기(주간) 총 시간 계산 — 플렉스 규칙대로 굵은 막대(인정 근무) 기준으로만 산정!
   const myPeriodStats = useMemo(() => {
     const fullDates = buildDateList(
       activeQueryRange.start,
@@ -620,7 +752,6 @@ export default function HqAttendancePage() {
 
       if (draft) {
         if (draft.actionMode === "DELETE") {
-          // 삭제 예정인 날은 0분 처리
           return;
         }
         const m = calcDraftNetWorkedMinutes(draft);
@@ -632,16 +763,10 @@ export default function HqAttendancePage() {
 
       if (rec) {
         let m = Number(rec.worked_minutes || 0);
-        if (rec.status === "WORKING" && rec.check_in_at) {
-          const el = Math.max(
-            0,
-            Math.round(
-              (nowClock.getTime() - new Date(rec.check_in_at).getTime()) / 60000
-            )
-          );
-          m = Math.max(0, el - (el >= 300 ? 60 : 0));
+        if (rec.status === "WORKING") {
+          m = ruleDailyMin; // 당일 근무 진행 중에도 인정 근무(굵은 막대) 소정근로 시간 유지
         } else if (rec.status === "LEAVE" && rec.work_mode === "LEAVE") {
-          m = ruleDailyMin; // 유급휴가 소정근로 인정
+          m = ruleDailyMin;
         }
         totalLoggedMin += m;
         totalEffectiveMin += m;
@@ -666,8 +791,36 @@ export default function HqAttendancePage() {
     recordByMemberDate,
     holidayMap,
     myRule,
-    nowClock,
   ]);
+
+  // 플렉스 근무 설정(승인·참조 조건 + 근무 정책) 기반 변경 일정 승인·참조 평가
+  const evaluatedApprovals = useMemo(
+    () =>
+      evaluateDraftsApprovalSummary({
+        drafts: draftList,
+        todayStr,
+        weeklyTotalMinutes: myPeriodStats.totalEffectiveMin,
+        me,
+        members: activeMembers,
+        approvalPolicies: companySettings?.extra_settings?.approval_policies,
+        workConditionRules: companySettings?.extra_settings?.work_condition_rules,
+        workFormPolicies,
+        substituteRules: companySettings?.extra_settings?.substitute_approvals,
+        reasonByKey: approvalReasonByKey,
+      }),
+    [
+      activeMembers,
+      approvalReasonByKey,
+      companySettings?.extra_settings?.approval_policies,
+      companySettings?.extra_settings?.substitute_approvals,
+      companySettings?.extra_settings?.work_condition_rules,
+      draftList,
+      me,
+      myPeriodStats.totalEffectiveMin,
+      todayStr,
+      workFormPolicies,
+    ]
+  );
 
   const draftWarnings = useMemo(() => {
     const warns: string[] = [];
@@ -747,7 +900,34 @@ export default function HqAttendancePage() {
     }
   };
 
-  // 플렉스 인라인 근무 편집 팝오버 열기 (권한 설정의 [근무 편집] 허용 범위 엄격 검증!)
+  const computeBaselineSnapshotForTarget = useCallback(
+    (t: InlineWorkPopoverTarget): DraftWorkEdit["baselineSnapshot"] => {
+      const exists = Boolean(t.hadExistingRecord || t.wasScheduledWorkday);
+      const gross =
+        t.baseline.outMinutes >= t.baseline.inMinutes
+          ? t.baseline.outMinutes - t.baseline.inMinutes
+          : 1440 - t.baseline.inMinutes + t.baseline.outMinutes;
+      const workedMinutes = exists
+        ? Math.max(0, gross - Math.max(0, t.baseline.breakMinutes))
+        : 0;
+      const overtimeMinutes = exists
+        ? Math.max(0, workedMinutes - t.ruleDailyMinutes)
+        : 0;
+      return {
+        exists,
+        policyName: t.baseline.policyName,
+        workMode: t.baseline.workMode,
+        inMinutes: t.baseline.inMinutes,
+        outMinutes: t.baseline.outMinutes,
+        breakMinutes: t.baseline.breakMinutes,
+        workedMinutes,
+        overtimeMinutes,
+      };
+    },
+    []
+  );
+
+  // 플렉스 인라인 인정 근무(굵은 막대) 편집 팝오버 열기 ([근무 편집 work.record_edit] 권한 전용!)
   const openEntryForDate = (
     targetMember: HqMember | null,
     ymd: string,
@@ -816,7 +996,6 @@ export default function HqAttendancePage() {
       "본사 편집·연구실";
     const baseMemo = existing?.memo || "";
 
-    // DOM 상 해당 날짜 근무 바 위치 우선 탐색 -> 바로 아래에 팝오버 정박 (Screenshot 0fed5963 완벽 재현)
     let anchorRect = {
       top: 240,
       bottom: 276,
@@ -851,7 +1030,7 @@ export default function HqAttendancePage() {
       memo: baseMemo,
     };
 
-    setInlineTarget({
+    const nextTarget: InlineWorkPopoverTarget = {
       key,
       memberId: member.instructor_id,
       memberName: member.name,
@@ -860,11 +1039,14 @@ export default function HqAttendancePage() {
       attendanceId: existing?.attendance_id,
       hadExistingRecord: Boolean(existing),
       wasScheduledWorkday,
+      ruleDailyMinutes: ruleWorkMin,
       anchorRect,
       baseline,
-    });
+    };
 
-    // [+ 추가하기 > 근무 > 원격근무/외근 등]으로 진입한 경우 즉시 해당 정책으로 드래프트 반영
+    const baseSnap = computeBaselineSnapshotForTarget(nextTarget);
+    setInlineTarget(nextTarget);
+
     if (opts?.presetMode || (opts?.policyLabel && opts.policyLabel !== "휴게")) {
       const nextMode = opts.presetMode || baseMode;
       const nextPolicy = opts.policyLabel || basePolicyName;
@@ -892,11 +1074,13 @@ export default function HqAttendancePage() {
             breakMinutes: prev[key]?.breakMinutes ?? baseBreakMin,
             locationNote: nextLoc,
             memo: prev[key]?.memo ?? baseMemo,
+            wasScheduledWorkday,
+            ruleDailyMinutes: ruleWorkMin,
+            baselineSnapshot: baseSnap,
           },
         }));
       }
     } else if (!existing && !wasScheduledWorkday && !draftEdits[key]) {
-      // 비근무일(토·일·공휴일) 행 클릭 시 즉시 9~6 예정 드래프트 프리뷰 생성
       setDraftEdits((prev) => ({
         ...prev,
         [key]: {
@@ -906,9 +1090,99 @@ export default function HqAttendancePage() {
           department: member.department || "미지정",
           workDate: ymd,
           actionMode: "UPSERT",
+          wasScheduledWorkday,
+          ruleDailyMinutes: ruleWorkMin,
+          baselineSnapshot: baseSnap,
           ...baseline,
         },
       }));
+    }
+  };
+
+  // 플렉스 [실시간 기록 수정] 모달 열기 ([구성원 실시간 근무 기록 편집 work.realtime_edit] 권한 전용 — 가느다란 막대 독립 수정!)
+  const openRealtimeEditForDate = (targetMember: HqMember | null, ymd: string) => {
+    const member = targetMember || me;
+    if (!member) return;
+    if (!canEditRealtimeWork(member)) return;
+
+    const key = `${member.instructor_id}__${ymd}`;
+    const storedRt = realtimeLogByMemberDate.get(key) || null;
+    const rec = recordByMemberDate.get(key);
+    const rule = resolveMemberWorkRule(
+      member.name,
+      member.profile_extra?.work_schedule_type
+    );
+    const dowKo = WEEKDAY_KO[parseYmdLocal(ymd).getDay()];
+    const holiday = holidayMap.get(ymd);
+    const isScheduledWorkday = rule.work_days.includes(dowKo) && !holiday;
+
+    const dayCustom =
+      rule.per_day_custom_enabled && rule.per_day_schedule?.[dowKo]
+        ? rule.per_day_schedule[dowKo]
+        : null;
+    const ruleStartMin =
+      parseHmToMinutes(dayCustom?.start_time || rule.start_time) ?? 540;
+    const ruleWorkMin =
+      Number(dayCustom ? dayCustom.work_hours : rule.daily_work_hours ?? 8) *
+        60 +
+      Number(dayCustom ? dayCustom.work_minutes : rule.daily_work_minutes ?? 0);
+    const ruleBreakMin = calcBreakMinutes(rule);
+    const ruleEndMin = ruleStartMin + ruleWorkMin + ruleBreakMin;
+
+    // Flex e97c4fe6 정책: 당일 실시간 근무가 진행 중일 때는 편집 불가 (종료 이후에만 가능)
+    if (ymd === todayStr) {
+      const isLiveRecording =
+        Boolean(storedRt?.is_active) ||
+        Boolean(rec?.status === "WORKING" && !rec?.check_out_at) ||
+        Boolean(
+          !storedRt &&
+            isScheduledWorkday &&
+            rule.auto_record_enabled !== false &&
+            nowMinutesOfDay >= ruleStartMin &&
+            nowMinutesOfDay < ruleEndMin
+        );
+      if (isLiveRecording) {
+        alert(
+          "실시간 근무가 진행 중인 상태에서는 실시간 기록(얇은 줄)을 편집할 수 없어요.\n실시간 근무 종료(퇴근) 이후에 수정해 주세요."
+        );
+        return;
+      }
+    }
+
+    const defaultStartMin = rec?.check_in_at
+      ? isoToMinutesOfDay(rec.check_in_at, ymd) ?? ruleStartMin
+      : ruleStartMin;
+    const defaultEndMin =
+      rec?.check_out_at && rec.status === "DONE"
+        ? isoToMinutesOfDay(rec.check_out_at, ymd) ?? ruleEndMin
+        : ruleEndMin;
+
+    setHoveredRealtimeTip(null);
+    setRealtimeEditModal({
+      member,
+      workDate: ymd,
+      existingLog: storedRt,
+      defaultStartMin,
+      defaultEndMin,
+    });
+  };
+
+  const handleSaveRealtimeModal = async (
+    action: "UPSERT_REALTIME_LOG" | "DELETE_REALTIME_LOG",
+    payload: Record<string, any>
+  ) => {
+    try {
+      await hqFetch("/api/hq/attendance", {
+        method: "POST",
+        body: {
+          action,
+          ...payload,
+        },
+      });
+      await loadAttendance();
+    } catch (err: any) {
+      alert(err?.message || "실시간 근무 기록 저장에 실패했습니다.");
+      throw err;
     }
   };
 
@@ -927,6 +1201,7 @@ export default function HqAttendancePage() {
 
   const handleStageDeleteDraft = useCallback(
     (t: InlineWorkPopoverTarget) => {
+      const snap = computeBaselineSnapshotForTarget(t);
       setDraftEdits((prev) => ({
         ...prev,
         [t.key]: {
@@ -937,39 +1212,74 @@ export default function HqAttendancePage() {
           workDate: t.workDate,
           attendanceId: t.attendanceId,
           actionMode: "DELETE",
+          wasScheduledWorkday: t.wasScheduledWorkday,
+          ruleDailyMinutes: t.ruleDailyMinutes,
+          baselineSnapshot: snap,
           ...t.baseline,
         },
       }));
     },
-    []
+    [computeBaselineSnapshotForTarget]
   );
 
   const handleCancelAllDrafts = useCallback(() => {
     setDraftEdits({});
+    setApprovalReasonByKey({});
     setInlineTarget(null);
     setApprovalPanelOpen(false);
   }, []);
 
   const handleSubmitAllDrafts = async () => {
     if (draftList.length === 0) return;
+
+    const missingReason = evaluatedApprovals.find(
+      (ev) => ev.reasonRequired && !(approvalReasonByKey[ev.draftKey] || "").trim()
+    );
+    if (missingReason) {
+      setApprovalPanelOpen(true);
+      alert(
+        `${missingReason.workDate} 일정(${missingReason.triggeredReasons.join(
+          ", "
+        )})은 사유 입력이 필수입니다. 우측 [승인 · 참조] 패널에서 사유를 입력해 주세요.`
+      );
+      return;
+    }
+
     setSubmitting(true);
     try {
-      const items = draftList.map((d) => ({
-        mode: d.actionMode,
-        instructor_id: d.memberId,
-        member_name: d.memberName,
-        department: d.department,
-        work_date: d.workDate,
-        attendance_id: d.attendanceId,
-        work_mode: d.workMode,
-        check_in_time: minutesToHm24(d.inMinutes),
-        check_out_time: minutesToHm24(d.outMinutes),
-        break_minutes: d.breakMinutes,
-        location_note: d.locationNote,
-        memo: d.memo,
-      }));
+      const evMap = new Map(evaluatedApprovals.map((e) => [e.draftKey, e]));
 
-      await hqFetch("/api/hq/attendance", {
+      const items = draftList.map((d) => {
+        const ev = evMap.get(d.key);
+        return {
+          mode: d.actionMode,
+          instructor_id: d.memberId,
+          member_name: d.memberName,
+          department: d.department,
+          work_date: d.workDate,
+          attendance_id: d.attendanceId,
+          work_mode: d.workMode,
+          check_in_time: minutesToHm24(d.inMinutes),
+          check_out_time: minutesToHm24(d.outMinutes),
+          break_minutes: d.breakMinutes,
+          location_note: d.locationNote,
+          memo: d.memo,
+          requires_approval: Boolean(ev?.requiresApproval),
+          approval_steps: ev?.steps || [],
+          cc_member_ids: (ev?.ccMembers || [])
+            .map((c) => c.id)
+            .filter(Boolean),
+          cc_member_names: (ev?.ccMembers || [])
+            .map((c) => c.name)
+            .filter(Boolean),
+          work_edit_payload: ev?.payload || null,
+        };
+      });
+
+      const res = await hqFetch<{
+        success: boolean;
+        submittedApprovals?: number;
+      }>("/api/hq/attendance", {
         method: "POST",
         body: {
           action: "BATCH_MANUAL_UPSERT",
@@ -978,9 +1288,18 @@ export default function HqAttendancePage() {
       });
 
       setDraftEdits({});
+      setApprovalReasonByKey({});
       setInlineTarget(null);
       setApprovalPanelOpen(false);
       await Promise.all([loadAttendance(), refreshAttendanceState()]);
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new Event("hq:approval-updated"));
+      }
+      if ((res as any)?.submittedApprovals > 0) {
+        alert(
+          `승인 대상 일정 ${(res as any).submittedApprovals}건이 워크플로우 결재 요청으로 상신되었습니다.`
+        );
+      }
     } catch (err: any) {
       alert(err?.message || "근무 일정 등록에 실패했습니다.");
     } finally {
@@ -1148,13 +1467,19 @@ export default function HqAttendancePage() {
     leaveApprovalByMemberDate,
   ]);
 
-  // 24시간 타임라인 행 블록 렌더링 헬퍼 (내 근무[주기] & 구성원[일] 공통 — Flex 0fed5963 & 8278a9a1 100% 재현)
+  // 24시간 타임라인 듀얼 레이어 렌더링 (상단 가느다란 막대 = 실시간 근무 기록 / 하단 굵은 막대 = 인정 근무 — Flex 10d26683 & 8e9c06fa 100% 재현)
   const render24hBarForMemberDate = (member: HqMember, ymd: string) => {
     const barKey = `${member.instructor_id}__${ymd}`;
     const draft = draftEdits[barKey];
     const isActivePopover = inlineTarget?.key === barKey;
     const rec = recordByMemberDate.get(barKey);
+    const storedRt = realtimeLogByMemberDate.get(barKey);
+    const pendingWorkAppr = pendingWorkApprovalByMemberDate.get(barKey);
     const lvDoc = leaveApprovalByMemberDate.get(barKey);
+    const canSeeRecognized = canViewRecognizedWork(member);
+    const canSeePastRt = canViewPastRealtime(member);
+    const canEditRt = canEditRealtimeWork(member);
+
     const rule = resolveMemberWorkRule(
       member.name,
       member.profile_extra?.work_schedule_type
@@ -1178,19 +1503,197 @@ export default function HqAttendancePage() {
     const ruleBreakMin = calcBreakMinutes(rule);
     const ruleEndMin = ruleStartMin + ruleWorkMin + ruleBreakMin;
 
+    const leaveLabel = String(
+      lvDoc?.leave_type ||
+        (rec?.work_mode === "LEAVE" ? rec.location_note : "") ||
+        ""
+    );
+    const isHalfAm = leaveLabel.includes("오전 반차");
+    const isHalfPm =
+      leaveLabel.includes("오후 반차") ||
+      ((rec?.status === "HALF_LEAVE" || leaveLabel.includes("반차")) &&
+        !isHalfAm);
+    const isHourlyLeave =
+      leaveLabel.includes("반반차") || leaveLabel.includes("시간차");
+    const hasFullLeave =
+      !draft &&
+      ((rec?.work_mode === "LEAVE" && rec?.status !== "HALF_LEAVE") ||
+        rec?.status === "LEAVE" ||
+        (Boolean(lvDoc) && !isHalfAm && !isHalfPm && !isHourlyLeave));
+
+    // =========================================================================
+    // [Layer 1] 상단 가느다란 막대: 실시간 근무 기록 (굵은 막대 위 top-[3px], h-[4px])
+    // - 당일(todayStr): 빨간 현재시각 세로선이 지나간 만큼 실시간으로 가느다란 막대가 채워짐!
+    // - 과거(ymd < todayStr): 저장된 실시간 타각/편집 기록(storedRt)이 있고 [구성원 실시간 근무 기록 조회/편집] 권한이 있을 때만 표시 (자동 근무 기록만 있는 지난 날은 미표시!)
+    // =========================================================================
+    let thinRealtimeOverlay: React.ReactNode = null;
+    {
+      let rtStart: number | null = null;
+      let rtEnd: number | null = null;
+      let rtTooltipEnd: number | null = null;
+      let rtIsActiveNow = false;
+      let rtBreaks: HqRealtimeBreakSpan[] = [];
+
+      if (storedRt && (ymd === todayStr || (ymd < todayStr && canSeePastRt))) {
+        rtStart = storedRt.start_min;
+        rtIsActiveNow = Boolean(storedRt.is_active && ymd === todayStr);
+        if (rtIsActiveNow) {
+          rtEnd = Math.max(rtStart + 4, nowMinutesOfDay);
+          rtTooltipEnd = null;
+        } else {
+          const resolvedEnd =
+            storedRt.end_min !== null
+              ? storedRt.end_min
+              : ymd === todayStr
+                ? Math.max(rtStart + 4, nowMinutesOfDay)
+                : Math.max(rtStart + 30, ruleEndMin);
+          rtEnd = Math.max(rtStart + 4, resolvedEnd);
+          rtTooltipEnd = storedRt.end_min;
+        }
+        rtBreaks = storedRt.breaks || [];
+      } else if (ymd === todayStr && !hasFullLeave) {
+        const autoTodayStart = rec?.check_in_at
+          ? isoToMinutesOfDay(rec.check_in_at, ymd) ?? ruleStartMin
+          : isHalfAm
+            ? ruleStartMin + 240 + ruleBreakMin
+            : ruleStartMin;
+        const autoTodaySchedEnd = isHalfPm
+          ? ruleStartMin + 240
+          : rec?.check_out_at && rec.status === "DONE"
+            ? isoToMinutesOfDay(rec.check_out_at, ymd) ?? ruleEndMin
+            : ruleEndMin;
+
+        const hasLiveProgressToday =
+          Boolean(rec?.status === "WORKING") ||
+          Boolean(
+            (isScheduledWorkday || rec?.check_in_at) &&
+              rule.auto_record_enabled !== false &&
+              nowMinutesOfDay >= autoTodayStart
+          );
+
+        if (hasLiveProgressToday && nowMinutesOfDay >= autoTodayStart) {
+          rtStart = autoTodayStart;
+          const stillRunning =
+            Boolean(rec?.status === "WORKING" && !rec?.check_out_at) ||
+            nowMinutesOfDay < autoTodaySchedEnd;
+          rtIsActiveNow = stillRunning;
+          rtEnd = stillRunning
+            ? Math.max(rtStart + 4, nowMinutesOfDay)
+            : Math.max(rtStart + 4, Math.min(nowMinutesOfDay, autoTodaySchedEnd));
+          rtTooltipEnd = stillRunning ? null : rtEnd;
+          rtBreaks =
+            !isHalfAm &&
+            !isHalfPm &&
+            b1Start !== null &&
+            b1End !== null &&
+            ruleBreakMin > 0
+              ? [{ id: "auto-brk", start_min: b1Start, end_min: b1End }]
+              : [];
+        }
+      }
+
+      if (rtStart !== null && rtEnd !== null && rtEnd > rtStart) {
+        const rtLeftPct = Math.max(0, Math.min(99, (rtStart / 1440) * 100));
+        const rtWidthPct = Math.max(
+          0.4,
+          Math.min(100 - rtLeftPct, ((rtEnd - rtStart) / 1440) * 100)
+        );
+        const rtSpan = Math.max(1, rtEnd - rtStart);
+        const subSegs = buildRealtimeSubSegments(rtStart, rtEnd, rtBreaks);
+
+        thinRealtimeOverlay = (
+          <div
+            data-realtime-bar={barKey}
+            style={{ left: `${rtLeftPct}%`, width: `${rtWidthPct}%` }}
+            onMouseEnter={(e) =>
+              setHoveredRealtimeTip({
+                key: barKey,
+                startMin: rtStart!,
+                endMin: rtTooltipEnd,
+                isActiveNow: rtIsActiveNow,
+                breaks: rtBreaks,
+                canEdit: canEditRt,
+                x: e.clientX,
+                y: e.clientY,
+              })
+            }
+            onMouseMove={(e) =>
+              setHoveredRealtimeTip((prev) =>
+                prev && prev.key === barKey
+                  ? { ...prev, x: e.clientX, y: e.clientY }
+                  : {
+                      key: barKey,
+                      startMin: rtStart!,
+                      endMin: rtTooltipEnd,
+                      isActiveNow: rtIsActiveNow,
+                      breaks: rtBreaks,
+                      canEdit: canEditRt,
+                      x: e.clientX,
+                      y: e.clientY,
+                    }
+              )
+            }
+            onMouseLeave={() =>
+              setHoveredRealtimeTip((prev) =>
+                prev?.key === barKey ? null : prev
+              )
+            }
+            onClick={(e) => {
+              e.stopPropagation();
+              if (!canEditRt) return;
+              openRealtimeEditForDate(member, ymd);
+            }}
+            className={`absolute top-[3px] h-[11px] flex items-center z-25 ${
+              canEditRt
+                ? rtIsActiveNow
+                  ? "cursor-not-allowed"
+                  : "cursor-pointer"
+                : "cursor-default"
+            }`}
+          >
+            <div className="w-full h-[4px] rounded-full overflow-hidden flex shadow-[0_0_0_0.5px_rgba(15,118,110,0.12)] transition-all hover:h-[5px]">
+              {subSegs.map((seg, sIdx) => (
+                <div
+                  key={sIdx}
+                  style={{
+                    width: `${((seg.to - seg.from) / rtSpan) * 100}%`,
+                  }}
+                  className={
+                    seg.isBreak ? "h-full bg-[#bcefeb]" : "h-full bg-[#38c6bd]"
+                  }
+                />
+              ))}
+            </div>
+          </div>
+        );
+      }
+    }
+
+    // 인정 근무 조회 권한이 없고 실시간 기록 조회 권한만 있는 타 구성원의 경우 얇은 줄만 렌더링
+    if (!canSeeRecognized) {
+      return thinRealtimeOverlay;
+    }
+
+    // =========================================================================
+    // [Layer 2] 하단 굵은 막대: 인정 근무 (top-[16px], h-[26px] — [근무 편집] 권한으로만 수정!)
+    // =========================================================================
+
     // 0) 드래프트로 삭제 예정인 경우
     if (draft?.actionMode === "DELETE") {
       return (
-        <div
-          data-work-bar={barKey}
-          className="absolute left-[37.5%] top-3.5 text-[11px] font-bold text-slate-400 line-through"
-        >
-          근무 일정 삭제 예정
-        </div>
+        <>
+          {thinRealtimeOverlay}
+          <div
+            data-work-bar={barKey}
+            className="absolute left-[37.5%] top-[20px] text-[11px] font-bold text-slate-400 line-through"
+          >
+            근무 일정 삭제 예정
+          </div>
+        </>
       );
     }
 
-    // 0-B) 실시간 편집 드래프트가 존재하는 경우 즉시 타임라인 반영 (Screenshot 8278a9a1 & c6455974 완벽 재현!)
+    // 0-B) 인정 근무 편집 드래프트가 존재하는 경우 즉시 굵은 막대에 반영
     if (draft?.actionMode === "UPSERT") {
       const dStart = draft.inMinutes;
       const dEnd =
@@ -1231,77 +1734,64 @@ export default function HqAttendancePage() {
             : "💼";
 
       return (
-        <div
-          data-work-bar={barKey}
-          style={{ left: `${leftPct}%`, width: `${widthPct}%` }}
-          className="absolute top-2.5 bottom-4 z-15"
-        >
-          <div className="relative h-6.5 rounded-[5px] border border-[#0f766e] ring-1 ring-[#0f766e]/25 px-2 flex items-center justify-between overflow-hidden bg-[#aef4e8]/95 text-[#0f766e] shadow-2xs">
-            {/* 일 소정근로 초과 구간 상단 코랄 오렌지 바 (Screenshot 8278a9a1 & c6455974 동일) */}
-            {overtimeTailPct > 0 && (
-              <div
-                style={{ width: `${overtimeTailPct}%` }}
-                className="pointer-events-none absolute top-0 right-0 h-[3px] bg-[#f05638] z-20"
-              />
-            )}
+        <>
+          {thinRealtimeOverlay}
+          <div
+            data-work-bar={barKey}
+            style={{ left: `${leftPct}%`, width: `${widthPct}%` }}
+            className="absolute top-[16px] bottom-2 z-15"
+          >
+            <div className="relative h-6.5 rounded-[5px] border border-[#0f766e] ring-1 ring-[#0f766e]/25 px-2 flex items-center justify-between overflow-hidden bg-[#aef4e8]/95 text-[#0f766e] shadow-2xs">
+              {overtimeTailPct > 0 && (
+                <div
+                  style={{ width: `${overtimeTailPct}%` }}
+                  className="pointer-events-none absolute top-0 right-0 h-[3px] bg-[#f05638] z-20"
+                />
+              )}
 
-            <div className="flex items-center gap-1.5 min-w-0 z-10">
-              <span className="text-[11px]">{modeIcon}</span>
-              {draft.policyName !== "근무" && (
-                <span className="text-[11px] font-extrabold truncate">
-                  {draft.policyName}
-                </span>
+              <div className="flex items-center gap-1.5 min-w-0 z-10">
+                <span className="text-[11px]">{modeIcon}</span>
+                {draft.policyName !== "근무" && (
+                  <span className="text-[11px] font-extrabold truncate">
+                    {draft.policyName}
+                  </span>
+                )}
+              </div>
+
+              {hasBreakInside && (
+                <div
+                  style={{
+                    left: `${breakLeftInBar}%`,
+                    width: `${breakWidthInBar}%`,
+                  }}
+                  className="absolute top-1 bottom-1 rounded-[3px] bg-white/95 border border-slate-200/90 flex items-center px-1.5 text-[10px] text-slate-500 pointer-events-none z-10"
+                >
+                  ☕
+                </div>
               )}
             </div>
 
-            {hasBreakInside && (
-              <div
-                style={{
-                  left: `${breakLeftInBar}%`,
-                  width: `${breakWidthInBar}%`,
-                }}
-                className="absolute top-1 bottom-1 rounded-[3px] bg-white/95 border border-slate-200/90 flex items-center px-1.5 text-[10px] text-slate-500 pointer-events-none z-10"
+            <div className="flex items-center justify-between text-[10px] text-slate-600 font-semibold mt-0.5 px-0.5 whitespace-nowrap">
+              <span>
+                {formatMinutesToKoreanAmPm(dStart)}
+                {draft.breakMinutes > 0 && (
+                  <span className="text-slate-400 ml-1 font-medium">
+                    휴게 1건
+                  </span>
+                )}
+              </span>
+              <span
+                className={
+                  overtimeTailPct > 0 ? "text-[#e85d3f] font-bold" : undefined
+                }
               >
-                ☕
-              </div>
-            )}
+                {formatMinutesToKoreanAmPm(dEnd)}
+              </span>
+            </div>
           </div>
-
-          <div className="flex items-center justify-between text-[10px] text-slate-600 font-semibold mt-0.5 px-0.5 whitespace-nowrap">
-            <span>
-              {formatMinutesToKoreanAmPm(dStart)}
-              {draft.breakMinutes > 0 && (
-                <span className="text-slate-400 ml-1 font-medium">휴게 1건</span>
-              )}
-            </span>
-            <span
-              className={
-                overtimeTailPct > 0 ? "text-[#e85d3f] font-bold" : undefined
-              }
-            >
-              {formatMinutesToKoreanAmPm(dEnd)}
-            </span>
-          </div>
-        </div>
+        </>
       );
     }
-
-    const leaveLabel = String(
-      lvDoc?.leave_type ||
-        (rec?.work_mode === "LEAVE" ? rec.location_note : "") ||
-        ""
-    );
-    const isHalfAm = leaveLabel.includes("오전 반차");
-    const isHalfPm =
-      leaveLabel.includes("오후 반차") ||
-      ((rec?.status === "HALF_LEAVE" || leaveLabel.includes("반차")) &&
-        !isHalfAm);
-    const isHourlyLeave =
-      leaveLabel.includes("반반차") || leaveLabel.includes("시간차");
-    const hasFullLeave =
-      (rec?.work_mode === "LEAVE" && rec?.status !== "HALF_LEAVE") ||
-      rec?.status === "LEAVE" ||
-      (Boolean(lvDoc) && !isHalfAm && !isHalfPm && !isHourlyLeave);
 
     // 1) 종일 휴가 상태인 경우
     if (hasFullLeave) {
@@ -1319,7 +1809,7 @@ export default function HqAttendancePage() {
         <div
           data-work-bar={barKey}
           style={{ left: `${leftPct}%`, width: `${Math.max(widthPct, 6)}%` }}
-          className="absolute top-2.5 bottom-4 z-10 group"
+          className="absolute top-[16px] bottom-2 z-10 group"
         >
           <div
             className={`h-6.5 rounded-[5px] border px-2.5 flex items-center justify-between text-[11px] font-extrabold shadow-2xs transition-all ${
@@ -1355,23 +1845,26 @@ export default function HqAttendancePage() {
             }%`,
             width: `${(240 / 1440) * 100}%`,
           }}
-          className="absolute top-2.5 bottom-4 z-15 pointer-events-none"
+          className="absolute top-[16px] bottom-2 z-15 pointer-events-none"
         >
           <div className="h-6.5 rounded-[5px] bg-[#8b5cf6] border border-[#7c3aed] text-white px-2 flex items-center justify-between text-[10.5px] font-extrabold shadow-2xs">
-            <span className="truncate">☂ {isHalfAm ? "오전 반차" : "오후 반차"}</span>
+            <span className="truncate">
+              ☂ {isHalfAm ? "오전 반차" : "오후 반차"}
+            </span>
             <span className="text-[9.5px] opacity-90">4h</span>
           </div>
         </div>
       ) : null;
 
-    // 2) 실제 출퇴근/자동 근무 기록이 존재하는 경우
+    // 2) 인정 근무 기록이 존재하는 경우 (당일 WORKING 포함 — 굵은 막대는 항상 전체 인정 근무 구간을 표시!)
     if (rec && rec.check_in_at) {
-      const actualInMin = isoToMinutesOfDay(rec.check_in_at, ymd) ?? ruleStartMin;
+      const actualInMin =
+        isoToMinutesOfDay(rec.check_in_at, ymd) ?? ruleStartMin;
       const isCurrentlyWorkingToday =
         rec.status === "WORKING" && !rec.check_out_at && ymd === todayStr;
 
-      const containerEndMin = isCurrentlyWorkingToday
-        ? Math.max(ruleEndMin, nowMinutesOfDay, actualInMin + 60)
+      const recognizedOutMin = isCurrentlyWorkingToday
+        ? Math.max(ruleEndMin, actualInMin + 60)
         : Math.max(
             actualInMin + 25,
             isoToMinutesOfDay(rec.check_out_at, ymd) ?? ruleEndMin
@@ -1380,20 +1873,8 @@ export default function HqAttendancePage() {
       const leftPct = Math.max(0, Math.min(96, (actualInMin / 1440) * 100));
       const widthPct = Math.max(
         3,
-        Math.min(100 - leftPct, ((containerEndMin - actualInMin) / 1440) * 100)
+        Math.min(100 - leftPct, ((recognizedOutMin - actualInMin) / 1440) * 100)
       );
-
-      const fillRatioPct = isCurrentlyWorkingToday
-        ? Math.max(
-            0,
-            Math.min(
-              100,
-              ((nowMinutesOfDay - actualInMin) /
-                Math.max(1, containerEndMin - actualInMin)) *
-                100
-            )
-          )
-        : 100;
 
       const isCustomWorkMode =
         rec.work_mode === "REMOTE" ||
@@ -1407,17 +1888,21 @@ export default function HqAttendancePage() {
             ? "bg-amber-200/80"
             : rec.work_mode.startsWith("FLEX_")
               ? "bg-indigo-200/80"
-              : "bg-[#aef4e8]/90";
+              : isCurrentlyWorkingToday
+                ? "bg-[#c8f9ef]/85"
+                : "bg-[#aef4e8]/90";
 
       const borderColorClass = isActivePopover
         ? "border-[#0f766e] ring-1 ring-[#0f766e]/30 text-[#0f766e]"
-        : rec.work_mode === "REMOTE"
-          ? "border-teal-500 text-teal-900"
-          : rec.work_mode === "OUTSIDE"
-            ? "border-amber-500 text-amber-950"
-            : rec.work_mode.startsWith("FLEX_")
-              ? "border-indigo-500 text-indigo-950"
-              : "border-[#2dd4bf] text-[#0f766e]";
+        : pendingWorkAppr
+          ? "border-amber-400 border-dashed text-amber-900"
+          : rec.work_mode === "REMOTE"
+            ? "border-teal-500 text-teal-900"
+            : rec.work_mode === "OUTSIDE"
+              ? "border-amber-500 text-amber-950"
+              : rec.work_mode.startsWith("FLEX_")
+                ? "border-indigo-500 text-indigo-950"
+                : "border-[#2dd4bf] text-[#0f766e]";
 
       const modeIcon =
         rec.work_mode === "REMOTE"
@@ -1428,7 +1913,7 @@ export default function HqAttendancePage() {
               ? "🌅"
               : "💼";
 
-      const spanMin = Math.max(1, containerEndMin - actualInMin);
+      const spanMin = Math.max(1, recognizedOutMin - actualInMin);
       const loggedOvertime = Math.max(
         0,
         Number(rec.overtime_minutes || 0) ||
@@ -1443,7 +1928,7 @@ export default function HqAttendancePage() {
         b1Start !== null &&
         b1End !== null &&
         actualInMin < b1Start &&
-        containerEndMin > b1End &&
+        recognizedOutMin > b1End &&
         (rec.break_minutes ?? 60) > 0;
 
       const breakLeftInBar =
@@ -1457,18 +1942,18 @@ export default function HqAttendancePage() {
 
       return (
         <>
+          {thinRealtimeOverlay}
           {halfLeaveOverlay}
           <div
             data-work-bar={barKey}
             style={{ left: `${leftPct}%`, width: `${widthPct}%` }}
-            className="absolute top-2.5 bottom-4 z-10"
+            className="absolute top-[16px] bottom-2 z-10"
           >
             <div
               className={`relative h-6.5 rounded-[5px] border px-2 flex items-center justify-between overflow-hidden bg-white transition-all hover:brightness-97 ${borderColorClass}`}
             >
               <div
-                style={{ width: `${fillRatioPct}%` }}
-                className={`absolute inset-y-0 left-0 pointer-events-none transition-all duration-500 ${fillColorClass}`}
+                className={`absolute inset-0 pointer-events-none ${fillColorClass}`}
               />
 
               {overtimeTailPct > 0 && (
@@ -1483,6 +1968,12 @@ export default function HqAttendancePage() {
                 {isCustomWorkMode && (
                   <span className="text-[11px] font-extrabold truncate">
                     {ATTENDANCE_MODES[rec.work_mode]?.shortLabel || "근무"}
+                  </span>
+                )}
+                {pendingWorkAppr && (
+                  <span className="px-1.5 py-0.2 rounded bg-amber-100/95 text-amber-800 text-[9.5px] font-extrabold truncate">
+                    승인대기 ({formatMinutesToKoreanAmPm(pendingWorkAppr.after_in_minutes)}~
+                    {formatMinutesToKoreanAmPm(pendingWorkAppr.after_out_minutes)})
                   </span>
                 )}
               </div>
@@ -1501,10 +1992,16 @@ export default function HqAttendancePage() {
             </div>
 
             <div className="flex items-center justify-between text-[10px] text-slate-500 font-medium mt-0.5 px-0.5 whitespace-nowrap">
-              <span className={isActivePopover ? "text-slate-800 font-bold" : undefined}>
+              <span
+                className={
+                  isActivePopover ? "text-slate-800 font-bold" : undefined
+                }
+              >
                 {formatMinutesToKoreanAmPm(actualInMin)}
                 {(rec.break_minutes || 0) > 0 && (
-                  <span className="text-slate-400 ml-1 font-normal">휴게 1건</span>
+                  <span className="text-slate-400 ml-1 font-normal">
+                    휴게 1건
+                  </span>
                 )}
               </span>
               <span
@@ -1516,7 +2013,7 @@ export default function HqAttendancePage() {
                       : undefined
                 }
               >
-                {formatMinutesToKoreanAmPm(containerEndMin)}
+                {formatMinutesToKoreanAmPm(recognizedOutMin)}
               </span>
             </div>
           </div>
@@ -1524,9 +2021,11 @@ export default function HqAttendancePage() {
       );
     }
 
-    // 3) 아직 출퇴근 기록이 없는 평일(미래 소정근로일 등) -> Flex 스타일 민트 윤곽선 예정 근무 바 표시
+    // 3) 아직 출퇴근 기록이 없는 평일(미래 소정근로일 등) -> Flex 스타일 민트 윤곽선 예정 인정 근무(굵은 막대) 표시
     if (isScheduledWorkday && showPlannedGuide) {
-      const workBarStart = isHalfAm ? ruleStartMin + 240 + ruleBreakMin : ruleStartMin;
+      const workBarStart = isHalfAm
+        ? ruleStartMin + 240 + ruleBreakMin
+        : ruleStartMin;
       const workBarEnd = isHalfPm ? ruleStartMin + 240 : ruleEndMin;
       const leftPct = (workBarStart / 1440) * 100;
       const widthPct = ((workBarEnd - workBarStart) / 1440) * 100;
@@ -1548,20 +2047,31 @@ export default function HqAttendancePage() {
 
       return (
         <>
+          {thinRealtimeOverlay}
           {halfLeaveOverlay}
           <div
             data-work-bar={barKey}
             style={{ left: `${leftPct}%`, width: `${widthPct}%` }}
-            className="absolute top-2.5 bottom-4 z-10"
+            className="absolute top-[16px] bottom-2 z-10"
           >
             <div
-              className={`relative h-6.5 rounded-[5px] border bg-white hover:bg-teal-50/30 transition-colors flex items-center px-2 ${
+              className={`relative h-6.5 rounded-[5px] border bg-white hover:bg-teal-50/30 transition-colors flex items-center justify-between px-2 ${
                 isActivePopover
                   ? "border-[#0f766e] ring-1 ring-[#0f766e]/25"
-                  : "border-[#5eead4]"
+                  : pendingWorkAppr
+                    ? "border-amber-400 border-dashed"
+                    : "border-[#5eead4]"
               }`}
             >
-              <span className="text-[11px] text-[#14b8a6]">💼</span>
+              <div className="flex items-center gap-1.5 min-w-0 z-10">
+                <span className="text-[11px] text-[#14b8a6]">💼</span>
+                {pendingWorkAppr && (
+                  <span className="px-1.5 py-0.2 rounded bg-amber-100/95 text-amber-800 text-[9.5px] font-extrabold truncate">
+                    승인대기 ({formatMinutesToKoreanAmPm(pendingWorkAppr.after_in_minutes)}~
+                    {formatMinutesToKoreanAmPm(pendingWorkAppr.after_out_minutes)})
+                  </span>
+                )}
+              </div>
               {hasBreak && (
                 <div
                   style={{
@@ -1575,13 +2085,23 @@ export default function HqAttendancePage() {
               )}
             </div>
             <div className="flex items-center justify-between text-[10px] font-medium text-slate-500 mt-0.5 px-0.5 whitespace-nowrap">
-              <span className={isActivePopover ? "text-slate-800 font-bold" : undefined}>
+              <span
+                className={
+                  isActivePopover ? "text-slate-800 font-bold" : undefined
+                }
+              >
                 {formatMinutesToKoreanAmPm(workBarStart)}{" "}
                 {hasBreak && (
-                  <span className="text-slate-400 ml-0.5 font-normal">휴게 1건</span>
+                  <span className="text-slate-400 ml-0.5 font-normal">
+                    휴게 1건
+                  </span>
                 )}
               </span>
-              <span className={isActivePopover ? "text-slate-800 font-bold" : undefined}>
+              <span
+                className={
+                  isActivePopover ? "text-slate-800 font-bold" : undefined
+                }
+              >
                 {formatMinutesToKoreanAmPm(workBarEnd)}
               </span>
             </div>
@@ -1590,17 +2110,43 @@ export default function HqAttendancePage() {
       );
     }
 
-    // 4) 공휴일 배지 표시
-    if (holiday) {
+    // 4) 공휴일 배지 또는 비근무일 결재대기 표시
+    if (pendingWorkAppr) {
+      const pStart = pendingWorkAppr.after_in_minutes;
+      const pEnd = Math.max(pStart + 60, pendingWorkAppr.after_out_minutes);
+      const leftPct = (pStart / 1440) * 100;
+      const widthPct = ((pEnd - pStart) / 1440) * 100;
       return (
-        <div className="absolute left-4 top-3.5 text-[11px] font-bold text-rose-500 flex items-center gap-1">
-          <span>{holiday.icon || "🎌"}</span>
-          <span>{holiday.name}</span>
-        </div>
+        <>
+          {thinRealtimeOverlay}
+          <div
+            data-work-bar={barKey}
+            style={{ left: `${leftPct}%`, width: `${Math.max(widthPct, 6)}%` }}
+            className="absolute top-[16px] bottom-2 z-10"
+          >
+            <div className="h-6.5 rounded-[5px] border border-dashed border-amber-400 bg-amber-50/80 px-2 flex items-center justify-between text-[10.5px] font-extrabold text-amber-800">
+              <span className="truncate">
+                ⏳ {pendingWorkAppr.after_policy_name} (승인대기)
+              </span>
+            </div>
+          </div>
+        </>
       );
     }
 
-    return null;
+    if (holiday) {
+      return (
+        <>
+          {thinRealtimeOverlay}
+          <div className="absolute left-4 top-4 text-[11px] font-bold text-rose-500 flex items-center gap-1">
+            <span>{holiday.icon || "🎌"}</span>
+            <span>{holiday.name}</span>
+          </div>
+        </>
+      );
+    }
+
+    return thinRealtimeOverlay;
   };
 
   // 월간 달력 셀 생성 (내 근무 - 월 뷰: 월요일 시작 + 인접월 날짜 포함 — Screenshot 104312 동일)
@@ -1953,23 +2499,30 @@ export default function HqAttendancePage() {
                       <span className="text-slate-400">›</span>
                     </button>
 
-                    {canEditSelfWork && (
-                      <>
-                        <div className="my-1 border-t border-slate-100" />
-                        <button
-                          type="button"
-                          onMouseEnter={() => setAddSubMenu(null)}
-                          onClick={() => {
-                            setAddMenuOpen(false);
-                            setRecurringOpen(true);
-                          }}
-                          className="w-full px-3.5 py-2 text-left hover:bg-slate-50 font-semibold text-slate-700 flex items-center gap-2"
-                        >
-                          <span>🔄</span>
-                          <span>반복 일정</span>
-                        </button>
-                      </>
-                    )}
+                    <div className="my-1 border-t border-slate-100" />
+                    <button
+                      type="button"
+                      disabled={!canEditSelfWork}
+                      onMouseEnter={() => setAddSubMenu(null)}
+                      onClick={() => {
+                        if (!canEditSelfWork) return;
+                        setAddMenuOpen(false);
+                        setRecurringOpen(true);
+                      }}
+                      title={
+                        canEditSelfWork
+                          ? "반복 일정 등록"
+                          : "근무 편집 권한이 있을 때만 사용할 수 있어요."
+                      }
+                      className={`w-full px-3.5 py-2 text-left font-semibold flex items-center gap-2 ${
+                        canEditSelfWork
+                          ? "hover:bg-slate-50 text-slate-700"
+                          : "opacity-40 cursor-not-allowed text-slate-400"
+                      }`}
+                    >
+                      <span>🔄</span>
+                      <span>반복 일정</span>
+                    </button>
                   </div>
                 </div>
               )}
@@ -3179,21 +3732,29 @@ export default function HqAttendancePage() {
                     const rec = rowKey
                       ? recordByMemberDate.get(rowKey)
                       : undefined;
+                    const storedRt = rowKey
+                      ? realtimeLogByMemberDate.get(rowKey)
+                      : undefined;
                     const isWorkDay =
                       myRule.work_days.includes(dowKo) && !holiday;
-                    const plannedMin = isWorkDay
-                      ? Number(myRule.daily_work_hours || 8) * 60 +
-                        Number(myRule.daily_work_minutes || 0)
-                      : 0;
+                    const ruleDailyMin =
+                      Number(myRule.daily_work_hours || 8) * 60 +
+                      Number(myRule.daily_work_minutes || 0);
+                    const plannedMin = isWorkDay ? ruleDailyMin : 0;
                     const displayMin = rowDraft
                       ? calcDraftNetWorkedMinutes(rowDraft)
                       : rec
-                        ? rec.status === "WORKING" && ymd === todayStr
-                          ? liveTodayElapsedMinutes
+                        ? rec.status === "WORKING"
+                          ? plannedMin || ruleDailyMin
                           : rec.work_mode === "LEAVE" && rec.status === "LEAVE"
                             ? plannedMin || 480
                             : Number(rec.worked_minutes || 0)
                         : plannedMin;
+                    const isOvertimeRow =
+                      !rowDraft &&
+                      displayMin > ruleDailyMin &&
+                      (Boolean(rec) || displayMin > 0);
+                    const canEditMyRt = Boolean(me && canEditRealtimeWork(me));
 
                     return (
                       <div
@@ -3205,13 +3766,13 @@ export default function HqAttendancePage() {
                             anchorEl: e.currentTarget,
                           })
                         }
-                        className={`flex h-[68px] transition-colors group ${
+                        className={`flex h-[74px] transition-colors group ${
                           canEditSelfWork
                             ? "hover:bg-slate-50/70 cursor-pointer"
                             : "cursor-default"
                         }`}
                       >
-                        {/* 좌측 일자 + 시간 배지 + [+] 버튼 */}
+                        {/* 좌측 일자 + 인정근무 시간 배지(초과 시 🔥) + [◐ 실시간기록] + [+ 인정근무] 버튼 */}
                         <div
                           className={`w-52 shrink-0 px-7 flex items-center justify-between border-r bg-white ${
                             rowDraft
@@ -3219,17 +3780,15 @@ export default function HqAttendancePage() {
                               : "border-r-slate-100 group-hover:bg-slate-50/70"
                           }`}
                         >
-                          <div className="flex items-center gap-2.5">
-                            <div className="flex items-center gap-1.5 w-12">
+                          <div className="flex items-center gap-2">
+                            <div className="flex items-center gap-1.5 w-11">
                               <span
                                 className={`text-xs font-extrabold tabular-nums ${
                                   isToday
                                     ? "w-6 h-6 rounded-md bg-[#ea580c] text-white inline-flex items-center justify-center"
-                                    : dow === 0 || holiday
+                                    : dow === 0 || dow === 6 || holiday
                                       ? "text-[#e85d3f]"
-                                      : dow === 6
-                                        ? "text-[#e85d3f]"
-                                        : "text-slate-700"
+                                      : "text-slate-700"
                                 }`}
                               >
                                 {dt.getDate()}
@@ -3246,37 +3805,62 @@ export default function HqAttendancePage() {
                             </div>
 
                             <span
-                              className={`px-2 py-0.5 rounded text-[11px] font-bold tabular-nums transition-colors ${
+                              className={`px-2 py-0.5 rounded text-[11px] font-bold tabular-nums inline-flex items-center gap-0.5 transition-colors ${
                                 rowDraft
                                   ? "bg-[#0066ff] text-white font-extrabold shadow-2xs"
-                                  : displayMin > 0
-                                    ? "bg-slate-100 text-slate-700"
-                                    : "bg-slate-100 text-slate-300"
+                                  : isOvertimeRow
+                                    ? "bg-[#fff1eb] text-[#c2410c] font-extrabold"
+                                    : displayMin > 0
+                                      ? "bg-slate-100 text-slate-700"
+                                      : "bg-slate-100 text-slate-300"
                               }`}
                             >
-                              {formatHmColon(displayMin)}
+                              <span>{formatHmColon(displayMin)}</span>
+                              {isOvertimeRow && (
+                                <span className="text-[10px]">🔥</span>
+                              )}
                             </span>
                           </div>
 
-                          {canEditSelfWork && (
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                if (me)
-                                  openEntryForDate(me, ymd, {
-                                    anchorEl: e.currentTarget,
-                                  });
-                              }}
-                              className="w-6 h-6 rounded-md text-slate-400 hover:text-slate-800 hover:bg-slate-200/60 flex items-center justify-center text-sm font-semibold"
-                              title="근무/휴게 추가·수정"
-                            >
-                              +
-                            </button>
-                          )}
+                          <div className="flex items-center gap-0.5">
+                            {canEditMyRt && ymd <= todayStr && (
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  if (me) openRealtimeEditForDate(me, ymd);
+                                }}
+                                className={`w-6 h-6 rounded-md flex items-center justify-center text-xs transition-colors ${
+                                  storedRt
+                                    ? "text-[#0d9488] hover:bg-teal-50 font-bold"
+                                    : "text-slate-300 hover:text-slate-700 hover:bg-slate-200/60"
+                                }`}
+                                title="실시간 기록 수정 (가느다란 막대)"
+                              >
+                                ◐
+                              </button>
+                            )}
+
+                            {canEditSelfWork && (
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  if (me)
+                                    openEntryForDate(me, ymd, {
+                                      anchorEl: e.currentTarget,
+                                    });
+                                }}
+                                className="w-6 h-6 rounded-md text-slate-400 hover:text-slate-800 hover:bg-slate-200/60 flex items-center justify-center text-sm font-semibold"
+                                title="인정 근무 추가·수정 (굵은 막대)"
+                              >
+                                +
+                              </button>
+                            )}
+                          </div>
                         </div>
 
-                        {/* 우측 24시간 그리드 셀 + 블록 */}
+                        {/* 우측 24시간 그리드 셀 + 듀얼 레이어 블록 */}
                         <div
                           className={`flex-1 relative ${
                             rowDraft ? "bg-[#f5f9ff]/65" : ""
@@ -3310,14 +3894,11 @@ export default function HqAttendancePage() {
             <FlexApprovalSidePanel
               rangeStart={activeQueryRange.start}
               rangeEnd={activeQueryRange.end}
-              drafts={draftList}
-              approvalPolicies={
-                companySettings?.extra_settings?.approval_policies
+              evaluatedItems={evaluatedApprovals}
+              reasonByKey={approvalReasonByKey}
+              onChangeReason={(k, val) =>
+                setApprovalReasonByKey((prev) => ({ ...prev, [k]: val }))
               }
-              workConditionRules={
-                companySettings?.extra_settings?.work_condition_rules
-              }
-              workFormPolicies={workFormPolicies}
               onClose={() => setApprovalPanelOpen(false)}
             />
           )}
@@ -3721,8 +4302,10 @@ export default function HqAttendancePage() {
                   ) : (
                     filteredTeamMembers.map((m) => {
                       const canEditM = canEditTargetWork(m);
+                      const canEditMRt = canEditRealtimeWork(m);
                       const rowKey = `${m.instructor_id}__${teamAnchorDate}`;
                       const rowDraft = draftEdits[rowKey];
+                      const storedRt = realtimeLogByMemberDate.get(rowKey);
                       const rule = resolveMemberWorkRule(
                         m.name,
                         m.profile_extra?.work_schedule_type
@@ -3733,26 +4316,21 @@ export default function HqAttendancePage() {
                       const holiday = holidayMap.get(teamAnchorDate);
                       const isWorkDay =
                         rule.work_days.includes(dowKo) && !holiday;
-                      const plannedMin = isWorkDay
-                        ? Number(rule.daily_work_hours || 8) * 60 +
-                          Number(rule.daily_work_minutes || 0)
-                        : 0;
+                      const ruleDailyMin =
+                        Number(rule.daily_work_hours || 8) * 60 +
+                        Number(rule.daily_work_minutes || 0);
+                      const plannedMin = isWorkDay ? ruleDailyMin : 0;
                       const displayMin = rowDraft
                         ? calcDraftNetWorkedMinutes(rowDraft)
                         : rec
-                          ? rec.status === "WORKING" &&
-                            teamAnchorDate === todayStr &&
-                            rec.check_in_at
-                            ? Math.max(
-                                0,
-                                Math.round(
-                                  (nowClock.getTime() -
-                                    new Date(rec.check_in_at).getTime()) /
-                                    60000
-                                ) - 60
-                              )
+                          ? rec.status === "WORKING"
+                            ? plannedMin || ruleDailyMin
                             : Number(rec.worked_minutes || plannedMin)
                           : plannedMin;
+                      const isOvertimeRow =
+                        !rowDraft &&
+                        displayMin > ruleDailyMin &&
+                        (Boolean(rec) || displayMin > 0);
 
                       const shortTwo = m.name.slice(-2);
                       const subRole =
@@ -3768,21 +4346,21 @@ export default function HqAttendancePage() {
                               anchorEl: e.currentTarget,
                             })
                           }
-                          className={`flex h-[68px] transition-colors ${
+                          className={`flex h-[74px] transition-colors ${
                             canEditM
                               ? "hover:bg-slate-50/70 cursor-pointer"
                               : "cursor-default"
                           }`}
                         >
-                          {/* 좌측: 2글자 컬러 아바타 + 성명/직무 + 8:00 배지 */}
+                          {/* 좌측: 2글자 컬러 아바타 + 성명/직무 + 8:00(초과 시 🔥) + [◐] */}
                           <div
-                            className={`w-60 shrink-0 px-7 flex items-center justify-between border-r bg-white ${
+                            className={`w-60 shrink-0 px-6 flex items-center justify-between border-r bg-white ${
                               rowDraft
                                 ? "border-r-[3px] border-r-[#0066ff]"
                                 : "border-r-slate-100"
                             }`}
                           >
-                            <div className="flex items-center gap-3 min-w-0">
+                            <div className="flex items-center gap-2.5 min-w-0">
                               <div
                                 style={{
                                   backgroundColor: avatarColorForName(m.name),
@@ -3803,15 +4381,40 @@ export default function HqAttendancePage() {
                               </div>
                             </div>
 
-                            <span
-                              className={`px-2 py-0.5 rounded text-[11px] font-bold tabular-nums shrink-0 ${
-                                rowDraft
-                                  ? "bg-[#0066ff] text-white font-extrabold"
-                                  : "bg-slate-100 text-slate-700"
-                              }`}
-                            >
-                              {formatHmColon(displayMin)}
-                            </span>
+                            <div className="flex items-center gap-1 shrink-0">
+                              <span
+                                className={`px-2 py-0.5 rounded text-[11px] font-bold tabular-nums inline-flex items-center gap-0.5 shrink-0 ${
+                                  rowDraft
+                                    ? "bg-[#0066ff] text-white font-extrabold"
+                                    : isOvertimeRow
+                                      ? "bg-[#fff1eb] text-[#c2410c] font-extrabold"
+                                      : "bg-slate-100 text-slate-700"
+                                }`}
+                              >
+                                <span>{formatHmColon(displayMin)}</span>
+                                {isOvertimeRow && (
+                                  <span className="text-[10px]">🔥</span>
+                                )}
+                              </span>
+
+                              {canEditMRt && teamAnchorDate <= todayStr && (
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    openRealtimeEditForDate(m, teamAnchorDate);
+                                  }}
+                                  className={`w-5.5 h-5.5 rounded-md flex items-center justify-center text-xs transition-colors ${
+                                    storedRt
+                                      ? "text-[#0d9488] hover:bg-teal-50 font-bold"
+                                      : "text-slate-300 hover:text-slate-700 hover:bg-slate-100"
+                                  }`}
+                                  title="실시간 기록 수정 (가느다란 막대)"
+                                >
+                                  ◐
+                                </button>
+                              )}
+                            </div>
                           </div>
 
                           {/* 우측: 24시간 그리드 + 예정/실제 근무 바 */}
@@ -4528,14 +5131,11 @@ export default function HqAttendancePage() {
             <FlexApprovalSidePanel
               rangeStart={activeQueryRange.start}
               rangeEnd={activeQueryRange.end}
-              drafts={draftList}
-              approvalPolicies={
-                companySettings?.extra_settings?.approval_policies
+              evaluatedItems={evaluatedApprovals}
+              reasonByKey={approvalReasonByKey}
+              onChangeReason={(k, val) =>
+                setApprovalReasonByKey((prev) => ({ ...prev, [k]: val }))
               }
-              workConditionRules={
-                companySettings?.extra_settings?.work_condition_rules
-              }
-              workFormPolicies={workFormPolicies}
               onClose={() => setApprovalPanelOpen(false)}
             />
           )}
@@ -4543,13 +5143,14 @@ export default function HqAttendancePage() {
       )}
 
       {/* =====================================================================
-          플렉스 인라인 근무 편집 팝오버 & 하단 플로팅 드래프트 바 & 모달 영역
+          플렉스 인라인 인정 근무 팝오버 & 실시간 기록 툴팁/수정 모달 & 하단 드래프트 바
          ===================================================================== */}
       {inlineTarget && (
         <FlexInlineWorkPopover
           target={inlineTarget}
           currentDraft={draftEdits[inlineTarget.key]}
           workFormPolicies={workFormPolicies}
+          baselineSnapshot={computeBaselineSnapshotForTarget(inlineTarget)}
           onChangeDraft={handleUpsertDraft}
           onClearDraft={handleClearDraft}
           onStageDelete={handleStageDeleteDraft}
@@ -4561,9 +5162,36 @@ export default function HqAttendancePage() {
         />
       )}
 
+      {hoveredRealtimeTip && !realtimeEditModal && (
+        <FlexRealtimeHoverTooltip
+          startMin={hoveredRealtimeTip.startMin}
+          endMin={hoveredRealtimeTip.endMin}
+          isActiveNow={hoveredRealtimeTip.isActiveNow}
+          nowMin={nowMinutesOfDay}
+          breaks={hoveredRealtimeTip.breaks}
+          canEdit={hoveredRealtimeTip.canEdit}
+          anchorPos={{ x: hoveredRealtimeTip.x, y: hoveredRealtimeTip.y }}
+        />
+      )}
+
+      {realtimeEditModal && (
+        <FlexRealtimeRecordEditModal
+          isOpen={Boolean(realtimeEditModal)}
+          memberId={realtimeEditModal.member.instructor_id}
+          memberName={realtimeEditModal.member.name}
+          department={realtimeEditModal.member.department || "미지정"}
+          workDate={realtimeEditModal.workDate}
+          existingLog={realtimeEditModal.existingLog}
+          defaultStartMin={realtimeEditModal.defaultStartMin}
+          defaultEndMin={realtimeEditModal.defaultEndMin}
+          onClose={() => setRealtimeEditModal(null)}
+          onSaved={handleSaveRealtimeModal}
+        />
+      )}
+
       <FlexDraftFloatingBar
         drafts={draftList}
-        approvalCount={0}
+        approvalCount={evaluatedApprovals.length}
         warningItems={draftWarnings}
         approvalPanelOpen={approvalPanelOpen}
         submitting={submitting}

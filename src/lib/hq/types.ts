@@ -1693,6 +1693,61 @@ export interface HqWorkflowDocComment {
   created_at: string;
 }
 
+export interface HqRealtimeBreakSpan {
+  id: string;
+  start_min: number; // 분 단위 (예: 720 = 오후 12:00)
+  end_min: number; // 분 단위 (예: 780 = 오후 1:00)
+}
+
+export interface HqRealtimeModeSegment {
+  id: string;
+  at_min: number; // 전환 시각 (분 단위)
+  policy_name: string;
+  work_mode: HqWorkMode;
+}
+
+export interface HqRealtimeWorkLog {
+  key: string; // `${instructor_id}__${work_date}`
+  instructor_id: string;
+  member_name: string;
+  department: string;
+  work_date: string;
+  start_min: number;
+  end_min: number | null; // null 이면 현재 실시간 기록 진행 중
+  policy_name: string;
+  work_mode: HqWorkMode;
+  transitions?: HqRealtimeModeSegment[];
+  breaks: HqRealtimeBreakSpan[];
+  is_active: boolean;
+  updated_at: string;
+}
+
+export interface HqWorkEditComparisonSnapshot {
+  exists: boolean;
+  policy_name: string;
+  work_mode: HqWorkMode;
+  in_minutes: number;
+  out_minutes: number;
+  break_minutes: number;
+  worked_minutes: number;
+  overtime_minutes: number;
+  location_note?: string;
+  memo?: string;
+}
+
+export interface HqWorkEditApprovalPayload {
+  target_member_id: string;
+  target_member_name: string;
+  department: string;
+  work_date: string;
+  action_mode: "UPSERT" | "DELETE";
+  attendance_id?: string;
+  triggered_reasons: string[];
+  reason_note: string;
+  before: HqWorkEditComparisonSnapshot;
+  after: HqWorkEditComparisonSnapshot;
+}
+
 export interface HqWorkflowDocMeta {
   approval_id: string;
   form_id: string | null;
@@ -1703,6 +1758,7 @@ export interface HqWorkflowDocMeta {
   field_values: Record<string, string>;
   field_labels?: Record<string, string>;
   step_auto_proceed?: Record<string, { enabled: boolean; days: number }>;
+  work_edit_payload?: HqWorkEditApprovalPayload | null;
   ref_doc_id?: string | null;
   ref_doc_no?: string | null;
   ref_doc_title?: string | null;

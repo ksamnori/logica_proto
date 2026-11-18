@@ -148,6 +148,70 @@ async function applyPostApprovalSideEffects(
     );
   }
 
+  // 2-B) 인정 근무 등록·수정 승인 문서(work_edit_payload) 최종 승인 → hq_attendance에 즉시 반영
+  try {
+    const wfStore = await readWorkflowMetaPayload(supabaseAdmin);
+    const docMeta = wfStore.docMetaById?.[String(doc.approval_id)];
+    const wp = docMeta?.work_edit_payload;
+    if (wp && wp.target_member_id && wp.work_date) {
+      if (wp.action_mode === "DELETE") {
+        if (wp.attendance_id) {
+          await supabaseAdmin
+            .from("hq_attendance")
+            .delete()
+            .eq("attendance_id", wp.attendance_id);
+        } else {
+          await supabaseAdmin
+            .from("hq_attendance")
+            .delete()
+            .eq("instructor_id", wp.target_member_id)
+            .eq("work_date", wp.work_date);
+        }
+      } else {
+        const toHm = (mins: number) => {
+          const c = ((Math.round(mins) % 1440) + 1440) % 1440;
+          return `${String(Math.floor(c / 60)).padStart(2, "0")}:${String(
+            c % 60
+          ).padStart(2, "0")}`;
+        };
+        const inHm = toHm(wp.after.in_minutes);
+        const outHm = toHm(wp.after.out_minutes);
+        const [wy, wm, wd] = wp.work_date.split("-").map(Number);
+        const nextDayYmd = new Date(
+          Date.UTC(wy, (wm || 1) - 1, (wd || 1) + 1)
+        )
+          .toISOString()
+          .slice(0, 10);
+        const outDate = outHm < inHm ? nextDayYmd : wp.work_date;
+
+        await supabaseAdmin.from("hq_attendance").upsert(
+          {
+            instructor_id: wp.target_member_id,
+            member_name: wp.target_member_name,
+            department: wp.department || "미지정",
+            work_date: wp.work_date,
+            work_mode: wp.after.work_mode || "OFFICE",
+            status: "DONE",
+            check_in_at: `${wp.work_date}T${inHm}:00+09:00`,
+            check_out_at: `${outDate}T${outHm}:00+09:00`,
+            break_minutes: wp.after.break_minutes,
+            worked_minutes: wp.after.worked_minutes,
+            overtime_minutes: wp.after.overtime_minutes,
+            location_note: wp.after.location_note || "본사 편집·연구실",
+            memo:
+              wp.after.memo ||
+              `[승인 완료: ${doc.doc_no}] ${wp.reason_note || wp.triggered_reasons.join(", ")}`,
+            approval_id: doc.approval_id,
+            updated_at: nowIso,
+          },
+          { onConflict: "instructor_id,work_date" }
+        );
+      }
+    }
+  } catch {
+    // 인정 근무 승인 후처리 중 예외가 결재 완료 자체를 막지 않도록 안전 처리
+  }
+
   // 3) 외부 서비스 연동: Google Calendar 자동 일정 등록 & Slack 알림 (비동기 안전 처리)
   syncApprovalDocToGoogleCalendar(supabaseAdmin, doc).catch(() => {});
   notifySlackIfEnabled(

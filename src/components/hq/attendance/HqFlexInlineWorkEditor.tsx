@@ -3,10 +3,23 @@
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { ATTENDANCE_MODES } from "@/lib/hq/constants";
+import {
+  DEFAULT_APPROVAL_POLICIES,
+  DEFAULT_WORK_CONDITION_RULES,
+  DEFAULT_WORK_FORM_POLICIES,
+} from "@/lib/hq/defaultApprovalPolicies";
+import { resolvePolicyApprovalLine } from "@/lib/hq/defaultWorkflowForms";
 import { formatMinutesToKoreanAmPm } from "@/lib/hq/defaultWorkRules";
 import type {
   HqApprovalPolicyItem,
+  HqMember,
+  HqRankCode,
+  HqRealtimeBreakSpan,
+  HqRealtimeModeSegment,
+  HqRealtimeWorkLog,
+  HqSubstituteApprovalRule,
   HqWorkConditionRule,
+  HqWorkEditApprovalPayload,
   HqWorkFormPolicy,
   HqWorkMode,
 } from "@/lib/hq/types";
@@ -22,10 +35,22 @@ export interface DraftWorkEdit {
   workMode: HqWorkMode;
   policyName: string;
   inMinutes: number; // 0 ~ 1425
-  outMinutes: number; // 15 ~ 1440 (또는 익일 연장 > 1440)
+  outMinutes: number; // 15 ~ 1440
   breakMinutes: number;
   locationNote: string;
   memo: string;
+  wasScheduledWorkday: boolean;
+  ruleDailyMinutes: number;
+  baselineSnapshot: {
+    exists: boolean;
+    policyName: string;
+    workMode: HqWorkMode;
+    inMinutes: number;
+    outMinutes: number;
+    breakMinutes: number;
+    workedMinutes: number;
+    overtimeMinutes: number;
+  };
 }
 
 export interface InlineWorkPopoverTarget {
@@ -37,6 +62,7 @@ export interface InlineWorkPopoverTarget {
   attendanceId?: string;
   hadExistingRecord: boolean;
   wasScheduledWorkday: boolean;
+  ruleDailyMinutes: number;
   anchorRect: {
     top: number;
     bottom: number;
@@ -53,6 +79,23 @@ export interface InlineWorkPopoverTarget {
     locationNote: string;
     memo: string;
   };
+}
+
+export interface EvaluatedDraftApprovalItem {
+  draftKey: string;
+  workDate: string;
+  memberName: string;
+  triggeredReasons: string[];
+  reasonRequired: boolean;
+  requiresApproval: boolean;
+  steps: {
+    approver_id: string;
+    approver_name: string;
+    approver_rank: HqRankCode;
+    approver_title: string;
+  }[];
+  ccMembers: { id: string; name: string; dept: string }[];
+  payload: HqWorkEditApprovalPayload;
 }
 
 export function minutesToHm24(mins: number): string {
@@ -88,12 +131,20 @@ export function calcDraftNetWorkedMinutes(draft: DraftWorkEdit): number {
 }
 
 export function isDraftIdenticalToBaseline(
-  draft: Omit<DraftWorkEdit, "key" | "memberId" | "memberName" | "department" | "workDate" | "attendanceId">,
+  draft: Pick<
+    DraftWorkEdit,
+    | "actionMode"
+    | "workMode"
+    | "policyName"
+    | "inMinutes"
+    | "outMinutes"
+    | "breakMinutes"
+    | "memo"
+  >,
   target: InlineWorkPopoverTarget
 ): boolean {
   if (draft.actionMode === "DELETE") return false;
   if (!target.hadExistingRecord && !target.wasScheduledWorkday) {
-    // 비근무일(주말/공휴일)에 새로 추가 중인 일정은 항상 변경사항으로 간주
     return false;
   }
   const b = target.baseline;
@@ -105,6 +156,224 @@ export function isDraftIdenticalToBaseline(
     draft.breakMinutes === b.breakMinutes &&
     (draft.memo || "").trim() === (b.memo || "").trim()
   );
+}
+
+function calendarDayDiffYmd(earlierYmd: string, laterYmd: string): number {
+  const [y1, m1, d1] = earlierYmd.split("-").map(Number);
+  const [y2, m2, d2] = laterYmd.split("-").map(Number);
+  const t1 = Date.UTC(y1 || 2026, (m1 || 1) - 1, d1 || 1);
+  const t2 = Date.UTC(y2 || 2026, (m2 || 1) - 1, d2 || 1);
+  return Math.round((t2 - t1) / 86_400_000);
+}
+
+/**
+ * 플렉스 근무 설정(승인·참조 조건 7종 + 근무 정책 4종)에 따른 승인·참조 대상 자동 산출
+ */
+export function evaluateDraftsApprovalSummary(params: {
+  drafts: DraftWorkEdit[];
+  todayStr: string;
+  weeklyTotalMinutes: number;
+  me: HqMember | null;
+  members: HqMember[];
+  approvalPolicies?: HqApprovalPolicyItem[];
+  workConditionRules?: HqWorkConditionRule[];
+  workFormPolicies?: HqWorkFormPolicy[];
+  substituteRules?: HqSubstituteApprovalRule[];
+  reasonByKey?: Record<string, string>;
+}): EvaluatedDraftApprovalItem[] {
+  const {
+    drafts,
+    todayStr,
+    weeklyTotalMinutes,
+    me,
+    members,
+    approvalPolicies,
+    workConditionRules,
+    workFormPolicies,
+    substituteRules,
+    reasonByKey = {},
+  } = params;
+
+  const policies =
+    approvalPolicies && approvalPolicies.length > 0
+      ? approvalPolicies
+      : DEFAULT_APPROVAL_POLICIES;
+  const condRules =
+    workConditionRules && workConditionRules.length > 0
+      ? workConditionRules
+      : DEFAULT_WORK_CONDITION_RULES;
+  const formPolicies =
+    workFormPolicies && workFormPolicies.length > 0
+      ? workFormPolicies
+      : DEFAULT_WORK_FORM_POLICIES;
+
+  const policyMap = new Map(policies.map((p) => [p.id, p]));
+  const condMap = new Map(condRules.map((c) => [c.policy_id, c]));
+
+  const results: EvaluatedDraftApprovalItem[] = [];
+
+  for (const d of drafts) {
+    const triggeredPolicyIds: { id: string; label: string; reasonReq: boolean }[] =
+      [];
+
+    const pushTrigger = (policyId: string, label: string, reasonReq = false) => {
+      const pol = policyMap.get(policyId);
+      if (!pol) return;
+      const hasAny =
+        (pol.steps && pol.steps.some((s) => (s.assignees || []).length > 0)) ||
+        (pol.cc_list && pol.cc_list.length > 0);
+      if (!hasAny) return;
+      if (!triggeredPolicyIds.some((x) => x.id === policyId)) {
+        triggeredPolicyIds.push({ id: policyId, label, reasonReq });
+      }
+    };
+
+    if (d.actionMode === "UPSERT") {
+      // 1) 근무 정책(근무 / 외근 / 원격근무 / 출장) 승인·참조 확인
+      const matchedForm = formPolicies.find((f) => f.name === d.policyName);
+      if (matchedForm) {
+        pushTrigger(
+          matchedForm.policy_id,
+          matchedForm.name,
+          Boolean(matchedForm.reason_required)
+        );
+      }
+
+      const netMin = calcDraftNetWorkedMinutes(d);
+      const overtimeMin = Math.max(0, netMin - d.ruleDailyMinutes);
+
+      // 2) 연장 근무 (wk-overtime)
+      if (overtimeMin > 0) {
+        const cr = condMap.get("wk-overtime");
+        pushTrigger("wk-overtime", "연장 근무", Boolean(cr?.reason_required));
+      }
+
+      // 3) 휴일 근무 (wk-holiday)
+      if (!d.wasScheduledWorkday) {
+        const cr = condMap.get("wk-holiday");
+        pushTrigger("wk-holiday", "휴일 근무", Boolean(cr?.reason_required));
+      }
+
+      // 4) 야간 근무 (wk-night: 오후 10시 ~ 오전 6시 포함)
+      if (d.inMinutes < 360 || d.outMinutes > 1320) {
+        const cr = condMap.get("wk-night");
+        pushTrigger("wk-night", "야간 근무", Boolean(cr?.reason_required));
+      }
+
+      // 5) 법정근로시간 초과 (wk-legal-over: 주 40h 초과)
+      if (weeklyTotalMinutes > 2400) {
+        const cr = condMap.get("wk-legal-over");
+        pushTrigger(
+          "wk-legal-over",
+          "법정근로시간 초과",
+          Boolean(cr?.reason_required)
+        );
+      }
+    }
+
+    // 6) 과거 근무 수정 (wk-edit-past: 달력일 기준 지정일[1~7일] 초과 과거 일정 수정 시 발동 — Screenshot c8b49118 동일!)
+    if (d.workDate < todayStr) {
+      const cr = condMap.get("wk-edit-past");
+      const limitDays = Math.max(
+        1,
+        Math.min(7, parseInt(String(cr?.past_edit_limit_days || "3"), 10) || 3)
+      );
+      const elapsedDays = calendarDayDiffYmd(d.workDate, todayStr);
+      if (elapsedDays > limitDays) {
+        pushTrigger("wk-edit-past", "과거 근무 수정", Boolean(cr?.reason_required));
+      }
+    }
+
+    if (triggeredPolicyIds.length === 0) continue;
+
+    const targetMember =
+      members.find((m) => m.instructor_id === d.memberId) || me;
+
+    const mergedSteps: EvaluatedDraftApprovalItem["steps"] = [];
+    const seenStepIds = new Set<string>();
+    const mergedCc: { id: string; name: string; dept: string }[] = [];
+    const seenCcKeys = new Set<string>();
+
+    triggeredPolicyIds.forEach((tr) => {
+      const pol = policyMap.get(tr.id);
+      if (!pol) return;
+      const line = resolvePolicyApprovalLine({
+        policy: pol,
+        me: targetMember,
+        members,
+        substituteRules,
+      });
+      line.steps.forEach((s) => {
+        if (!seenStepIds.has(s.approver_id)) {
+          seenStepIds.add(s.approver_id);
+          mergedSteps.push({
+            approver_id: s.approver_id,
+            approver_name: s.approver_name,
+            approver_rank: (s.approver_rank || "TEAM_LEAD") as HqRankCode,
+            approver_title: s.approver_title,
+          });
+        }
+      });
+      line.ccMembers.forEach((c) => {
+        const ck = c.id || c.name;
+        if (!seenCcKeys.has(ck)) {
+          seenCcKeys.add(ck);
+          mergedCc.push(c);
+        }
+      });
+    });
+
+    if (mergedSteps.length === 0 && mergedCc.length === 0) continue;
+
+    const afterNet = calcDraftNetWorkedMinutes(d);
+    const afterOt = Math.max(0, afterNet - d.ruleDailyMinutes);
+    const reasonText = (reasonByKey[d.key] || d.memo || "").trim();
+
+    results.push({
+      draftKey: d.key,
+      workDate: d.workDate,
+      memberName: d.memberName,
+      triggeredReasons: triggeredPolicyIds.map((x) => x.label),
+      reasonRequired: triggeredPolicyIds.some((x) => x.reasonReq),
+      requiresApproval: mergedSteps.length > 0,
+      steps: mergedSteps,
+      ccMembers: mergedCc,
+      payload: {
+        target_member_id: d.memberId,
+        target_member_name: d.memberName,
+        department: d.department,
+        work_date: d.workDate,
+        action_mode: d.actionMode,
+        attendance_id: d.attendanceId,
+        triggered_reasons: triggeredPolicyIds.map((x) => x.label),
+        reason_note: reasonText,
+        before: {
+          exists: d.baselineSnapshot.exists,
+          policy_name: d.baselineSnapshot.policyName,
+          work_mode: d.baselineSnapshot.workMode,
+          in_minutes: d.baselineSnapshot.inMinutes,
+          out_minutes: d.baselineSnapshot.outMinutes,
+          break_minutes: d.baselineSnapshot.breakMinutes,
+          worked_minutes: d.baselineSnapshot.workedMinutes,
+          overtime_minutes: d.baselineSnapshot.overtimeMinutes,
+        },
+        after: {
+          exists: d.actionMode === "UPSERT",
+          policy_name: d.policyName,
+          work_mode: d.workMode,
+          in_minutes: d.inMinutes,
+          out_minutes: d.outMinutes,
+          break_minutes: d.breakMinutes,
+          worked_minutes: afterNet,
+          overtime_minutes: afterOt,
+          location_note: d.locationNote,
+          memo: d.memo,
+        },
+      },
+    });
+  }
+
+  return results;
 }
 
 // 15분 단위 시각 옵션 (오전 12:00 ~ 오후 11:45, 총 96개)
@@ -145,7 +414,14 @@ function parseUserTypedTime(raw: string): number | null {
     mm = 0;
   }
 
-  if (Number.isNaN(hh) || Number.isNaN(mm) || hh < 0 || hh > 24 || mm < 0 || mm > 59) {
+  if (
+    Number.isNaN(hh) ||
+    Number.isNaN(mm) ||
+    hh < 0 ||
+    hh > 24 ||
+    mm < 0 ||
+    mm > 59
+  ) {
     return null;
   }
 
@@ -155,10 +431,14 @@ function parseUserTypedTime(raw: string): number | null {
   return hh * 60 + mm;
 }
 
+/**
+ * 1. 인정 근무(굵은 막대) 클릭 시 열리는 플렉스 인라인 팝오버 ([근무 편집] 권한 전용)
+ */
 export function FlexInlineWorkPopover({
   target,
   currentDraft,
   workFormPolicies,
+  baselineSnapshot,
   onChangeDraft,
   onClearDraft,
   onStageDelete,
@@ -168,6 +448,7 @@ export function FlexInlineWorkPopover({
   target: InlineWorkPopoverTarget;
   currentDraft?: DraftWorkEdit;
   workFormPolicies: HqWorkFormPolicy[];
+  baselineSnapshot: DraftWorkEdit["baselineSnapshot"];
   onChangeDraft: (next: DraftWorkEdit) => void;
   onClearDraft: (key: string) => void;
   onStageDelete: (target: InlineWorkPopoverTarget) => void;
@@ -202,7 +483,6 @@ export function FlexInlineWorkPopover({
     return target.baseline;
   }, [currentDraft, target.baseline]);
 
-  // 바깥 클릭 시 플렉스처럼 자연스럽게 팝오버 닫기 (변경된 draft는 유지)
   useEffect(() => {
     const handleOutside = (e: MouseEvent) => {
       const el = e.target as HTMLElement | null;
@@ -220,7 +500,6 @@ export function FlexInlineWorkPopover({
     };
   }, [onConfirmClose]);
 
-  // 시간 드롭다운 열릴 때 현재 선택된 시각이 중앙에 오도록 자동 스크롤
   useEffect(() => {
     if (!activeTimeField || !timeListRef.current) return;
     const curMin =
@@ -251,7 +530,6 @@ export function FlexInlineWorkPopover({
       ...patch,
     };
 
-    // 근무 시간이 바뀌면 기본 휴게시간(4시간 이상 30분, 8시간 이상 60분) 자동 보정 (사용자가 직접 조정하지 않은 경우)
     if (
       (patch.inMinutes !== undefined || patch.outMinutes !== undefined) &&
       patch.breakMinutes === undefined
@@ -286,11 +564,13 @@ export function FlexInlineWorkPopover({
       workDate: target.workDate,
       attendanceId: target.attendanceId,
       actionMode: "UPSERT",
+      wasScheduledWorkday: target.wasScheduledWorkday,
+      ruleDailyMinutes: target.ruleDailyMinutes,
+      baselineSnapshot,
       ...merged,
     });
   };
 
-  // 화면 가장자리 잘림 방지 위치 산출
   const positionStyle = useMemo<React.CSSProperties>(() => {
     const winW = typeof window !== "undefined" ? window.innerWidth : 1280;
     const winH = typeof window !== "undefined" ? window.innerHeight : 800;
@@ -352,9 +632,14 @@ export function FlexInlineWorkPopover({
           : ATTENDANCE_MODES[m].defaultLocation;
       pushChoice(p.name, p.icon || "💼", m, loc);
     });
-    pushChoice("원격근무", "🏠", "REMOTE", ATTENDANCE_MODES.REMOTE.defaultLocation);
+    pushChoice(
+      "원격근무",
+      "🏠",
+      "REMOTE",
+      ATTENDANCE_MODES.REMOTE.defaultLocation
+    );
     pushChoice("외근", "🚗", "OUTSIDE", "외근지");
-    pushChoice("출장", "🚄", "OUTSIDE", "출장지");
+    pushChoice("출장", "✈️", "OUTSIDE", "출장지");
 
     return base;
   }, [workFormPolicies]);
@@ -380,7 +665,7 @@ export function FlexInlineWorkPopover({
       ref={cardRef}
       style={positionStyle}
       onClick={(e) => e.stopPropagation()}
-      className="z-[150] rounded-2xl bg-white shadow-[0_14px_42px_rgba(15,23,42,0.16)] border border-slate-200/85 select-none animate-in fade-in zoom-in-95 duration-100"
+      className="z-[150] rounded-2xl bg-white shadow-[0_14px_42px_rgba(15,23,42,0.16)] border border-slate-200/85 select-none"
     >
       <div className="px-4 pt-4 pb-3.5 space-y-3">
         {/* 상단: 근무 정책 선택 드롭다운 (💼 근무 ▾) */}
@@ -456,11 +741,7 @@ export function FlexInlineWorkPopover({
         {/* 중단: 출퇴근 시간 범위 (🕒 오전 9:00 -> 오후 6:00) + 총 시간 */}
         <div className="relative flex items-start gap-2.5">
           <span className="mt-1.5 text-slate-400 shrink-0" aria-hidden="true">
-            <svg
-              className="w-4 h-4"
-              viewBox="0 0 20 20"
-              fill="currentColor"
-            >
+            <svg className="w-4 h-4" viewBox="0 0 20 20" fill="currentColor">
               <path
                 fillRule="evenodd"
                 d="M10 18a8 8 0 100-16 8 8 0 000 16zm.75-12.25a.75.75 0 00-1.5 0v4.5c0 .199.079.39.22.53l2.5 2.5a.75.75 0 101.06-1.06l-2.28-2.28V5.75z"
@@ -647,7 +928,6 @@ export function FlexInlineWorkPopover({
           </div>
         </div>
 
-        {/* 선택형 보조 행: 휴게시간 조정 / 메모 입력 */}
         {showBreakPicker && (
           <div className="pt-1 flex items-center justify-between gap-1.5 text-[11px]">
             <span className="font-bold text-slate-500">☕ 휴게</span>
@@ -675,7 +955,7 @@ export function FlexInlineWorkPopover({
             <input
               value={effectiveState.memo}
               onChange={(e) => applyFieldPatch({ memo: e.target.value })}
-              placeholder="업무 메모 입력 (선택)"
+              placeholder="인정 근무 사유·메모 입력 (선택)"
               className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 bg-slate-50/70 text-xs text-slate-800 placeholder:text-slate-400 outline-none focus:border-slate-400"
             />
           </div>
@@ -720,7 +1000,7 @@ export function FlexInlineWorkPopover({
                 className="w-full px-3.5 py-2 text-left hover:bg-slate-50 font-semibold text-slate-700 flex items-center gap-2"
               >
                 <span>📝</span>
-                <span>메모 입력</span>
+                <span>사유 · 메모 입력</span>
               </button>
               {(target.hadExistingRecord || Boolean(currentDraft)) && (
                 <>
@@ -740,7 +1020,7 @@ export function FlexInlineWorkPopover({
                   >
                     <span>🗑️</span>
                     <span>
-                      {target.hadExistingRecord ? "근무 기록 삭제" : "변경 취소"}
+                      {target.hadExistingRecord ? "인정 근무 삭제" : "변경 취소"}
                     </span>
                   </button>
                 </>
@@ -758,7 +1038,6 @@ export function FlexInlineWorkPopover({
               !target.hadExistingRecord &&
               !target.wasScheduledWorkday
             ) {
-              // 주말/휴일에 [+] 눌러 기본 9~6 그대로 [확인]을 누른 경우 바로 드래프트에 추가
               onChangeDraft({
                 key: target.key,
                 memberId: target.memberId,
@@ -767,6 +1046,9 @@ export function FlexInlineWorkPopover({
                 workDate: target.workDate,
                 attendanceId: target.attendanceId,
                 actionMode: "UPSERT",
+                wasScheduledWorkday: target.wasScheduledWorkday,
+                ruleDailyMinutes: target.ruleDailyMinutes,
+                baselineSnapshot,
                 ...effectiveState,
               });
             }
@@ -781,6 +1063,9 @@ export function FlexInlineWorkPopover({
   );
 }
 
+/**
+ * 2. 하단 플로팅 드래프트 바 (취소 | 변경됨 N | 승인·참조 N | 확인 필요 N | 등록하기)
+ */
 export function FlexDraftFloatingBar({
   drafts,
   approvalCount,
@@ -839,7 +1124,7 @@ export function FlexDraftFloatingBar({
         <span
           className={`min-w-[18px] h-[18px] px-1 rounded-full text-[11px] font-extrabold inline-flex items-center justify-center tabular-nums ${
             approvalCount > 0
-              ? "bg-blue-600 text-white"
+              ? "bg-amber-500 text-white"
               : "bg-slate-100 text-slate-400"
           }`}
         >
@@ -859,7 +1144,7 @@ export function FlexDraftFloatingBar({
           <span
             className={`min-w-[18px] h-[18px] px-1 rounded-full text-[11px] font-extrabold inline-flex items-center justify-center tabular-nums ${
               warningItems.length > 0
-                ? "bg-amber-500 text-white"
+                ? "bg-rose-500 text-white"
                 : "bg-slate-100 text-slate-400"
             }`}
           >
@@ -869,7 +1154,7 @@ export function FlexDraftFloatingBar({
 
         {warnOpen && warningItems.length > 0 && (
           <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2.5 w-72 rounded-2xl bg-white shadow-2xl border border-slate-200 p-3.5 space-y-1.5 text-[11px] text-slate-700">
-            <div className="font-extrabold text-amber-700">
+            <div className="font-extrabold text-rose-600">
               ⚠️ 확인이 필요한 항목 ({warningItems.length})
             </div>
             <ul className="list-disc pl-4 space-y-1 text-slate-600">
@@ -896,27 +1181,34 @@ export function FlexDraftFloatingBar({
         >
           <path d="M3.105 2.288a.75.75 0 0 0-.826.95l1.414 4.926A1.5 1.5 0 0 0 5.135 9.25h6.115a.75.75 0 0 1 0 1.5H5.135a1.5 1.5 0 0 0-1.442 1.086l-1.414 4.926a.75.75 0 0 0 .826.95 28.897 28.897 0 0 0 15.293-7.155.75.75 0 0 0 0-1.114A28.897 28.897 0 0 0 3.105 2.288Z" />
         </svg>
-        <span>{submitting ? "등록 중..." : "등록하기"}</span>
+        <span>
+          {submitting
+            ? "처리 중..."
+            : approvalCount > 0
+              ? "승인 요청 · 등록"
+              : "등록하기"}
+        </span>
       </button>
     </div>
   );
 }
 
+/**
+ * 3. 우측 [승인 · 참조] 패널 (Screenshot 369d6a95 + 승인조건 발동 시 승인선·사유 입력 표시)
+ */
 export function FlexApprovalSidePanel({
   rangeStart,
   rangeEnd,
-  drafts,
-  approvalPolicies,
-  workConditionRules,
-  workFormPolicies,
+  evaluatedItems,
+  reasonByKey,
+  onChangeReason,
   onClose,
 }: {
   rangeStart: string;
   rangeEnd: string;
-  drafts: DraftWorkEdit[];
-  approvalPolicies?: HqApprovalPolicyItem[];
-  workConditionRules?: HqWorkConditionRule[];
-  workFormPolicies?: HqWorkFormPolicy[];
+  evaluatedItems: EvaluatedDraftApprovalItem[];
+  reasonByKey: Record<string, string>;
+  onChangeReason: (draftKey: string, val: string) => void;
   onClose: () => void;
 }) {
   const formattedRange = useMemo(() => {
@@ -928,37 +1220,12 @@ export function FlexApprovalSidePanel({
     return `${fmt(rangeStart, true)} – ${fmt(rangeEnd, !sameYear)}`;
   }, [rangeStart, rangeEnd]);
 
-  const requiredApprovalItems = useMemo(() => {
-    const out: { workDate: string; label: string; policyTitle: string }[] = [];
-    const policies = approvalPolicies || [];
-    const forms = workFormPolicies || [];
-    void workConditionRules;
-
-    drafts.forEach((d) => {
-      if (d.actionMode === "DELETE") return;
-      const matchedForm = forms.find((f) => f.name === d.policyName);
-      if (matchedForm) {
-        const pol = policies.find((p) => p.id === matchedForm.policy_id);
-        if (pol && ((pol.steps && pol.steps.length > 0) || (pol.cc_list && pol.cc_list.length > 0))) {
-          out.push({
-            workDate: d.workDate,
-            label: `${d.policyName} (${formatMinutesToKoreanAmPm(
-              d.inMinutes
-            )} ~ ${formatMinutesToKoreanAmPm(d.outMinutes)})`,
-            policyTitle: pol.title,
-          });
-        }
-      }
-    });
-    return out;
-  }, [approvalPolicies, drafts, workConditionRules, workFormPolicies]);
-
   return (
     <aside
       data-flex-draft-bar="true"
-      className="w-[292px] shrink-0 border-l border-slate-200 bg-white flex flex-col select-none"
+      className="w-[300px] shrink-0 border-l border-slate-200 bg-white flex flex-col select-none"
     >
-      <div className="px-6 pt-5 pb-4 flex items-start justify-between">
+      <div className="px-6 pt-5 pb-4 flex items-start justify-between border-b border-slate-100">
         <div>
           <h3 className="text-sm font-extrabold text-slate-900">승인 · 참조</h3>
           <p className="text-[11px] font-medium text-slate-400 mt-1">
@@ -974,8 +1241,8 @@ export function FlexApprovalSidePanel({
         </button>
       </div>
 
-      <div className="flex-1 px-6 py-8 flex flex-col items-center justify-center text-center">
-        {requiredApprovalItems.length === 0 ? (
+      {evaluatedItems.length === 0 ? (
+        <div className="flex-1 px-6 py-8 flex flex-col items-center justify-center text-center">
           <div className="space-y-2">
             <div className="w-9 h-9 mx-auto rounded-xl bg-slate-50 border border-slate-200/80 flex items-center justify-center text-slate-300">
               <svg
@@ -999,27 +1266,565 @@ export function FlexApprovalSidePanel({
               별도의 절차 없이 등록할 수 있어요.
             </p>
           </div>
-        ) : (
-          <div className="w-full space-y-2.5 text-left">
-            {requiredApprovalItems.map((item, idx) => (
-              <div
-                key={idx}
-                className="p-3 rounded-xl border border-slate-200 bg-slate-50/60 space-y-1"
-              >
-                <div className="text-[11px] font-bold text-blue-600">
-                  {item.workDate}
+        </div>
+      ) : (
+        <div className="flex-1 overflow-y-auto p-5 space-y-3.5 text-xs">
+          {evaluatedItems.map((ev) => (
+            <div
+              key={ev.draftKey}
+              className="p-3.5 rounded-2xl border border-slate-200 bg-slate-50/60 space-y-2.5"
+            >
+              <div className="flex items-center justify-between gap-2">
+                <span className="font-extrabold text-slate-900">
+                  {ev.workDate}
+                </span>
+                <span
+                  className={`px-2 py-0.5 rounded-md text-[10px] font-extrabold ${
+                    ev.requiresApproval
+                      ? "bg-amber-100 text-amber-800"
+                      : "bg-slate-200 text-slate-700"
+                  }`}
+                >
+                  {ev.requiresApproval ? "승인 필요" : "참조 알림"}
+                </span>
+              </div>
+
+              <div className="flex flex-wrap gap-1">
+                {ev.triggeredReasons.map((r) => (
+                  <span
+                    key={r}
+                    className="px-2 py-0.5 rounded bg-white border border-slate-200 text-[10.5px] font-bold text-slate-700"
+                  >
+                    {r}
+                  </span>
+                ))}
+              </div>
+
+              {ev.steps.length > 0 && (
+                <div className="text-[11px] text-slate-600">
+                  <span className="font-bold text-slate-400 mr-1.5">승인자</span>
+                  <span className="font-semibold text-slate-800">
+                    {ev.steps.map((s) => s.approver_name).join(" → ")}
+                  </span>
                 </div>
-                <div className="text-xs font-extrabold text-slate-800">
-                  {item.label}
+              )}
+
+              {ev.ccMembers.length > 0 && (
+                <div className="text-[11px] text-slate-600">
+                  <span className="font-bold text-slate-400 mr-1.5">참조자</span>
+                  <span className="font-semibold text-slate-700">
+                    {ev.ccMembers.map((c) => c.name).join(", ")}
+                  </span>
                 </div>
-                <div className="text-[11px] text-slate-500">
-                  적용 정책: {item.policyTitle}
-                </div>
+              )}
+
+              <div>
+                <input
+                  value={reasonByKey[ev.draftKey] || ""}
+                  onChange={(e) => onChangeReason(ev.draftKey, e.target.value)}
+                  placeholder={
+                    ev.reasonRequired
+                      ? "사유를 입력해 주세요 (필수)"
+                      : "승인 요청 사유 입력 (선택)"
+                  }
+                  className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 bg-white text-[11px] text-slate-800 placeholder:text-slate-400 outline-none focus:border-slate-400"
+                />
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </aside>
+  );
+}
+
+/**
+ * 4. 실시간 근무 기록(얇은 줄) 호버 다크 툴팁 (Screenshot c34f6653 100% 재현)
+ */
+export function FlexRealtimeHoverTooltip({
+  startMin,
+  endMin,
+  isActiveNow,
+  nowMin,
+  breaks,
+  canEdit,
+  anchorPos,
+}: {
+  startMin: number;
+  endMin: number | null;
+  isActiveNow: boolean;
+  nowMin: number;
+  breaks: HqRealtimeBreakSpan[];
+  canEdit: boolean;
+  anchorPos: { x: number; y: number };
+}) {
+  const effectiveEnd = endMin ?? nowMin;
+  const visibleBreaks = breaks.filter(
+    (b) => b.start_min >= startMin && b.start_min < effectiveEnd
+  );
+
+  return (
+    <div
+      style={{
+        position: "fixed",
+        left: `${Math.max(16, Math.min((typeof window !== "undefined" ? window.innerWidth : 1200) - 240, anchorPos.x - 105))}px`,
+        top: `${Math.max(12, anchorPos.y - (visibleBreaks.length > 0 ? 112 : 82))}px`,
+      }}
+      className="pointer-events-none z-[180] w-[224px] rounded-xl bg-[#2b303a] text-white px-3.5 py-2.5 shadow-2xl text-[11px] space-y-1.5"
+    >
+      <div className="flex items-center justify-between">
+        <span className="text-slate-300 font-medium">기록 시작</span>
+        <span className="font-bold tabular-nums">
+          {formatMinutesToKoreanAmPm(startMin)}
+        </span>
+      </div>
+      <div className="flex items-center justify-between">
+        <span className="text-slate-300 font-medium">기록 종료</span>
+        <span className="font-bold tabular-nums">
+          {isActiveNow && endMin === null
+            ? `${formatMinutesToKoreanAmPm(nowMin)} (진행중)`
+            : endMin !== null
+              ? formatMinutesToKoreanAmPm(endMin)
+              : "-"}
+        </span>
+      </div>
+      {visibleBreaks.length > 0 && (
+        <div className="pt-1 border-t border-white/10 flex items-start justify-between gap-2">
+          <span className="text-slate-300 font-medium shrink-0">휴게 기록</span>
+          <div className="text-right font-semibold tabular-nums space-y-0.5">
+            {visibleBreaks.map((b) => (
+              <div key={b.id}>
+                {formatMinutesToKoreanAmPm(b.start_min)} –{" "}
+                {formatMinutesToKoreanAmPm(Math.min(b.end_min, effectiveEnd))}
               </div>
             ))}
           </div>
-        )}
+        </div>
+      )}
+      {canEdit && !isActiveNow && (
+        <div className="pt-1 border-t border-white/10 text-[10px] text-teal-300 font-semibold text-right">
+          클릭하여 실시간 기록 수정
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * 5. 플렉스 [실시간 기록 수정] 모달 (Screenshot 8e9c06fa 100% 재현 — 얇은 줄만 독립 수정!)
+ */
+export function FlexRealtimeRecordEditModal({
+  isOpen,
+  memberId,
+  memberName,
+  department,
+  workDate,
+  existingLog,
+  defaultStartMin,
+  defaultEndMin,
+  onClose,
+  onSaved,
+}: {
+  isOpen: boolean;
+  memberId: string;
+  memberName: string;
+  department: string;
+  workDate: string;
+  existingLog?: HqRealtimeWorkLog | null;
+  defaultStartMin: number;
+  defaultEndMin: number;
+  onClose: () => void;
+  onSaved: (
+    action: "UPSERT_REALTIME_LOG" | "DELETE_REALTIME_LOG",
+    payload: Record<string, any>
+  ) => Promise<void>;
+}) {
+  const [startMin, setStartMin] = useState(
+    existingLog?.start_min ?? defaultStartMin
+  );
+  const [endMin, setEndMin] = useState<number | null>(
+    existingLog ? existingLog.end_min : defaultEndMin
+  );
+  const [policyName, setPolicyName] = useState(
+    existingLog?.policy_name || "근무"
+  );
+  const [workMode, setWorkMode] = useState<HqWorkMode>(
+    existingLog?.work_mode || "OFFICE"
+  );
+  const [transitions, setTransitions] = useState<HqRealtimeModeSegment[]>(
+    existingLog?.transitions || []
+  );
+  const [breaks, setBreaks] = useState<HqRealtimeBreakSpan[]>(
+    existingLog?.breaks || [{ id: "brk-1", start_min: 720, end_min: 780 }]
+  );
+  const [moreOpen, setMoreOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    setStartMin(existingLog?.start_min ?? defaultStartMin);
+    setEndMin(existingLog ? existingLog.end_min : defaultEndMin);
+    setPolicyName(existingLog?.policy_name || "근무");
+    setWorkMode(existingLog?.work_mode || "OFFICE");
+    setTransitions(existingLog?.transitions || []);
+    setBreaks(
+      existingLog?.breaks || [{ id: "brk-1", start_min: 720, end_min: 780 }]
+    );
+    setMoreOpen(false);
+  }, [defaultEndMin, defaultStartMin, existingLog, isOpen]);
+
+  if (!isOpen) return null;
+
+  const [wy, wm, wd] = workDate.split("-").map(Number);
+  const dowKo = ["일", "월", "화", "수", "목", "금", "토"][
+    new Date(wy || 2026, (wm || 1) - 1, wd || 1).getDay()
+  ];
+  const dateHeader = `${wy}년 ${wm}월 ${wd}일 (${dowKo})`;
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      await onSaved("UPSERT_REALTIME_LOG", {
+        instructor_id: memberId,
+        member_name: memberName,
+        department,
+        work_date: workDate,
+        start_min: startMin,
+        end_min: endMin,
+        policy_name: policyName,
+        work_mode: workMode,
+        transitions,
+        breaks,
+      });
+      onClose();
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!confirm("해당 날짜의 실시간 근무 기록(얇은 줄)을 삭제하시겠습니까?")) {
+      return;
+    }
+    setSaving(true);
+    try {
+      await onSaved("DELETE_REALTIME_LOG", {
+        instructor_id: memberId,
+        work_date: workDate,
+      });
+      onClose();
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div
+      onClick={onClose}
+      className="fixed inset-0 z-[190] bg-slate-900/40 backdrop-blur-[1px] flex items-center justify-center p-4 select-none"
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="w-full max-w-[460px] rounded-2xl bg-white shadow-2xl border border-slate-200 overflow-hidden text-xs"
+      >
+        {/* 모달 헤더 */}
+        <div className="px-6 pt-5 pb-4 flex items-center justify-between">
+          <div className="flex items-baseline gap-2.5">
+            <h3 className="text-[15px] font-extrabold text-slate-900">
+              실시간 기록 수정
+            </h3>
+            <span className="text-xs font-semibold text-slate-400">
+              {dateHeader}
+            </span>
+          </div>
+
+          <div className="flex items-center gap-1.5 relative">
+            {existingLog && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => setMoreOpen((v) => !v)}
+                  className="w-7 h-7 rounded-lg hover:bg-slate-100 text-slate-400 hover:text-slate-700 font-bold"
+                >
+                  ⋯
+                </button>
+                {moreOpen && (
+                  <div className="absolute right-8 top-full mt-1 w-36 rounded-xl bg-white shadow-xl border border-slate-200 py-1.5 z-20">
+                    <button
+                      type="button"
+                      onClick={handleDelete}
+                      className="w-full px-3.5 py-2 text-left hover:bg-rose-50 text-rose-600 font-bold"
+                    >
+                      실시간 기록 삭제
+                    </button>
+                  </div>
+                )}
+              </>
+            )}
+            <button
+              type="button"
+              onClick={onClose}
+              className="w-6 h-6 rounded-full bg-slate-200/80 hover:bg-slate-300 text-slate-500 flex items-center justify-center text-[11px] font-bold"
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+
+        {/* 본문 폼 (Screenshot 8e9c06fa 동일 레이아웃) */}
+        <div className="px-6 py-3 space-y-5 max-h-[68vh] overflow-y-auto">
+          {/* 1) 기록 시작 + 전환 기록 추가 */}
+          <div className="grid grid-cols-12 items-start gap-3">
+            <label className="col-span-3 pt-2 font-bold text-slate-500">
+              기록 시작 <span className="text-rose-500">*</span>
+            </label>
+            <div className="col-span-9 space-y-2">
+              <div className="grid grid-cols-2 gap-2">
+                <select
+                  value={startMin}
+                  onChange={(e) => setStartMin(Number(e.target.value))}
+                  className="px-3 py-2 rounded-lg border border-slate-200 focus:border-[#16cc3b] bg-white font-bold text-slate-800 outline-none tabular-nums"
+                >
+                  {TIME_SLOTS_15M.map((s) => (
+                    <option key={s.minutes} value={s.minutes}>
+                      {s.label}
+                    </option>
+                  ))}
+                </select>
+
+                <select
+                  value={policyName}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setPolicyName(val);
+                    setWorkMode(
+                      val === "원격근무"
+                        ? "REMOTE"
+                        : val === "외근" || val === "출장"
+                          ? "OUTSIDE"
+                          : "OFFICE"
+                    );
+                  }}
+                  className="px-3 py-2 rounded-lg border border-slate-200 bg-white font-bold text-slate-800 outline-none"
+                >
+                  <option value="근무">💼 근무</option>
+                  <option value="원격근무">🏠 원격근무</option>
+                  <option value="외근">🚗 외근</option>
+                  <option value="출장">✈️ 출장</option>
+                </select>
+              </div>
+
+              {transitions.map((tr, idx) => (
+                <div
+                  key={tr.id}
+                  className="grid grid-cols-12 items-center gap-2"
+                >
+                  <select
+                    value={tr.at_min}
+                    onChange={(e) => {
+                      const v = Number(e.target.value);
+                      setTransitions((prev) =>
+                        prev.map((x, i) => (i === idx ? { ...x, at_min: v } : x))
+                      );
+                    }}
+                    className="col-span-5 px-2.5 py-1.5 rounded-lg border border-slate-200 bg-white font-semibold text-slate-700 outline-none tabular-nums"
+                  >
+                    {TIME_SLOTS_15M.map((s) => (
+                      <option key={s.minutes} value={s.minutes}>
+                        {s.label}
+                      </option>
+                    ))}
+                  </select>
+                  <select
+                    value={tr.policy_name}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      const wmMode: HqWorkMode =
+                        val === "원격근무"
+                          ? "REMOTE"
+                          : val === "외근" || val === "출장"
+                            ? "OUTSIDE"
+                            : "OFFICE";
+                      setTransitions((prev) =>
+                        prev.map((x, i) =>
+                          i === idx
+                            ? { ...x, policy_name: val, work_mode: wmMode }
+                            : x
+                        )
+                      );
+                    }}
+                    className="col-span-6 px-2.5 py-1.5 rounded-lg border border-slate-200 bg-white font-semibold text-slate-700 outline-none"
+                  >
+                    <option value="근무">💼 근무</option>
+                    <option value="원격근무">🏠 원격근무</option>
+                    <option value="외근">🚗 외근</option>
+                    <option value="출장">✈️ 출장</option>
+                  </select>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setTransitions((prev) => prev.filter((_, i) => i !== idx))
+                    }
+                    className="col-span-1 text-slate-400 hover:text-rose-500 font-bold text-center"
+                  >
+                    ✕
+                  </button>
+                </div>
+              ))}
+
+              <button
+                type="button"
+                onClick={() =>
+                  setTransitions((prev) => [
+                    ...prev,
+                    {
+                      id: `tr-${Date.now()}`,
+                      at_min: Math.min(1380, startMin + 240),
+                      policy_name: "원격근무",
+                      work_mode: "REMOTE",
+                    },
+                  ])
+                }
+                className="text-[11px] font-bold text-slate-400 hover:text-slate-700 flex items-center gap-1"
+              >
+                <span>+</span>
+                <span>전환 기록 추가</span>
+              </button>
+            </div>
+          </div>
+
+          {/* 2) 기록 종료 */}
+          <div className="grid grid-cols-12 items-center gap-3">
+            <label className="col-span-3 font-bold text-slate-500">
+              기록 종료
+            </label>
+            <div className="col-span-9">
+              <div className="inline-flex items-center gap-1.5">
+                <select
+                  value={endMin ?? ""}
+                  onChange={(e) =>
+                    setEndMin(
+                      e.target.value === "" ? null : Number(e.target.value)
+                    )
+                  }
+                  className="w-44 px-3 py-2 rounded-lg border border-slate-200 focus:border-[#16cc3b] bg-white font-bold text-slate-800 outline-none tabular-nums"
+                >
+                  <option value="">종료 시각 없음</option>
+                  {TIME_SLOTS_15M.map((s) => (
+                    <option key={s.minutes} value={s.minutes}>
+                      {s.label}
+                    </option>
+                  ))}
+                </select>
+                {endMin !== null && (
+                  <button
+                    type="button"
+                    onClick={() => setEndMin(null)}
+                    className="w-5 h-5 rounded-full bg-slate-200 hover:bg-slate-300 text-slate-500 flex items-center justify-center text-[10px] font-bold"
+                    title="종료 시각 지우기"
+                  >
+                    ✕
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* 3) 휴게 기록 */}
+          <div className="grid grid-cols-12 items-start gap-3">
+            <label className="col-span-3 pt-2 font-bold text-slate-500">
+              휴게 기록
+            </label>
+            <div className="col-span-9 space-y-2">
+              {breaks.map((b, idx) => (
+                <div key={b.id} className="flex items-center gap-1.5">
+                  <select
+                    value={b.start_min}
+                    onChange={(e) => {
+                      const v = Number(e.target.value);
+                      setBreaks((prev) =>
+                        prev.map((x, i) =>
+                          i === idx ? { ...x, start_min: v } : x
+                        )
+                      );
+                    }}
+                    className="flex-1 px-2.5 py-2 rounded-lg border border-slate-200 bg-white font-bold text-slate-800 outline-none tabular-nums"
+                  >
+                    {TIME_SLOTS_15M.map((s) => (
+                      <option key={s.minutes} value={s.minutes}>
+                        {s.label}
+                      </option>
+                    ))}
+                  </select>
+                  <span className="text-slate-300 font-bold">→</span>
+                  <select
+                    value={b.end_min}
+                    onChange={(e) => {
+                      const v = Number(e.target.value);
+                      setBreaks((prev) =>
+                        prev.map((x, i) =>
+                          i === idx ? { ...x, end_min: v } : x
+                        )
+                      );
+                    }}
+                    className="flex-1 px-2.5 py-2 rounded-lg border border-slate-200 bg-white font-bold text-slate-800 outline-none tabular-nums"
+                  >
+                    {TIME_SLOTS_15M.map((s) => (
+                      <option key={s.minutes} value={s.minutes}>
+                        {s.label}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setBreaks((prev) => prev.filter((_, i) => i !== idx))
+                    }
+                    className="w-6 h-6 rounded hover:bg-slate-100 text-slate-400 hover:text-rose-500 font-bold"
+                  >
+                    ✕
+                  </button>
+                </div>
+              ))}
+
+              <button
+                type="button"
+                onClick={() =>
+                  setBreaks((prev) => [
+                    ...prev,
+                    {
+                      id: `brk-${Date.now()}`,
+                      start_min: 720,
+                      end_min: 780,
+                    },
+                  ])
+                }
+                className="text-[11px] font-bold text-slate-400 hover:text-slate-700 flex items-center gap-1"
+              >
+                <span>+</span>
+                <span>휴게 기록 추가</span>
+              </button>
+            </div>
+          </div>
+
+          <div className="p-3 rounded-xl bg-slate-50 border border-slate-200/70 text-[11px] text-slate-500 leading-relaxed">
+            • 실시간 기록(얇은 줄)을 수정하더라도 <strong>인정 근무(굵은 막대)</strong>에는 영향을 주지 않아요.
+            <br />• 실시간 기록 편집 내용은 별도 승인 절차 없이 즉시 반영됩니다.
+          </div>
+        </div>
+
+        {/* 모달 푸터 */}
+        <div className="px-6 py-4 border-t border-slate-100 flex items-center justify-end gap-2 bg-white">
+          <button
+            type="button"
+            disabled={saving}
+            onClick={handleSave}
+            className="px-5 py-2 rounded-xl bg-[#00c458] hover:bg-[#00b04f] text-white font-extrabold shadow-xs transition-colors disabled:opacity-50"
+          >
+            {saving ? "저장 중..." : "저장"}
+          </button>
+        </div>
       </div>
-    </aside>
+    </div>
   );
 }
