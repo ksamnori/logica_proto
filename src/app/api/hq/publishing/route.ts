@@ -13,7 +13,7 @@ export const runtime = "nodejs";
 
 function generateBookCode(): string {
   const year = new Date().getFullYear();
-  const rand = String(Math.floor(100 + Math.random() * 900));
+  const rand = String(Math.floor(1000 + Math.random() * 9000));
   return `BK-${year}-${rand}`;
 }
 
@@ -64,21 +64,31 @@ export async function POST(req: NextRequest) {
     const stageMeta = PUB_STAGES.find((s) => s.code === stage) || PUB_STAGES[0];
     const nowIso = new Date().toISOString();
 
-    const payload = {
-      book_code: String(body?.book_code || "").trim() || generateBookCode(),
+    const hasExplicitEditor =
+      body !== null &&
+      typeof body === "object" &&
+      ("editor_id" in body || "editor_name" in body);
+
+    const editorId = hasExplicitEditor ? body?.editor_id || null : caller.userId;
+    const editorName = hasExplicitEditor
+      ? String(body?.editor_name || "").trim() || null
+      : caller.name;
+
+    const manualBookCode = String(body?.book_code || "").trim();
+    const basePayload = {
       title,
       subtitle: String(body?.subtitle || "").trim() || null,
       series_name: String(body?.series_name || "").trim() || null,
       target_grade: String(body?.target_grade || "").trim() || null,
-      stage,
+      stage: stageMeta.code,
       proof_round: String(body?.proof_round || "초교").trim(),
       progress_pct:
         body?.progress_pct !== undefined
           ? Math.min(100, Math.max(0, Number(body.progress_pct)))
           : stageMeta.defaultPct,
       author_name: String(body?.author_name || "").trim() || null,
-      editor_id: body?.editor_id || caller.userId,
-      editor_name: String(body?.editor_name || caller.name).trim(),
+      editor_id: editorId,
+      editor_name: editorName,
       designer_name: String(body?.designer_name || "").trim() || null,
       isbn: String(body?.isbn || "").trim() || null,
       edition_info: String(body?.edition_info || "초판 1쇄").trim(),
@@ -94,20 +104,37 @@ export async function POST(req: NextRequest) {
     };
 
     const supabaseAdmin = getSupabaseAdmin();
-    const { data: created, error } = await supabaseAdmin
-      .from("hq_publication")
-      .insert(payload)
-      .select("*")
-      .single();
 
-    if (error) {
-      if (isMissingHqTableError(error)) {
+    let created = null;
+    let lastError: any = null;
+    const maxAttempts = manualBookCode ? 1 : 3;
+
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      const book_code = manualBookCode || generateBookCode();
+      const { data, error } = await supabaseAdmin
+        .from("hq_publication")
+        .insert({ book_code, ...basePayload })
+        .select("*")
+        .single();
+
+      if (!error) {
+        created = data;
+        lastError = null;
+        break;
+      }
+
+      lastError = error;
+      if (error.code !== "23505") break; // 중복 키가 아니면 즉시 중단
+    }
+
+    if (lastError) {
+      if (isMissingHqTableError(lastError)) {
         return apiFail(
           "먼저 상단 노란 배너에서 확장 DB 테이블 생성 SQL을 1회 실행해 주세요.",
           400
         );
       }
-      return apiFail(`도서 등록 실패: ${error.message}`, 500);
+      return apiFail(`도서 등록 실패: ${lastError.message}`, 500);
     }
 
     return NextResponse.json({ success: true, data: created });
@@ -133,14 +160,20 @@ export async function PATCH(req: NextRequest) {
     if (body?.quick_stage) {
       const nextStage = String(body.quick_stage) as HqPubStage;
       const stageMeta = PUB_STAGES.find((s) => s.code === nextStage);
+      if (!stageMeta) return apiFail("유효하지 않은 공정 단계입니다.");
+
+      const updateFields: Record<string, any> = {
+        stage: stageMeta.code,
+        progress_pct: stageMeta.defaultPct,
+        updated_at: nowIso,
+      };
+      if (body?.proof_round) {
+        updateFields.proof_round = String(body.proof_round).trim();
+      }
+
       const { data: updated, error } = await supabaseAdmin
         .from("hq_publication")
-        .update({
-          stage: nextStage,
-          progress_pct: stageMeta ? stageMeta.defaultPct : 50,
-          proof_round: body?.proof_round || undefined,
-          updated_at: nowIso,
-        })
+        .update(updateFields)
         .eq("pub_id", pubId)
         .select("*")
         .single();
@@ -149,17 +182,25 @@ export async function PATCH(req: NextRequest) {
       return NextResponse.json({ success: true, data: updated });
     }
 
+    const title = String(body?.title || "").trim();
+    if (!title) return apiFail("도서명(또는 가제)을 입력해 주세요.");
+
     const stage = (body?.stage || "PLANNING") as HqPubStage;
+    const stageMeta = PUB_STAGES.find((s) => s.code === stage) || PUB_STAGES[0];
+
     const { data: updated, error } = await supabaseAdmin
       .from("hq_publication")
       .update({
-        title: String(body?.title || "").trim(),
+        title,
         subtitle: String(body?.subtitle || "").trim() || null,
         series_name: String(body?.series_name || "").trim() || null,
         target_grade: String(body?.target_grade || "").trim() || null,
-        stage,
+        stage: stageMeta.code,
         proof_round: String(body?.proof_round || "").trim() || null,
-        progress_pct: Math.min(100, Math.max(0, Number(body?.progress_pct ?? 50))),
+        progress_pct: Math.min(
+          100,
+          Math.max(0, Number(body?.progress_pct ?? stageMeta.defaultPct))
+        ),
         author_name: String(body?.author_name || "").trim() || null,
         editor_id: body?.editor_id || null,
         editor_name: String(body?.editor_name || "").trim() || null,

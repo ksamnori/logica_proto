@@ -1,4 +1,4 @@
-// src/app/hq/publishing/page.tsx
+// src/app/(hq)/hq/publishing/page.tsx
 "use client";
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
@@ -17,10 +17,17 @@ function getDDayBadge(dateStr?: string | null): {
   urgent: boolean;
 } | null {
   if (!dateStr) return null;
-  const target = new Date(`${dateStr}T00:00:00`).getTime();
+  const [ty, tm, td] = dateStr.slice(0, 10).split("-").map(Number);
+  if (!ty || !tm || !td) return null;
+
+  const target = new Date(ty, tm - 1, td).getTime();
+  const now = new Date();
   const today = new Date(
-    `${new Date().toISOString().slice(0, 10)}T00:00:00`
+    now.getFullYear(),
+    now.getMonth(),
+    now.getDate()
   ).getTime();
+
   if (Number.isNaN(target)) return null;
   const diff = Math.round((target - today) / (1000 * 60 * 60 * 24));
   if (diff < 0) return { text: `하판 D+${Math.abs(diff)} 지연`, urgent: true };
@@ -35,6 +42,8 @@ export default function HqPublishingPage() {
 
   const [books, setBooks] = useState<HqPublication[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [schemaMissing, setSchemaMissing] = useState(false);
   const [viewMode, setViewMode] = useState<"board" | "table">("board");
   const [keyword, setKeyword] = useState("");
 
@@ -66,14 +75,17 @@ export default function HqPublishingPage() {
 
   const loadBooks = useCallback(async () => {
     setLoading(true);
+    setLoadError(null);
     try {
       const res = await hqFetch<{
         success: boolean;
+        schemaMissing?: boolean;
         data: { books: HqPublication[] };
       }>("/api/hq/publishing");
+      setSchemaMissing(Boolean(res.schemaMissing));
       setBooks(res.data?.books || []);
-    } catch {
-      // ignore
+    } catch (err: any) {
+      setLoadError(err?.message || "출판 공정 목록을 불러오지 못했습니다.");
     } finally {
       setLoading(false);
     }
@@ -123,19 +135,19 @@ export default function HqPublishingPage() {
     setTargetGrade(b.target_grade || "");
     setStage(b.stage);
     setProofRound(b.proof_round || "초교");
-    setProgressPct(String(b.progress_pct));
+    setProgressPct(String(b.progress_pct ?? 0));
     setAuthorName(b.author_name || "");
     setEditorId(b.editor_id || "");
     setEditorName(b.editor_name || "");
     setDesignerName(b.designer_name || "");
     setIsbn(b.isbn || "");
     setEditionInfo(b.edition_info || "초판 1쇄");
-    setListPrice(String(b.list_price || 0));
-    setPrintRun(String(b.print_run || 0));
+    setListPrice(String(b.list_price ?? 0));
+    setPrintRun(String(b.print_run ?? 0));
     setPrintVendor(b.print_vendor || "");
     setPressDeadline(b.press_deadline || "");
     setPublishDate(b.publish_date || "");
-    setPriority(b.priority);
+    setPriority(b.priority || "NORMAL");
     setMemo(b.memo || "");
     setModalOpen(true);
   };
@@ -155,7 +167,7 @@ export default function HqPublishingPage() {
         progress_pct: Number(progressPct || 0),
         author_name: authorName,
         editor_id: editorId || null,
-        editor_name: editorName,
+        editor_name: editorName.trim() || null,
         designer_name: designerName,
         isbn,
         edition_info: editionInfo,
@@ -245,6 +257,23 @@ export default function HqPublishingPage() {
 
   return (
     <div className="p-6 max-w-[1480px] mx-auto w-full space-y-6">
+      {(schemaMissing || loadError) && (
+        <div className="rounded-2xl border border-amber-300 bg-amber-50 px-4 py-3 text-xs font-bold text-amber-900 flex items-center justify-between gap-3">
+          <span>
+            {schemaMissing
+              ? "hq_publication 테이블이 아직 생성되지 않았습니다. Supabase SQL 패치를 먼저 실행해 주세요."
+              : `데이터 조회 오류: ${loadError}`}
+          </span>
+          <button
+            type="button"
+            onClick={loadBooks}
+            className="px-3 py-1.5 rounded-lg bg-white border border-amber-300 text-amber-800 hover:bg-amber-100 shrink-0"
+          >
+            다시 시도
+          </button>
+        </div>
+      )}
+
       {/* 상단 KPI & 컨트롤 */}
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
         <div className="rounded-2xl bg-white border border-slate-200 p-5 shadow-xs">
@@ -489,9 +518,9 @@ export default function HqPublishingPage() {
                             {b.book_code}
                           </div>
                           <span
-                            className={`inline-block mt-1 px-2 py-0.5 rounded border text-[10px] font-bold ${stMeta?.badgeClass}`}
+                            className={`inline-block mt-1 px-2 py-0.5 rounded border text-[10px] font-bold ${stMeta?.badgeClass || ""}`}
                           >
-                            {stMeta?.shortLabel}
+                            {stMeta?.shortLabel || b.stage}
                           </span>
                         </td>
                         <td className="py-3.5 px-4">
@@ -512,8 +541,8 @@ export default function HqPublishingPage() {
                             {b.isbn || "ISBN 미발급"}
                           </div>
                           <div className="text-[11px] text-slate-500">
-                            정가 {b.list_price.toLocaleString()}원 ·{" "}
-                            {b.print_run.toLocaleString()}부
+                            정가 {(b.list_price ?? 0).toLocaleString()}원 ·{" "}
+                            {(b.print_run ?? 0).toLocaleString()}부
                           </div>
                         </td>
                         <td className="py-3.5 px-4 whitespace-nowrap text-slate-700">
@@ -684,11 +713,16 @@ export default function HqPublishingPage() {
                   <select
                     value={editorId}
                     onChange={(e) => {
-                      setEditorId(e.target.value);
-                      const m = activeMembers.find(
-                        (x) => x.instructor_id === e.target.value
-                      );
-                      if (m) setEditorName(m.name);
+                      const nextId = e.target.value;
+                      setEditorId(nextId);
+                      if (!nextId) {
+                        setEditorName("");
+                      } else {
+                        const m = activeMembers.find(
+                          (x) => x.instructor_id === nextId
+                        );
+                        if (m) setEditorName(m.name);
+                      }
                     }}
                     className="w-full px-3 py-2 rounded-xl border border-slate-300 font-bold bg-white"
                   >
@@ -699,6 +733,14 @@ export default function HqPublishingPage() {
                       </option>
                     ))}
                   </select>
+                  {!editorId && (
+                    <input
+                      value={editorName}
+                      onChange={(e) => setEditorName(e.target.value)}
+                      placeholder="편집자명 직접 입력 (비우면 미지정)"
+                      className="mt-1.5 w-full px-3 py-2 rounded-xl border border-slate-300"
+                    />
+                  )}
                 </div>
                 <div>
                   <label className="block font-bold text-slate-700 mb-1">
@@ -718,6 +760,7 @@ export default function HqPublishingPage() {
                   <input
                     value={authorName}
                     onChange={(e) => setAuthorName(e.target.value)}
+                    placeholder="예: 천종현수학연구소"
                     className="w-full px-3 py-2 rounded-xl border border-slate-300"
                   />
                 </div>
@@ -741,6 +784,7 @@ export default function HqPublishingPage() {
                   </label>
                   <input
                     type="number"
+                    min={0}
                     value={listPrice}
                     onChange={(e) => setListPrice(e.target.value)}
                     className="w-full px-3 py-2 rounded-xl border border-slate-300 font-bold"
@@ -752,6 +796,7 @@ export default function HqPublishingPage() {
                   </label>
                   <input
                     type="number"
+                    min={0}
                     value={printRun}
                     onChange={(e) => setPrintRun(e.target.value)}
                     className="w-full px-3 py-2 rounded-xl border border-slate-300 font-bold"
