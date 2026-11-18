@@ -240,23 +240,28 @@ export default function HqChatDrawer() {
         }));
         setAllInstructors(enriched);
 
-        const tSet = new Set<string>();
+        // 내가 속한 지점(테넌트)만 아코디언을 펼치고, 다른 지점은 모두 접은 상태로 시작
+        const myInst = enriched.find(
+          (inst: any) => String(inst.instructor_id) === String(instId)
+        );
+        const myTenantName = (
+          myInst?.academy_tenant?.name || "본사"
+        ).trim();
         const dSet = new Set<string>();
         enriched.forEach((inst: any) => {
           const tName = (inst.academy_tenant.name || "소속 미지정").trim();
           const dName = (inst.department || "부서 미지정").trim();
-          if (tName === "본사") {
-            tSet.add(tName);
+          if (tName === myTenantName) {
             dSet.add(`${tName}_${dName}`);
           }
         });
-        setExpandedTenants(Array.from(tSet));
+        setExpandedTenants([myTenantName]);
         setExpandedDepts(Array.from(dSet));
       }
     } catch {
       // ignore
     }
-  }, []);
+  }, [instId]);
 
   useEffect(() => {
     if (!chatDrawerOpen || !instId) return;
@@ -847,8 +852,22 @@ export default function HqChatDrawer() {
         </>
       ) : (
         <>
-          {/* 탭 바 */}
+          {/* 탭 바 (좌: 전사 조직도 · 새 대화 / 우: 대화방 목록) */}
           <div className="flex px-3 pt-2 bg-slate-50 border-b border-slate-200 gap-1 shrink-0">
+            <button
+              type="button"
+              onClick={() => {
+                setTab("new");
+                if (allInstructors.length === 0) loadDirectory();
+              }}
+              className={`flex-1 py-2 text-xs font-extrabold border-b-2 transition-colors ${
+                tab === "new"
+                  ? "border-brand text-brand"
+                  : "border-transparent text-slate-500 hover:text-slate-700"
+              }`}
+            >
+              전사 조직도 · 새 대화
+            </button>
             <button
               type="button"
               onClick={() => {
@@ -867,20 +886,6 @@ export default function HqChatDrawer() {
                   {unreadChatCount > 99 ? "99+" : unreadChatCount}
                 </span>
               )}
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setTab("new");
-                if (allInstructors.length === 0) loadDirectory();
-              }}
-              className={`flex-1 py-2 text-xs font-extrabold border-b-2 transition-colors ${
-                tab === "new"
-                  ? "border-brand text-brand"
-                  : "border-transparent text-slate-500 hover:text-slate-700"
-              }`}
-            >
-              전사 조직도 · 새 대화
             </button>
           </div>
 

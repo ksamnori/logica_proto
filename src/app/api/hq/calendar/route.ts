@@ -3,7 +3,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { google } from "googleapis";
 import { SETTINGS_STORAGE_BUCKET } from "@/lib/hq/companySettingsServer";
 import { ATTENDANCE_MODES, FALLBACK_HQ_TENANT_ID } from "@/lib/hq/constants";
-import { getMergedIntegrationSettings } from "@/lib/hq/integrationServer";
+import {
+  getMergedIntegrationSettings,
+  resolveHqCalendarId,
+} from "@/lib/hq/integrationServer";
 import {
   apiFail,
   getSupabaseAdmin,
@@ -108,7 +111,11 @@ export async function GET(req: NextRequest) {
     const gcalCfg = integrations.google_calendar;
     const customCalId = (gcalCfg.calendar_id || "").trim();
     const envCalId = (process.env.TARGET_CALENDAR_ID || "").trim();
-    const targetCalId = customCalId || envCalId;
+    // 본부 캘린더(01000math@gmail.com 등) 우선 — 학원 공용 캘린더로 폴백하지 않음
+    const targetCalId = resolveHqCalendarId(customCalId);
+    const isAcademySharedCalendar = Boolean(envCalId) && targetCalId === envCalId;
+    const usingSavedHqCalendar =
+      Boolean(customCalId) && customCalId === targetCalId;
     const hqPrefix = (gcalCfg.event_prefix || "[HQ]").trim();
 
     let googleConnected = false;
@@ -131,8 +138,8 @@ export async function GET(req: NextRequest) {
           const summary = String(ev.summary || "").trim();
           // HQ 자동 동기화 항목([HQ])은 본부 내부 데이터에서 더 상세히 보여주므로 중복 제외
           if (hqPrefix && summary.startsWith(hqPrefix)) continue;
-          // 학원 공용 환경변수 캘린더를 공유 중인 경우 학원 자동 로그([Logica])는 제외
-          if (!customCalId && summary.startsWith("[Logica]")) continue;
+          // 학원 공용 캘린더를 보는 경우에만 학원 자동 로그([Logica]) 제외
+          if (isAcademySharedCalendar && summary.startsWith("[Logica]")) continue;
 
           const rawStart = ev.start?.dateTime || ev.start?.date || "";
           const rawEnd = ev.end?.dateTime || ev.end?.date || rawStart;
@@ -465,10 +472,11 @@ export async function GET(req: NextRequest) {
         googleStatus: {
           configured: Boolean(gcalClient && targetCalId),
           connected: googleConnected,
-          usingCustomHqCalendar: Boolean(customCalId),
+          usingCustomHqCalendar: !isAcademySharedCalendar,
+          calendarId: targetCalId,
           calendarTitle:
-            gcalCfg.verified_calendar_title ||
-            (customCalId ? "본부 Google 캘린더" : "Google 공유 캘린더"),
+            (usingSavedHqCalendar && gcalCfg.verified_calendar_title) ||
+            `본부 Google 캘린더 (${targetCalId})`,
           error: googleError,
         },
         events,
@@ -500,9 +508,9 @@ export async function POST(req: NextRequest) {
 
     const supabaseAdmin = getSupabaseAdmin();
     const { integrations } = await getMergedIntegrationSettings(supabaseAdmin);
-    const targetCalId =
-      (integrations.google_calendar.calendar_id || "").trim() ||
-      (process.env.TARGET_CALENDAR_ID || "").trim();
+    const targetCalId = resolveHqCalendarId(
+      integrations.google_calendar.calendar_id
+    );
 
     const gcalClient = targetCalId ? getGoogleCalendarClientOrNull() : null;
     if (!gcalClient || !targetCalId) {

@@ -1,7 +1,7 @@
 // src/components/hq/HqHeader.tsx
 "use client";
 
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { useHqShell } from "./HqShellContext";
 import { ATTENDANCE_MODES, getRankMeta } from "@/lib/hq/constants";
@@ -115,6 +115,9 @@ export default function HqHeader() {
   const {
     me,
     pendingApprovalCount,
+    approvalAlertActive,
+    newApprovalArrivedCount,
+    dismissApprovalAlert,
     unreadChatCount,
     myTodayAttendance,
     sidebarCollapsed,
@@ -129,6 +132,13 @@ export default function HqHeader() {
   } = useHqShell();
 
   const [clockBusy, setClockBusy] = useState(false);
+
+  // 결재함에 진입하면 새 결재 도착 알림(깜빡임)을 자동 해제
+  useEffect(() => {
+    if (canonicalPath === "/hq/approvals" && approvalAlertActive) {
+      dismissApprovalAlert();
+    }
+  }, [approvalAlertActive, canonicalPath, dismissApprovalAlert]);
 
   const meta = PAGE_TITLES[canonicalPath] || {
     title: "본부 워크스페이스",
@@ -271,16 +281,78 @@ export default function HqHeader() {
         )}
 
         {pendingApprovalCount > 0 && canonicalPath !== "/hq/approvals" && (
-          <button
-            type="button"
-            onClick={() => router.push(hqHref("/hq/approvals"))}
-            className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-rose-50 hover:bg-rose-100 border border-rose-200 text-rose-700 text-xs font-bold transition-colors"
-          >
-            <span>🔔 결재 대기</span>
-            <span className="px-1.5 py-0.5 rounded-full bg-rose-600 text-white text-[11px] leading-none">
-              {pendingApprovalCount}건
-            </span>
-          </button>
+          <div className="relative hidden sm:block">
+            <button
+              type="button"
+              onClick={() => {
+                dismissApprovalAlert();
+                router.push(hqHref("/hq/approvals"));
+              }}
+              title={`내 결재 대기 문서 ${pendingApprovalCount}건`}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-bold transition-colors ${
+                approvalAlertActive
+                  ? "hq-approval-flash bg-rose-600 border-rose-600 text-white"
+                  : "bg-rose-50 hover:bg-rose-100 border-rose-200 text-rose-700"
+              }`}
+            >
+              <span className="hq-bell-ring inline-block">🔔</span>
+              <span>결재 대기</span>
+              <span
+                className={`px-1.5 py-0.5 rounded-full text-[11px] leading-none ${
+                  approvalAlertActive
+                    ? "bg-white text-rose-600"
+                    : "bg-rose-600 text-white"
+                }`}
+              >
+                {pendingApprovalCount}건
+              </span>
+              {approvalAlertActive && (
+                <span className="absolute -top-1 -right-1 flex h-3 w-3">
+                  <span className="absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75 animate-ping" />
+                  <span className="relative inline-flex h-3 w-3 rounded-full bg-amber-400 ring-2 ring-white" />
+                </span>
+              )}
+            </button>
+
+            {/* 새 결재 도착 토스트 (모든 페이지 공통) */}
+            {approvalAlertActive && newApprovalArrivedCount > 0 && (
+              <div className="absolute right-0 top-full mt-2 w-72 rounded-2xl bg-white border border-rose-200 shadow-2xl p-3.5 z-50 whitespace-normal">
+                <div className="flex items-start gap-2.5">
+                  <span className="hq-bell-ring inline-block text-lg leading-none mt-0.5">
+                    🔔
+                  </span>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-xs font-extrabold text-slate-900">
+                      새 결재 문서가 도착했어요
+                    </div>
+                    <p className="text-[11px] text-slate-500 mt-0.5 leading-relaxed">
+                      내 승인을 기다리는 문서가 {newApprovalArrivedCount}건 새로
+                      들어왔습니다. (총 {pendingApprovalCount}건 대기)
+                    </p>
+                    <div className="mt-2.5 flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          dismissApprovalAlert();
+                          router.push(hqHref("/hq/approvals"));
+                        }}
+                        className="px-3 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-[11px] font-extrabold"
+                      >
+                        결재함 열기
+                      </button>
+                      <button
+                        type="button"
+                        onClick={dismissApprovalAlert}
+                        className="px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-600 text-[11px] font-bold"
+                      >
+                        나중에
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
         )}
 
         <button
@@ -304,12 +376,10 @@ export default function HqHeader() {
                 ? `사내 메신저 열기 (안 읽은 메시지 ${unreadChatCount}건)`
                 : "사내 메신저 열기"
             }
-            className={`relative px-3 py-2 rounded-xl border text-xs font-extrabold transition-all flex items-center gap-1.5 ${
+            className={`relative px-3 py-2 rounded-xl border text-xs font-extrabold transition-all flex items-center gap-1.5 text-[#3c1e1e] shadow-xs ${
               chatDrawerOpen || canonicalPath === "/hq/messenger"
-                ? "bg-slate-900 border-slate-900 text-white shadow-xs"
-                : unreadChatCount > 0
-                  ? "bg-rose-50/80 hover:bg-rose-100 border-rose-200 text-slate-800"
-                  : "bg-slate-50 hover:bg-slate-100 border-slate-200 text-slate-700"
+                ? "bg-[#f5d800] border-[#e0c400] ring-2 ring-[#fee500]/60"
+                : "bg-[#fee500] hover:bg-[#f5dc00] border-[#f0d800]"
             }`}
           >
             <span className="text-sm leading-none">💬</span>

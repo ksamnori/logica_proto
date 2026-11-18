@@ -1,7 +1,7 @@
 // src/app/hq/page.tsx
 "use client";
 
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useHqShell } from "@/components/hq/HqShellContext";
 import HqCalendarSidebar from "@/components/hq/HqCalendarSidebar";
@@ -46,6 +46,8 @@ export default function HqHomeDashboardPage() {
     openChatDrawer,
     refreshMembers,
     refreshApprovalBadge,
+    pendingApprovalCount,
+    approvalAlertActive,
   } = useHqShell();
 
   const [docs, setDocs] = useState<HqApprovalDoc[]>([]);
@@ -103,6 +105,27 @@ export default function HqHomeDashboardPage() {
   useEffect(() => {
     loadDashboardData();
   }, [loadDashboardData]);
+
+  // 결재 문서 실시간 반영: 새 결재 도착/결재 처리 이벤트 및 대기 건수 변화 시 대시보드 즉시 갱신
+  useEffect(() => {
+    const onApprovalSync = () => {
+      loadDashboardData();
+    };
+    window.addEventListener("hq:approval-incoming", onApprovalSync);
+    window.addEventListener("hq:approval-updated", onApprovalSync);
+    return () => {
+      window.removeEventListener("hq:approval-incoming", onApprovalSync);
+      window.removeEventListener("hq:approval-updated", onApprovalSync);
+    };
+  }, [loadDashboardData]);
+
+  const prevPendingRef = useRef(pendingApprovalCount);
+  useEffect(() => {
+    if (prevPendingRef.current !== pendingApprovalCount) {
+      prevPendingRef.current = pendingApprovalCount;
+      loadDashboardData();
+    }
+  }, [loadDashboardData, pendingApprovalCount]);
 
   const activeMembers = useMemo(
     () => members.filter((m) => m.work_status === "재직"),
@@ -311,7 +334,7 @@ export default function HqHomeDashboardPage() {
         id: "all-clear",
         tone: "ok",
         badge: "정상 운영",
-        text: "현재 밀린 결재나 이상 징후가 없습니다. 상단 빠른 기안 버튼으로 휴가·품의·지출결의를 바로 상신할 수 있습니다.",
+        text: "현재 밀린 결재나 이상 징후가 없습니다. 상단 빠른 기안 버튼으로 휴가·품의·지출품의를 바로 상신할 수 있습니다.",
       });
     }
 
@@ -389,6 +412,22 @@ export default function HqHomeDashboardPage() {
                   ⏱️ 출퇴근·유연근무
                 </button>
               )}
+              {(
+                [
+                  { type: "LEAVE", label: "🌴 휴가신청" },
+                  { type: "EXPENSE", label: "💳 지출품의" },
+                  { type: "PURCHASE", label: "🛒 인쇄·구매품의" },
+                ] as const
+              ).map((btn) => (
+                <button
+                  key={btn.type}
+                  type="button"
+                  onClick={() => openQuickDraft(btn.type)}
+                  className="px-3.5 py-2.5 rounded-xl bg-white/10 hover:bg-white/20 border border-white/15 text-white text-xs font-bold transition-colors whitespace-nowrap"
+                >
+                  {btn.label}
+                </button>
+              ))}
               {canAccessMenu("/hq/contracts") && (
                 <button
                   type="button"
@@ -396,6 +435,15 @@ export default function HqHomeDashboardPage() {
                   className="px-3.5 py-2.5 rounded-xl bg-white/10 hover:bg-white/20 border border-white/15 text-white text-xs font-bold transition-colors whitespace-nowrap"
                 >
                   📑 전자계약·저작권
+                </button>
+              )}
+              {me && (
+                <button
+                  type="button"
+                  onClick={() => setCertModalOpen(true)}
+                  className="px-3.5 py-2.5 rounded-xl bg-white text-slate-900 hover:bg-blue-50 text-xs font-extrabold shadow-sm transition-colors whitespace-nowrap"
+                >
+                  🪪 증명서 발급
                 </button>
               )}
               {canAccessMenu("/hq/publishing") && (
@@ -414,31 +462,6 @@ export default function HqHomeDashboardPage() {
                   className="px-3.5 py-2.5 rounded-xl bg-white/10 hover:bg-white/20 border border-white/15 text-white text-xs font-bold transition-colors whitespace-nowrap"
                 >
                   📈 인사이트
-                </button>
-              )}
-              {(
-                [
-                  { type: "LEAVE", label: "🌴 휴가신청" },
-                  { type: "EXPENSE", label: "💳 지출결의" },
-                  { type: "PURCHASE", label: "🛒 인쇄·구매품의" },
-                ] as const
-              ).map((btn) => (
-                <button
-                  key={btn.type}
-                  type="button"
-                  onClick={() => openQuickDraft(btn.type)}
-                  className="px-3.5 py-2.5 rounded-xl bg-white/10 hover:bg-white/20 border border-white/15 text-white text-xs font-bold transition-colors whitespace-nowrap"
-                >
-                  {btn.label}
-                </button>
-              ))}
-              {me && (
-                <button
-                  type="button"
-                  onClick={() => setCertModalOpen(true)}
-                  className="px-3.5 py-2.5 rounded-xl bg-white text-slate-900 hover:bg-blue-50 text-xs font-extrabold shadow-sm transition-colors whitespace-nowrap"
-                >
-                  🪪 증명서 발급
                 </button>
               )}
             </div>
@@ -489,11 +512,20 @@ export default function HqHomeDashboardPage() {
         <section className="grid grid-cols-1 sm:grid-cols-2 2xl:grid-cols-4 gap-4">
           <div
             onClick={() => goHq("/hq/approvals")}
-            className="bg-white rounded-2xl p-5 border border-slate-200 shadow-xs hover:border-brand/40 cursor-pointer transition-all"
+            className={`bg-white rounded-2xl p-5 border shadow-xs hover:border-brand/40 cursor-pointer transition-all ${
+              approvalAlertActive
+                ? "hq-approval-card-flash border-rose-300"
+                : "border-slate-200"
+            }`}
           >
             <div className="flex items-center justify-between">
-              <span className="text-xs font-bold text-slate-500">
+              <span className="text-xs font-bold text-slate-500 flex items-center gap-1.5">
                 내 결재 대기 문서
+                {approvalAlertActive && (
+                  <span className="px-1.5 py-0.5 rounded-full bg-rose-600 text-white text-[10px] font-extrabold animate-pulse">
+                    NEW
+                  </span>
+                )}
               </span>
               <span className="text-lg">✍️</span>
             </div>

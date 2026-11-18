@@ -7,6 +7,7 @@ import React, {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 import { useRouter } from "next/navigation";
@@ -49,6 +50,11 @@ interface HqShellState {
     target: MemberPermissionSubject | null | undefined
   ) => boolean;
   pendingApprovalCount: number;
+  /** 새 결재 문서가 실시간으로 도착하여 우상단 알림이 깜빡이는 상태 */
+  approvalAlertActive: boolean;
+  /** 마지막 알림 해제 이후 새로 도착한 결재 문서 수 */
+  newApprovalArrivedCount: number;
+  dismissApprovalAlert: () => void;
   unsignedContractCount: number;
   unreadChatCount: number;
   myTodayAttendance: HqAttendanceRecord | null;
@@ -113,6 +119,9 @@ export function HqShellProvider({
   const [canAccessAnalytics, setCanAccessAnalytics] = useState(false);
   const [contestAccess, setContestAccess] = useState<ContestAccessLevel>(null);
   const [pendingApprovalCount, setPendingApprovalCount] = useState(0);
+  const [approvalAlertActive, setApprovalAlertActive] = useState(false);
+  const [newApprovalArrivedCount, setNewApprovalArrivedCount] = useState(0);
+  const lastPendingCountRef = useRef<number | null>(null);
   const [unsignedContractCount, setUnsignedContractCount] = useState(0);
   const [unreadChatCount, setUnreadChatCount] = useState(0);
   const [myTodayAttendance, setMyTodayAttendance] =
@@ -228,10 +237,35 @@ export function HqShellProvider({
         data: { myPendingCount: number };
       }>("/api/hq/approvals");
       if (res.schemaMissing) setSchemaMissing(true);
-      setPendingApprovalCount(Number(res.data?.myPendingCount || 0));
+      const nextCount = Number(res.data?.myPendingCount || 0);
+      const prevCount = lastPendingCountRef.current;
+      lastPendingCountRef.current = nextCount;
+      setPendingApprovalCount(nextCount);
+
+      // 최초 로드 이후 내 결재 대기 건수가 늘어났다면 → 새 결재 도착 알림(깜빡임) 활성화
+      if (prevCount !== null && nextCount > prevCount) {
+        const added = nextCount - prevCount;
+        setNewApprovalArrivedCount((c) => c + added);
+        setApprovalAlertActive(true);
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(
+            new CustomEvent("hq:approval-incoming", {
+              detail: { added, total: nextCount },
+            })
+          );
+        }
+      } else if (nextCount === 0) {
+        setApprovalAlertActive(false);
+        setNewApprovalArrivedCount(0);
+      }
     } catch {
       // ignore badge fetch errors when offline/unauth
     }
+  }, []);
+
+  const dismissApprovalAlert = useCallback(() => {
+    setApprovalAlertActive(false);
+    setNewApprovalArrivedCount(0);
   }, []);
 
   const refreshAttendanceState = useCallback(async () => {
@@ -443,9 +477,53 @@ export function HqShellProvider({
     window.addEventListener("hq:attendance-updated", onAttendanceChange);
     window.addEventListener("hq:contract-updated", onContractChange);
 
+    // =====================================================================
+    // 결재 문서 실시간 감지: Supabase Realtime(결재 단계/문서 변경) + 30초 폴링 + 탭 복귀 즉시 갱신
+    // =====================================================================
+    let approvalDebounce: ReturnType<typeof setTimeout> | null = null;
+    const scheduleApprovalRefresh = () => {
+      if (approvalDebounce) clearTimeout(approvalDebounce);
+      approvalDebounce = setTimeout(() => {
+        approvalDebounce = null;
+        refreshApprovalBadge();
+      }, 700);
+    };
+
+    const unsubApprovalStep = subscribePostgresChanges(
+      { table: "hq_approval_step", events: ["INSERT", "UPDATE"] },
+      (payload) => {
+        const row: any = payload.new || {};
+        if (!row.approver_id || String(row.approver_id) === String(instId)) {
+          scheduleApprovalRefresh();
+        }
+      }
+    );
+    const unsubApprovalDoc = subscribePostgresChanges(
+      { table: "hq_approval_doc", events: ["INSERT", "UPDATE"] },
+      () => scheduleApprovalRefresh()
+    );
+
+    const approvalPollTimer = window.setInterval(() => {
+      if (document.visibilityState === "visible") {
+        refreshApprovalBadge();
+      }
+    }, 30_000);
+
+    const onVisibleAgain = () => {
+      if (document.visibilityState === "visible") scheduleApprovalRefresh();
+    };
+    document.addEventListener("visibilitychange", onVisibleAgain);
+    window.addEventListener("focus", onVisibleAgain);
+
     return () => {
       unsubMsg();
       unsubChatMember();
+      unsubApprovalStep();
+      unsubApprovalDoc();
+      if (approvalDebounce) clearTimeout(approvalDebounce);
+      window.clearInterval(approvalPollTimer);
+      document.removeEventListener("visibilitychange", onVisibleAgain);
+      window.removeEventListener("focus", onVisibleAgain);
       window.removeEventListener("hq:approval-updated", onApprovalChange);
       window.removeEventListener("hq:attendance-updated", onAttendanceChange);
       window.removeEventListener("hq:contract-updated", onContractChange);
@@ -574,6 +652,9 @@ export function HqShellProvider({
         hasHqPerm,
         canAccessTargetPerm,
         pendingApprovalCount,
+        approvalAlertActive,
+        newApprovalArrivedCount,
+        dismissApprovalAlert,
         unsignedContractCount,
         unreadChatCount,
         myTodayAttendance,

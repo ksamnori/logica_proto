@@ -3,12 +3,32 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { google } from "googleapis";
 import { readCompanySettingsServer } from "./companySettingsServer";
 import { FALLBACK_HQ_TENANT_ID } from "./constants";
-import { DEFAULT_INTEGRATION_SETTINGS } from "./defaultIntegrationSettings";
+import {
+  DEFAULT_INTEGRATION_SETTINGS,
+  HQ_DEFAULT_GOOGLE_CALENDAR_ID,
+} from "./defaultIntegrationSettings";
 import type {
   HqAccessTerminalProvider,
   HqAttendanceStatus,
   HqIntegrationSettings,
 } from "./types";
+
+/**
+ * 본부(HQ)에서 사용할 Google 캘린더 ID 결정
+ * 1) [설정 > 연결 설정]에 입력한 캘린더 ID (단, 학원 공용 캘린더 ID와 같으면 무시)
+ * 2) HQ_TARGET_CALENDAR_ID 환경변수
+ * 3) 본부 기본 캘린더 (01000math@gmail.com)
+ * ※ 학원 공용 TARGET_CALENDAR_ID로는 더 이상 폴백하지 않음 (학원 캘린더만 보이던 문제 해결)
+ */
+export function resolveHqCalendarId(customCalendarId?: string | null): string {
+  const custom = String(customCalendarId || "").trim();
+  const academyCalId = (process.env.TARGET_CALENDAR_ID || "").trim();
+  if (custom && custom !== academyCalId) return custom;
+  return (
+    (process.env.HQ_TARGET_CALENDAR_ID || "").trim() ||
+    HQ_DEFAULT_GOOGLE_CALENDAR_ID
+  );
+}
 
 export const TERMINAL_PROVIDER_LABELS: Record<
   HqAccessTerminalProvider,
@@ -79,13 +99,9 @@ export async function getMergedIntegrationSettings(
 export async function testGoogleCalendarConnection(
   customCalendarId?: string
 ): Promise<{ calendarId: string; summary: string }> {
-  const calId =
-    (customCalendarId || "").trim() ||
-    (process.env.TARGET_CALENDAR_ID || "").trim();
+  const calId = resolveHqCalendarId(customCalendarId);
   if (!calId) {
-    throw new Error(
-      "연동할 Google Calendar ID를 입력하거나 TARGET_CALENDAR_ID 환경변수를 확인해주세요."
-    );
+    throw new Error("연동할 Google Calendar ID를 입력해 주세요.");
   }
   const calendar = getGoogleCalendarClient();
   const meta = await calendar.calendars.get({ calendarId: calId });
@@ -107,9 +123,7 @@ export async function syncApprovalDocToGoogleCalendar(
   const cfg = integrations.google_calendar;
   if (!forceRun && !cfg.enabled) return false;
 
-  const calId =
-    (cfg.calendar_id || "").trim() ||
-    (process.env.TARGET_CALENDAR_ID || "").trim();
+  const calId = resolveHqCalendarId(cfg.calendar_id);
   if (!calId) return false;
 
   const isLeave = doc.doc_type === "LEAVE";
@@ -182,9 +196,7 @@ export async function batchSyncHqToGoogleCalendar(
   const { integrations, holidaysByYear } =
     await getMergedIntegrationSettings(supabaseAdmin);
   const cfg = integrations.google_calendar;
-  const calId =
-    (overrideCalendarId ?? cfg.calendar_id ?? "").trim() ||
-    (process.env.TARGET_CALENDAR_ID || "").trim();
+  const calId = resolveHqCalendarId(overrideCalendarId || cfg.calendar_id);
 
   const { summary: calendarSummary } = await testGoogleCalendarConnection(calId);
   const calendar = getGoogleCalendarClient();

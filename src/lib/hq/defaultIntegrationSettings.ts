@@ -1,6 +1,13 @@
 // src/lib/hq/defaultIntegrationSettings.ts
 import type { HqIntegrationSettings } from "./types";
 
+/**
+ * 본부(HQ) 기본 Google 캘린더 ID
+ * - 서비스 계정(logica-bot@logica-minutes.iam.gserviceaccount.com)이 공유 초대된 본부 캘린더
+ * - 학원 공용 캘린더(TARGET_CALENDAR_ID)와 분리하여 본부 대시보드에 표시
+ */
+export const HQ_DEFAULT_GOOGLE_CALENDAR_ID = "01000math@gmail.com";
+
 export const DEFAULT_INTEGRATION_SETTINGS: HqIntegrationSettings = {
   slack: {
     enabled: false,

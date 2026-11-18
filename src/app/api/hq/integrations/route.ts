@@ -4,6 +4,7 @@ import { appendHqAuditLog } from "@/lib/hq/auditLogServer";
 import {
   batchSyncHqToGoogleCalendar,
   ingestTerminalAttendanceEvents,
+  resolveHqCalendarId,
   sendSlackWebhookMessage,
   TERMINAL_PROVIDER_LABELS,
   testGoogleCalendarConnection,
@@ -32,7 +33,7 @@ export async function GET(req: NextRequest) {
       data: {
         hasGoogleServiceAccount,
         serviceAccountEmail: process.env.GOOGLE_CLIENT_EMAIL || "",
-        defaultTargetCalendarId: process.env.TARGET_CALENDAR_ID || "",
+        defaultTargetCalendarId: resolveHqCalendarId(""),
       },
     });
   } catch (e: any) {

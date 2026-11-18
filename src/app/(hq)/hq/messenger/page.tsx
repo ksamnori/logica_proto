@@ -165,15 +165,22 @@ export default function HqMessengerPage() {
         }));
         setAllInstructors(enrichedData);
 
-        const tSet = new Set<string>();
+        // 내가 속한 지점(테넌트)만 아코디언을 펼치고, 다른 지점은 모두 접은 상태로 시작
+        const myInst = enrichedData.find(
+          (inst: any) => String(inst.instructor_id) === String(instId)
+        );
+        const myTenantName = (
+          myInst?.academy_tenant?.name || "본사"
+        ).trim();
         const dSet = new Set<string>();
         enrichedData.forEach((inst: any) => {
           const tName = (inst.academy_tenant.name || "소속 미지정").trim();
           const dName = (inst.department || "부서 미지정").trim();
-          tSet.add(tName);
-          dSet.add(`${tName}_${dName}`);
+          if (tName === myTenantName) {
+            dSet.add(`${tName}_${dName}`);
+          }
         });
-        setExpandedTenants(Array.from(tSet));
+        setExpandedTenants([myTenantName]);
         setExpandedDepts(Array.from(dSet));
       }
     } catch {
