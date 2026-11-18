@@ -67,12 +67,12 @@ export const DEFAULT_ANNUAL_LEAVE_POLICY: HqAnnualLeavePolicyItem = {
   effective_start_date: "2021-01-01",
   first_year_monthly_rule: "매월 개근시 1일 부여",
   first_year_annual_rule: "첫 회계일에 근무한 기간의 연차 부여",
-  decimal_rounding: "일 단위 올림 처리",
+  decimal_rounding: "소수점 둘째 자리 반올림",
   extra_bonus_days: 0,
-  use_group_hire_date: true,
-  monthly_expire_point: "당해 연말 (매년 12월 31일)",
+  use_group_hire_date: false,
+  monthly_expire_point: "입사일로부터 1년 후",
   monthly_grace_period: "유예기간 없음",
-  annual_expire_point: "당해 연말 (매년 12월 31일)",
+  annual_expire_point: "부여일로부터 1년 후",
   annual_grace_period: "유예기간 없음",
   smart_promotion_enabled: true,
   apply_all_default: true,
@@ -579,15 +579,18 @@ export function buildAccrualPreviewRows(
     },
   ];
 
-  // 1) 1년 미만 월차 스케줄
+  // 1) 1년 미만 월차 스케줄 (말일 입사자 월말 클램핑 적용, 최대 11일)
   if (pol.first_year_monthly_rule === "입사 시 11일 선부여") {
     rows[0].monthlyText = "11일";
   } else if (pol.first_year_monthly_rule === "매월 개근시 1일 부여") {
     for (let m = 1; m <= 11; m++) {
+      const targetYear = hire.getFullYear() + Math.floor((hire.getMonth() + m) / 12);
+      const targetMonth0 = (hire.getMonth() + m) % 12;
+      const maxDay = new Date(targetYear, targetMonth0 + 1, 0).getDate();
       const dt = new Date(
-        hire.getFullYear(),
-        hire.getMonth() + m,
-        hire.getDate()
+        targetYear,
+        targetMonth0,
+        Math.min(hire.getDate(), maxDay)
       );
       rows.push({
         sortMs: dt.getTime() + m,
@@ -609,15 +612,16 @@ export function buildAccrualPreviewRows(
 
     for (let idx = 1; idx <= 5; idx++) {
       const fDate = new Date(firstFiscalYear + (idx - 1), month - 1, day);
+      const diffDaysFromHire = Math.max(
+        1,
+        Math.round((fDate.getTime() - hire.getTime()) / 86400000)
+      );
       if (
         idx === 1 &&
+        diffDaysFromHire < 365 &&
         pol.first_year_annual_rule === "첫 회계일에 근무한 기간의 연차 부여"
       ) {
-        const diffDays = Math.max(
-          1,
-          Math.round((fDate.getTime() - hire.getTime()) / 86400000) + 1
-        );
-        const rawDays = Math.min(15, (diffDays / 365) * (15 + bonus));
+        const rawDays = Math.min(15 + bonus, (diffDaysFromHire / 365) * (15 + bonus));
         const rawStr = `${rawDays.toFixed(2)}일`;
         const finalStr = roundProRataDays(rawDays, pol.decimal_rounding);
         rows.push({
@@ -630,9 +634,12 @@ export function buildAccrualPreviewRows(
           annualText: finalStr,
         });
       } else {
-        // 2번째 회계일=15일, 3번째=15일, 4번째=16일, 5번째=16일...
-        const addYears = Math.max(0, Math.floor((idx - 2) / 2));
-        const total = Math.min(25, 15 + addYears) + bonus;
+        const completedYears =
+          hire.getMonth() + 1 === month && hire.getDate() === day
+            ? idx
+            : Math.max(1, idx - 1);
+        const addDays = Math.max(0, Math.floor((completedYears - 1) / 2));
+        const total = Math.min(25, 15 + addDays) + bonus;
         rows.push({
           sortMs: fDate.getTime(),
           dateLabel: formatDotDate(fDate),

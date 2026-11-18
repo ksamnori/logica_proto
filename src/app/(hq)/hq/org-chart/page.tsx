@@ -79,9 +79,17 @@ export default function HqOrgChartPage() {
   const visibleNodes = useMemo(
     () =>
       orgNodes
-        .filter((n) => !n.is_hidden && n.name !== "퇴직")
+        .filter((n) => !n.is_hidden)
         .sort((a, b) => a.order - b.order),
     [orgNodes]
+  );
+
+  const isRetiredNodeVisible = useMemo(
+    () =>
+      visibleNodes.some(
+        (n) => n.name === "퇴직" || n.id === "org-retired"
+      ),
+    [visibleNodes]
   );
 
   // 부모-자식 트리 맵 구성 (다단계 하위 조직 완벽 지원)
@@ -149,8 +157,18 @@ export default function HqOrgChartPage() {
       });
     });
 
+    if (isRetiredNodeVisible) {
+      const retiredBucket: HqMember[] = [];
+      members.forEach((m) => {
+        if (m.work_status === "퇴직") {
+          retiredBucket.push(m);
+        }
+      });
+      map.set("퇴직", retiredBucket);
+    }
+
     return map;
-  }, [visibleNodes, snapshotMembers]);
+  }, [visibleNodes, snapshotMembers, isRetiredNodeVisible, members]);
 
   // 특정 노드와 모든 하위 조직에 속한 중복 없는 구성원 목록
   const collectSubtreeMembers = (node: HqOrgChartNode): HqMember[] => {

@@ -399,6 +399,9 @@ export function HqSettlementAnnualAdjustModal({
         memberId: m.instructor_id,
         hireDate: m.hire_date,
         groupHireDate: m.profile_extra?.group_hire_date || null,
+        useMemberGroupHireDate: m.profile_extra?.use_group_hire_date !== false,
+        weeklyWorkHours: Number(m.profile_extra?.weekly_work_hours ?? 40),
+        resignDate: m.resign_date || null,
         year: currentYear,
         currentYear,
         currentMonth,
@@ -414,6 +417,10 @@ export function HqSettlementAnnualAdjustModal({
           memberId: m.instructor_id,
           hireDate: m.hire_date,
           groupHireDate: m.profile_extra?.group_hire_date || null,
+          useMemberGroupHireDate:
+            m.profile_extra?.use_group_hire_date !== false,
+          weeklyWorkHours: Number(m.profile_extra?.weekly_work_hours ?? 40),
+          resignDate: m.resign_date || null,
           year: currentYear,
           currentYear,
           currentMonth,
@@ -426,7 +433,7 @@ export function HqSettlementAnnualAdjustModal({
       }
 
       map.set(m.instructor_id, {
-        autoDays: fiscalSum.totalAutoGrantYearEnd,
+        autoDays: fiscalSum.totalAutoGrantToDate,
         usedDays: fiscalSum.totalUsedYear,
         adjDays: fiscalSum.totalAdjustedYear,
         remainDays: fiscalSum.availableRemainDays,

@@ -190,6 +190,7 @@ export interface HqProfileExtra {
   nickname?: string;
   bio?: string;
   personal_email?: string;
+  use_group_hire_date?: boolean;
   group_hire_date?: string;
   hire_type?: string;
   hr_effective_date?: string;
@@ -208,6 +209,10 @@ export interface HqProfileExtra {
   postal_code?: string;
   address_base?: string;
   address_detail?: string;
+  military_status?: string;
+  military_branch?: string;
+  veteran_disability_type?: string;
+  veteran_disability_detail?: string;
   work_schedule_type?: string;
   work_schedule_mode?: string;
   weekly_work_hours?: number;
@@ -847,6 +852,7 @@ export interface HqAnnualLeavePolicyItem {
     | "소수점 둘째 자리 반올림";
   extra_bonus_days: number; // 법정 외 추가 부여 일수 (기본 0)
   use_group_hire_date: boolean; // 그룹 입사일 기준 여부
+  _explicit_group_hire_basis?: boolean; // 관리자가 명시적으로 그룹 입사일 기준을 선택했는지 여부
   // 자동 소멸 설정 (연말 일괄 소멸 / 유예 / 소멸 안 함 모두 선택 가능)
   monthly_expire_point:
     | "입사일로부터 1년 후"

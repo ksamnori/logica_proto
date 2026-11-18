@@ -190,6 +190,10 @@ export default function HqMemberLeaveDetailView({
         memberId: member.instructor_id,
         hireDate: member.hire_date,
         groupHireDate: member.profile_extra?.group_hire_date || null,
+        useMemberGroupHireDate:
+          member.profile_extra?.use_group_hire_date !== false,
+        weeklyWorkHours: Number(member.profile_extra?.weekly_work_hours ?? 40),
+        resignDate: member.resign_date || null,
         year: currentYear,
         currentYear,
         currentMonth,
@@ -215,6 +219,10 @@ export default function HqMemberLeaveDetailView({
         memberId: member.instructor_id,
         hireDate: member.hire_date,
         groupHireDate: member.profile_extra?.group_hire_date || null,
+        useMemberGroupHireDate:
+          member.profile_extra?.use_group_hire_date !== false,
+        weeklyWorkHours: Number(member.profile_extra?.weekly_work_hours ?? 40),
+        resignDate: member.resign_date || null,
         year: detailYear,
         currentYear,
         currentMonth,
@@ -1099,8 +1107,14 @@ export default function HqMemberLeaveDetailView({
                 <span>자동 부여</span>
               </div>
               <div className="text-lg font-extrabold text-[#00a84b] mt-1">
-                + {detailLedger.totalAutoGrantYearEnd}일
+                + {detailLedger.totalAutoGrantToDate}일
               </div>
+              {detailLedger.totalAutoGrantYearEnd >
+                detailLedger.totalAutoGrantToDate && (
+                <div className="mt-0.5 text-[11px] font-semibold text-slate-400">
+                  연말까지 총 +{detailLedger.totalAutoGrantYearEnd}일 예정
+                </div>
+              )}
             </div>
 
             <div className="p-5">
@@ -1201,7 +1215,18 @@ export default function HqMemberLeaveDetailView({
                           )}
                         </td>
                         <td className="py-3.5 px-4 font-bold text-slate-800">
-                          {r.autoGrant > 0 ? `+${r.autoGrant}일` : ""}
+                          {r.autoGrant > 0 ? (
+                            <span>+{r.autoGrant}일</span>
+                          ) : r.scheduledFutureGrant > 0 ? (
+                            <span className="text-slate-400 font-semibold">
+                              +{r.scheduledFutureGrant}일 예정
+                              {r.grantDateLabels[0]
+                                ? ` (${r.grantDateLabels[0].split(" ")[0]})`
+                                : ""}
+                            </span>
+                          ) : (
+                            ""
+                          )}
                         </td>
                         <td className="py-3.5 px-4 font-bold text-slate-600">
                           {r.expired > 0 ? `-${r.expired}일` : ""}

@@ -76,6 +76,7 @@ function sanitizeExtraForViewer(
     nickname: src.nickname || "",
     bio: src.bio || "",
     personal_email: src.personal_email || "",
+    use_group_hire_date: src.use_group_hire_date !== false,
     group_hire_date: src.group_hire_date || "",
     hire_type: src.hire_type || "",
     hr_effective_date: src.hr_effective_date || "",
@@ -102,6 +103,10 @@ function sanitizeExtraForViewer(
     postal_code: src.postal_code || "",
     address_base: src.address_base || "",
     address_detail: src.address_detail || "",
+    military_status: src.military_status || "",
+    military_branch: src.military_branch || "",
+    veteran_disability_type: src.veteran_disability_type || "",
+    veteran_disability_detail: src.veteran_disability_detail || "",
     work_schedule_type: src.work_schedule_type || "기본 9시",
     work_schedule_mode: src.work_schedule_mode || "고정",
     weekly_work_hours: Number(src.weekly_work_hours ?? 40),
@@ -267,9 +272,13 @@ export async function GET(req: NextRequest) {
         memberId: id,
         hireDate: resolvedHireDate,
         groupHireDate: rawProfileExtra.group_hire_date || null,
+        useMemberGroupHireDate: rawProfileExtra.use_group_hire_date !== false,
+        weeklyWorkHours: Number(rawProfileExtra.weekly_work_hours ?? 40),
+        resignDate: prof?.resign_date || null,
         year: curYear,
         currentYear: curYear,
         currentMonth: curMonth,
+        todayYmd: kstNow.toISOString().slice(0, 10),
         policy: activeAnnualPolicy,
         leaveDocs: yearLeaveDocs,
         adjustments: leavesLedger.adjustments,
@@ -277,7 +286,7 @@ export async function GET(req: NextRequest) {
       });
 
       const totalLeave = roundLeave4(
-        ledgerSummary.totalAutoGrantYearEnd + ledgerSummary.totalAdjustedYear
+        ledgerSummary.totalAutoGrantToDate + ledgerSummary.totalAdjustedYear
       );
       const usedLeave = ledgerSummary.totalUsedYear;
       const remainLeave = ledgerSummary.availableRemainDays;
@@ -722,6 +731,10 @@ export async function PATCH(req: NextRequest) {
         "postal_code",
         "address_base",
         "address_detail",
+        "military_status",
+        "military_branch",
+        "veteran_disability_type",
+        "veteran_disability_detail",
         "special_notes",
         "careers",
         "educations",
@@ -769,6 +782,7 @@ export async function PATCH(req: NextRequest) {
 
       if (caller.isHrManager) {
         const hrOnlyKeys: (keyof HqProfileExtra)[] = [
+          "use_group_hire_date",
           "group_hire_date",
           "hire_type",
           "hr_effective_date",

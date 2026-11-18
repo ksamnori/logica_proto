@@ -374,6 +374,7 @@ export default function HqAnnualLeaveSettingsSection({
       description: polDraft.description.trim(),
       request_on_cancel:
         cleanedSteps.length > 0 ? polDraft.request_on_cancel : false,
+      _explicit_group_hire_basis: Boolean(polDraft.use_group_hire_date),
     };
 
     const nextLeavePolicies = isNewPol

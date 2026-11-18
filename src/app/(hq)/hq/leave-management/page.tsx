@@ -10,6 +10,7 @@ import {
 import HqCustomGrantModal from "@/components/hq/leaves/HqCustomGrantModal";
 import HqFlexTargetPicker from "@/components/hq/leaves/HqFlexTargetPicker";
 import HqMemberLeaveDetailView from "@/components/hq/leaves/HqMemberLeaveDetailView";
+import HqStatutoryLeaveSimulatorModal from "@/components/hq/leaves/HqStatutoryLeaveSimulatorModal";
 import HqMemberProfileModal from "@/components/hq/members/HqMemberProfileModal";
 import { hqFetch } from "@/lib/hq/clientApi";
 import {
@@ -217,6 +218,7 @@ export default function HqLeaveManagementPage() {
   // 6) 제출된 사용 계획 [보기] 모달
   const [viewPlanTarget, setViewPlanTarget] =
     useState<HqAnnualLeavePlanItem | null>(null);
+  const [simModalOpen, setSimModalOpen] = useState(false);
 
   const canManage = Boolean(isHrManager || isHqAdmin);
 
@@ -321,6 +323,10 @@ export default function HqLeaveManagementPage() {
           memberId: m.instructor_id,
           hireDate: m.hire_date,
           groupHireDate: m.profile_extra?.group_hire_date || null,
+          useMemberGroupHireDate:
+            m.profile_extra?.use_group_hire_date !== false,
+          weeklyWorkHours: Number(m.profile_extra?.weekly_work_hours ?? 40),
+          resignDate: m.resign_date || null,
           year: currentYear,
           currentYear,
           currentMonth,
@@ -354,6 +360,10 @@ export default function HqLeaveManagementPage() {
           memberId: m.instructor_id,
           hireDate: m.hire_date,
           groupHireDate: m.profile_extra?.group_hire_date || null,
+          useMemberGroupHireDate:
+            m.profile_extra?.use_group_hire_date !== false,
+          weeklyWorkHours: Number(m.profile_extra?.weekly_work_hours ?? 40),
+          resignDate: m.resign_date || null,
           year: monthlyYear,
           currentYear,
           currentMonth,
@@ -1207,9 +1217,18 @@ export default function HqLeaveManagementPage() {
 
           {tab === "BALANCE" && canManage && (
             <div
-              className="flex items-center gap-2"
+              className="flex flex-wrap items-center gap-2"
               onClick={(e) => e.stopPropagation()}
             >
+              {/* 0) 근로기준법 법정 연차 · 수당 · 퇴직정산 계산기 */}
+              <button
+                type="button"
+                onClick={() => setSimModalOpen(true)}
+                className="px-3.5 py-2 rounded-lg border border-emerald-200 bg-emerald-50/70 hover:bg-emerald-100/80 text-xs font-extrabold text-emerald-800 flex items-center gap-1.5"
+              >
+                <span>⚖️ 법정 연차·수당 계산기</span>
+              </button>
+
               {/* 1) 맞춤 휴가 부여 ▾ 드롭다운 */}
               <div className="relative">
                 <button
@@ -2867,6 +2886,13 @@ export default function HqLeaveManagementPage() {
         onSaved={async () => {
           await refreshMembers();
         }}
+      />
+
+      {/* 근로기준법 제60조~제62조 법정 연차·수당·퇴직정산 시뮬레이터 */}
+      <HqStatutoryLeaveSimulatorModal
+        isOpen={simModalOpen}
+        onClose={() => setSimModalOpen(false)}
+        members={members}
       />
     </div>
   );

@@ -456,6 +456,12 @@ export default function HqLeavesPage() {
       memberId: detailMember?.instructor_id || "",
       hireDate: detailMember?.hire_date || null,
       groupHireDate: detailMember?.profile_extra?.group_hire_date || null,
+      useMemberGroupHireDate:
+        detailMember?.profile_extra?.use_group_hire_date !== false,
+      weeklyWorkHours: Number(
+        detailMember?.profile_extra?.weekly_work_hours ?? 40
+      ),
+      resignDate: detailMember?.resign_date || null,
       year: detailYear,
       currentYear,
       currentMonth,
@@ -467,7 +473,8 @@ export default function HqLeavesPage() {
     return {
       rows: summary.rows,
       isYearEndBasis: summary.isYearEndBasis,
-      totalAuto: summary.totalAutoGrantYearEnd,
+      totalAuto: summary.totalAutoGrantToDate,
+      totalAutoYearEnd: summary.totalAutoGrantYearEnd,
       totalExpired: summary.totalExpired,
       totalUsed: summary.totalUsedYear,
       totalAdjusted: summary.totalAdjustedYear,
@@ -484,13 +491,16 @@ export default function HqLeavesPage() {
     uploadedMonthly,
   ]);
 
-  // 내 올해 사용 가능 잔여 연차 일수 (당해 연말 12월 31일까지 사용 기준 실시간 반영)
+  // 내 올해 사용 가능 잔여 연차 일수 (오늘까지 실제 발생한 법정 연차 기준 실시간 반영)
   const myAvailableAnnualDays = useMemo(() => {
     if (!me) return 0;
     return computeMemberAnnualLeaveLedgerForYear({
       memberId: me.instructor_id,
       hireDate: me.hire_date,
       groupHireDate: me.profile_extra?.group_hire_date || null,
+      useMemberGroupHireDate: me.profile_extra?.use_group_hire_date !== false,
+      weeklyWorkHours: Number(me.profile_extra?.weekly_work_hours ?? 40),
+      resignDate: me.resign_date || null,
       year: currentYear,
       currentYear,
       currentMonth,
@@ -1316,6 +1326,11 @@ export default function HqLeavesPage() {
                   ? `+ ${formatDayVal(detailLedger.totalAuto)}`
                   : "없음"}
               </div>
+              {detailLedger.totalAutoYearEnd > detailLedger.totalAuto && (
+                <div className="mt-0.5 text-[11px] font-semibold text-slate-400">
+                  연말까지 총 +{detailLedger.totalAutoYearEnd}일 예정
+                </div>
+              )}
             </div>
 
             <div className="p-5">
@@ -1471,7 +1486,18 @@ export default function HqLeavesPage() {
                             </div>
                           </td>
                           <td className="py-3.5 px-4 border-r border-slate-100 font-bold text-slate-800">
-                            {r.autoGrant > 0 ? `+${r.autoGrant}일` : ""}
+                            {r.autoGrant > 0 ? (
+                              <span>+{r.autoGrant}일</span>
+                            ) : r.scheduledFutureGrant > 0 ? (
+                              <span className="text-slate-400 font-semibold">
+                                +{r.scheduledFutureGrant}일 예정
+                                {r.grantDateLabels[0]
+                                  ? ` (${r.grantDateLabels[0].split(" ")[0]})`
+                                  : ""}
+                              </span>
+                            ) : (
+                              ""
+                            )}
                           </td>
                           <td className="py-3.5 px-4 border-r border-slate-100 font-semibold text-rose-600">
                             {r.expired > 0 ? `-${r.expired}일` : ""}

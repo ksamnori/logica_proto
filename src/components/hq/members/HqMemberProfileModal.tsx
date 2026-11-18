@@ -233,6 +233,7 @@ export default function HqMemberProfileModal({
     personal_email: "",
     employee_no: "",
     hire_date: "",
+    use_group_hire_date: true,
     group_hire_date: "",
     hire_type: "",
     rrn_front: "",
@@ -250,6 +251,10 @@ export default function HqMemberProfileModal({
     bank_name: "",
     bank_account: "",
     account_holder: "",
+    military_status: "",
+    military_branch: "",
+    veteran_disability_type: "",
+    veteran_disability_detail: "",
   });
 
   // 3) 근로계약 폼
@@ -389,6 +394,7 @@ export default function HqMemberProfileModal({
         personal_email: mEx.personal_email || "",
         employee_no: member.employee_no || "",
         hire_date: member.hire_date || "",
+        use_group_hire_date: mEx.use_group_hire_date !== false,
         group_hire_date: mEx.group_hire_date || member.hire_date || "",
         hire_type: mEx.hire_type || "",
         rrn_front: mEx.rrn_front || "",
@@ -406,6 +412,10 @@ export default function HqMemberProfileModal({
         bank_name: member.bank_name || "",
         bank_account: member.bank_account || "",
         account_holder: member.account_holder || member.name,
+        military_status: mEx.military_status || "",
+        military_branch: mEx.military_branch || "",
+        veteran_disability_type: mEx.veteran_disability_type || "",
+        veteran_disability_detail: mEx.veteran_disability_detail || "",
       });
       setEditModal("basic");
     } else if (initialSubModal === "hr") {
@@ -538,6 +548,7 @@ export default function HqMemberProfileModal({
       personal_email: ex.personal_email || "",
       employee_no: member.employee_no || "",
       hire_date: member.hire_date || "",
+      use_group_hire_date: ex.use_group_hire_date !== false,
       group_hire_date: ex.group_hire_date || member.hire_date || "",
       hire_type: ex.hire_type || "",
       rrn_front: ex.rrn_front || "",
@@ -555,6 +566,10 @@ export default function HqMemberProfileModal({
       bank_name: member.bank_name || "",
       bank_account: member.bank_account || "",
       account_holder: member.account_holder || member.name,
+      military_status: ex.military_status || "",
+      military_branch: ex.military_branch || "",
+      veteran_disability_type: ex.veteran_disability_type || "",
+      veteran_disability_detail: ex.veteran_disability_detail || "",
     });
     setEditModal("basic");
   };
@@ -1113,9 +1128,15 @@ export default function HqMemberProfileModal({
                               그룹 입사일
                             </span>
                             <span className="text-slate-800 mr-4">
-                              {formatKoreanDate(
-                                ex.group_hire_date || member.hire_date
-                              ) || "-"}
+                              {ex.use_group_hire_date === false ? (
+                                <span className="text-slate-400 text-xs">
+                                  미사용
+                                </span>
+                              ) : (
+                                formatKoreanDate(
+                                  ex.group_hire_date || member.hire_date
+                                ) || "-"
+                              )}
                             </span>
                             <span className="text-slate-400 mr-1.5">
                               입사 유형
@@ -1228,6 +1249,48 @@ export default function HqMemberProfileModal({
                             ) : (
                               <PlaceholderBtn
                                 text="계좌 등록하기"
+                                canClick={canEditSelfOrHr}
+                                onClick={openBasicEdit}
+                              />
+                            )}
+                          </InfoRow>
+
+                          <InfoRow icon="🎖️" label="병역 사항">
+                            {ex.military_status ? (
+                              <div className="flex flex-wrap items-center gap-2">
+                                <span className="font-medium text-slate-800">
+                                  {ex.military_status}
+                                </span>
+                                {ex.military_branch && (
+                                  <span className="text-xs text-slate-500">
+                                    ({ex.military_branch})
+                                  </span>
+                                )}
+                              </div>
+                            ) : (
+                              <PlaceholderBtn
+                                text="병역 사항 선택하기"
+                                canClick={canEditSelfOrHr}
+                                onClick={openBasicEdit}
+                              />
+                            )}
+                          </InfoRow>
+
+                          <InfoRow icon="🤝" label="장애인 · 국가유공자">
+                            {ex.veteran_disability_type ? (
+                              <div className="flex flex-wrap items-center gap-2">
+                                <span className="font-medium text-slate-800">
+                                  {ex.veteran_disability_type}
+                                </span>
+                                {ex.veteran_disability_detail && (
+                                  <span className="text-xs text-slate-500">
+                                    ({ex.veteran_disability_detail})
+                                  </span>
+                                )}
+                              </div>
+                            ) : (
+                              <PlaceholderBtn
+                                text="해당 여부 선택하기"
                                 canClick={canEditSelfOrHr}
                                 onClick={openBasicEdit}
                               />
@@ -2768,9 +2831,19 @@ export default function HqMemberProfileModal({
                 postal_code: basicForm.postal_code.trim(),
                 address_base: basicForm.address_base.trim(),
                 address_detail: basicForm.address_detail.trim(),
+                military_status: basicForm.military_status,
+                military_branch: basicForm.military_branch.trim(),
+                veteran_disability_type: basicForm.veteran_disability_type,
+                veteran_disability_detail:
+                  basicForm.veteran_disability_detail.trim(),
                 ...(isHrManager
                   ? {
-                      group_hire_date: basicForm.group_hire_date,
+                      use_group_hire_date: Boolean(
+                        basicForm.use_group_hire_date
+                      ),
+                      group_hire_date: basicForm.use_group_hire_date
+                        ? basicForm.group_hire_date || basicForm.hire_date
+                        : "",
                       hire_type: basicForm.hire_type,
                     }
                   : {}),
@@ -2834,30 +2907,108 @@ export default function HqMemberProfileModal({
             </Field>
 
             {isHrManager && (
-              <div className="sm:col-span-2 grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <Field label="입사일">
-                  <input
-                    type="date"
-                    value={basicForm.hire_date}
-                    onChange={(e) =>
-                      setBasicForm({ ...basicForm, hire_date: e.target.value })
+              <div className="sm:col-span-2 space-y-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                  <Field label="입사일 *">
+                    <input
+                      type="date"
+                      value={basicForm.hire_date}
+                      onChange={(e) => {
+                        const nextHire = e.target.value;
+                        setBasicForm((prev) => ({
+                          ...prev,
+                          hire_date: nextHire,
+                          group_hire_date:
+                            prev.use_group_hire_date &&
+                            (!prev.group_hire_date ||
+                              prev.group_hire_date === prev.hire_date)
+                              ? nextHire
+                              : prev.group_hire_date,
+                        }));
+                      }}
+                      className="w-full min-w-0 px-3 py-2.5 rounded-xl border border-slate-300 font-semibold"
+                    />
+                  </Field>
+                  <Field
+                    label={
+                      basicForm.use_group_hire_date
+                        ? "그룹 입사일 *"
+                        : "그룹 입사일 (미사용)"
                     }
-                    className="w-full min-w-0 px-3 py-2.5 rounded-xl border border-slate-300"
-                  />
-                </Field>
-                <Field label="그룹 입사일">
-                  <input
-                    type="date"
-                    value={basicForm.group_hire_date}
-                    onChange={(e) =>
-                      setBasicForm({
-                        ...basicForm,
-                        group_hire_date: e.target.value,
+                  >
+                    <input
+                      type="date"
+                      disabled={!basicForm.use_group_hire_date}
+                      value={
+                        basicForm.use_group_hire_date
+                          ? basicForm.group_hire_date
+                          : ""
+                      }
+                      onChange={(e) =>
+                        setBasicForm({
+                          ...basicForm,
+                          group_hire_date: e.target.value,
+                        })
+                      }
+                      className="w-full min-w-0 px-3 py-2.5 rounded-xl border border-slate-300 font-semibold disabled:bg-slate-100 disabled:text-slate-400"
+                    />
+                  </Field>
+                </div>
+
+                {/* 플렉스 스타일 '그룹 입사일 사용하기' 토글 스위치 */}
+                <div className="flex items-center gap-2.5">
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={basicForm.use_group_hire_date}
+                    onClick={() =>
+                      setBasicForm((prev) => {
+                        const nextUse = !prev.use_group_hire_date;
+                        return {
+                          ...prev,
+                          use_group_hire_date: nextUse,
+                          group_hire_date:
+                            nextUse && !prev.group_hire_date
+                              ? prev.hire_date
+                              : prev.group_hire_date,
+                        };
                       })
                     }
-                    className="w-full min-w-0 px-3 py-2.5 rounded-xl border border-slate-300"
-                  />
-                </Field>
+                    className={`w-9 h-5 rounded-full transition-colors relative shrink-0 ${
+                      basicForm.use_group_hire_date
+                        ? "bg-[#00c73c]"
+                        : "bg-slate-300"
+                    }`}
+                  >
+                    <span
+                      className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-all ${
+                        basicForm.use_group_hire_date ? "left-4.5" : "left-0.5"
+                      }`}
+                    />
+                  </button>
+                  <span
+                    onClick={() =>
+                      setBasicForm((prev) => {
+                        const nextUse = !prev.use_group_hire_date;
+                        return {
+                          ...prev,
+                          use_group_hire_date: nextUse,
+                          group_hire_date:
+                            nextUse && !prev.group_hire_date
+                              ? prev.hire_date
+                              : prev.group_hire_date,
+                        };
+                      })
+                    }
+                    className="text-xs font-bold text-slate-700 cursor-pointer select-none"
+                  >
+                    그룹 입사일 사용하기
+                  </span>
+                  <span className="text-[11px] text-slate-400">
+                    (법정 연차는 입사일을 기준으로 산정됩니다)
+                  </span>
+                </div>
+
                 <Field label="입사 유형">
                   <select
                     value={basicForm.hire_type}
@@ -2869,10 +3020,11 @@ export default function HqMemberProfileModal({
                     }
                     className="w-full min-w-0 px-3 py-2.5 rounded-xl border border-slate-300 font-bold bg-white"
                   >
-                    <option value="">유형없음</option>
+                    <option value="">입사 유형 선택</option>
                     <option value="신입">신입</option>
                     <option value="경력">경력</option>
                     <option value="전배">전배</option>
+                    <option value="재입사">재입사</option>
                   </select>
                 </Field>
               </div>
@@ -3120,6 +3272,102 @@ export default function HqMemberProfileModal({
                     placeholder="예금주"
                     className="w-full min-w-0 px-3 py-2.5 rounded-xl border border-slate-300"
                   />
+                </div>
+              </Field>
+            </div>
+
+            {/* 병역 사항 (Screenshot 4) */}
+            <div className="sm:col-span-2">
+              <Field label="병역 사항">
+                <div className="space-y-2">
+                  <select
+                    value={basicForm.military_status}
+                    onChange={(e) =>
+                      setBasicForm({
+                        ...basicForm,
+                        military_status: e.target.value,
+                        military_branch:
+                          e.target.value === "" || e.target.value === "해당없음"
+                            ? ""
+                            : basicForm.military_branch,
+                      })
+                    }
+                    className={`w-full min-w-0 px-3 py-2.5 rounded-xl border border-slate-300 bg-white font-semibold ${
+                      basicForm.military_status
+                        ? "text-slate-900"
+                        : "text-slate-400"
+                    }`}
+                  >
+                    <option value="">병역 사항 선택</option>
+                    <option value="해당없음">해당없음</option>
+                    <option value="군필">군필 (만기·의병·조기전역 등)</option>
+                    <option value="미필">미필</option>
+                    <option value="복무중">복무중 (산업기능·전문연구요원 등)</option>
+                    <option value="면제">면제 (전시근로역·병역면제)</option>
+                  </select>
+                  {basicForm.military_status &&
+                    basicForm.military_status !== "해당없음" &&
+                    basicForm.military_status !== "미필" && (
+                      <input
+                        value={basicForm.military_branch}
+                        onChange={(e) =>
+                          setBasicForm({
+                            ...basicForm,
+                            military_branch: e.target.value,
+                          })
+                        }
+                        placeholder="군별 · 계급 · 전역구분 또는 사유 입력 (예: 육군 병장 만기전역, 선택)"
+                        className="w-full min-w-0 px-3 py-2.5 rounded-xl border border-slate-300"
+                      />
+                    )}
+                </div>
+              </Field>
+            </div>
+
+            {/* 장애인 · 국가유공자 (Screenshot 4) */}
+            <div className="sm:col-span-2">
+              <Field label="장애인 · 국가유공자">
+                <div className="space-y-2">
+                  <select
+                    value={basicForm.veteran_disability_type}
+                    onChange={(e) =>
+                      setBasicForm({
+                        ...basicForm,
+                        veteran_disability_type: e.target.value,
+                        veteran_disability_detail:
+                          e.target.value === "" || e.target.value === "해당없음"
+                            ? ""
+                            : basicForm.veteran_disability_detail,
+                      })
+                    }
+                    className={`w-full min-w-0 px-3 py-2.5 rounded-xl border border-slate-300 bg-white font-semibold ${
+                      basicForm.veteran_disability_type
+                        ? "text-slate-900"
+                        : "text-slate-400"
+                    }`}
+                  >
+                    <option value="">종류 선택</option>
+                    <option value="해당없음">해당없음</option>
+                    <option value="장애인">장애인</option>
+                    <option value="국가유공자">국가유공자 (보훈대상자)</option>
+                    <option value="장애인 및 국가유공자">
+                      장애인 및 국가유공자
+                    </option>
+                  </select>
+                  {basicForm.veteran_disability_type &&
+                    basicForm.veteran_disability_type !== "해당없음" && (
+                      <input
+                        value={basicForm.veteran_disability_detail}
+                        onChange={(e) =>
+                          setBasicForm({
+                            ...basicForm,
+                            veteran_disability_detail: e.target.value,
+                          })
+                        }
+                        placeholder="장애 정도(중증·경증) · 보훈번호 · 보훈관계 등 세부 내용 입력 (선택)"
+                        className="w-full min-w-0 px-3 py-2.5 rounded-xl border border-slate-300"
+                      />
+                    )}
                 </div>
               </Field>
             </div>
