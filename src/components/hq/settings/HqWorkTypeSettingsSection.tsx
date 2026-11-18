@@ -43,9 +43,10 @@ function formatShortAmPmLabel(totalMin: number): string {
 }
 
 /**
- * 플렉스 자동 근무 기록 애니메이션 프리뷰 (Screenshots 105232 -> 105238 -> 105244)
- * 빨간 세로바(현재 시각 기준선)가 좌 -> 우로 부드럽게 이동하며 오늘의 근무 바 색상을 실시간으로 채우고,
- * 퇴근 시각을 통과하는 순간 초록 체크(✓)로 자동 퇴근 기록이 완료되는 모습을 시연합니다.
+ * 플렉스 자동 근무 기록 애니메이션 프리뷰
+ * - 빨간 세로바와 가로 근무 바(276px 고정 트랙)가 완전히 동일한 좌표계(0% ~ 100%)를 공유하여 오차 0px로 일치
+ * - 빨간 세로바가 가로바 우측 끝(100%)을 절대 넘어가지 않으며, 끝에 닿는 순간 오직 3번째(오늘) 행의 PM 6만 체크(✓) 표시
+ * - 아래 4, 5번째(미래 예정) 행은 항상 빈 점선 상태 유지
  */
 function AutoRecordRedBarAnimation({
   enabled,
@@ -60,39 +61,43 @@ function AutoRecordRedBarAnimation({
   dailyWorkMinutes: number;
   breakMinutes: number;
 }) {
-  // progress: -8 ~ 112 (% 기준, 0~100 구간이 근무 바 폭)
-  const [progress, setProgress] = useState(28);
+  // progress: 정확히 0 ~ 100 구간만 이동 (0% = 가로바 시작점, 100% = 가로바 끝점)
+  const [progress, setProgress] = useState(0);
   const [paused, setPaused] = useState(false);
+  const [replaySeed, setReplaySeed] = useState(0);
 
   useEffect(() => {
     if (!enabled || paused) return;
     let rafId = 0;
     let lastTs = performance.now();
-    let holdMs = 0;
+    let curProgress = progress >= 100 ? 0 : progress;
+    let holdElapsed = 0;
 
     const tick = (now: number) => {
-      const dt = Math.min(64, now - lastTs);
+      const dt = Math.min(64, Math.max(0, now - lastTs));
       lastTs = now;
 
-      setProgress((prev) => {
-        if (prev >= 106) {
-          holdMs += dt;
-          if (holdMs >= 1150) {
-            holdMs = 0;
-            return -6;
-          }
-          return prev;
+      if (curProgress >= 100) {
+        curProgress = 100;
+        holdElapsed += dt;
+        // 가로바 끝에 도달해 PM 6 체크(✓)가 켜진 상태를 약 1.1초간 보여준 뒤 0%부터 재시작
+        if (holdElapsed >= 1100) {
+          curProgress = 0;
+          holdElapsed = 0;
         }
-        // 약 3.8초 동안 -6% -> 106% 부드럽게 이동
-        return prev + (dt / 3800) * 112;
-      });
+      } else {
+        // 약 3.2초 동안 0% -> 100% 등속 이동
+        curProgress = Math.min(100, curProgress + (dt / 3200) * 100);
+      }
 
+      setProgress(curProgress);
       rafId = requestAnimationFrame(tick);
     };
 
     rafId = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(rafId);
-  }, [enabled, paused]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [enabled, paused, replaySeed]);
 
   const startMin = parseHmToMinutes(startTime) ?? 540;
   const endMin =
@@ -103,10 +108,8 @@ function AutoRecordRedBarAnimation({
   const startLabel = formatShortAmPmLabel(startMin);
   const endLabel = formatShortAmPmLabel(endMin);
 
-  const clampedFill = enabled ? Math.max(0, Math.min(100, progress)) : 0;
-  const todayCompleted = enabled && progress >= 100;
-  // 바 영역이 전체 row의 중앙 56% 폭(left: 22% ~ 78%)을 차지하도록 배치하여 플렉스 비율과 일치
-  const redLineLeftPct = 22 + (progress / 100) * 56;
+  const clampedProgress = enabled ? Math.max(0, Math.min(100, progress)) : 0;
+  const todayCompleted = enabled && clampedProgress >= 100;
 
   const rows = [
     { kind: "PAST_FADED" as const },
@@ -118,17 +121,18 @@ function AutoRecordRedBarAnimation({
 
   return (
     <div className="group relative bg-white px-6 py-4 select-none overflow-hidden">
-      {/* 상·하단 소프트 페이드 그라데이션 (Screenshots 105232~105244 동일) */}
+      {/* 상·하단 소프트 페이드 그라데이션 */}
       <div className="pointer-events-none absolute inset-x-0 top-0 h-11 bg-gradient-to-b from-white via-white/70 to-transparent z-10" />
       <div className="pointer-events-none absolute inset-x-0 bottom-0 h-11 bg-gradient-to-t from-white via-white/75 to-transparent z-10" />
 
-      {/* 호버 시 리플레이 / 일시정지 미니 컨트롤 (Screenshot 105244 동일) */}
+      {/* 호버 시 리플레이 / 일시정지 미니 컨트롤 */}
       <div className="opacity-0 group-hover:opacity-100 transition-opacity absolute top-4 left-1/2 -translate-x-1/2 z-30 flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-slate-800/85 text-white shadow-lg">
         <button
           type="button"
           onClick={() => {
-            setProgress(-4);
+            setProgress(0);
             setPaused(false);
+            setReplaySeed((s) => s + 1);
           }}
           title="처음부터 다시 재생"
           className="px-1.5 py-0.5 rounded hover:bg-white/15 text-[11px] font-bold"
@@ -146,104 +150,117 @@ function AutoRecordRedBarAnimation({
         </button>
       </div>
 
-      {/* 빨간 세로 기준선 (좌 -> 우 실시간 이동) */}
-      {enabled && (
-        <div
-          style={{ left: `${redLineLeftPct}%` }}
-          className="pointer-events-none absolute top-2 bottom-2 w-[1.5px] bg-[#e05243]/85 z-20"
-        />
-      )}
+      {/* 5개 행과 빨간 세로바가 동일한 중앙 276px 트랙을 공유하는 래퍼 */}
+      <div className="relative">
+        {/* 빨간 세로 기준선: 가로바(276px)의 0% ~ 100% 범위 내에서만 정확히 이동 */}
+        {enabled && (
+          <div className="pointer-events-none absolute inset-y-0 left-1/2 -translate-x-1/2 w-[276px] z-20">
+            <div
+              style={{ left: `${clampedProgress.toFixed(3)}%` }}
+              className="absolute top-1 bottom-1 w-[1.5px] -translate-x-1/2 bg-[#e05243]"
+            />
+          </div>
+        )}
 
-      <div className="divide-y divide-slate-100">
-        {rows.map((row, idx) => {
-          const isPast = row.kind === "PAST_FADED" || row.kind === "PAST";
-          const isToday = row.kind === "TODAY";
-          const rowOpacity =
-            row.kind === "PAST_FADED"
-              ? "opacity-45"
-              : row.kind === "FUTURE_FADED"
-                ? "opacity-40"
-                : "opacity-100";
+        <div className="divide-y divide-slate-100">
+          {rows.map((row, idx) => {
+            const isPast = row.kind === "PAST_FADED" || row.kind === "PAST";
+            const isToday = row.kind === "TODAY";
+            const rowOpacity =
+              row.kind === "PAST_FADED"
+                ? "opacity-45"
+                : row.kind === "FUTURE_FADED"
+                  ? "opacity-40"
+                  : "opacity-100";
 
-          const fillWidthPct = isPast
-            ? enabled
-              ? 100
-              : 0
-            : isToday
-              ? clampedFill
-              : 0;
-          const showDoneCheck = enabled && (isPast || todayCompleted);
-          const isSolidComplete = enabled && (isPast || todayCompleted);
+            // 과거(1·2행)는 100%, 오늘(3행)만 clampedProgress만큼 채움, 미래(4·5행)는 항상 0%
+            const rowFillPct = !enabled
+              ? 0
+              : isPast
+                ? 100
+                : isToday
+                  ? clampedProgress
+                  : 0;
 
-          return (
-            <div key={idx} className={`py-2.5 ${rowOpacity}`}>
-              <div className="w-[56%] mx-auto">
-                <div
-                  className={`h-6 rounded-[5px] relative overflow-hidden flex items-center ${
-                    isSolidComplete
-                      ? "border border-[#5eead4] bg-[#c7f5ec]"
-                      : "border border-dashed border-[#6ee7d8] bg-white"
-                  }`}
-                >
-                  {fillWidthPct > 0 && !isSolidComplete && (
-                    <div
-                      style={{ width: `${fillWidthPct}%` }}
-                      className="absolute inset-y-0 left-0 bg-[#c7f5ec] border-r border-[#4fd1c5]"
-                    />
-                  )}
-                  {/* 서류가방 아이콘 */}
-                  <span
-                    className={`relative z-10 ml-2 inline-flex items-center justify-center ${
-                      fillWidthPct > 4 || isSolidComplete
-                        ? "text-[#0d9488]"
-                        : "text-[#5eead4]"
-                    }`}
-                  >
-                    <svg
-                      viewBox="0 0 20 20"
-                      fill="currentColor"
-                      className="w-3.5 h-3.5"
-                    >
-                      <path
-                        fillRule="evenodd"
-                        d="M6 3.75A1.75 1.75 0 017.75 2h4.5A1.75 1.75 0 0114 3.75V5h2.25A1.75 1.75 0 0118 6.75v8.5A1.75 1.75 0 0116.25 17H3.75A1.75 1.75 0 012 15.25v-8.5A1.75 1.75 0 013.75 5H6V3.75zm1.5 0a.25.25 0 01.25-.25h4.5a.25.25 0 01.25.25V5h-5V3.75z"
-                        clipRule="evenodd"
+            // 완료 체크(✓)는 과거(1·2행)이거나, 오늘(3행)이 100%에 도달했을 때만 표시 (4·5행은 절대 체크 안 됨!)
+            const showDoneCheck =
+              enabled && (isPast || (isToday && todayCompleted));
+
+            return (
+              <div key={idx} className={`py-2.5 ${rowOpacity}`}>
+                <div className="w-[276px] mx-auto">
+                  <div className="h-6 w-full relative rounded-[5px] flex items-center">
+                    {/* 기본 점선 트랙 레이어 */}
+                    <div className="absolute inset-0 rounded-[5px] border border-dashed border-[#6ee7d8] bg-white" />
+
+                    {/* 채워지는 민트 레이어 (clipPath로 빨간 세로바 위치와 0px 오차 일치) */}
+                    {rowFillPct > 0 && (
+                      <div
+                        style={
+                          rowFillPct < 100
+                            ? {
+                                clipPath: `inset(0 ${(
+                                  100 - rowFillPct
+                                ).toFixed(3)}% 0 0)`,
+                              }
+                            : undefined
+                        }
+                        className="absolute inset-0 rounded-[5px] border border-[#38d9a9] bg-[#c7f5ec]"
                       />
-                    </svg>
-                  </span>
-                </div>
+                    )}
 
-                <div className="flex items-center justify-between text-[9.5px] mt-1 px-0.5 tabular-nums">
-                  <span
-                    className={
-                      isToday && enabled && progress >= 0
-                        ? "font-extrabold text-slate-700"
-                        : "font-semibold text-slate-400"
-                    }
-                  >
-                    {startLabel}
-                  </span>
-                  <span className="inline-flex items-center gap-1">
+                    {/* 서류가방 아이콘 */}
+                    <span
+                      className={`relative z-10 ml-2 inline-flex items-center justify-center ${
+                        rowFillPct > 3 ? "text-[#0d9488]" : "text-[#5eead4]"
+                      }`}
+                    >
+                      <svg
+                        viewBox="0 0 20 20"
+                        fill="currentColor"
+                        className="w-3.5 h-3.5"
+                      >
+                        <path
+                          fillRule="evenodd"
+                          d="M6 3.75A1.75 1.75 0 017.75 2h4.5A1.75 1.75 0 0114 3.75V5h2.25A1.75 1.75 0 0118 6.75v8.5A1.75 1.75 0 0116.25 17H3.75A1.75 1.75 0 012 15.25v-8.5A1.75 1.75 0 013.75 5H6V3.75zm1.5 0a.25.25 0 01.25-.25h4.5a.25.25 0 01.25.25V5h-5V3.75z"
+                          clipRule="evenodd"
+                        />
+                      </svg>
+                    </span>
+                  </div>
+
+                  <div className="flex items-center justify-between text-[9.5px] mt-1 px-0.5 tabular-nums">
                     <span
                       className={
-                        isToday && todayCompleted
-                          ? "font-extrabold text-slate-700"
+                        isToday && enabled
+                          ? "font-extrabold text-slate-800"
                           : "font-semibold text-slate-400"
                       }
                     >
-                      {endLabel}
+                      {startLabel}
                     </span>
-                    {showDoneCheck && (
-                      <span className="w-3 h-3 rounded-full bg-[#16cc3b] text-white text-[8px] font-extrabold inline-flex items-center justify-center leading-none">
-                        ✓
+                    <span className="relative inline-flex items-center">
+                      <span
+                        className={
+                          isToday && todayCompleted
+                            ? "font-extrabold text-slate-800"
+                            : "font-semibold text-slate-400"
+                        }
+                      >
+                        {endLabel}
                       </span>
-                    )}
-                  </span>
+                      {showDoneCheck && (
+                        <span className="absolute left-full ml-1 top-1/2 -translate-y-1/2 w-3 h-3 rounded-full bg-[#16cc3b] text-white text-[8px] font-extrabold inline-flex items-center justify-center leading-none">
+                          ✓
+                        </span>
+                      )}
+                    </span>
+                  </div>
                 </div>
               </div>
-            </div>
-          );
-        })}
+            );
+          })}
+        </div>
       </div>
     </div>
   );
