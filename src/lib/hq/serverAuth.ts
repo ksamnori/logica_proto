@@ -67,6 +67,7 @@ export interface HqCallerInfo {
   tenantId: string | null;
   hqTenantIds: Set<string>;
   tenantNames: Record<string, string>;
+  isSystemOwner: boolean;
   isHqAdmin: boolean;
   isHrManager: boolean;
   isDelegatedHrAdmin: boolean;
@@ -165,14 +166,14 @@ export async function requireHqCaller(
   const jobTitle = prof?.job_title || inferred.jobTitle;
   const department = (prof?.department || inst.department || "미지정").trim();
 
-  // 최고관리자: DB is_hq_admin 등록자, 전체 시스템 SUPER_ADMIN(최고관리자), 또는 대표·소장(Lv.5)
-  let isHqAdmin = rpcHqAdmin || isSuperRole || rankCode === "CEO";
+  // 시스템 오너(DB is_hq_admin 또는 SUPER_ADMIN 역할) — 직급만 '대표(CEO)'인 일반/테스트 계정은 권한 설정의 최고관리자 명단을 따름
+  const isSystemOwner = rpcHqAdmin || isSuperRole;
+  let isHqAdmin = isSystemOwner;
 
-  // 인사·급여 관리자: 최고관리자, 본부장·이사(Lv.4+), 경영지원 팀장(Lv.3+), 또는 최고관리자가 위임한 인사담당자(is_hr_admin)
+  // 인사·급여 관리자 기본값 (권한 설정 확인 전 초기값)
   let isDelegatedHrAdmin = !isHqAdmin && Boolean(prof?.is_hr_admin);
   let isHrManager =
     isHqAdmin ||
-    rankLevel >= 4 ||
     Boolean(prof?.is_hr_admin) ||
     (department.includes("경영지원") && rankLevel >= 3);
 
@@ -186,11 +187,16 @@ export async function requireHqCaller(
         member: {
           instructor_id: String(user.id),
           name: callerName,
+          department,
           is_dept_head: Boolean(prof?.is_dept_head || inferred.isDeptHead),
           rank_code: rankCode,
+          profile_extra:
+            prof?.profile_extra && typeof prof.profile_extra === "object"
+              ? prof.profile_extra
+              : null,
         },
         rawSettings: permCfg,
-        isDbHqAdmin: isHqAdmin,
+        isDbHqAdmin: isSystemOwner,
       });
 
       if (resolved.isSuperAdmin) {
@@ -213,6 +219,9 @@ export async function requireHqCaller(
           isHrManager = true;
         }
       }
+    } else if (!permCfg) {
+      isHqAdmin = isSystemOwner || rankCode === "CEO";
+      if (isHqAdmin || rankLevel >= 4) isHrManager = true;
     }
 
     const sec = settings.extra_settings?.security_settings;
@@ -280,6 +289,7 @@ export async function requireHqCaller(
     tenantId: inst.tenant_id ? String(inst.tenant_id) : null,
     hqTenantIds,
     tenantNames,
+    isSystemOwner,
     isHqAdmin,
     isHrManager,
     isDelegatedHrAdmin,

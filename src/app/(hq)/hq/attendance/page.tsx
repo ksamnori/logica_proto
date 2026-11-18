@@ -13,13 +13,20 @@ import HqLeaveRegisterModal, {
   type LeaveRegisterKind,
 } from "@/components/hq/leaves/HqLeaveRegisterModal";
 import {
-  AttendanceEntryModal,
   AttendanceUploadModal,
   exportAttendanceCsv,
   RecurringScheduleModal,
-  type EntryModalInitialState,
 } from "@/components/hq/attendance/HqAttendanceModals";
-import { ATTENDANCE_MODES, WEEKLY_MAX_MINUTES } from "@/lib/hq/constants";
+import {
+  calcDraftNetWorkedMinutes,
+  type DraftWorkEdit,
+  FlexApprovalSidePanel,
+  FlexDraftFloatingBar,
+  FlexInlineWorkPopover,
+  type InlineWorkPopoverTarget,
+  minutesToHm24,
+} from "@/components/hq/attendance/HqFlexInlineWorkEditor";
+import { ATTENDANCE_MODES } from "@/lib/hq/constants";
 import { hqFetch } from "@/lib/hq/clientApi";
 import { DEFAULT_WORK_FORM_POLICIES } from "@/lib/hq/defaultApprovalPolicies";
 import { DEFAULT_CUSTOM_LEAVES } from "@/lib/hq/defaultLeaveSettings";
@@ -213,8 +220,9 @@ export default function HqAttendancePage() {
     me,
     members,
     companySettings,
-    isHrManager,
     isHqAdmin,
+    hasHqPerm,
+    canAccessTargetPerm,
     refreshAttendanceState,
   } = useHqShell();
 
@@ -228,7 +236,7 @@ export default function HqAttendancePage() {
   const [showWeekends, setShowWeekends] = useState(true);
   const [showPlannedGuide, setShowPlannedGuide] = useState(true);
   const [showNowLine, setShowNowLine] = useState(true);
-  const [studioExpanded, setStudioExpanded] = useState(true);
+  const [studioExpanded, setStudioExpanded] = useState(false);
 
   // 구성원 근무 뷰 상태
   const [teamPeriodMode, setTeamPeriodMode] = useState<TeamPeriodMode>("DAY");
@@ -267,9 +275,15 @@ export default function HqAttendancePage() {
   );
   const [memo, setMemo] = useState("");
 
+  // 플렉스 인라인 실시간 근무 편집 팝오버 + 변경 드래프트 + 승인·참조 우측 패널 상태
+  const [inlineTarget, setInlineTarget] =
+    useState<InlineWorkPopoverTarget | null>(null);
+  const [draftEdits, setDraftEdits] = useState<Record<string, DraftWorkEdit>>(
+    {}
+  );
+  const [approvalPanelOpen, setApprovalPanelOpen] = useState(false);
+
   // 모달 상태
-  const [entryModalState, setEntryModalState] =
-    useState<EntryModalInitialState | null>(null);
   const [recurringOpen, setRecurringOpen] = useState(false);
   const [uploadModalOpen, setUploadModalOpen] = useState(false);
   const [leaveModalOpen, setLeaveModalOpen] = useState(false);
@@ -302,8 +316,48 @@ export default function HqAttendancePage() {
     return () => document.removeEventListener("mousedown", onDocClick);
   }, []);
 
-  const canManageTeam = Boolean(
-    isHrManager || isHqAdmin || (me && me.rank_level >= 3)
+  // 권한 설정(permission_settings) 기반 열람 · 편집 범위 정밀 판정
+  const canEditTargetWork = useCallback(
+    (target: HqMember | null | undefined): boolean => {
+      if (!target) return false;
+      return Boolean(
+        canAccessTargetPerm("work.record_edit", target) ||
+          canAccessTargetPerm("work.realtime_edit", target)
+      );
+    },
+    [canAccessTargetPerm]
+  );
+
+  const canEditSelfWork = useMemo(
+    () => Boolean(me && canEditTargetWork(me)),
+    [canEditTargetWork, me]
+  );
+
+  const canViewTargetWork = useCallback(
+    (target: HqMember | null | undefined): boolean => {
+      if (!target) return false;
+      if (target.instructor_id === me?.instructor_id) return true;
+      return Boolean(
+        canAccessTargetPerm("work.record_view", target) ||
+          canAccessTargetPerm("work.realtime_view", target)
+      );
+    },
+    [canAccessTargetPerm, me?.instructor_id]
+  );
+
+  const canViewAnyOtherMember = useMemo(
+    () =>
+      Boolean(
+        isHqAdmin ||
+          hasHqPerm("work.record_view") ||
+          hasHqPerm("work.realtime_view")
+      ),
+    [hasHqPerm, isHqAdmin]
+  );
+
+  const canDownloadStats = useMemo(
+    () => Boolean(isHqAdmin || hasHqPerm("work.stats_view")),
+    [hasHqPerm, isHqAdmin]
   );
 
   const activeMembers = useMemo(() => {
@@ -311,13 +365,24 @@ export default function HqAttendancePage() {
     return [...filtered].sort((a, b) => a.name.localeCompare(b.name, "ko"));
   }, [members]);
 
+  // 구성원 근무 탭에 노출할 허용 범위 구성원 목록
+  const viewableTeamMembers = useMemo(() => {
+    if (!canViewAnyOtherMember) return [];
+    return activeMembers.filter((m) => canViewTargetWork(m));
+  }, [activeMembers, canViewAnyOtherMember, canViewTargetWork]);
+
+  const editableMembers = useMemo(
+    () => activeMembers.filter((m) => canEditTargetWork(m)),
+    [activeMembers, canEditTargetWork]
+  );
+
   const departments = useMemo(() => {
     const s = new Set<string>();
-    activeMembers.forEach((m) => {
+    viewableTeamMembers.forEach((m) => {
       if (m.department) s.add(m.department);
     });
     return Array.from(s);
-  }, [activeMembers]);
+  }, [viewableTeamMembers]);
 
   // 회사 설정 연동: 근무 유형 / 근무 정책 / 맞춤 휴가 / 회사 공휴일
   const workRules: HqWorkRuleItem[] = useMemo(() => {
@@ -530,7 +595,9 @@ export default function HqAttendancePage() {
     });
   }, [activeQueryRange.start, activeQueryRange.end, showWeekends]);
 
-  // 내 근무 주기(주간) 총 시간 계산 (계획 + 실기록 통합)
+  const draftList = useMemo(() => Object.values(draftEdits), [draftEdits]);
+
+  // 내 근무 주기(주간) 총 시간 계산 (계획 + 실기록 + 실시간 편집 드래프트 통합)
   const myPeriodStats = useMemo(() => {
     const fullDates = buildDateList(
       activeQueryRange.start,
@@ -541,13 +608,27 @@ export default function HqAttendancePage() {
     let totalOvertimeMin = 0;
 
     fullDates.forEach((ymd) => {
-      const rec = me ? recordByMemberDate.get(`${me.instructor_id}__${ymd}`) : undefined;
+      const key = me ? `${me.instructor_id}__${ymd}` : "";
+      const draft = key ? draftEdits[key] : undefined;
+      const rec = me ? recordByMemberDate.get(key) : undefined;
       const dowKo = WEEKDAY_KO[parseYmdLocal(ymd).getDay()];
       const isHoliday = holidayMap.has(ymd);
       const isWorkDay = myRule.work_days.includes(dowKo) && !isHoliday;
       const ruleDailyMin =
         Number(myRule.daily_work_hours || 8) * 60 +
         Number(myRule.daily_work_minutes || 0);
+
+      if (draft) {
+        if (draft.actionMode === "DELETE") {
+          // 삭제 예정인 날은 0분 처리
+          return;
+        }
+        const m = calcDraftNetWorkedMinutes(draft);
+        totalLoggedMin += m;
+        totalEffectiveMin += m;
+        totalOvertimeMin += Math.max(0, m - ruleDailyMin);
+        return;
+      }
 
       if (rec) {
         let m = Number(rec.worked_minutes || 0);
@@ -564,7 +645,9 @@ export default function HqAttendancePage() {
         }
         totalLoggedMin += m;
         totalEffectiveMin += m;
-        totalOvertimeMin += Number(rec.overtime_minutes || Math.max(0, m - 480));
+        totalOvertimeMin += Number(
+          rec.overtime_minutes || Math.max(0, m - ruleDailyMin)
+        );
       } else if (isWorkDay) {
         totalEffectiveMin += ruleDailyMin;
       }
@@ -579,11 +662,33 @@ export default function HqAttendancePage() {
     activeQueryRange.start,
     activeQueryRange.end,
     me,
+    draftEdits,
     recordByMemberDate,
     holidayMap,
     myRule,
     nowClock,
   ]);
+
+  const draftWarnings = useMemo(() => {
+    const warns: string[] = [];
+    if (
+      mainTab === "MY" &&
+      myPeriodMode !== "MONTH" &&
+      myPeriodStats.totalEffectiveMin > 3120
+    ) {
+      warns.push(
+        `주 최대 52시간 한도를 ${formatHmColon(
+          myPeriodStats.totalEffectiveMin - 3120
+        )} 초과했습니다.`
+      );
+    }
+    draftList.forEach((d) => {
+      if (d.actionMode === "UPSERT" && calcDraftNetWorkedMinutes(d) <= 0) {
+        warns.push(`${d.workDate}: 실근무 시간이 0분입니다. 출·퇴근 시각을 확인해 주세요.`);
+      }
+    });
+    return warns;
+  }, [draftList, mainTab, myPeriodMode, myPeriodStats.totalEffectiveMin]);
 
   // 출근/퇴근/형태변경 핸들러
   const handleQuickCheckIn = async () => {
@@ -642,7 +747,7 @@ export default function HqAttendancePage() {
     }
   };
 
-  // 단건 모달 열기 헬퍼
+  // 플렉스 인라인 근무 편집 팝오버 열기 (권한 설정의 [근무 편집] 허용 범위 엄격 검증!)
   const openEntryForDate = (
     targetMember: HqMember | null,
     ymd: string,
@@ -650,59 +755,237 @@ export default function HqAttendancePage() {
       presetMode?: HqWorkMode;
       policyLabel?: string;
       focusBreak?: boolean;
+      anchorEl?: HTMLElement | null;
     }
   ) => {
     const member = targetMember || me;
     if (!member) return;
-    if (member.instructor_id !== me?.instructor_id && !canManageTeam) {
+    if (!canEditTargetWork(member)) {
       return;
     }
 
-    const existing = recordByMemberDate.get(`${member.instructor_id}__${ymd}`);
+    const key = `${member.instructor_id}__${ymd}`;
+    const existing = recordByMemberDate.get(key);
     const rule = resolveMemberWorkRule(
       member.name,
       member.profile_extra?.work_schedule_type
     );
-    const ruleStartMin = parseHmToMinutes(rule.start_time) ?? 540;
+    const dowKo = WEEKDAY_KO[parseYmdLocal(ymd).getDay()];
+    const holiday = holidayMap.get(ymd);
+    const wasScheduledWorkday = rule.work_days.includes(dowKo) && !holiday;
+
+    const dayCustom =
+      rule.per_day_custom_enabled && rule.per_day_schedule?.[dowKo]
+        ? rule.per_day_schedule[dowKo]
+        : null;
+    const ruleStartMin =
+      parseHmToMinutes(dayCustom?.start_time || rule.start_time) ?? 540;
     const ruleWorkMin =
-      Number(rule.daily_work_hours || 8) * 60 +
-      Number(rule.daily_work_minutes || 0);
+      Number(dayCustom ? dayCustom.work_hours : rule.daily_work_hours ?? 8) *
+        60 +
+      Number(dayCustom ? dayCustom.work_minutes : rule.daily_work_minutes ?? 0);
     const ruleBreakMin = calcBreakMinutes(rule);
     const ruleEndMin = ruleStartMin + ruleWorkMin + ruleBreakMin;
-    const defaultOutHm = `${String(Math.floor(ruleEndMin / 60) % 24).padStart(
-      2,
-      "0"
-    )}:${String(ruleEndMin % 60).padStart(2, "0")}`;
 
-    const mode =
-      opts?.presetMode || existing?.work_mode || ("OFFICE" as HqWorkMode);
+    const baseMode: HqWorkMode = existing?.work_mode && existing.work_mode !== "LEAVE"
+      ? existing.work_mode
+      : "OFFICE";
+    const basePolicyName =
+      baseMode === "REMOTE"
+        ? "원격근무"
+        : baseMode === "OUTSIDE"
+          ? existing?.location_note === "출장지"
+            ? "출장"
+            : "외근"
+          : "근무";
 
-    setEntryModalState({
-      attendanceId: existing?.attendance_id,
-      targetMemberId: member.instructor_id,
+    const baseInMin = existing?.check_in_at
+      ? isoToMinutesOfDay(existing.check_in_at, ymd) ?? ruleStartMin
+      : ruleStartMin;
+    const baseOutMin =
+      existing?.check_out_at && existing.status === "DONE"
+        ? isoToMinutesOfDay(existing.check_out_at, ymd) ?? ruleEndMin
+        : ruleEndMin;
+    const baseBreakMin =
+      existing?.break_minutes !== undefined
+        ? Number(existing.break_minutes)
+        : ruleBreakMin || 60;
+    const baseLocation =
+      existing?.location_note ||
+      ATTENDANCE_MODES[baseMode]?.defaultLocation ||
+      "본사 편집·연구실";
+    const baseMemo = existing?.memo || "";
+
+    // DOM 상 해당 날짜 근무 바 위치 우선 탐색 -> 바로 아래에 팝오버 정박 (Screenshot 0fed5963 완벽 재현)
+    let anchorRect = {
+      top: 240,
+      bottom: 276,
+      left: 420,
+      right: 680,
+      width: 260,
+    };
+    if (typeof document !== "undefined") {
+      const barEl = document.querySelector(
+        `[data-work-bar="${key}"]`
+      ) as HTMLElement | null;
+      const targetEl = barEl || opts?.anchorEl || null;
+      if (targetEl) {
+        const r = targetEl.getBoundingClientRect();
+        anchorRect = {
+          top: r.top,
+          bottom: r.bottom,
+          left: barEl ? r.left : Math.max(260, r.left + 120),
+          right: r.right,
+          width: r.width,
+        };
+      }
+    }
+
+    const baseline = {
+      workMode: baseMode,
+      policyName: basePolicyName,
+      inMinutes: baseInMin,
+      outMinutes: baseOutMin,
+      breakMinutes: baseBreakMin,
+      locationNote: baseLocation,
+      memo: baseMemo,
+    };
+
+    setInlineTarget({
+      key,
+      memberId: member.instructor_id,
+      memberName: member.name,
+      department: member.department || "미지정",
       workDate: ymd,
-      workMode: mode,
-      statusOverride: existing?.status === "HALF_LEAVE" ? "HALF_LEAVE" : "",
-      policyLabel: opts?.policyLabel,
-      inTime: existing?.check_in_at
-        ? formatClock24(existing.check_in_at)
-        : rule.start_time || "09:00",
-      outTime: existing?.check_out_at
-        ? formatClock24(existing.check_out_at)
-        : defaultOutHm,
-      breakMinutes:
-        existing?.break_minutes !== undefined
-          ? Number(existing.break_minutes)
-          : ruleBreakMin || 60,
-      locationNote:
-        opts?.policyLabel === "출장"
-          ? "출장지"
-          : existing?.location_note ||
-            ATTENDANCE_MODES[mode]?.defaultLocation ||
-            "본사 편집·연구실",
-      memo: existing?.memo || "",
-      focusBreak: opts?.focusBreak,
+      attendanceId: existing?.attendance_id,
+      hadExistingRecord: Boolean(existing),
+      wasScheduledWorkday,
+      anchorRect,
+      baseline,
     });
+
+    // [+ 추가하기 > 근무 > 원격근무/외근 등]으로 진입한 경우 즉시 해당 정책으로 드래프트 반영
+    if (opts?.presetMode || (opts?.policyLabel && opts.policyLabel !== "휴게")) {
+      const nextMode = opts.presetMode || baseMode;
+      const nextPolicy = opts.policyLabel || basePolicyName;
+      const nextLoc =
+        nextPolicy === "출장"
+          ? "출장지"
+          : nextPolicy === "외근"
+            ? "외근지"
+            : ATTENDANCE_MODES[nextMode]?.defaultLocation || baseLocation;
+      if (nextMode !== baseMode || nextPolicy !== basePolicyName || !wasScheduledWorkday) {
+        setDraftEdits((prev) => ({
+          ...prev,
+          [key]: {
+            key,
+            memberId: member.instructor_id,
+            memberName: member.name,
+            department: member.department || "미지정",
+            workDate: ymd,
+            attendanceId: existing?.attendance_id,
+            actionMode: "UPSERT",
+            workMode: nextMode,
+            policyName: nextPolicy,
+            inMinutes: prev[key]?.inMinutes ?? baseInMin,
+            outMinutes: prev[key]?.outMinutes ?? baseOutMin,
+            breakMinutes: prev[key]?.breakMinutes ?? baseBreakMin,
+            locationNote: nextLoc,
+            memo: prev[key]?.memo ?? baseMemo,
+          },
+        }));
+      }
+    } else if (!existing && !wasScheduledWorkday && !draftEdits[key]) {
+      // 비근무일(토·일·공휴일) 행 클릭 시 즉시 9~6 예정 드래프트 프리뷰 생성
+      setDraftEdits((prev) => ({
+        ...prev,
+        [key]: {
+          key,
+          memberId: member.instructor_id,
+          memberName: member.name,
+          department: member.department || "미지정",
+          workDate: ymd,
+          actionMode: "UPSERT",
+          ...baseline,
+        },
+      }));
+    }
+  };
+
+  const handleUpsertDraft = useCallback((next: DraftWorkEdit) => {
+    setDraftEdits((prev) => ({ ...prev, [next.key]: next }));
+  }, []);
+
+  const handleClearDraft = useCallback((key: string) => {
+    setDraftEdits((prev) => {
+      if (!prev[key]) return prev;
+      const copy = { ...prev };
+      delete copy[key];
+      return copy;
+    });
+  }, []);
+
+  const handleStageDeleteDraft = useCallback(
+    (t: InlineWorkPopoverTarget) => {
+      setDraftEdits((prev) => ({
+        ...prev,
+        [t.key]: {
+          key: t.key,
+          memberId: t.memberId,
+          memberName: t.memberName,
+          department: t.department,
+          workDate: t.workDate,
+          attendanceId: t.attendanceId,
+          actionMode: "DELETE",
+          ...t.baseline,
+        },
+      }));
+    },
+    []
+  );
+
+  const handleCancelAllDrafts = useCallback(() => {
+    setDraftEdits({});
+    setInlineTarget(null);
+    setApprovalPanelOpen(false);
+  }, []);
+
+  const handleSubmitAllDrafts = async () => {
+    if (draftList.length === 0) return;
+    setSubmitting(true);
+    try {
+      const items = draftList.map((d) => ({
+        mode: d.actionMode,
+        instructor_id: d.memberId,
+        member_name: d.memberName,
+        department: d.department,
+        work_date: d.workDate,
+        attendance_id: d.attendanceId,
+        work_mode: d.workMode,
+        check_in_time: minutesToHm24(d.inMinutes),
+        check_out_time: minutesToHm24(d.outMinutes),
+        break_minutes: d.breakMinutes,
+        location_note: d.locationNote,
+        memo: d.memo,
+      }));
+
+      await hqFetch("/api/hq/attendance", {
+        method: "POST",
+        body: {
+          action: "BATCH_MANUAL_UPSERT",
+          items,
+        },
+      });
+
+      setDraftEdits({});
+      setInlineTarget(null);
+      setApprovalPanelOpen(false);
+      await Promise.all([loadAttendance(), refreshAttendanceState()]);
+    } catch (err: any) {
+      alert(err?.message || "근무 일정 등록에 실패했습니다.");
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   // 날짜 이동 핸들러
@@ -728,7 +1011,7 @@ export default function HqAttendancePage() {
     }
   };
 
-  // 구성원 근무 요약 카운트 (휴가 / 초과 근무 / 맞춤 근무 / 실시간 근무중)
+  // 구성원 근무 요약 카운트 (열람 허용 범위 내 구성원 기준)
   const teamSummaryCounts = useMemo(() => {
     let leaveCount = 0;
     let overtimeCount = 0;
@@ -738,7 +1021,7 @@ export default function HqAttendancePage() {
     const checkDate =
       teamPeriodMode === "DAY" ? teamAnchorDate : todayStr;
 
-    activeMembers.forEach((m) => {
+    viewableTeamMembers.forEach((m) => {
       if (deptFilter !== "ALL" && m.department !== deptFilter) return;
 
       const rec = recordByMemberDate.get(`${m.instructor_id}__${checkDate}`);
@@ -770,7 +1053,6 @@ export default function HqAttendancePage() {
             rec.work_mode === "FLEX_11")) ||
         rule.start_time !== "09:00"
       ) {
-        // 원격/외근/시차 또는 기본 9시 외 시차 근무유형 적용자
         if (
           rec &&
           (rec.work_mode === "REMOTE" ||
@@ -787,7 +1069,7 @@ export default function HqAttendancePage() {
 
     return { leaveCount, overtimeCount, customWorkCount, workingNowCount };
   }, [
-    activeMembers,
+    viewableTeamMembers,
     deptFilter,
     teamPeriodMode,
     teamAnchorDate,
@@ -801,7 +1083,7 @@ export default function HqAttendancePage() {
     const checkDate =
       teamPeriodMode === "DAY" ? teamAnchorDate : todayStr;
 
-    return activeMembers.filter((m) => {
+    return viewableTeamMembers.filter((m) => {
       if (deptFilter !== "ALL" && m.department !== deptFilter) return false;
       if (teamPeriodMode === "CYCLE" && teamRuleFilter !== "ALL") {
         const mRule = resolveMemberWorkRule(
@@ -853,7 +1135,7 @@ export default function HqAttendancePage() {
       return true;
     });
   }, [
-    activeMembers,
+    viewableTeamMembers,
     deptFilter,
     teamRuleFilter,
     resolveMemberWorkRule,
@@ -866,10 +1148,13 @@ export default function HqAttendancePage() {
     leaveApprovalByMemberDate,
   ]);
 
-  // 24시간 타임라인 행 블록 렌더링 헬퍼 (내 근무[주기] & 구성원[일] 공통 — Flex 104833 & 104619 100% 재현)
+  // 24시간 타임라인 행 블록 렌더링 헬퍼 (내 근무[주기] & 구성원[일] 공통 — Flex 0fed5963 & 8278a9a1 100% 재현)
   const render24hBarForMemberDate = (member: HqMember, ymd: string) => {
-    const rec = recordByMemberDate.get(`${member.instructor_id}__${ymd}`);
-    const lvDoc = leaveApprovalByMemberDate.get(`${member.instructor_id}__${ymd}`);
+    const barKey = `${member.instructor_id}__${ymd}`;
+    const draft = draftEdits[barKey];
+    const isActivePopover = inlineTarget?.key === barKey;
+    const rec = recordByMemberDate.get(barKey);
+    const lvDoc = leaveApprovalByMemberDate.get(barKey);
     const rule = resolveMemberWorkRule(
       member.name,
       member.profile_extra?.work_schedule_type
@@ -892,6 +1177,114 @@ export default function HqAttendancePage() {
     const b1End = parseHmToMinutes(rule.break_end_1);
     const ruleBreakMin = calcBreakMinutes(rule);
     const ruleEndMin = ruleStartMin + ruleWorkMin + ruleBreakMin;
+
+    // 0) 드래프트로 삭제 예정인 경우
+    if (draft?.actionMode === "DELETE") {
+      return (
+        <div
+          data-work-bar={barKey}
+          className="absolute left-[37.5%] top-3.5 text-[11px] font-bold text-slate-400 line-through"
+        >
+          근무 일정 삭제 예정
+        </div>
+      );
+    }
+
+    // 0-B) 실시간 편집 드래프트가 존재하는 경우 즉시 타임라인 반영 (Screenshot 8278a9a1 & c6455974 완벽 재현!)
+    if (draft?.actionMode === "UPSERT") {
+      const dStart = draft.inMinutes;
+      const dEnd =
+        draft.outMinutes > draft.inMinutes
+          ? draft.outMinutes
+          : Math.min(1440, draft.inMinutes + 60);
+      const leftPct = Math.max(0, Math.min(96, (dStart / 1440) * 100));
+      const widthPct = Math.max(
+        3,
+        Math.min(100 - leftPct, ((dEnd - dStart) / 1440) * 100)
+      );
+      const netMin = calcDraftNetWorkedMinutes(draft);
+      const overtimeMin = Math.max(0, netMin - ruleWorkMin);
+      const spanMin = Math.max(1, dEnd - dStart);
+      const overtimeTailPct =
+        overtimeMin > 0 ? Math.min(100, (overtimeMin / spanMin) * 100) : 0;
+
+      const hasBreakInside =
+        b1Start !== null &&
+        b1End !== null &&
+        dStart < b1Start &&
+        dEnd > b1End &&
+        draft.breakMinutes > 0;
+      const breakLeftInBar =
+        hasBreakInside && b1Start !== null
+          ? ((b1Start - dStart) / spanMin) * 100
+          : 0;
+      const breakWidthInBar =
+        hasBreakInside && b1Start !== null && b1End !== null
+          ? ((b1End - b1Start) / spanMin) * 100
+          : 0;
+
+      const modeIcon =
+        draft.workMode === "REMOTE"
+          ? "🏠"
+          : draft.workMode === "OUTSIDE"
+            ? "🚗"
+            : "💼";
+
+      return (
+        <div
+          data-work-bar={barKey}
+          style={{ left: `${leftPct}%`, width: `${widthPct}%` }}
+          className="absolute top-2.5 bottom-4 z-15"
+        >
+          <div className="relative h-6.5 rounded-[5px] border border-[#0f766e] ring-1 ring-[#0f766e]/25 px-2 flex items-center justify-between overflow-hidden bg-[#aef4e8]/95 text-[#0f766e] shadow-2xs">
+            {/* 일 소정근로 초과 구간 상단 코랄 오렌지 바 (Screenshot 8278a9a1 & c6455974 동일) */}
+            {overtimeTailPct > 0 && (
+              <div
+                style={{ width: `${overtimeTailPct}%` }}
+                className="pointer-events-none absolute top-0 right-0 h-[3px] bg-[#f05638] z-20"
+              />
+            )}
+
+            <div className="flex items-center gap-1.5 min-w-0 z-10">
+              <span className="text-[11px]">{modeIcon}</span>
+              {draft.policyName !== "근무" && (
+                <span className="text-[11px] font-extrabold truncate">
+                  {draft.policyName}
+                </span>
+              )}
+            </div>
+
+            {hasBreakInside && (
+              <div
+                style={{
+                  left: `${breakLeftInBar}%`,
+                  width: `${breakWidthInBar}%`,
+                }}
+                className="absolute top-1 bottom-1 rounded-[3px] bg-white/95 border border-slate-200/90 flex items-center px-1.5 text-[10px] text-slate-500 pointer-events-none z-10"
+              >
+                ☕
+              </div>
+            )}
+          </div>
+
+          <div className="flex items-center justify-between text-[10px] text-slate-600 font-semibold mt-0.5 px-0.5 whitespace-nowrap">
+            <span>
+              {formatMinutesToKoreanAmPm(dStart)}
+              {draft.breakMinutes > 0 && (
+                <span className="text-slate-400 ml-1 font-medium">휴게 1건</span>
+              )}
+            </span>
+            <span
+              className={
+                overtimeTailPct > 0 ? "text-[#e85d3f] font-bold" : undefined
+              }
+            >
+              {formatMinutesToKoreanAmPm(dEnd)}
+            </span>
+          </div>
+        </div>
+      );
+    }
 
     const leaveLabel = String(
       lvDoc?.leave_type ||
@@ -924,6 +1317,7 @@ export default function HqAttendancePage() {
 
       return (
         <div
+          data-work-bar={barKey}
           style={{ left: `${leftPct}%`, width: `${Math.max(widthPct, 6)}%` }}
           className="absolute top-2.5 bottom-4 z-10 group"
         >
@@ -976,7 +1370,6 @@ export default function HqAttendancePage() {
       const isCurrentlyWorkingToday =
         rec.status === "WORKING" && !rec.check_out_at && ymd === todayStr;
 
-      // 오늘 근무중(특히 자동 근무 기록)인 경우 전체 예정 바 틀을 그리되 빨간 현재시각 세로선까지 민트 색상을 채움 (Screenshot 104833 완벽 재현!)
       const containerEndMin = isCurrentlyWorkingToday
         ? Math.max(ruleEndMin, nowMinutesOfDay, actualInMin + 60)
         : Math.max(
@@ -1016,8 +1409,9 @@ export default function HqAttendancePage() {
               ? "bg-indigo-200/80"
               : "bg-[#aef4e8]/90";
 
-      const borderColorClass =
-        rec.work_mode === "REMOTE"
+      const borderColorClass = isActivePopover
+        ? "border-[#0f766e] ring-1 ring-[#0f766e]/30 text-[#0f766e]"
+        : rec.work_mode === "REMOTE"
           ? "border-teal-500 text-teal-900"
           : rec.work_mode === "OUTSIDE"
             ? "border-amber-500 text-amber-950"
@@ -1034,6 +1428,17 @@ export default function HqAttendancePage() {
               ? "🌅"
               : "💼";
 
+      const spanMin = Math.max(1, containerEndMin - actualInMin);
+      const loggedOvertime = Math.max(
+        0,
+        Number(rec.overtime_minutes || 0) ||
+          Number(rec.worked_minutes || 0) - ruleWorkMin
+      );
+      const overtimeTailPct =
+        !isCurrentlyWorkingToday && loggedOvertime > 0
+          ? Math.min(100, (loggedOvertime / spanMin) * 100)
+          : 0;
+
       const hasBreakInside =
         b1Start !== null &&
         b1End !== null &&
@@ -1043,28 +1448,35 @@ export default function HqAttendancePage() {
 
       const breakLeftInBar =
         hasBreakInside && b1Start !== null
-          ? ((b1Start - actualInMin) / (containerEndMin - actualInMin)) * 100
+          ? ((b1Start - actualInMin) / spanMin) * 100
           : 0;
       const breakWidthInBar =
         hasBreakInside && b1Start !== null && b1End !== null
-          ? ((b1End - b1Start) / (containerEndMin - actualInMin)) * 100
+          ? ((b1End - b1Start) / spanMin) * 100
           : 0;
 
       return (
         <>
           {halfLeaveOverlay}
           <div
+            data-work-bar={barKey}
             style={{ left: `${leftPct}%`, width: `${widthPct}%` }}
             className="absolute top-2.5 bottom-4 z-10"
           >
             <div
               className={`relative h-6.5 rounded-[5px] border px-2 flex items-center justify-between overflow-hidden bg-white transition-all hover:brightness-97 ${borderColorClass}`}
             >
-              {/* 좌측부터 빨간 현재시각 세로선(또는 퇴근시각)까지 채워지는 민트 진행 바 */}
               <div
                 style={{ width: `${fillRatioPct}%` }}
                 className={`absolute inset-y-0 left-0 pointer-events-none transition-all duration-500 ${fillColorClass}`}
               />
+
+              {overtimeTailPct > 0 && (
+                <div
+                  style={{ width: `${overtimeTailPct}%` }}
+                  className="pointer-events-none absolute top-0 right-0 h-[3px] bg-[#f05638] z-20"
+                />
+              )}
 
               <div className="flex items-center gap-1.5 min-w-0 z-10">
                 <span className="text-[11px]">{modeIcon}</span>
@@ -1089,13 +1501,23 @@ export default function HqAttendancePage() {
             </div>
 
             <div className="flex items-center justify-between text-[10px] text-slate-500 font-medium mt-0.5 px-0.5 whitespace-nowrap">
-              <span>
+              <span className={isActivePopover ? "text-slate-800 font-bold" : undefined}>
                 {formatMinutesToKoreanAmPm(actualInMin)}
                 {(rec.break_minutes || 0) > 0 && (
-                  <span className="text-slate-400 ml-1">휴게 1건</span>
+                  <span className="text-slate-400 ml-1 font-normal">휴게 1건</span>
                 )}
               </span>
-              <span>{formatMinutesToKoreanAmPm(containerEndMin)}</span>
+              <span
+                className={
+                  overtimeTailPct > 0
+                    ? "text-[#e85d3f] font-bold"
+                    : isActivePopover
+                      ? "text-slate-800 font-bold"
+                      : undefined
+                }
+              >
+                {formatMinutesToKoreanAmPm(containerEndMin)}
+              </span>
             </div>
           </div>
         </>
@@ -1128,10 +1550,17 @@ export default function HqAttendancePage() {
         <>
           {halfLeaveOverlay}
           <div
+            data-work-bar={barKey}
             style={{ left: `${leftPct}%`, width: `${widthPct}%` }}
             className="absolute top-2.5 bottom-4 z-10"
           >
-            <div className="relative h-6.5 rounded-[5px] border border-[#5eead4] bg-white hover:bg-teal-50/30 transition-colors flex items-center px-2">
+            <div
+              className={`relative h-6.5 rounded-[5px] border bg-white hover:bg-teal-50/30 transition-colors flex items-center px-2 ${
+                isActivePopover
+                  ? "border-[#0f766e] ring-1 ring-[#0f766e]/25"
+                  : "border-[#5eead4]"
+              }`}
+            >
               <span className="text-[11px] text-[#14b8a6]">💼</span>
               {hasBreak && (
                 <div
@@ -1146,13 +1575,15 @@ export default function HqAttendancePage() {
               )}
             </div>
             <div className="flex items-center justify-between text-[10px] font-medium text-slate-500 mt-0.5 px-0.5 whitespace-nowrap">
-              <span>
+              <span className={isActivePopover ? "text-slate-800 font-bold" : undefined}>
                 {formatMinutesToKoreanAmPm(workBarStart)}{" "}
                 {hasBreak && (
-                  <span className="text-slate-400 ml-0.5">휴게 1건</span>
+                  <span className="text-slate-400 ml-0.5 font-normal">휴게 1건</span>
                 )}
               </span>
-              <span>{formatMinutesToKoreanAmPm(workBarEnd)}</span>
+              <span className={isActivePopover ? "text-slate-800 font-bold" : undefined}>
+                {formatMinutesToKoreanAmPm(workBarEnd)}
+              </span>
             </div>
           </div>
         </>
@@ -1382,11 +1813,14 @@ export default function HqAttendancePage() {
               )}
             </div>
 
-            {/* [+ 추가하기 ▾] 계단식 드롭다운 (근무 › / 휴가 › / 반복 일정) */}
+            {/* [+ 추가하기 ▾] 계단식 드롭다운 (근무 편집 권한이 없으면 휴가만 노출!) */}
             <div className="relative">
               <button
                 type="button"
                 onClick={() => {
+                  if (!addMenuOpen) {
+                    setAddSubMenu(canEditSelfWork ? "WORK" : "LEAVE");
+                  }
                   setAddMenuOpen((v) => !v);
                   setPeriodMenuOpen(false);
                 }}
@@ -1399,7 +1833,7 @@ export default function HqAttendancePage() {
               {addMenuOpen && (
                 <div className="absolute right-0 top-full mt-1.5 z-40 flex items-start">
                   {/* 좌측 플라이아웃 서브메뉴 */}
-                  {addSubMenu === "WORK" && (
+                  {canEditSelfWork && addSubMenu === "WORK" && (
                     <div className="w-44 rounded-xl bg-white border border-slate-200 shadow-xl py-1.5 mr-1.5 text-xs">
                       {workFormPolicies.map((pol) => {
                         const presetMode: HqWorkMode = pol.name.includes("원격")
@@ -1483,22 +1917,24 @@ export default function HqAttendancePage() {
 
                   {/* 우측 메인 메뉴 */}
                   <div className="w-40 rounded-xl bg-white border border-slate-200 shadow-xl py-1.5 text-xs">
-                    <button
-                      type="button"
-                      onMouseEnter={() => setAddSubMenu("WORK")}
-                      onClick={() => setAddSubMenu("WORK")}
-                      className={`w-full px-3.5 py-2 text-left font-semibold flex items-center justify-between ${
-                        addSubMenu === "WORK"
-                          ? "bg-slate-100 text-slate-900"
-                          : "text-slate-700 hover:bg-slate-50"
-                      }`}
-                    >
-                      <span className="flex items-center gap-2">
-                        <span>🧳</span>
-                        <span>근무</span>
-                      </span>
-                      <span className="text-slate-400">›</span>
-                    </button>
+                    {canEditSelfWork && (
+                      <button
+                        type="button"
+                        onMouseEnter={() => setAddSubMenu("WORK")}
+                        onClick={() => setAddSubMenu("WORK")}
+                        className={`w-full px-3.5 py-2 text-left font-semibold flex items-center justify-between ${
+                          addSubMenu === "WORK"
+                            ? "bg-slate-100 text-slate-900"
+                            : "text-slate-700 hover:bg-slate-50"
+                        }`}
+                      >
+                        <span className="flex items-center gap-2">
+                          <span>🧳</span>
+                          <span>근무</span>
+                        </span>
+                        <span className="text-slate-400">›</span>
+                      </button>
+                    )}
 
                     <button
                       type="button"
@@ -1517,19 +1953,23 @@ export default function HqAttendancePage() {
                       <span className="text-slate-400">›</span>
                     </button>
 
-                    <div className="my-1 border-t border-slate-100" />
-                    <button
-                      type="button"
-                      onMouseEnter={() => setAddSubMenu(null)}
-                      onClick={() => {
-                        setAddMenuOpen(false);
-                        setRecurringOpen(true);
-                      }}
-                      className="w-full px-3.5 py-2 text-left hover:bg-slate-50 font-semibold text-slate-700 flex items-center gap-2"
-                    >
-                      <span>🔄</span>
-                      <span>반복 일정</span>
-                    </button>
+                    {canEditSelfWork && (
+                      <>
+                        <div className="my-1 border-t border-slate-100" />
+                        <button
+                          type="button"
+                          onMouseEnter={() => setAddSubMenu(null)}
+                          onClick={() => {
+                            setAddMenuOpen(false);
+                            setRecurringOpen(true);
+                          }}
+                          className="w-full px-3.5 py-2 text-left hover:bg-slate-50 font-semibold text-slate-700 flex items-center gap-2"
+                        >
+                          <span>🔄</span>
+                          <span>반복 일정</span>
+                        </button>
+                      </>
+                    )}
                   </div>
                 </div>
               )}
@@ -1538,36 +1978,40 @@ export default function HqAttendancePage() {
         ) : (
           /* 구성원 근무 우측: 검색 & [근무 기록 관리 ▾] */
           <div className="flex items-center gap-2">
-            {teamSearchOpen ? (
-              <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-slate-100 border border-slate-200">
-                <span className="text-xs text-slate-400">🔍</span>
-                <input
-                  autoFocus
-                  value={teamKeyword}
-                  onChange={(e) => setTeamKeyword(e.target.value)}
-                  placeholder="이름, 부서, 직무 검색..."
-                  className="bg-transparent text-xs font-semibold text-slate-800 outline-none w-40"
-                />
-                <button
-                  type="button"
-                  onClick={() => {
-                    setTeamKeyword("");
-                    setTeamSearchOpen(false);
-                  }}
-                  className="text-xs text-slate-400 hover:text-slate-700"
-                >
-                  ✕
-                </button>
-              </div>
-            ) : (
-              <button
-                type="button"
-                onClick={() => setTeamSearchOpen(true)}
-                className="w-8 h-8 rounded-lg hover:bg-slate-100 text-slate-600 flex items-center justify-center text-sm"
-                title="구성원 검색"
-              >
-                🔍
-              </button>
+            {canViewAnyOtherMember && (
+              <>
+                {teamSearchOpen ? (
+                  <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-slate-100 border border-slate-200">
+                    <span className="text-xs text-slate-400">🔍</span>
+                    <input
+                      autoFocus
+                      value={teamKeyword}
+                      onChange={(e) => setTeamKeyword(e.target.value)}
+                      placeholder="이름, 부서, 직무 검색..."
+                      className="bg-transparent text-xs font-semibold text-slate-800 outline-none w-40"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setTeamKeyword("");
+                        setTeamSearchOpen(false);
+                      }}
+                      className="text-xs text-slate-400 hover:text-slate-700"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setTeamSearchOpen(true)}
+                    className="w-8 h-8 rounded-lg hover:bg-slate-100 text-slate-600 flex items-center justify-center text-sm"
+                    title="구성원 검색"
+                  >
+                    🔍
+                  </button>
+                )}
+              </>
             )}
 
             <div className="relative">
@@ -1583,65 +2027,73 @@ export default function HqAttendancePage() {
 
               {recordMgmtOpen && (
                 <div className="absolute right-0 top-full mt-1.5 w-64 rounded-xl bg-white border border-slate-200 shadow-xl py-2 z-40 text-xs">
-                  <div className="px-4 py-1 text-[11px] font-bold text-slate-400">
-                    다운로드
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setRecordMgmtOpen(false);
-                      exportAttendanceCsv(
-                        "ALL",
-                        records,
-                        `${activeQueryRange.start}_${activeQueryRange.end}`
-                      );
-                    }}
-                    className="w-full px-4 py-2 text-left hover:bg-slate-50 transition-colors"
-                  >
-                    <div className="font-bold text-slate-800">
-                      구성원 근무 기록
-                    </div>
-                    <div className="text-[11px] text-slate-400 mt-0.5 leading-snug">
-                      출 · 퇴근 시각, 근무 시간을 확인할 수 있어요.
-                    </div>
-                  </button>
+                  {canDownloadStats && (
+                    <>
+                      <div className="px-4 py-1 text-[11px] font-bold text-slate-400">
+                        다운로드
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setRecordMgmtOpen(false);
+                          exportAttendanceCsv(
+                            "ALL",
+                            records,
+                            `${activeQueryRange.start}_${activeQueryRange.end}`
+                          );
+                        }}
+                        className="w-full px-4 py-2 text-left hover:bg-slate-50 transition-colors"
+                      >
+                        <div className="font-bold text-slate-800">
+                          구성원 근무 기록
+                        </div>
+                        <div className="text-[11px] text-slate-400 mt-0.5 leading-snug">
+                          출 · 퇴근 시각, 근무 시간을 확인할 수 있어요.
+                        </div>
+                      </button>
 
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setRecordMgmtOpen(false);
-                      exportAttendanceCsv(
-                        "OVERTIME",
-                        records,
-                        `${activeQueryRange.start}_${activeQueryRange.end}`
-                      );
-                    }}
-                    className="w-full px-4 py-2 text-left hover:bg-slate-50 transition-colors"
-                  >
-                    <div className="font-bold text-slate-800">
-                      구성원 초과 근무 기록
-                    </div>
-                    <div className="text-[11px] text-slate-400 mt-0.5 leading-snug">
-                      정산이 필요한 초과 근무를 항목 별로 확인할 수 있어요.
-                    </div>
-                  </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setRecordMgmtOpen(false);
+                          exportAttendanceCsv(
+                            "OVERTIME",
+                            records,
+                            `${activeQueryRange.start}_${activeQueryRange.end}`
+                          );
+                        }}
+                        className="w-full px-4 py-2 text-left hover:bg-slate-50 transition-colors"
+                      >
+                        <div className="font-bold text-slate-800">
+                          구성원 초과 근무 기록
+                        </div>
+                        <div className="text-[11px] text-slate-400 mt-0.5 leading-snug">
+                          정산이 필요한 초과 근무를 항목 별로 확인할 수 있어요.
+                        </div>
+                      </button>
+                      <div className="my-1.5 border-t border-slate-100" />
+                    </>
+                  )}
 
-                  <div className="my-1.5 border-t border-slate-100" />
-                  <div className="px-4 py-1 text-[11px] font-bold text-slate-400">
-                    업로드
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setRecordMgmtOpen(false);
-                      setUploadModalOpen(true);
-                    }}
-                    className="w-full px-4 py-2 text-left hover:bg-slate-50 font-bold text-slate-800"
-                  >
-                    근무 기록 업로드
-                  </button>
+                  {editableMembers.length > 0 && (
+                    <>
+                      <div className="px-4 py-1 text-[11px] font-bold text-slate-400">
+                        업로드
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setRecordMgmtOpen(false);
+                          setUploadModalOpen(true);
+                        }}
+                        className="w-full px-4 py-2 text-left hover:bg-slate-50 font-bold text-slate-800"
+                      >
+                        근무 기록 업로드
+                      </button>
+                      <div className="my-1.5 border-t border-slate-100" />
+                    </>
+                  )}
 
-                  <div className="my-1.5 border-t border-slate-100" />
                   <button
                     type="button"
                     onClick={() => {
@@ -1793,15 +2245,19 @@ export default function HqAttendancePage() {
                     🔴 퇴근 기록하기
                   </button>
                 </div>
-              ) : (
+              ) : canEditSelfWork ? (
                 <button
                   type="button"
-                  onClick={() => openEntryForDate(me, todayStr)}
+                  onClick={(e) =>
+                    openEntryForDate(me, todayStr, {
+                      anchorEl: e.currentTarget,
+                    })
+                  }
                   className="px-3.5 py-2 rounded-xl bg-white/15 hover:bg-white/25 text-white text-xs font-bold"
                 >
                   ✏️ 오늘 기록 수정
                 </button>
-              )}
+              ) : null}
             </div>
           </div>
         </div>
@@ -1811,7 +2267,8 @@ export default function HqAttendancePage() {
           탭 1: [내 근무] 본문 영역
          ===================================================================== */}
       {mainTab === "MY" && (
-        <div className="flex-1 flex flex-col">
+        <div className="flex-1 flex min-h-0">
+          <div className="flex-1 flex flex-col min-w-0">
           {/* 날짜 네비게이터 + 우측 주기/주/월 총시간 프로그레스 게이지 */}
           <div className="px-7 py-4 border-b border-slate-200 flex flex-wrap items-center justify-between gap-4">
             <div className="flex items-center gap-2">
@@ -1838,13 +2295,26 @@ export default function HqAttendancePage() {
                 </button>
               </div>
 
-              <button
-                type="button"
-                onClick={() => setMyAnchorDate(todayStr)}
-                className="px-2.5 py-1.5 rounded-lg hover:bg-slate-100 text-xs font-bold text-slate-600"
-              >
-                오늘
-              </button>
+              {draftList.length > 0 ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const firstYmd = draftList[0]?.workDate;
+                    if (firstYmd) setMyAnchorDate(firstYmd);
+                  }}
+                  className="px-2.5 py-1.5 rounded-lg hover:bg-blue-50 text-xs font-extrabold text-[#0066ff] transition-colors"
+                >
+                  입력 중인 날짜
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setMyAnchorDate(todayStr)}
+                  className="px-2.5 py-1.5 rounded-lg hover:bg-slate-100 text-xs font-bold text-slate-600"
+                >
+                  오늘
+                </button>
+              )}
 
               {myPeriodMode === "CYCLE" && (
                 <span className="hidden md:inline-flex items-center px-2 py-0.5 rounded bg-teal-50 text-teal-700 text-[11px] font-bold">
@@ -1856,12 +2326,22 @@ export default function HqAttendancePage() {
                   주간 세로 타임라인
                 </span>
               )}
+              {!canEditSelfWork && (
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-slate-100 text-slate-500 text-[11px] font-semibold">
+                  <span>🔒</span>
+                  <span>근무 편집 제한됨</span>
+                </span>
+              )}
             </div>
 
-            {/* 우측: 주기/주 (40:00 + ⚑ -12:00) 또는 월 (168:00) 게이지 바 */}
+            {/* 우측: 주기/주 (40:00 + ⚑ -12:00 / 드래프트 시 41:15 +1:15 ⚑ -10:45) 또는 월 (168:00) 게이지 바 */}
             <div className="flex items-center gap-4">
               <div className="text-right">
-                <span className="text-[21px] font-bold text-slate-700 tabular-nums tracking-tight">
+                <span
+                  className={`text-[21px] font-bold tabular-nums tracking-tight transition-colors ${
+                    draftList.length > 0 ? "text-[#00bfa5]" : "text-slate-700"
+                  }`}
+                >
                   {formatHmColon(myPeriodStats.totalEffectiveMin)}
                 </span>
               </div>
@@ -1884,17 +2364,34 @@ export default function HqAttendancePage() {
                 </div>
               ) : (
                 <div className="w-52">
-                  <div className="flex items-center justify-end text-[10px] font-bold text-slate-400 mb-1">
-                    <span className="flex items-center gap-0.5 tabular-nums">
-                      <span>⚑</span>
-                      <span>
-                        {myPeriodStats.totalEffectiveMin > 2400
-                          ? `+${formatHmColon(
+                  <div className="flex items-center justify-end gap-1.5 text-[10px] font-bold text-slate-400 mb-1 tabular-nums">
+                    {myPeriodStats.totalEffectiveMin > 2400 ? (
+                      <>
+                        <span className="text-[#e85d3f] flex items-center gap-0.5 font-extrabold">
+                          <span>
+                            +
+                            {formatHmColon(
                               myPeriodStats.totalEffectiveMin - 2400
-                            )}`
-                          : "-12:00"}
+                            )}
+                          </span>
+                          <span>⚑</span>
+                        </span>
+                        <span>
+                          -
+                          {formatHmColon(
+                            Math.max(
+                              0,
+                              3120 - myPeriodStats.totalEffectiveMin
+                            )
+                          )}
+                        </span>
+                      </>
+                    ) : (
+                      <span className="flex items-center gap-0.5">
+                        <span>⚑</span>
+                        <span>-12:00</span>
                       </span>
-                    </span>
+                    )}
                   </div>
                   <div className="h-2 rounded-full bg-slate-100 overflow-hidden flex">
                     <div className="w-[77%] h-full bg-slate-100 border-r border-white relative overflow-hidden">
@@ -1906,7 +2403,7 @@ export default function HqAttendancePage() {
                     <div className="w-[23%] h-full bg-slate-100 relative overflow-hidden">
                       <div
                         style={{ width: `${overtimeBarPct}%` }}
-                        className="h-full bg-amber-500 transition-all duration-300"
+                        className="h-full bg-[#f05638] transition-all duration-300"
                       />
                     </div>
                   </div>
@@ -1939,13 +2436,13 @@ export default function HqAttendancePage() {
                     const d = parseYmdLocal(ymd);
                     const dow = d.getDay();
                     const dowKo = WEEKDAY_KO[dow];
-                    const rec = me
-                      ? recordByMemberDate.get(`${me.instructor_id}__${ymd}`)
+                    const cellKey = me ? `${me.instructor_id}__${ymd}` : "";
+                    const cellDraft = cellKey ? draftEdits[cellKey] : undefined;
+                    const rec = cellKey
+                      ? recordByMemberDate.get(cellKey)
                       : undefined;
-                    const lvDoc = me
-                      ? leaveApprovalByMemberDate.get(
-                          `${me.instructor_id}__${ymd}`
-                        )
+                    const lvDoc = cellKey
+                      ? leaveApprovalByMemberDate.get(cellKey)
                       : undefined;
                     const holiday = holidayMap.get(ymd);
                     const isToday = ymd === todayStr;
@@ -1961,32 +2458,50 @@ export default function HqAttendancePage() {
                     const ruleBreakMin = calcBreakMinutes(myRule);
                     const ruleEndMin = ruleStartMin + ruleWorkMin + ruleBreakMin;
 
-                    const dayMin = rec
-                      ? rec.status === "WORKING" && ymd === todayStr
-                        ? ruleWorkMin
-                        : rec.work_mode === "LEAVE" && rec.status === "LEAVE"
+                    const dayMin = cellDraft
+                      ? calcDraftNetWorkedMinutes(cellDraft)
+                      : rec
+                        ? rec.status === "WORKING" && ymd === todayStr
                           ? ruleWorkMin
-                          : Number(rec.worked_minutes || ruleWorkMin)
-                      : isWorkDay
-                        ? ruleWorkMin
-                        : 0;
+                          : rec.work_mode === "LEAVE" && rec.status === "LEAVE"
+                            ? ruleWorkMin
+                            : Number(rec.worked_minutes || ruleWorkMin)
+                        : isWorkDay
+                          ? ruleWorkMin
+                          : 0;
 
                     const isPastOrDone =
-                      ymd < todayStr || rec?.status === "DONE";
+                      Boolean(cellDraft) ||
+                      ymd < todayStr ||
+                      rec?.status === "DONE";
                     const hasFullLeave =
-                      (rec?.work_mode === "LEAVE" &&
+                      !cellDraft &&
+                      ((rec?.work_mode === "LEAVE" &&
                         rec?.status !== "HALF_LEAVE") ||
-                      rec?.status === "LEAVE" ||
-                      (Boolean(lvDoc) &&
-                        !String(lvDoc?.leave_type || "").includes("반차") &&
-                        !String(lvDoc?.leave_type || "").includes("시간차"));
+                        rec?.status === "LEAVE" ||
+                        (Boolean(lvDoc) &&
+                          !String(lvDoc?.leave_type || "").includes("반차") &&
+                          !String(lvDoc?.leave_type || "").includes("시간차")));
 
                     return (
                       <div
                         key={ymd}
-                        onClick={() => openEntryForDate(me, ymd)}
-                        className={`min-h-[116px] p-3 bg-white hover:bg-slate-50/70 cursor-pointer transition-colors flex flex-col justify-between group ${
-                          inCurrentMonth ? "" : "opacity-55 bg-slate-50/25"
+                        onClick={(e) =>
+                          canEditSelfWork &&
+                          openEntryForDate(me, ymd, {
+                            anchorEl: e.currentTarget,
+                          })
+                        }
+                        className={`min-h-[116px] p-3 transition-colors flex flex-col justify-between group ${
+                          cellDraft
+                            ? "bg-[#f5f9ff]"
+                            : inCurrentMonth
+                              ? "bg-white"
+                              : "opacity-55 bg-slate-50/25"
+                        } ${
+                          canEditSelfWork
+                            ? "hover:bg-slate-50/70 cursor-pointer"
+                            : "cursor-default"
                         }`}
                       >
                         <div className="flex items-center justify-between">
@@ -2003,24 +2518,32 @@ export default function HqAttendancePage() {
                               {d.getDate()}
                             </span>
                             <span
-                              className={`px-1.5 py-0.5 rounded bg-slate-100 text-[10.5px] font-bold tabular-nums ${
-                                dayMin > 0 ? "text-slate-600" : "text-slate-300"
+                              className={`px-1.5 py-0.5 rounded text-[10.5px] font-bold tabular-nums ${
+                                cellDraft
+                                  ? "bg-[#0066ff] text-white font-extrabold"
+                                  : dayMin > 0
+                                    ? "bg-slate-100 text-slate-600"
+                                    : "bg-slate-100 text-slate-300"
                               }`}
                             >
                               {formatHmColon(dayMin)}
                             </span>
                           </div>
 
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              openEntryForDate(me, ymd);
-                            }}
-                            className="w-5 h-5 rounded text-slate-300 hover:text-slate-700 hover:bg-slate-100 flex items-center justify-center text-xs font-bold"
-                          >
-                            +
-                          </button>
+                          {canEditSelfWork && (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                openEntryForDate(me, ymd, {
+                                  anchorEl: e.currentTarget,
+                                });
+                              }}
+                              className="w-5 h-5 rounded text-slate-300 hover:text-slate-700 hover:bg-slate-100 flex items-center justify-center text-xs font-bold"
+                            >
+                              +
+                            </button>
+                          )}
                         </div>
 
                         <div className="mt-2 space-y-1">
@@ -2030,40 +2553,54 @@ export default function HqAttendancePage() {
                             </div>
                           )}
 
-                          {hasFullLeave ? (
+                          {cellDraft?.actionMode === "DELETE" ? (
+                            <div className="text-[10.5px] font-bold text-slate-400 line-through">
+                              삭제 예정
+                            </div>
+                          ) : hasFullLeave ? (
                             <div className="px-2 py-1 rounded-md bg-[#8b5cf6] text-white text-[10.5px] font-extrabold flex items-center justify-between">
                               <span>
                                 ☂ {lvDoc?.leave_type || rec?.location_note || "연차"}
                               </span>
                               <span>8h</span>
                             </div>
-                          ) : isWorkDay || rec ? (
+                          ) : cellDraft || isWorkDay || rec ? (
                             isPastOrDone ? (
                               <div className="space-y-0.5">
                                 <div className="flex items-center justify-between text-[11px] pl-1.5 border-l-2 border-[#14b8a6]">
                                   <span className="font-extrabold text-slate-800">
-                                    {rec &&
-                                    rec.work_mode !== "OFFICE" &&
-                                    ATTENDANCE_MODES[rec.work_mode]
-                                      ? ATTENDANCE_MODES[rec.work_mode]
-                                          .shortLabel
-                                      : "근무"}
+                                    {cellDraft
+                                      ? cellDraft.policyName
+                                      : rec &&
+                                          rec.work_mode !== "OFFICE" &&
+                                          ATTENDANCE_MODES[rec.work_mode]
+                                        ? ATTENDANCE_MODES[rec.work_mode]
+                                            .shortLabel
+                                        : "근무"}
                                   </span>
                                   <span className="text-[10.5px] text-slate-500 tabular-nums">
                                     {formatMinutesToKoreanAmPm(
-                                      isoToMinutesOfDay(rec?.check_in_at, ymd) ??
-                                        ruleStartMin
+                                      cellDraft
+                                        ? cellDraft.inMinutes
+                                        : isoToMinutesOfDay(
+                                            rec?.check_in_at,
+                                            ymd
+                                          ) ?? ruleStartMin
                                     )}{" "}
                                     -{" "}
                                     {formatMinutesToKoreanAmPm(
-                                      isoToMinutesOfDay(
-                                        rec?.check_out_at,
-                                        ymd
-                                      ) ?? ruleEndMin
+                                      cellDraft
+                                        ? cellDraft.outMinutes
+                                        : isoToMinutesOfDay(
+                                            rec?.check_out_at,
+                                            ymd
+                                          ) ?? ruleEndMin
                                     )}
                                   </span>
                                 </div>
-                                {ruleBreakMin > 0 && (
+                                {(cellDraft
+                                  ? cellDraft.breakMinutes
+                                  : ruleBreakMin) > 0 && (
                                   <div className="text-right text-[10px] text-slate-400">
                                     휴게 1건
                                   </div>
@@ -2134,10 +2671,14 @@ export default function HqAttendancePage() {
                           const holiday = holidayMap.get(ymd);
                           const isOff =
                             dow === 0 || dow === 6 || Boolean(holiday);
-                          const rec = me
-                            ? recordByMemberDate.get(
-                                `${me.instructor_id}__${ymd}`
-                              )
+                          const colKey = me
+                            ? `${me.instructor_id}__${ymd}`
+                            : "";
+                          const colDraft = colKey
+                            ? draftEdits[colKey]
+                            : undefined;
+                          const rec = colKey
+                            ? recordByMemberDate.get(colKey)
                             : undefined;
                           const isWorkDay =
                             myRule.work_days.includes(dowKo) && !holiday;
@@ -2145,20 +2686,34 @@ export default function HqAttendancePage() {
                             ? Number(myRule.daily_work_hours || 8) * 60 +
                               Number(myRule.daily_work_minutes || 0)
                             : 0;
-                          const displayMin = rec
-                            ? rec.status === "WORKING" && ymd === todayStr
-                              ? plannedMin
-                              : rec.work_mode === "LEAVE" &&
-                                  rec.status === "LEAVE"
-                                ? plannedMin || 480
-                                : Number(rec.worked_minutes || plannedMin)
-                            : plannedMin;
+                          const displayMin = colDraft
+                            ? calcDraftNetWorkedMinutes(colDraft)
+                            : rec
+                              ? rec.status === "WORKING" && ymd === todayStr
+                                ? plannedMin
+                                : rec.work_mode === "LEAVE" &&
+                                    rec.status === "LEAVE"
+                                  ? plannedMin || 480
+                                  : Number(rec.worked_minutes || plannedMin)
+                              : plannedMin;
 
                           return (
                             <div
                               key={ymd}
-                              onClick={() => me && openEntryForDate(me, ymd)}
-                              className="px-3.5 py-2.5 hover:bg-slate-50/70 cursor-pointer transition-colors"
+                              onClick={(e) =>
+                                canEditSelfWork &&
+                                me &&
+                                openEntryForDate(me, ymd, {
+                                  anchorEl: e.currentTarget,
+                                })
+                              }
+                              className={`px-3.5 py-2.5 transition-colors ${
+                                colDraft ? "bg-[#f5f9ff]" : ""
+                              } ${
+                                canEditSelfWork
+                                  ? "hover:bg-slate-50/70 cursor-pointer"
+                                  : "cursor-default"
+                              }`}
                             >
                               <div className="flex items-center justify-between">
                                 <div className="flex items-center gap-1.5">
@@ -2184,24 +2739,31 @@ export default function HqAttendancePage() {
                                   </span>
                                 </div>
 
-                                <button
-                                  type="button"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    if (me) openEntryForDate(me, ymd);
-                                  }}
-                                  className="w-5 h-5 rounded text-slate-400 hover:text-slate-800 hover:bg-slate-100 flex items-center justify-center text-xs font-bold"
-                                >
-                                  +
-                                </button>
+                                {canEditSelfWork && (
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      if (me)
+                                        openEntryForDate(me, ymd, {
+                                          anchorEl: e.currentTarget,
+                                        });
+                                    }}
+                                    className="w-5 h-5 rounded text-slate-400 hover:text-slate-800 hover:bg-slate-100 flex items-center justify-center text-xs font-bold"
+                                  >
+                                    +
+                                  </button>
+                                )}
                               </div>
 
                               <div className="mt-1.5">
                                 <span
-                                  className={`inline-block px-2 py-0.5 rounded bg-slate-100 text-[11px] font-bold tabular-nums ${
-                                    displayMin > 0
-                                      ? "text-slate-700"
-                                      : "text-slate-300"
+                                  className={`inline-block px-2 py-0.5 rounded text-[11px] font-bold tabular-nums ${
+                                    colDraft
+                                      ? "bg-[#0066ff] text-white font-extrabold"
+                                      : displayMin > 0
+                                        ? "bg-slate-100 text-slate-700"
+                                        : "bg-slate-100 text-slate-300"
                                   }`}
                                 >
                                   {formatHmColon(displayMin)}
@@ -2274,15 +2836,17 @@ export default function HqAttendancePage() {
                         {myWeekDates.map((ymd) => {
                           const dowKo = WEEKDAY_KO[parseYmdLocal(ymd).getDay()];
                           const holiday = holidayMap.get(ymd);
-                          const rec = me
-                            ? recordByMemberDate.get(
-                                `${me.instructor_id}__${ymd}`
-                              )
+                          const colKey = me
+                            ? `${me.instructor_id}__${ymd}`
+                            : "";
+                          const colDraft = colKey
+                            ? draftEdits[colKey]
                             : undefined;
-                          const lvDoc = me
-                            ? leaveApprovalByMemberDate.get(
-                                `${me.instructor_id}__${ymd}`
-                              )
+                          const rec = colKey
+                            ? recordByMemberDate.get(colKey)
+                            : undefined;
+                          const lvDoc = colKey
+                            ? leaveApprovalByMemberDate.get(colKey)
                             : undefined;
                           const isWorkDay =
                             myRule.work_days.includes(dowKo) && !holiday;
@@ -2328,27 +2892,33 @@ export default function HqAttendancePage() {
                               leaveLabel.includes("반차")) &&
                               !isHalfAm);
                           const hasFullLeave =
-                            (rec?.work_mode === "LEAVE" &&
+                            !colDraft &&
+                            ((rec?.work_mode === "LEAVE" &&
                               rec?.status !== "HALF_LEAVE") ||
-                            rec?.status === "LEAVE" ||
-                            (Boolean(lvDoc) &&
-                              !isHalfAm &&
-                              !isHalfPm &&
-                              !leaveLabel.includes("시간차"));
+                              rec?.status === "LEAVE" ||
+                              (Boolean(lvDoc) &&
+                                !isHalfAm &&
+                                !isHalfPm &&
+                                !leaveLabel.includes("시간차")));
 
-                          const blockStartMin = rec?.check_in_at
-                            ? isoToMinutesOfDay(rec.check_in_at, ymd) ??
-                              ruleStartMin
-                            : isHalfAm
-                              ? ruleStartMin + 240 + ruleBreakMin
-                              : ruleStartMin;
+                          const blockStartMin =
+                            colDraft?.actionMode === "UPSERT"
+                              ? colDraft.inMinutes
+                              : rec?.check_in_at
+                                ? isoToMinutesOfDay(rec.check_in_at, ymd) ??
+                                  ruleStartMin
+                                : isHalfAm
+                                  ? ruleStartMin + 240 + ruleBreakMin
+                                  : ruleStartMin;
                           const blockEndMin =
-                            rec?.check_out_at && rec.status === "DONE"
-                              ? isoToMinutesOfDay(rec.check_out_at, ymd) ??
-                                ruleEndMin
-                              : isHalfPm
-                                ? ruleStartMin + 240
-                                : ruleEndMin;
+                            colDraft?.actionMode === "UPSERT"
+                              ? colDraft.outMinutes
+                              : rec?.check_out_at && rec.status === "DONE"
+                                ? isoToMinutesOfDay(rec.check_out_at, ymd) ??
+                                  ruleEndMin
+                                : isHalfPm
+                                  ? ruleStartMin + 240
+                                  : ruleEndMin;
 
                           const clampedTopPx = Math.max(
                             0,
@@ -2361,7 +2931,9 @@ export default function HqAttendancePage() {
                           );
 
                           const isPastOrDone =
-                            ymd < todayStr || rec?.status === "DONE";
+                            colDraft?.actionMode === "UPSERT" ||
+                            ymd < todayStr ||
+                            rec?.status === "DONE";
                           const isWorkingToday =
                             ymd === todayStr &&
                             !isPastOrDone &&
@@ -2405,8 +2977,20 @@ export default function HqAttendancePage() {
                           return (
                             <div
                               key={ymd}
-                              onClick={() => me && openEntryForDate(me, ymd)}
-                              className="relative cursor-pointer hover:bg-slate-50/40"
+                              onClick={(e) =>
+                                canEditSelfWork &&
+                                me &&
+                                openEntryForDate(me, ymd, {
+                                  anchorEl: e.currentTarget,
+                                })
+                              }
+                              className={`relative ${
+                                colDraft ? "bg-[#f5f9ff]/60" : ""
+                              } ${
+                                canEditSelfWork
+                                  ? "cursor-pointer hover:bg-slate-50/40"
+                                  : "cursor-default"
+                              }`}
                             >
                               {/* 가로 정시 그리드 라인 */}
                               {Array.from({ length: totalHours }, (_, idx) => (
@@ -2426,7 +3010,7 @@ export default function HqAttendancePage() {
                                 </div>
                               )}
 
-                              {hasFullLeave ? (
+                              {colDraft?.actionMode === "DELETE" ? null : hasFullLeave ? (
                                 <div
                                   style={{
                                     top: `${clampedTopPx}px`,
@@ -2442,15 +3026,22 @@ export default function HqAttendancePage() {
                                     {formatMinutesToKoreanAmPm(blockEndMin)}
                                   </div>
                                 </div>
-                              ) : isWorkDay || rec ? (
+                              ) : colDraft || isWorkDay || rec ? (
                                 <div
+                                  data-work-bar={colKey}
                                   style={{
                                     top: `${clampedTopPx}px`,
                                     height: `${clampedHeightPx}px`,
                                   }}
                                   className="absolute left-2 right-2 z-10"
                                 >
-                                  <div className="w-full h-full rounded-lg border border-[#38d9a9] bg-white relative overflow-hidden p-2.5">
+                                  <div
+                                    className={`w-full h-full rounded-lg border bg-white relative overflow-hidden p-2.5 ${
+                                      colDraft || inlineTarget?.key === colKey
+                                        ? "border-[#0f766e] ring-1 ring-[#0f766e]/25"
+                                        : "border-[#38d9a9]"
+                                    }`}
+                                  >
                                     {verticalFillPct > 0 && (
                                       <div
                                         style={{ height: `${verticalFillPct}%` }}
@@ -2460,12 +3051,14 @@ export default function HqAttendancePage() {
 
                                     <div className="relative z-10">
                                       <div className="text-xs font-extrabold text-[#0f766e]">
-                                        {rec &&
-                                        rec.work_mode !== "OFFICE" &&
-                                        ATTENDANCE_MODES[rec.work_mode]
-                                          ? ATTENDANCE_MODES[rec.work_mode]
-                                              .shortLabel
-                                          : "근무"}
+                                        {colDraft
+                                          ? colDraft.policyName
+                                          : rec &&
+                                              rec.work_mode !== "OFFICE" &&
+                                              ATTENDANCE_MODES[rec.work_mode]
+                                            ? ATTENDANCE_MODES[rec.work_mode]
+                                                .shortLabel
+                                            : "근무"}
                                       </div>
                                       <div className="text-[10.5px] font-semibold text-[#0f766e]/80 mt-0.5 tabular-nums">
                                         {formatMinutesToKoreanAmPm(blockStartMin)}{" "}
@@ -2505,7 +3098,7 @@ export default function HqAttendancePage() {
             </div>
           ) : (
             /* ===============================================================
-               내 근무 > [주기] 수평 24시간 근무주기 타임라인 (Screenshot 104833 100% 재현)
+               내 근무 > [주기] 수평 24시간 근무주기 타임라인 (Screenshot 0fed5963 & 8278a9a1 100% 재현)
                =============================================================== */
             <div className="flex-1 overflow-x-auto">
               <div
@@ -2581,8 +3174,10 @@ export default function HqAttendancePage() {
                     const dowKo = WEEKDAY_KO[dow];
                     const isToday = ymd === todayStr;
                     const holiday = holidayMap.get(ymd);
-                    const rec = me
-                      ? recordByMemberDate.get(`${me.instructor_id}__${ymd}`)
+                    const rowKey = me ? `${me.instructor_id}__${ymd}` : "";
+                    const rowDraft = rowKey ? draftEdits[rowKey] : undefined;
+                    const rec = rowKey
+                      ? recordByMemberDate.get(rowKey)
                       : undefined;
                     const isWorkDay =
                       myRule.work_days.includes(dowKo) && !holiday;
@@ -2590,22 +3185,40 @@ export default function HqAttendancePage() {
                       ? Number(myRule.daily_work_hours || 8) * 60 +
                         Number(myRule.daily_work_minutes || 0)
                       : 0;
-                    const displayMin = rec
-                      ? rec.status === "WORKING" && ymd === todayStr
-                        ? liveTodayElapsedMinutes
-                        : rec.work_mode === "LEAVE" && rec.status === "LEAVE"
-                        ? plannedMin || 480
-                        : Number(rec.worked_minutes || 0)
-                      : plannedMin;
+                    const displayMin = rowDraft
+                      ? calcDraftNetWorkedMinutes(rowDraft)
+                      : rec
+                        ? rec.status === "WORKING" && ymd === todayStr
+                          ? liveTodayElapsedMinutes
+                          : rec.work_mode === "LEAVE" && rec.status === "LEAVE"
+                            ? plannedMin || 480
+                            : Number(rec.worked_minutes || 0)
+                        : plannedMin;
 
                     return (
                       <div
                         key={ymd}
-                        onClick={() => me && openEntryForDate(me, ymd)}
-                        className="flex h-[68px] hover:bg-slate-50/70 cursor-pointer transition-colors group"
+                        onClick={(e) =>
+                          canEditSelfWork &&
+                          me &&
+                          openEntryForDate(me, ymd, {
+                            anchorEl: e.currentTarget,
+                          })
+                        }
+                        className={`flex h-[68px] transition-colors group ${
+                          canEditSelfWork
+                            ? "hover:bg-slate-50/70 cursor-pointer"
+                            : "cursor-default"
+                        }`}
                       >
                         {/* 좌측 일자 + 시간 배지 + [+] 버튼 */}
-                        <div className="w-52 shrink-0 px-7 flex items-center justify-between border-r border-slate-100 bg-white group-hover:bg-slate-50/70">
+                        <div
+                          className={`w-52 shrink-0 px-7 flex items-center justify-between border-r bg-white ${
+                            rowDraft
+                              ? "border-r-[3px] border-r-[#0066ff]"
+                              : "border-r-slate-100 group-hover:bg-slate-50/70"
+                          }`}
+                        >
                           <div className="flex items-center gap-2.5">
                             <div className="flex items-center gap-1.5 w-12">
                               <span
@@ -2613,20 +3226,18 @@ export default function HqAttendancePage() {
                                   isToday
                                     ? "w-6 h-6 rounded-md bg-[#ea580c] text-white inline-flex items-center justify-center"
                                     : dow === 0 || holiday
-                                    ? "text-rose-500"
-                                    : dow === 6
-                                    ? "text-blue-500"
-                                    : "text-slate-700"
+                                      ? "text-[#e85d3f]"
+                                      : dow === 6
+                                        ? "text-[#e85d3f]"
+                                        : "text-slate-700"
                                 }`}
                               >
                                 {dt.getDate()}
                               </span>
                               <span
                                 className={`text-xs font-bold ${
-                                  dow === 0 || holiday
-                                    ? "text-rose-500"
-                                    : dow === 6
-                                    ? "text-blue-500"
+                                  dow === 0 || dow === 6 || holiday
+                                    ? "text-[#e85d3f]"
                                     : "text-slate-600"
                                 }`}
                               >
@@ -2635,31 +3246,42 @@ export default function HqAttendancePage() {
                             </div>
 
                             <span
-                              className={`px-2 py-0.5 rounded bg-slate-100 text-[11px] font-bold tabular-nums ${
-                                displayMin > 0
-                                  ? "text-slate-700"
-                                  : "text-slate-300"
+                              className={`px-2 py-0.5 rounded text-[11px] font-bold tabular-nums transition-colors ${
+                                rowDraft
+                                  ? "bg-[#0066ff] text-white font-extrabold shadow-2xs"
+                                  : displayMin > 0
+                                    ? "bg-slate-100 text-slate-700"
+                                    : "bg-slate-100 text-slate-300"
                               }`}
                             >
                               {formatHmColon(displayMin)}
                             </span>
                           </div>
 
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              if (me) openEntryForDate(me, ymd);
-                            }}
-                            className="w-6 h-6 rounded-md text-slate-400 hover:text-slate-800 hover:bg-slate-200/60 flex items-center justify-center text-sm font-semibold"
-                            title="근무/휴게 추가·수정"
-                          >
-                            +
-                          </button>
+                          {canEditSelfWork && (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                if (me)
+                                  openEntryForDate(me, ymd, {
+                                    anchorEl: e.currentTarget,
+                                  });
+                              }}
+                              className="w-6 h-6 rounded-md text-slate-400 hover:text-slate-800 hover:bg-slate-200/60 flex items-center justify-center text-sm font-semibold"
+                              title="근무/휴게 추가·수정"
+                            >
+                              +
+                            </button>
+                          )}
                         </div>
 
                         {/* 우측 24시간 그리드 셀 + 블록 */}
-                        <div className="flex-1 relative">
+                        <div
+                          className={`flex-1 relative ${
+                            rowDraft ? "bg-[#f5f9ff]/65" : ""
+                          }`}
+                        >
                           <div className="grid grid-cols-24 h-full pointer-events-none">
                             {Array.from({ length: 24 }, (_, h) => (
                               <div
@@ -2682,14 +3304,46 @@ export default function HqAttendancePage() {
               </div>
             </div>
           )}
+          </div>
+
+          {approvalPanelOpen && draftList.length > 0 && (
+            <FlexApprovalSidePanel
+              rangeStart={activeQueryRange.start}
+              rangeEnd={activeQueryRange.end}
+              drafts={draftList}
+              approvalPolicies={
+                companySettings?.extra_settings?.approval_policies
+              }
+              workConditionRules={
+                companySettings?.extra_settings?.work_condition_rules
+              }
+              workFormPolicies={workFormPolicies}
+              onClose={() => setApprovalPanelOpen(false)}
+            />
+          )}
         </div>
       )}
 
       {/* =====================================================================
-          탭 2: [구성원 근무] 본문 영역 (스크린샷 100% + 멀티데이 매트릭스)
+          탭 2: [구성원 근무] 본문 영역 (권한 설정의 열람·편집 범위 엄격 적용)
          ===================================================================== */}
       {mainTab === "TEAM" && (
-        <div className="flex-1 flex flex-col">
+        <div className="flex-1 flex min-h-0">
+          {!canViewAnyOtherMember ? (
+            <div className="flex-1 flex flex-col items-center justify-center py-24 px-6 text-center">
+              <div className="w-12 h-12 rounded-2xl bg-slate-100 text-slate-400 flex items-center justify-center text-xl mb-3">
+                🔒
+              </div>
+              <h3 className="text-sm font-extrabold text-slate-800">
+                다른 구성원의 근무 기록을 조회할 권한이 없어요.
+              </h3>
+              <p className="text-xs text-slate-400 mt-1.5 max-w-md leading-relaxed">
+                관리자가 [설정 &gt; 권한 설정]에서 <strong>근무 조회</strong> 또는{" "}
+                <strong>구성원 실시간 근무 기록 조회</strong> 권한을 부여하면 허용 범위 내 구성원의 근무 현황을 확인할 수 있습니다.
+              </p>
+            </div>
+          ) : (
+          <div className="flex-1 flex flex-col min-w-0">
           {/* 일 | 주 | 월 | 주기 + 날짜 이동 + 오늘 + 조직 필터 */}
           <div className="px-7 pt-4 pb-3 flex flex-wrap items-center gap-2.5">
             <div className="inline-flex rounded-lg bg-slate-100 p-0.5 border border-slate-200">
@@ -3066,13 +3720,14 @@ export default function HqAttendancePage() {
                     </div>
                   ) : (
                     filteredTeamMembers.map((m) => {
+                      const canEditM = canEditTargetWork(m);
+                      const rowKey = `${m.instructor_id}__${teamAnchorDate}`;
+                      const rowDraft = draftEdits[rowKey];
                       const rule = resolveMemberWorkRule(
                         m.name,
                         m.profile_extra?.work_schedule_type
                       );
-                      const rec = recordByMemberDate.get(
-                        `${m.instructor_id}__${teamAnchorDate}`
-                      );
+                      const rec = recordByMemberDate.get(rowKey);
                       const dowKo =
                         WEEKDAY_KO[parseYmdLocal(teamAnchorDate).getDay()];
                       const holiday = holidayMap.get(teamAnchorDate);
@@ -3082,20 +3737,22 @@ export default function HqAttendancePage() {
                         ? Number(rule.daily_work_hours || 8) * 60 +
                           Number(rule.daily_work_minutes || 0)
                         : 0;
-                      const displayMin = rec
-                        ? rec.status === "WORKING" &&
-                          teamAnchorDate === todayStr &&
-                          rec.check_in_at
-                          ? Math.max(
-                              0,
-                              Math.round(
-                                (nowClock.getTime() -
-                                  new Date(rec.check_in_at).getTime()) /
-                                  60000
-                              ) - 60
-                            )
-                          : Number(rec.worked_minutes || plannedMin)
-                        : plannedMin;
+                      const displayMin = rowDraft
+                        ? calcDraftNetWorkedMinutes(rowDraft)
+                        : rec
+                          ? rec.status === "WORKING" &&
+                            teamAnchorDate === todayStr &&
+                            rec.check_in_at
+                            ? Math.max(
+                                0,
+                                Math.round(
+                                  (nowClock.getTime() -
+                                    new Date(rec.check_in_at).getTime()) /
+                                    60000
+                                ) - 60
+                              )
+                            : Number(rec.worked_minutes || plannedMin)
+                          : plannedMin;
 
                       const shortTwo = m.name.slice(-2);
                       const subRole =
@@ -3105,15 +3762,26 @@ export default function HqAttendancePage() {
                       return (
                         <div
                           key={m.instructor_id}
-                          onClick={() => openEntryForDate(m, teamAnchorDate)}
+                          onClick={(e) =>
+                            canEditM &&
+                            openEntryForDate(m, teamAnchorDate, {
+                              anchorEl: e.currentTarget,
+                            })
+                          }
                           className={`flex h-[68px] transition-colors ${
-                            canManageTeam || m.instructor_id === me?.instructor_id
+                            canEditM
                               ? "hover:bg-slate-50/70 cursor-pointer"
-                              : ""
+                              : "cursor-default"
                           }`}
                         >
                           {/* 좌측: 2글자 컬러 아바타 + 성명/직무 + 8:00 배지 */}
-                          <div className="w-60 shrink-0 px-7 flex items-center justify-between border-r border-slate-100 bg-white">
+                          <div
+                            className={`w-60 shrink-0 px-7 flex items-center justify-between border-r bg-white ${
+                              rowDraft
+                                ? "border-r-[3px] border-r-[#0066ff]"
+                                : "border-r-slate-100"
+                            }`}
+                          >
                             <div className="flex items-center gap-3 min-w-0">
                               <div
                                 style={{
@@ -3135,13 +3803,23 @@ export default function HqAttendancePage() {
                               </div>
                             </div>
 
-                            <span className="px-2 py-0.5 rounded bg-slate-100 text-[11px] font-bold text-slate-700 tabular-nums shrink-0">
+                            <span
+                              className={`px-2 py-0.5 rounded text-[11px] font-bold tabular-nums shrink-0 ${
+                                rowDraft
+                                  ? "bg-[#0066ff] text-white font-extrabold"
+                                  : "bg-slate-100 text-slate-700"
+                              }`}
+                            >
                               {formatHmColon(displayMin)}
                             </span>
                           </div>
 
                           {/* 우측: 24시간 그리드 + 예정/실제 근무 바 */}
-                          <div className="flex-1 relative">
+                          <div
+                            className={`flex-1 relative ${
+                              rowDraft ? "bg-[#f5f9ff]/65" : ""
+                            }`}
+                          >
                             <div className="grid grid-cols-24 h-full pointer-events-none">
                               {Array.from({ length: 24 }, (_, h) => (
                                 <div
@@ -3276,8 +3954,17 @@ export default function HqAttendancePage() {
                   return (
                     <div
                       key={m.instructor_id}
-                      onClick={() => openEntryForDate(m, todayStr)}
-                      className="flex items-center h-[62px] hover:bg-slate-50/70 cursor-pointer transition-colors"
+                      onClick={(e) =>
+                        canEditTargetWork(m) &&
+                        openEntryForDate(m, todayStr, {
+                          anchorEl: e.currentTarget,
+                        })
+                      }
+                      className={`flex items-center h-[62px] transition-colors ${
+                        canEditTargetWork(m)
+                          ? "hover:bg-slate-50/70 cursor-pointer"
+                          : "cursor-default"
+                      }`}
                     >
                       {/* 좌측 구성원 + [40:00 / 40:00] 배지 */}
                       <div className="w-80 shrink-0 px-7 flex items-center justify-between border-r border-slate-100 h-full">
@@ -3522,8 +4209,21 @@ export default function HqAttendancePage() {
                                 return (
                                   <div
                                     key={ymd}
-                                    onClick={() => openEntryForDate(m, ymd)}
-                                    className="p-1.5 cursor-pointer hover:bg-slate-50 space-y-1"
+                                    onClick={(e) =>
+                                      canEditTargetWork(m) &&
+                                      openEntryForDate(m, ymd, {
+                                        anchorEl: e.currentTarget,
+                                      })
+                                    }
+                                    className={`p-1.5 space-y-1 ${
+                                      draftEdits[`${m.instructor_id}__${ymd}`]
+                                        ? "bg-[#f5f9ff]"
+                                        : ""
+                                    } ${
+                                      canEditTargetWork(m)
+                                        ? "cursor-pointer hover:bg-slate-50"
+                                        : "cursor-default"
+                                    }`}
                                   >
                                     {hasFullLv ? (
                                       <div className="px-2 py-1 rounded-[4px] bg-[#8b5cf6] text-white text-[10.5px] font-bold truncate">
@@ -3759,8 +4459,21 @@ export default function HqAttendancePage() {
                                 return (
                                   <div
                                     key={ymd}
-                                    onClick={() => openEntryForDate(m, ymd)}
-                                    className="p-1.5 cursor-pointer hover:bg-slate-50 space-y-1"
+                                    onClick={(e) =>
+                                      canEditTargetWork(m) &&
+                                      openEntryForDate(m, ymd, {
+                                        anchorEl: e.currentTarget,
+                                      })
+                                    }
+                                    className={`p-1.5 space-y-1 ${
+                                      draftEdits[`${m.instructor_id}__${ymd}`]
+                                        ? "bg-[#f5f9ff]"
+                                        : ""
+                                    } ${
+                                      canEditTargetWork(m)
+                                        ? "cursor-pointer hover:bg-slate-50"
+                                        : "cursor-default"
+                                    }`}
                                   >
                                     {hasFullLv ? (
                                       <div className="px-1.5 py-0.5 rounded-[4px] bg-[#8b5cf6] text-white text-[10.5px] font-bold truncate">
@@ -3808,28 +4521,58 @@ export default function HqAttendancePage() {
               })()}
             </div>
           )}
+          </div>
+          )}
+
+          {canViewAnyOtherMember && approvalPanelOpen && draftList.length > 0 && (
+            <FlexApprovalSidePanel
+              rangeStart={activeQueryRange.start}
+              rangeEnd={activeQueryRange.end}
+              drafts={draftList}
+              approvalPolicies={
+                companySettings?.extra_settings?.approval_policies
+              }
+              workConditionRules={
+                companySettings?.extra_settings?.work_condition_rules
+              }
+              workFormPolicies={workFormPolicies}
+              onClose={() => setApprovalPanelOpen(false)}
+            />
+          )}
         </div>
       )}
 
       {/* =====================================================================
-          모달 연결 영역
+          플렉스 인라인 근무 편집 팝오버 & 하단 플로팅 드래프트 바 & 모달 영역
          ===================================================================== */}
-      {entryModalState && (
-        <AttendanceEntryModal
-          isOpen={Boolean(entryModalState)}
-          initial={entryModalState}
-          me={me}
-          activeMembers={activeMembers}
-          canManageTeam={canManageTeam}
+      {inlineTarget && (
+        <FlexInlineWorkPopover
+          target={inlineTarget}
+          currentDraft={draftEdits[inlineTarget.key]}
           workFormPolicies={workFormPolicies}
-          onClose={() => setEntryModalState(null)}
-          onSaved={async () => {
-            await Promise.all([loadAttendance(), refreshAttendanceState()]);
+          onChangeDraft={handleUpsertDraft}
+          onClearDraft={handleClearDraft}
+          onStageDelete={handleStageDeleteDraft}
+          onConfirmClose={() => setInlineTarget(null)}
+          onSwitchToLeaveModal={() => {
+            setLeaveRegisterKind({ type: "ANNUAL" });
+            setLeaveModalOpen(true);
           }}
         />
       )}
 
-      {recurringOpen && (
+      <FlexDraftFloatingBar
+        drafts={draftList}
+        approvalCount={0}
+        warningItems={draftWarnings}
+        approvalPanelOpen={approvalPanelOpen}
+        submitting={submitting}
+        onToggleApprovalPanel={() => setApprovalPanelOpen((v) => !v)}
+        onCancelAll={handleCancelAllDrafts}
+        onSubmitAll={handleSubmitAllDrafts}
+      />
+
+      {recurringOpen && canEditSelfWork && (
         <RecurringScheduleModal
           isOpen={recurringOpen}
           me={me}
@@ -3842,10 +4585,10 @@ export default function HqAttendancePage() {
         />
       )}
 
-      {uploadModalOpen && (
+      {uploadModalOpen && editableMembers.length > 0 && (
         <AttendanceUploadModal
           isOpen={uploadModalOpen}
-          activeMembers={activeMembers}
+          activeMembers={editableMembers}
           onClose={() => setUploadModalOpen(false)}
           onUploaded={async () => {
             await Promise.all([loadAttendance(), refreshAttendanceState()]);

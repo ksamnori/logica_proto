@@ -1,9 +1,20 @@
 // src/lib/hq/hqPermissionEngine.ts
-import { DEFAULT_PERMISSION_SETTINGS } from "./defaultPermissionSettings";
+import {
+  type CanonicalPermissionScope,
+  DEFAULT_PERMISSION_SETTINGS,
+  mergeScopeToCover,
+  normalizePermissionScope,
+  PERMISSION_ITEM_BY_KEY,
+} from "./defaultPermissionSettings";
+import { normalizeOrgNodes } from "./orgTreeHelper";
 import type {
   HqMember,
+  HqOrgChartNode,
   HqPermissionGroupItem,
+  HqPermissionScope,
   HqPermissionSettings,
+  HqProfileExtra,
+  HqRankCode,
 } from "./types";
 
 export interface HqSidebarMenuPermDef {
@@ -393,6 +404,132 @@ export function isMemberInGroup(
   return false;
 }
 
+export interface MemberPermissionSubject {
+  instructor_id?: string;
+  name?: string;
+  department?: string | null;
+  rank_code?: HqRankCode;
+  is_dept_head?: boolean;
+  profile_extra?: HqProfileExtra | null;
+}
+
+function getMemberOrgNames(
+  subject: MemberPermissionSubject | null | undefined,
+  includeSecondary: boolean
+): Set<string> {
+  const out = new Set<string>();
+  if (!subject) return out;
+
+  const primaryDept = (subject.department || "").trim();
+  if (primaryDept && primaryDept !== "미지정" && primaryDept !== "퇴직") {
+    out.add(primaryDept);
+  }
+  if (subject.rank_code === "CEO") {
+    out.add("대표");
+  }
+
+  const assignments = Array.isArray(subject.profile_extra?.org_assignments)
+    ? subject.profile_extra!.org_assignments!
+    : [];
+
+  assignments.forEach((a) => {
+    const orgName = (a?.org_name || "").trim();
+    if (!orgName || orgName === "미지정" || orgName === "퇴직") return;
+    if (a.is_primary || includeSecondary) {
+      out.add(orgName);
+    }
+  });
+
+  return out;
+}
+
+export function getOrgAndDescendantNames(
+  rootOrgNames: Iterable<string>,
+  rawOrgNodes?: HqOrgChartNode[] | null
+): Set<string> {
+  const allowed = new Set<string>();
+  const seeds = Array.from(rootOrgNames).filter(
+    (n) => n && n !== "미지정" && n !== "퇴직"
+  );
+  seeds.forEach((s) => allowed.add(s));
+  if (seeds.length === 0) return allowed;
+
+  const nodes = normalizeOrgNodes(rawOrgNodes).filter(
+    (n) => n.name !== "퇴직"
+  );
+  const childrenByParentId = new Map<string, HqOrgChartNode[]>();
+  nodes.forEach((n) => {
+    if (!n.parent_id) return;
+    const arr = childrenByParentId.get(n.parent_id) || [];
+    arr.push(n);
+    childrenByParentId.set(n.parent_id, arr);
+  });
+
+  const visitedIds = new Set<string>();
+  const queue: HqOrgChartNode[] = nodes.filter((n) => allowed.has(n.name));
+
+  while (queue.length > 0) {
+    const cur = queue.shift()!;
+    if (visitedIds.has(cur.id)) continue;
+    visitedIds.add(cur.id);
+    if (cur.name && cur.name !== "퇴직") {
+      allowed.add(cur.name);
+    }
+    const kids = childrenByParentId.get(cur.id) || [];
+    kids.forEach((k) => {
+      if (!visitedIds.has(k.id)) queue.push(k);
+    });
+  }
+
+  return allowed;
+}
+
+export function doesScopeMatchTargetMember(params: {
+  actor: MemberPermissionSubject | null | undefined;
+  target: MemberPermissionSubject | null | undefined;
+  scope: CanonicalPermissionScope;
+  orgNodes?: HqOrgChartNode[] | null;
+}): boolean {
+  const { actor, target, scope, orgNodes } = params;
+  if (!actor || !target) return false;
+
+  const isSelf = Boolean(
+    actor.instructor_id &&
+      target.instructor_id &&
+      actor.instructor_id === target.instructor_id
+  );
+  if (isSelf) return true;
+
+  if (scope === "본인만") return false;
+  if (scope === "전체 구성원") return true;
+
+  const targetOrgs = getMemberOrgNames(target, true);
+  if (targetOrgs.size === 0) return false;
+
+  let allowedOrgs: Set<string>;
+  if (scope === "소속 주조직") {
+    allowedOrgs = getMemberOrgNames(actor, false);
+  } else if (scope === "소속 조직 전체") {
+    allowedOrgs = getMemberOrgNames(actor, true);
+  } else if (scope === "소속 주조직 및 하위 조직") {
+    allowedOrgs = getOrgAndDescendantNames(
+      getMemberOrgNames(actor, false),
+      orgNodes
+    );
+  } else {
+    // "소속 조직 전체 및 하위 조직"
+    allowedOrgs = getOrgAndDescendantNames(
+      getMemberOrgNames(actor, true),
+      orgNodes
+    );
+  }
+
+  for (const tOrg of targetOrgs) {
+    if (allowedOrgs.has(tOrg)) return true;
+  }
+  return false;
+}
+
 export interface ResolvedMemberPermissionState {
   isSuperAdmin: boolean;
   isOrgHead: boolean;
@@ -400,14 +537,17 @@ export interface ResolvedMemberPermissionState {
   inheritedPermissions: Record<string, boolean>; // 개인 오버라이드 적용 전 (기본 + 조직장 + 소속그룹)
   personalOverrides: Record<string, boolean>; // 구성원 권한 탭에서 직접 지정한 ON/OFF
   effectivePermissions: Record<string, boolean>; // 최종 권한 맵
+  effectiveScopes: Record<string, CanonicalPermissionScope>; // 최종 권한별 허용 범위 맵
   canAccessRoute: (canonicalHqPath: string) => boolean;
+  canAccessTargetMember: (
+    permKey: string,
+    target: MemberPermissionSubject | null | undefined,
+    orgNodes?: HqOrgChartNode[] | null
+  ) => boolean;
 }
 
 export function resolveMemberPermissions(params: {
-  member: Pick<
-    HqMember,
-    "instructor_id" | "name" | "is_dept_head" | "rank_code"
-  > | null;
+  member: MemberPermissionSubject | null;
   rawSettings?: HqPermissionSettings | null;
   isDbHqAdmin?: boolean;
   canAccessAnalyticsRpc?: boolean;
@@ -424,15 +564,17 @@ export function resolveMemberPermissions(params: {
       inheritedPermissions: {},
       personalOverrides: {},
       effectivePermissions: {},
+      effectiveScopes: {},
       canAccessRoute: (p) =>
         p === "/hq" || p === "/hq/login" || p === "/hq/signup",
+      canAccessTargetMember: () => false,
     };
   }
 
   const cleanName = (mem.name || "").trim();
+  const memId = mem.instructor_id || "";
   const inSuperList =
-    (Boolean(mem.instructor_id) &&
-      Boolean(settings.super_admin_ids?.includes(mem.instructor_id))) ||
+    (Boolean(memId) && Boolean(settings.super_admin_ids?.includes(memId))) ||
     (Boolean(cleanName) && settings.super_admin_names.includes(cleanName));
 
   // DB 최고관리자(시스템 오너) 또는 최고 관리자 그룹 포함자
@@ -448,10 +590,31 @@ export function resolveMemberPermissions(params: {
   const assignedGroups = settings.groups.filter((g) => isMemberInGroup(mem, g));
 
   const inherited: Record<string, boolean> = {};
+  const inheritedScopes: Record<string, CanonicalPermissionScope> = {};
+
+  const applyLayerPermissionsAndScopes = (
+    layerPerms: Record<string, boolean> | undefined,
+    layerScopes: Record<string, HqPermissionScope> | undefined
+  ) => {
+    if (!layerPerms) return;
+    Object.entries(layerPerms).forEach(([k, v]) => {
+      if (!v) return;
+      inherited[k] = true;
+      const item = PERMISSION_ITEM_BY_KEY[k];
+      const normScope = normalizePermissionScope(layerScopes?.[k], item);
+      inheritedScopes[k] = item
+        ? mergeScopeToCover(inheritedScopes[k], normScope, item)
+        : normScope;
+    });
+  };
 
   if (isSuperAdmin) {
     HQ_SIDEBAR_MENU_PERM_ITEMS.forEach((m) => {
       inherited[m.permKey] = true;
+    });
+    Object.keys(PERMISSION_ITEM_BY_KEY).forEach((k) => {
+      inherited[k] = true;
+      inheritedScopes[k] = "전체 구성원";
     });
     inherited["company.basic_manage"] = true;
     inherited["hr.employment_manage"] = true;
@@ -460,22 +623,20 @@ export function resolveMemberPermissions(params: {
     inherited["insight.view"] = true;
     inherited["permission.manage"] = true;
   } else {
-    Object.entries(settings.default_member_permissions || {}).forEach(
-      ([k, v]) => {
-        if (v) inherited[k] = true;
-      }
+    applyLayerPermissionsAndScopes(
+      settings.default_member_permissions,
+      settings.default_member_scopes
     );
 
     if (isOrgHead) {
-      Object.entries(settings.org_head_permissions || {}).forEach(([k, v]) => {
-        if (v) inherited[k] = true;
-      });
+      applyLayerPermissionsAndScopes(
+        settings.org_head_permissions,
+        settings.org_head_scopes
+      );
     }
 
     assignedGroups.forEach((g) => {
-      Object.entries(g.permissions || {}).forEach(([k, v]) => {
-        if (v) inherited[k] = true;
-      });
+      applyLayerPermissionsAndScopes(g.permissions, g.scopes);
     });
 
     if (params.canAccessAnalyticsRpc) {
@@ -498,11 +659,40 @@ export function resolveMemberPermissions(params: {
     ...byIdOverride,
   };
 
+  const byNameScopeOverride = cleanName
+    ? settings.member_scope_overrides?.[cleanName] || {}
+    : {};
+  const byIdScopeOverride = mem.instructor_id
+    ? settings.member_scope_overrides?.[mem.instructor_id] || {}
+    : {};
+  const personalScopeOverrides: Record<string, HqPermissionScope> = {
+    ...byNameScopeOverride,
+    ...byIdScopeOverride,
+  };
+
   const effective: Record<string, boolean> = { ...inherited };
+  const effectiveScopes: Record<string, CanonicalPermissionScope> = {
+    ...inheritedScopes,
+  };
+
   if (!isSuperAdmin) {
     Object.entries(personalOverrides).forEach(([k, val]) => {
       if (typeof val === "boolean") {
         effective[k] = val;
+        if (val && !effectiveScopes[k]) {
+          effectiveScopes[k] = normalizePermissionScope(
+            personalScopeOverrides[k],
+            PERMISSION_ITEM_BY_KEY[k]
+          );
+        }
+      }
+    });
+    Object.entries(personalScopeOverrides).forEach(([k, rawScope]) => {
+      if (effective[k]) {
+        effectiveScopes[k] = normalizePermissionScope(
+          rawScope,
+          PERMISSION_ITEM_BY_KEY[k]
+        );
       }
     });
   }
@@ -528,6 +718,27 @@ export function resolveMemberPermissions(params: {
     return Boolean(effective[matchedMenu.permKey]);
   };
 
+  const canAccessTargetMember = (
+    permKey: string,
+    target: MemberPermissionSubject | null | undefined,
+    orgNodes?: HqOrgChartNode[] | null
+  ): boolean => {
+    if (!target) return false;
+    if (isSuperAdmin) return true;
+    if (!effective[permKey]) return false;
+
+    const item = PERMISSION_ITEM_BY_KEY[permKey];
+    const scope =
+      effectiveScopes[permKey] || normalizePermissionScope(undefined, item);
+
+    return doesScopeMatchTargetMember({
+      actor: mem,
+      target,
+      scope,
+      orgNodes,
+    });
+  };
+
   return {
     isSuperAdmin,
     isOrgHead,
@@ -535,6 +746,8 @@ export function resolveMemberPermissions(params: {
     inheritedPermissions: inherited,
     personalOverrides,
     effectivePermissions: effective,
+    effectiveScopes,
     canAccessRoute,
+    canAccessTargetMember,
   };
 }

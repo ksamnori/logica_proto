@@ -2,18 +2,25 @@
 import { NextRequest, NextResponse } from "next/server";
 import { appendHqAuditLog } from "@/lib/hq/auditLogServer";
 import { readCompanySettingsServer } from "@/lib/hq/companySettingsServer";
-import { ATTENDANCE_MODES } from "@/lib/hq/constants";
+import { ATTENDANCE_MODES, inferRankFromPosition } from "@/lib/hq/constants";
 import { DEFAULT_WORK_RULES } from "@/lib/hq/defaultWorkRules";
+import {
+  type MemberPermissionSubject,
+  resolveMemberPermissions,
+} from "@/lib/hq/hqPermissionEngine";
 import { notifySlackIfEnabled } from "@/lib/hq/integrationServer";
 import { readWorkMgmtStateServer } from "@/lib/hq/leavesLedgerServer";
 import {
   apiFail,
   getSupabaseAdmin,
+  type HqCallerInfo,
   isMissingHqTableError,
   requireHqCaller,
 } from "@/lib/hq/serverAuth";
 import type {
   HqAttendanceStatus,
+  HqCompanySettings,
+  HqRankCode,
   HqWorkMode,
   HqWorkRuleItem,
 } from "@/lib/hq/types";
@@ -151,6 +158,121 @@ function calcWorkedMinutes(
   const workedMinutes = Math.max(0, grossMin - autoBreak);
   const overtimeMinutes = Math.max(0, workedMinutes - 480);
   return { breakMinutes: autoBreak, workedMinutes, overtimeMinutes };
+}
+
+async function buildWorkPermissionGuard(
+  supabaseAdmin: ReturnType<typeof getSupabaseAdmin>,
+  caller: HqCallerInfo,
+  preloaded?: {
+    settings?: HqCompanySettings | null;
+    instRows?: any[];
+    profRows?: any[];
+  }
+) {
+  let settings = preloaded?.settings ?? null;
+  let instRows = preloaded?.instRows;
+  let profRows = preloaded?.profRows;
+
+  if (!settings || !instRows || !profRows) {
+    const [sRes, iRes, pRes] = await Promise.all([
+      settings
+        ? Promise.resolve({ settings })
+        : readCompanySettingsServer(supabaseAdmin).catch(() => null),
+      instRows
+        ? Promise.resolve({ data: instRows })
+        : supabaseAdmin
+            .from("instructor")
+            .select(
+              "instructor_id, name, position, chat_position, department, tenant_id, status"
+            ),
+      profRows
+        ? Promise.resolve({ data: profRows })
+        : supabaseAdmin
+            .from("hq_member_profile")
+            .select(
+              "instructor_id, department, rank_code, is_dept_head, profile_extra"
+            ),
+    ]);
+    settings = sRes?.settings ?? null;
+    instRows = iRes.data || [];
+    profRows = pRes.data || [];
+  }
+
+  const profById = new Map<string, any>();
+  (profRows || []).forEach((p: any) => {
+    profById.set(String(p.instructor_id), p);
+  });
+
+  const subjectById = new Map<string, MemberPermissionSubject>();
+  (instRows || []).forEach((inst: any) => {
+    const idStr = String(inst.instructor_id);
+    const prof = profById.get(idStr);
+    const inf = inferRankFromPosition(inst.chat_position, inst.position);
+    const rankCode = ((prof?.rank_code as HqRankCode) ||
+      inf.rankCode) as HqRankCode;
+    subjectById.set(idStr, {
+      instructor_id: idStr,
+      name: String(inst.name || "").trim(),
+      department:
+        String(prof?.department || inst.department || "미지정").trim() ||
+        "미지정",
+      rank_code: rankCode,
+      is_dept_head: Boolean(prof?.is_dept_head ?? inf.isDeptHead),
+      profile_extra:
+        prof?.profile_extra && typeof prof.profile_extra === "object"
+          ? prof.profile_extra
+          : null,
+    });
+  });
+
+  const callerSubject: MemberPermissionSubject = subjectById.get(
+    caller.userId
+  ) || {
+    instructor_id: caller.userId,
+    name: caller.name,
+    department: caller.department,
+    rank_code: caller.rankCode,
+  };
+
+  const resolved = resolveMemberPermissions({
+    member: callerSubject,
+    rawSettings: settings?.extra_settings?.permission_settings,
+    isDbHqAdmin: caller.isSystemOwner,
+  });
+
+  const orgNodes = settings?.extra_settings?.org_chart_nodes;
+
+  const canViewMemberWork = (targetId: string): boolean => {
+    if (!targetId) return false;
+    if (targetId === caller.userId) return true;
+    if (resolved.isSuperAdmin) return true;
+    const target = subjectById.get(targetId);
+    if (!target) return false;
+    return (
+      resolved.canAccessTargetMember("work.record_view", target, orgNodes) ||
+      resolved.canAccessTargetMember("work.realtime_view", target, orgNodes)
+    );
+  };
+
+  const canEditMemberWork = (targetId: string): boolean => {
+    if (!targetId) return false;
+    if (resolved.isSuperAdmin) return true;
+    const target =
+      subjectById.get(targetId) ||
+      (targetId === caller.userId ? callerSubject : null);
+    if (!target) return false;
+    return (
+      resolved.canAccessTargetMember("work.record_edit", target, orgNodes) ||
+      resolved.canAccessTargetMember("work.realtime_edit", target, orgNodes)
+    );
+  };
+
+  return {
+    resolved,
+    subjectById,
+    canViewMemberWork,
+    canEditMemberWork,
+  };
 }
 
 export async function GET(req: NextRequest) {
@@ -576,17 +698,25 @@ export async function GET(req: NextRequest) {
       console.warn("Auto attendance materialization warning:", autoErr);
     }
 
+    const permGuard = await buildWorkPermissionGuard(supabaseAdmin, caller, {
+      settings: settingsRes?.settings ?? null,
+      instRows: instRes.data || [],
+      profRows: profRes.data || [],
+    });
+
     const allRows = Array.from(allRowsMap.values()).sort((a, b) =>
       String(b.work_date || "").localeCompare(String(a.work_date || ""))
     );
     const nowMs = Date.now();
 
-    const todayRecords = allRows.filter((r: any) => r.work_date === todayStr);
     const myToday =
-      todayRecords.find((r: any) => r.instructor_id === caller.userId) || null;
+      allRows.find(
+        (r: any) =>
+          r.work_date === todayStr && r.instructor_id === caller.userId
+      ) || null;
 
-    // 이번 주 구성원별 누적 실근무시간(분) 계산
-    const weeklySummary: Record<string, number> = {};
+    // 이번 주 구성원별 누적 실근무시간(분) 계산 (열람 허용 범위 내 구성원 + 본인만 노출)
+    const fullWeeklySummary: Record<string, number> = {};
     allRows.forEach((r: any) => {
       if (r.work_date < weekStartStr || r.work_date > weekEndStr) return;
       let mins = Number(r.worked_minutes || 0);
@@ -600,12 +730,32 @@ export async function GET(req: NextRequest) {
           brk > 0 && elapsed > 240 ? Math.min(brk, elapsed - 240) : 0;
         mins = Math.max(0, elapsed - deductBreak);
       }
-      weeklySummary[r.instructor_id] =
-        (weeklySummary[r.instructor_id] || 0) + mins;
+      fullWeeklySummary[r.instructor_id] =
+        (fullWeeklySummary[r.instructor_id] || 0) + mins;
     });
 
+    const weeklySummary: Record<string, number> = {};
+    Object.entries(fullWeeklySummary).forEach(([memberId, mins]) => {
+      if (permGuard.canViewMemberWork(memberId)) {
+        weeklySummary[memberId] = mins;
+      }
+    });
+
+    const todayRecords = allRows.filter(
+      (r: any) =>
+        r.work_date === todayStr &&
+        permGuard.canViewMemberWork(String(r.instructor_id))
+    );
+
     const rangeRecords = allRows.filter(
-      (r: any) => r.work_date >= rangeStart && r.work_date <= rangeEnd
+      (r: any) =>
+        r.work_date >= rangeStart &&
+        r.work_date <= rangeEnd &&
+        permGuard.canViewMemberWork(String(r.instructor_id))
+    );
+
+    const visibleLeaveApprovals = leaveApprovals.filter((doc: any) =>
+      permGuard.canViewMemberWork(String(doc.drafter_id))
     );
 
     return NextResponse.json({
@@ -618,11 +768,11 @@ export async function GET(req: NextRequest) {
         rangeStart,
         rangeEnd,
         myToday,
-        myWeeklyMinutes: weeklySummary[caller.userId] || 0,
+        myWeeklyMinutes: fullWeeklySummary[caller.userId] || 0,
         todayRecords,
         weeklySummary,
         records: rangeRecords,
-        leaveApprovals,
+        leaveApprovals: visibleLeaveApprovals,
       },
     });
   } catch (e: any) {
@@ -640,8 +790,6 @@ export async function POST(req: NextRequest) {
     const action = String(body?.action || "CHECK_IN").toUpperCase();
     const { nowIso, todayStr } = getKstNowParts();
     const supabaseAdmin = getSupabaseAdmin();
-    const canManageTeam =
-      caller.isHrManager || caller.isHqAdmin || caller.rankLevel >= 3;
 
     if (action === "CHECK_IN") {
       const workMode = (body?.work_mode || "OFFICE") as HqWorkMode;
@@ -776,23 +924,33 @@ export async function POST(req: NextRequest) {
     }
 
     if (action === "MANUAL_UPSERT") {
+      const permGuard = await buildWorkPermissionGuard(supabaseAdmin, caller);
       const targetId = String(body?.instructor_id || caller.userId);
-      if (targetId !== caller.userId && !canManageTeam) {
+      if (!permGuard.canEditMemberWork(targetId)) {
         return apiFail(
-          "타 구성원의 근태 보정은 팀장급 이상 또는 인사담당자만 가능합니다.",
+          targetId === caller.userId
+            ? "근무 시간 편집 권한이 없습니다. 권한 설정에서 [근무 편집] 권한을 확인해 주세요."
+            : "선택한 구성원의 근무 기록을 편집할 권한(또는 허용 범위)이 없습니다.",
           403
         );
       }
 
+      const targetSubject = permGuard.subjectById.get(targetId);
+      const targetDept = String(
+        body?.department || targetSubject?.department || caller.department
+      );
       const workDate = String(body?.work_date || todayStr);
-      if (!caller.isHrManager && !caller.isHqAdmin) {
+      if (
+        !permGuard.resolved.isSuperAdmin &&
+        !permGuard.resolved.effectivePermissions["work.close_manage"]
+      ) {
         const wmState = await readWorkMgmtStateServer(supabaseAdmin);
         const lockedHit = wmState.attendanceLocks.find(
           (l) =>
             workDate >= l.start_date &&
             workDate <= l.end_date &&
             (l.target_scope === "ALL" ||
-              (l.target_departments || []).includes(caller.department))
+              (l.target_departments || []).includes(targetDept))
         );
         if (lockedHit) {
           return apiFail(
@@ -831,8 +989,10 @@ export async function POST(req: NextRequest) {
           ? "DONE"
           : "WORKING";
 
-      const memberName = String(body?.member_name || caller.name);
-      const department = String(body?.department || caller.department);
+      const memberName = String(
+        body?.member_name || targetSubject?.name || caller.name
+      );
+      const department = targetDept;
 
       const { data: saved, error: saveErr } = await supabaseAdmin
         .from("hq_attendance")
@@ -865,10 +1025,160 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: true, data: saved });
     }
 
+    if (action === "BATCH_MANUAL_UPSERT") {
+      const permGuard = await buildWorkPermissionGuard(supabaseAdmin, caller);
+      const items: any[] = Array.isArray(body?.items) ? body.items : [];
+      if (items.length === 0) {
+        return apiFail("등록할 변경 일정이 없습니다.");
+      }
+
+      const wmState =
+        !permGuard.resolved.isSuperAdmin &&
+        !permGuard.resolved.effectivePermissions["work.close_manage"]
+          ? await readWorkMgmtStateServer(supabaseAdmin)
+          : null;
+
+      const upserts: any[] = [];
+      const deleteKeys: { instructor_id: string; work_date: string; attendance_id?: string }[] = [];
+
+      for (const item of items.slice(0, 200)) {
+        const targetId = String(item?.instructor_id || caller.userId);
+        if (!permGuard.canEditMemberWork(targetId)) {
+          return apiFail(
+            targetId === caller.userId
+              ? "근무 시간 편집 권한이 없습니다. 권한 설정에서 [근무 편집] 권한을 확인해 주세요."
+              : "선택한 구성원의 근무 기록을 편집할 권한(또는 허용 범위)이 없습니다.",
+            403
+          );
+        }
+
+        const targetSubject = permGuard.subjectById.get(targetId);
+        const targetDept = String(
+          item?.department || targetSubject?.department || caller.department
+        );
+        const workDate = String(item?.work_date || todayStr);
+
+        if (wmState) {
+          const lockedHit = wmState.attendanceLocks.find(
+            (l) =>
+              workDate >= l.start_date &&
+              workDate <= l.end_date &&
+              (l.target_scope === "ALL" ||
+                (l.target_departments || []).includes(targetDept))
+          );
+          if (lockedHit) {
+            return apiFail(
+              `근태 마감(${lockedHit.title}: ${lockedHit.start_date}~${lockedHit.end_date})된 기간의 기록은 수정할 수 없습니다.`,
+              403
+            );
+          }
+        }
+
+        if (item?.mode === "DELETE") {
+          deleteKeys.push({
+            instructor_id: targetId,
+            work_date: workDate,
+            attendance_id: item?.attendance_id
+              ? String(item.attendance_id)
+              : undefined,
+          });
+          continue;
+        }
+
+        const workMode = (item?.work_mode || "OFFICE") as HqWorkMode;
+        const statusOverride = String(item?.status_override || "");
+        const inTime = String(item?.check_in_time || "").trim();
+        const outTime = String(item?.check_out_time || "").trim();
+        const isFullLeave =
+          workMode === "LEAVE" && statusOverride !== "HALF_LEAVE";
+        const { checkInIso, checkOutIso } = isFullLeave
+          ? { checkInIso: null, checkOutIso: null }
+          : buildCheckInOutIso(workDate, inTime, outTime);
+
+        const calc = isFullLeave
+          ? { breakMinutes: 0, workedMinutes: 0, overtimeMinutes: 0 }
+          : calcWorkedMinutes(
+              checkInIso,
+              checkOutIso,
+              item?.break_minutes !== undefined
+                ? Number(item.break_minutes)
+                : undefined
+            );
+
+        const status: HqAttendanceStatus =
+          statusOverride === "HALF_LEAVE"
+            ? "HALF_LEAVE"
+            : isFullLeave
+              ? "LEAVE"
+              : checkOutIso
+                ? "DONE"
+                : "WORKING";
+
+        upserts.push({
+          instructor_id: targetId,
+          member_name: String(
+            item?.member_name || targetSubject?.name || caller.name
+          ),
+          department: targetDept,
+          work_date: workDate,
+          work_mode: workMode,
+          status,
+          check_in_at: checkInIso,
+          check_out_at: checkOutIso,
+          break_minutes: calc.breakMinutes,
+          worked_minutes: calc.workedMinutes,
+          overtime_minutes: calc.overtimeMinutes,
+          location_note:
+            String(item?.location_note || "").trim() ||
+            ATTENDANCE_MODES[workMode]?.defaultLocation ||
+            null,
+          memo: String(item?.memo || "").trim() || null,
+          updated_at: nowIso,
+        });
+      }
+
+      if (deleteKeys.length > 0) {
+        for (const dk of deleteKeys) {
+          if (dk.attendance_id) {
+            await supabaseAdmin
+              .from("hq_attendance")
+              .delete()
+              .eq("attendance_id", dk.attendance_id);
+          } else {
+            await supabaseAdmin
+              .from("hq_attendance")
+              .delete()
+              .eq("instructor_id", dk.instructor_id)
+              .eq("work_date", dk.work_date);
+          }
+        }
+      }
+
+      if (upserts.length > 0) {
+        const { error: upErr } = await supabaseAdmin
+          .from("hq_attendance")
+          .upsert(upserts, { onConflict: "instructor_id,work_date" });
+        if (upErr) {
+          return apiFail(`근무 일정 등록 실패: ${upErr.message}`, 500);
+        }
+      }
+
+      return NextResponse.json({
+        success: true,
+        data: { upserted: upserts.length, deleted: deleteKeys.length },
+      });
+    }
+
     if (action === "BATCH_RECURRING_UPSERT") {
+      const permGuard = await buildWorkPermissionGuard(supabaseAdmin, caller);
       const targetId = String(body?.instructor_id || caller.userId);
-      if (targetId !== caller.userId && !canManageTeam) {
-        return apiFail("본인 또는 권한 있는 구성원만 반복 일정을 등록할 수 있습니다.", 403);
+      if (!permGuard.canEditMemberWork(targetId)) {
+        return apiFail(
+          targetId === caller.userId
+            ? "근무 편집 권한이 없어 반복 근무 일정을 등록할 수 없습니다."
+            : "선택한 구성원의 반복 근무 일정을 등록할 권한이 없습니다.",
+          403
+        );
       }
 
       const startDate = String(body?.start_date || "");
@@ -951,16 +1261,20 @@ export async function POST(req: NextRequest) {
     }
 
     if (action === "BULK_CSV_UPSERT") {
-      if (!canManageTeam) {
-        return apiFail(
-          "근무 기록 일괄 업로드는 팀장급 이상 또는 인사관리자만 가능합니다.",
-          403
-        );
-      }
-
+      const permGuard = await buildWorkPermissionGuard(supabaseAdmin, caller);
       const rows: any[] = Array.isArray(body?.rows) ? body.rows : [];
       if (rows.length === 0) {
         return apiFail("업로드할 유효한 근무 기록 행이 없습니다.");
+      }
+
+      const unauthorizedRow = rows
+        .slice(0, 500)
+        .find((r) => !permGuard.canEditMemberWork(String(r.instructor_id || "")));
+      if (unauthorizedRow) {
+        return apiFail(
+          `업로드 데이터 중 '${unauthorizedRow.member_name || "구성원"}' 님의 근무 기록을 편집할 권한이 없습니다.`,
+          403
+        );
       }
 
       const upserts = rows.slice(0, 500).map((r) => {
@@ -1048,8 +1362,14 @@ export async function POST(req: NextRequest) {
       if (!existing) {
         return apiFail("이미 삭제되었거나 존재하지 않는 기록입니다.", 404);
       }
-      if (existing.instructor_id !== caller.userId && !canManageTeam) {
-        return apiFail("타 구성원의 근무 기록 삭제 권한이 없습니다.", 403);
+      const permGuard = await buildWorkPermissionGuard(supabaseAdmin, caller);
+      if (!permGuard.canEditMemberWork(String(existing.instructor_id))) {
+        return apiFail(
+          existing.instructor_id === caller.userId
+            ? "근무 편집 권한이 없어 근무 기록을 삭제할 수 없습니다."
+            : "해당 구성원의 근무 기록을 삭제할 권한이 없습니다.",
+          403
+        );
       }
 
       const { error: delErr } = await supabaseAdmin

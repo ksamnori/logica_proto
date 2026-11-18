@@ -160,18 +160,21 @@ export default function HqPermissionSettingsSection({
   const matrixScrollRef = useRef<HTMLDivElement>(null);
   const sectionRefs = useRef<Record<string, HTMLDivElement | null>>({});
 
-  // 3) 구성원별 권한 그룹 & 좌측 메뉴 개별 ON/OFF 편집 모달
+  // 3) 구성원별 권한 그룹 & 좌측 메뉴 · 세부 권한 개별 ON/OFF 편집 모달
   const [editingMemberRow, setEditingMemberRow] =
     useState<DirectoryPerson | null>(null);
-  const [memberModalTab, setMemberModalTab] = useState<"MENUS" | "GROUPS">(
-    "MENUS"
-  );
+  const [memberModalTab, setMemberModalTab] = useState<
+    "MENUS" | "WORK" | "GROUPS"
+  >("MENUS");
   const [memberAssignedGroupIds, setMemberAssignedGroupIds] = useState<
     string[]
   >([]);
   const [memberIsSuperDraft, setMemberIsSuperDraft] = useState(false);
   const [memberOverridesDraft, setMemberOverridesDraft] = useState<
     Record<string, boolean>
+  >({});
+  const [memberScopeOverridesDraft, setMemberScopeOverridesDraft] = useState<
+    Record<string, HqPermissionScope>
   >({});
 
   // 재직 구성원 전체(신규 가입 테스트 계정 포함) ID 기준 정렬
@@ -391,6 +394,12 @@ export default function HqPermissionSettingsSection({
       ? permSettings.member_overrides?.[person.instructor_id] || {}
       : {};
     setMemberOverridesDraft({ ...byName, ...byId });
+
+    const sByName = permSettings.member_scope_overrides?.[person.name] || {};
+    const sById = person.instructor_id
+      ? permSettings.member_scope_overrides?.[person.instructor_id] || {}
+      : {};
+    setMemberScopeOverridesDraft({ ...sByName, ...sById });
   };
 
   // 모달 내 현재 Draft 기준 해당 구성원의 상속 권한 실시간 계산
@@ -482,13 +491,24 @@ export default function HqPermissionSettingsSection({
     });
 
     const nextOverrides = { ...(permSettings.member_overrides || {}) };
+    const nextScopeOverrides = {
+      ...(permSettings.member_scope_overrides || {}),
+    };
     const storeKey = id || nm;
     // 이름 키 중복 제거 후 ID(없으면 이름) 단일 키로 깔끔히 저장
     delete nextOverrides[nm];
     if (id) delete nextOverrides[id];
+    delete nextScopeOverrides[nm];
+    if (id) delete nextScopeOverrides[id];
 
     if (!memberIsSuperDraft && Object.keys(memberOverridesDraft).length > 0) {
       nextOverrides[storeKey] = memberOverridesDraft;
+    }
+    if (
+      !memberIsSuperDraft &&
+      Object.keys(memberScopeOverridesDraft).length > 0
+    ) {
+      nextScopeOverrides[storeKey] = memberScopeOverridesDraft;
     }
 
     await patchPermSettings(
@@ -497,8 +517,9 @@ export default function HqPermissionSettingsSection({
         super_admin_ids: nextSuperIds,
         groups: nextGroups,
         member_overrides: nextOverrides,
+        member_scope_overrides: nextScopeOverrides,
       },
-      `${nm} 님의 메뉴 권한 및 그룹 배정이 저장되었습니다.`
+      `${nm} 님의 메뉴·근무 권한 및 그룹 배정이 저장되었습니다.`
     );
     setEditingMemberRow(null);
   };
@@ -2080,9 +2101,9 @@ export default function HqPermissionSettingsSection({
               </button>
             </div>
 
-            {/* 서브 탭: 좌측 메뉴 ON/OFF | 소속 권한 그룹 */}
+            {/* 서브 탭: 좌측 메뉴 ON/OFF | 근무 권한 | 소속 권한 그룹 */}
             <div className="px-6 pt-3 shrink-0">
-              <div className="grid grid-cols-2 p-1 rounded-xl bg-slate-100">
+              <div className="grid grid-cols-3 p-1 rounded-xl bg-slate-100">
                 <button
                   type="button"
                   onClick={() => setMemberModalTab("MENUS")}
@@ -2092,7 +2113,18 @@ export default function HqPermissionSettingsSection({
                       : "text-slate-500 hover:text-slate-800"
                   }`}
                 >
-                  좌측 메뉴 ON / OFF
+                  좌측 메뉴 ON/OFF
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setMemberModalTab("WORK")}
+                  className={`py-1.5 rounded-lg font-bold transition-all ${
+                    memberModalTab === "WORK"
+                      ? "bg-white text-slate-900 shadow-2xs"
+                      : "text-slate-500 hover:text-slate-800"
+                  }`}
+                >
+                  근무 열람 · 편집
                 </button>
                 <button
                   type="button"
@@ -2103,13 +2135,117 @@ export default function HqPermissionSettingsSection({
                       : "text-slate-500 hover:text-slate-800"
                   }`}
                 >
-                  권한 그룹 배정 ({memberAssignedGroupIds.length})
+                  권한 그룹 ({memberAssignedGroupIds.length})
                 </button>
               </div>
             </div>
 
             <div className="p-6 overflow-y-auto custom-scroll space-y-3 flex-1">
-              {memberModalTab === "MENUS" ? (
+              {memberModalTab === "WORK" ? (
+                <>
+                  {memberIsSuperDraft ? (
+                    <div className="p-3.5 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-[11px] font-semibold">
+                      👑 현재 <strong>최고 관리자</strong>로 지정되어 전체 구성원 근무 조회·편집이 허용됩니다.
+                    </div>
+                  ) : (
+                    <div className="text-[11px] text-slate-500 leading-relaxed">
+                      이 구성원에게 적용되는 <strong>근무 조회 · 근무 편집</strong> 권한과 허용 조직 범위를 개별 오버라이드할 수 있습니다.
+                    </div>
+                  )}
+
+                  <div className="divide-y divide-slate-100 border border-slate-200 rounded-xl overflow-hidden">
+                    {(
+                      PERMISSION_CATEGORIES.find((c) => c.id === "cat-work")
+                        ?.items || []
+                    ).map((wItem) => {
+                      const inherited = Boolean(draftMemberInherited[wItem.key]);
+                      const hasOverride =
+                        !memberIsSuperDraft &&
+                        memberOverridesDraft[wItem.key] !== undefined;
+                      const effective = memberIsSuperDraft
+                        ? true
+                        : hasOverride
+                          ? Boolean(memberOverridesDraft[wItem.key])
+                          : inherited;
+                      const scopeOpts = getAllowedScopeOptionsForItem(wItem);
+                      const curScope = memberIsSuperDraft
+                        ? "전체 구성원"
+                        : normalizePermissionScope(
+                            memberScopeOverridesDraft[wItem.key] ||
+                              permSettings.default_member_scopes?.[wItem.key],
+                            wItem
+                          );
+
+                      return (
+                        <div
+                          key={wItem.key}
+                          className="px-4 py-3 flex items-center justify-between gap-3"
+                        >
+                          <div className="min-w-0">
+                            <div className="font-bold text-slate-800 flex items-center gap-1.5">
+                              <span>{wItem.title}</span>
+                              {hasOverride && (
+                                <span
+                                  className={`px-1.5 py-0.5 rounded text-[9px] font-extrabold ${
+                                    effective
+                                      ? "bg-emerald-50 text-emerald-700"
+                                      : "bg-rose-50 text-rose-600"
+                                  }`}
+                                >
+                                  {effective ? "개별 허용" : "개별 차단"}
+                                </span>
+                              )}
+                            </div>
+                            <div className="text-[10.5px] text-slate-400 mt-0.5">
+                              {wItem.description}
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-2 shrink-0">
+                            {scopeOpts.length > 0 && (
+                              <select
+                                disabled={!canEdit || memberIsSuperDraft}
+                                value={curScope}
+                                onChange={(e) =>
+                                  setMemberScopeOverridesDraft((prev) => ({
+                                    ...prev,
+                                    [wItem.key]:
+                                      e.target.value as HqPermissionScope,
+                                  }))
+                                }
+                                className="px-2 py-1 rounded-lg border border-slate-200 bg-white text-[11px] font-semibold text-slate-700 outline-none"
+                              >
+                                {scopeOpts.map((opt) => (
+                                  <option key={opt.value} value={opt.value}>
+                                    {opt.label}
+                                  </option>
+                                ))}
+                              </select>
+                            )}
+
+                            <button
+                              type="button"
+                              disabled={!canEdit || memberIsSuperDraft}
+                              onClick={() =>
+                                handleToggleMemberMenuSwitch(wItem.key)
+                              }
+                              className={`w-10 h-5.5 rounded-full transition-colors relative shrink-0 ${
+                                effective ? "bg-[#00c458]" : "bg-slate-300"
+                              }`}
+                            >
+                              <span
+                                className={`absolute top-0.5 w-4.5 h-4.5 rounded-full bg-white shadow transition-transform ${
+                                  effective ? "left-5" : "left-0.5"
+                                }`}
+                              />
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </>
+              ) : memberModalTab === "MENUS" ? (
                 <>
                   {memberIsSuperDraft ? (
                     <div className="p-3.5 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-[11px] font-semibold">

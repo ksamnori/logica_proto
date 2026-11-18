@@ -114,7 +114,14 @@ function isoToKstMinutes(iso?: string | null): number | null {
 }
 
 export default function HqWorkManagementPage() {
-  const { members, companySettings, isHrManager, isHqAdmin } = useHqShell();
+  const {
+    me,
+    members,
+    companySettings,
+    isHqAdmin,
+    hasHqPerm,
+    canAccessTargetPerm,
+  } = useHqShell();
 
   const [tab, setTab] = useState<WorkMgmtTab>("DASHBOARD");
   const [loading, setLoading] = useState(true);
@@ -190,14 +197,28 @@ export default function HqWorkManagementPage() {
   // 사용되지 않는 상수 경고 방지
   void WEEKDAY_KO;
 
-  const canManage = Boolean(isHrManager || isHqAdmin);
+  const canManage = Boolean(
+    isHqAdmin ||
+      hasHqPerm("work.overtime_comp_manage") ||
+      hasHqPerm("work.comp_leave_manage") ||
+      hasHqPerm("work.holiday_sub_manage") ||
+      hasHqPerm("work.close_manage") ||
+      hasHqPerm("work.record_edit")
+  );
 
   const activeMembers = useMemo(
     () =>
       members
-        .filter((m) => m.work_status === "재직")
+        .filter(
+          (m) =>
+            m.work_status === "재직" &&
+            (m.instructor_id === me?.instructor_id ||
+              canAccessTargetPerm("work.record_view", m) ||
+              canAccessTargetPerm("work.stats_view", m) ||
+              canAccessTargetPerm("work.realtime_view", m))
+        )
         .sort((a, b) => a.name.localeCompare(b.name, "ko")),
-    [members]
+    [canAccessTargetPerm, me?.instructor_id, members]
   );
 
   const workRules: HqWorkRuleItem[] = useMemo(() => {

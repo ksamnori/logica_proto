@@ -1284,6 +1284,7 @@ export interface HqPermissionSettings {
   default_member_scopes?: Record<string, HqPermissionScope>;
   groups: HqPermissionGroupItem[];
   member_overrides?: Record<string, Record<string, boolean>>; // memberId 또는 name 기준 개별 ON/OFF 오버라이드
+  member_scope_overrides?: Record<string, Record<string, HqPermissionScope>>; // memberId 또는 name 기준 개별 범위 오버라이드
 }
 
 export type HqAccessTerminalProvider = "secom" | "adt_caps" | "kt_telecop";

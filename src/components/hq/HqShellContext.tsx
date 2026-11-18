@@ -20,6 +20,7 @@ import type { ContestAccessLevel } from "@/app/(dashboard)/contest-db/contestUti
 import { hqFetch } from "@/lib/hq/clientApi";
 import { DEFAULT_HQ_COMPANY_SETTINGS } from "@/lib/hq/defaultCompanySettings";
 import {
+  type MemberPermissionSubject,
   type ResolvedMemberPermissionState,
   resolveMemberPermissions,
 } from "@/lib/hq/hqPermissionEngine";
@@ -43,6 +44,10 @@ interface HqShellState {
   myPermissions: ResolvedMemberPermissionState;
   canAccessMenu: (canonicalHqPath: string) => boolean;
   hasHqPerm: (permKey: string) => boolean;
+  canAccessTargetPerm: (
+    permKey: string,
+    target: MemberPermissionSubject | null | undefined
+  ) => boolean;
   pendingApprovalCount: number;
   unsignedContractCount: number;
   unreadChatCount: number;
@@ -508,6 +513,26 @@ export function HqShellProvider({
     [effectiveIsHqAdmin, myPermissions]
   );
 
+  const canAccessTargetPerm = useCallback(
+    (
+      permKey: string,
+      target: MemberPermissionSubject | null | undefined
+    ): boolean => {
+      if (!target) return false;
+      if (effectiveIsHqAdmin) return true;
+      return myPermissions.canAccessTargetMember(
+        permKey,
+        target,
+        companySettings.extra_settings?.org_chart_nodes
+      );
+    },
+    [
+      companySettings.extra_settings?.org_chart_nodes,
+      effectiveIsHqAdmin,
+      myPermissions,
+    ]
+  );
+
   // 지정 출·퇴근 시각 도래 시 자동 근무 시작·퇴근 상태가 즉시 반영되도록 1분 주기 동기화
   useEffect(() => {
     if (!me?.instructor_id) return;
@@ -547,6 +572,7 @@ export function HqShellProvider({
         myPermissions,
         canAccessMenu,
         hasHqPerm,
+        canAccessTargetPerm,
         pendingApprovalCount,
         unsignedContractCount,
         unreadChatCount,
