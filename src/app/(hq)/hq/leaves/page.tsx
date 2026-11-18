@@ -9,6 +9,7 @@ import React, {
   useState,
 } from "react";
 import { useHqShell } from "@/components/hq/HqShellContext";
+import HqLeaveRegisterModal from "@/components/hq/leaves/HqLeaveRegisterModal";
 import { buildRecommendedApprovalLine } from "@/lib/hq/approvalLine";
 import { hqFetch } from "@/lib/hq/clientApi";
 import { DEFAULT_APPROVAL_POLICIES } from "@/lib/hq/defaultApprovalPolicies";
@@ -1720,213 +1721,18 @@ export default function HqLeavesPage() {
       )}
 
       {/* =====================================================================
-          모달 1: Flex 스타일 2개월 달력 휴가 등록 모달 (스크린샷 2 100% 재현)
+          모달 1: Flex 스타일 2개월 달력 + 상세 일정(반반차/시간차/반차) + 승인·참조 휴가 등록 모달
          ===================================================================== */}
-      {regModalOpen && (
-        <div className="fixed inset-0 z-50 bg-slate-900/35 backdrop-blur-[1px] flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl border border-slate-200/90 shadow-2xl w-full max-w-[620px] p-7">
-            {/* 상단 캡션 & 닫기 */}
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-1.5 text-xs">
-                <span>
-                  {selectedLeaveKind.type === "ANNUAL"
-                    ? "🏖️"
-                    : selectedLeaveKind.item.icon || "🌿"}
-                </span>
-                <span className="font-bold text-slate-800">
-                  {selectedLeaveKind.type === "ANNUAL"
-                    ? "연차"
-                    : selectedLeaveKind.item.name}
-                </span>
-                <span className="text-slate-400 font-medium">
-                  {selectedLeaveKind.type === "ANNUAL"
-                    ? `${myAvailableAnnualDays}일 사용 가능 · 유급`
-                    : `신청 시 ${selectedLeaveKind.item.grant_amount}일 부여 · ${selectedLeaveKind.item.pay_type}`}
-                </span>
-              </div>
-
-              <button
-                type="button"
-                onClick={() => setRegModalOpen(false)}
-                className="w-7 h-7 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-500 flex items-center justify-center text-xs font-bold"
-              >
-                ✕
-              </button>
-            </div>
-
-            {/* 메인 안내 타이틀 */}
-            <h3 className="mt-3 text-[20px] font-extrabold text-slate-900 tracking-tight">
-              {!pickStartDate
-                ? "휴가 시작 날짜를 선택해주세요"
-                : `${pickStartDate}${
-                    pickEndDate && pickEndDate !== pickStartDate
-                      ? ` ~ ${pickEndDate}`
-                      : ""
-                  } (${computedModalLeaveDays}일)`}
-            </h3>
-
-            {/* 좌·우 2개월 캘린더 */}
-            <div className="mt-6 grid grid-cols-1 sm:grid-cols-2 gap-7">
-              {[calBaseYm, secondMonthYm].map((ymObj, calIdx) => {
-                const cells = buildMonthGrid(ymObj.year, ymObj.month);
-                return (
-                  <div key={`${ymObj.year}-${ymObj.month}`}>
-                    <div className="flex items-center justify-between mb-3 px-1">
-                      {calIdx === 0 ? (
-                        <button
-                          type="button"
-                          onClick={() => shiftCalMonth(-1)}
-                          className="w-6 h-6 rounded hover:bg-slate-100 text-slate-400 hover:text-slate-800 text-xs font-bold"
-                        >
-                          ‹
-                        </button>
-                      ) : (
-                        <span className="w-6" />
-                      )}
-
-                      <span className="text-xs font-bold text-slate-800">
-                        {ymObj.year}년 {ymObj.month}월
-                      </span>
-
-                      {calIdx === 1 ? (
-                        <button
-                          type="button"
-                          onClick={() => shiftCalMonth(1)}
-                          className="w-6 h-6 rounded hover:bg-slate-100 text-slate-400 hover:text-slate-800 text-xs font-bold"
-                        >
-                          ›
-                        </button>
-                      ) : (
-                        <span className="w-6" />
-                      )}
-                    </div>
-
-                    <div className="grid grid-cols-7 text-center text-[11px] font-semibold text-slate-400 mb-1.5">
-                      {WEEKDAY_HEADER.map((w) => (
-                        <div key={w} className="py-1">
-                          {w}
-                        </div>
-                      ))}
-                    </div>
-
-                    <div className="grid grid-cols-7 gap-y-1 text-center">
-                      {cells.map((c) => {
-                        if (!c.inMonth) {
-                          return (
-                            <div
-                              key={c.ymd}
-                              className="h-8 flex items-center justify-center text-xs text-slate-300"
-                            >
-                              {calIdx === 1 ? c.day : ""}
-                            </div>
-                          );
-                        }
-
-                        const isToday = c.ymd === todayYmd;
-                        const isWeekendOrHoliday =
-                          c.dow === 0 || c.dow === 6 || holidaySet.has(c.ymd);
-                        const inSelectedRange =
-                          pickStartDate &&
-                          c.ymd >= pickStartDate &&
-                          c.ymd <= (pickEndDate || pickStartDate);
-
-                        return (
-                          <button
-                            key={c.ymd}
-                            type="button"
-                            onClick={() => handleCalendarDayClick(c.ymd)}
-                            className={`h-8 w-8 mx-auto rounded-lg text-xs transition-all flex items-center justify-center tabular-nums ${
-                              inSelectedRange
-                                ? "bg-emerald-600 text-white font-extrabold shadow-xs"
-                                : isToday
-                                ? "bg-emerald-100/80 text-emerald-800 font-extrabold"
-                                : isWeekendOrHoliday
-                                ? "text-slate-400 hover:bg-slate-100 font-medium"
-                                : "text-slate-800 hover:bg-slate-100 font-bold"
-                            }`}
-                          >
-                            {c.day}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-
-            {/* 날짜 선택 완료 시 하단 세부 옵션 & 등록 버튼 표시 */}
-            {pickStartDate && (
-              <div className="mt-6 pt-5 border-t border-slate-100 space-y-3.5">
-                {selectedLeaveKind.type === "ANNUAL" && (
-                  <div className="flex flex-wrap items-center gap-1.5">
-                    {(
-                      [
-                        { key: "FULL", label: "종일 (1일 단위)" },
-                        { key: "AM_HALF", label: "오전 반차 (0.5일)" },
-                        { key: "PM_HALF", label: "오후 반차 (0.5일)" },
-                        { key: "TWO_HOURS", label: "시간차 2시간 (0.25일)" },
-                      ] as const
-                    ).map((u) => (
-                      <button
-                        key={u.key}
-                        type="button"
-                        onClick={() => setAnnualUnitMode(u.key)}
-                        className={`px-3 py-1.5 rounded-lg border text-xs font-bold transition-all ${
-                          annualUnitMode === u.key
-                            ? "border-emerald-600 bg-emerald-50 text-emerald-800"
-                            : "border-slate-200 text-slate-600 hover:bg-slate-50"
-                        }`}
-                      >
-                        {u.label}
-                      </button>
-                    ))}
-                  </div>
-                )}
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                  <input
-                    value={leaveReason}
-                    onChange={(e) => setLeaveReason(e.target.value)}
-                    placeholder="휴가 사유 입력 (선택)"
-                    className="px-3 py-2 rounded-xl border border-slate-200 text-xs font-semibold text-slate-800 outline-none focus:border-emerald-500"
-                  />
-                  <input
-                    value={handoverName}
-                    onChange={(e) => setHandoverName(e.target.value)}
-                    placeholder="업무 대행자 / 인수인계 메모 (선택)"
-                    className="px-3 py-2 rounded-xl border border-slate-200 text-xs font-semibold text-slate-800 outline-none focus:border-emerald-500"
-                  />
-                </div>
-
-                <div className="flex items-center justify-between pt-1">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setPickStartDate("");
-                      setPickEndDate("");
-                    }}
-                    className="text-xs font-bold text-slate-400 hover:text-slate-700"
-                  >
-                    날짜 다시 선택
-                  </button>
-
-                  <button
-                    type="button"
-                    disabled={submitting}
-                    onClick={handleSubmitLeaveRequest}
-                    className="px-5 py-2.5 rounded-xl bg-[#16a34a] hover:bg-[#15803d] text-white text-xs font-extrabold shadow-sm disabled:opacity-50"
-                  >
-                    {submitting
-                      ? "승인 요청 중..."
-                      : `${computedModalLeaveDays}일 휴가 등록 · 승인 요청`}
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
+      <HqLeaveRegisterModal
+        isOpen={regModalOpen}
+        onClose={() => setRegModalOpen(false)}
+        initialKind={selectedLeaveKind}
+        availableAnnualDays={myAvailableAnnualDays}
+        leaveDocs={leaveDocs}
+        adjustments={adjustments}
+        uploadedMonthly={uploadedMonthly}
+        onSubmitted={loadLeavesData}
+      />
 
       {/* =====================================================================
           모달 2: 연차 일수 수동 조정 모달 (인사관리자 전용 ✎)

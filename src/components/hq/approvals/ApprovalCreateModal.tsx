@@ -1036,7 +1036,7 @@ export default function ApprovalCreateModal({
                     🌴 휴가 · 연차 상세 정보
                   </h4>
                   <span className="px-2.5 py-0.5 rounded-full bg-white border border-emerald-200 text-emerald-700 text-[11px] font-extrabold">
-                    잔여 연차: {me.annual_leave_remain}일 (당해 12.31 기준)
+                    잔여 연차: {me.annual_leave_remain}일 사용 가능
                   </span>
                 </div>
 
@@ -1102,25 +1102,13 @@ export default function ApprovalCreateModal({
                     </label>
                     <input
                       type="number"
-                      step="0.25"
+                      step="0.125"
                       min="0.125"
                       value={leaveDays}
                       onChange={(e) => setLeaveDays(e.target.value)}
                       className="w-full px-3 py-2 rounded-xl border border-slate-200 bg-white text-xs font-extrabold text-emerald-700"
                     />
                   </div>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">
-                    부재 중 업무 인수인계자 (선택)
-                  </label>
-                  <input
-                    value={handoverName}
-                    onChange={(e) => setHandoverName(e.target.value)}
-                    placeholder="예: 집필팀 김문수 팀장"
-                    className="w-full px-3 py-2 rounded-xl border border-slate-200 bg-white text-xs font-medium text-slate-800"
-                  />
                 </div>
               </section>
             )}

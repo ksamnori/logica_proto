@@ -7,6 +7,7 @@ import { useHqShell } from "@/components/hq/HqShellContext";
 import HqCalendarSidebar from "@/components/hq/HqCalendarSidebar";
 import ApprovalCreateModal from "@/components/hq/approvals/ApprovalCreateModal";
 import ApprovalDetailModal from "@/components/hq/approvals/ApprovalDetailModal";
+import HqLeaveRegisterModal from "@/components/hq/leaves/HqLeaveRegisterModal";
 import CertificatePrintModal from "@/components/hq/members/CertificatePrintModal";
 import {
   APPROVAL_DOC_META,
@@ -53,6 +54,7 @@ export default function HqHomeDashboardPage() {
   const [loadingData, setLoadingData] = useState(true);
 
   const [createOpen, setCreateOpen] = useState(false);
+  const [leaveRegOpen, setLeaveRegOpen] = useState(false);
   const [defaultDocType, setDefaultDocType] =
     useState<HqApprovalDocType>("GENERAL");
   const [selectedDoc, setSelectedDoc] = useState<HqApprovalDoc | null>(null);
@@ -333,6 +335,10 @@ export default function HqHomeDashboardPage() {
   ]);
 
   const openQuickDraft = (docType: HqApprovalDocType) => {
+    if (docType === "LEAVE") {
+      setLeaveRegOpen(true);
+      return;
+    }
     setDefaultDocType(docType);
     setCreateOpen(true);
   };
@@ -919,6 +925,15 @@ export default function HqHomeDashboardPage() {
         isOpen={certModalOpen}
         member={me}
         onClose={() => setCertModalOpen(false)}
+      />
+
+      {/* 대시보드 휴가 신청 -> 휴가 페이지와 동일한 플렉스 스타일 달력·상세일정·승인참조 모달 */}
+      <HqLeaveRegisterModal
+        isOpen={leaveRegOpen}
+        onClose={() => setLeaveRegOpen(false)}
+        allowSwitchLeaveKind
+        leaveDocs={docs}
+        onSubmitted={handleAfterUpdate}
       />
     </>
   );

@@ -46,7 +46,9 @@ async function applyPostApprovalSideEffects(
     const leaveMeta = LEAVE_TYPES.find((lt) => lt.label === leaveLabel);
     const shouldDeduct = leaveMeta
       ? leaveMeta.deductAnnual
-      : leaveLabel.includes("연차") || leaveLabel.includes("반차");
+      : leaveLabel.includes("연차") ||
+        leaveLabel.includes("반차") ||
+        leaveLabel.includes("시간차");
     if (shouldDeduct) {
       const { data: prof } = await supabaseAdmin
         .from("hq_member_profile")
@@ -55,7 +57,7 @@ async function applyPostApprovalSideEffects(
         .maybeSingle();
 
       const prevUsed = Number(prof?.annual_leave_used ?? 0);
-      const nextUsed = Number((prevUsed + Number(doc.leave_days)).toFixed(2));
+      const nextUsed = Number((prevUsed + Number(doc.leave_days)).toFixed(4));
       await supabaseAdmin
         .from("hq_member_profile")
         .upsert(
