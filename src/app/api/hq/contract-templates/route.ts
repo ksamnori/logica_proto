@@ -2,8 +2,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { appendHqAuditLog } from "@/lib/hq/auditLogServer";
-import { SETTINGS_STORAGE_BUCKET } from "@/lib/hq/companySettingsServer";
 import { DEFAULT_SEEDED_CONTRACT_TEMPLATES } from "@/lib/hq/contractTemplateEngine";
+import { readHqKvPayload, writeHqKvPayload } from "@/lib/hq/hqKvStoreServer";
 import {
   apiFail,
   getSupabaseAdmin,
@@ -17,6 +17,7 @@ import type {
 
 export const runtime = "nodejs";
 
+const CONTRACT_TEMPLATES_SETTING_KEY = "HQ_CONTRACT_TEMPLATES";
 const CONTRACT_TEMPLATES_PATH = "hq_system_config/contract_templates.json";
 
 interface StoredContractTemplatesPayload {
@@ -36,33 +37,47 @@ const DEFAULT_PAYLOAD: StoredContractTemplatesPayload = {
   reflectedContractIds: [],
 };
 
+function cloneDefaultTemplatesPayload(): StoredContractTemplatesPayload {
+  return {
+    categories: [...DEFAULT_PAYLOAD.categories],
+    customFields: DEFAULT_PAYLOAD.customFields.map((f) => ({ ...f })),
+    templates: DEFAULT_PAYLOAD.templates.map((t) => ({
+      ...t,
+      tags: [...(t.tags || [])],
+    })),
+    reflectedContractIds: [],
+  };
+}
+
 async function readTemplatesPayload(
   supabaseAdmin: SupabaseClient
 ): Promise<StoredContractTemplatesPayload> {
   try {
-    const { data: blob, error } = await supabaseAdmin.storage
-      .from(SETTINGS_STORAGE_BUCKET)
-      .download(CONTRACT_TEMPLATES_PATH);
-    if (error || !blob) return DEFAULT_PAYLOAD;
-    const parsed = JSON.parse(await blob.text());
+    const parsed = await readHqKvPayload<Partial<StoredContractTemplatesPayload>>(
+      supabaseAdmin,
+      CONTRACT_TEMPLATES_SETTING_KEY,
+      CONTRACT_TEMPLATES_PATH
+    );
+    if (!parsed) return cloneDefaultTemplatesPayload();
+    const fallback = cloneDefaultTemplatesPayload();
     return {
       categories:
-        Array.isArray(parsed?.categories) && parsed.categories.length > 0
+        Array.isArray(parsed.categories) && parsed.categories.length > 0
           ? parsed.categories
-          : DEFAULT_PAYLOAD.categories,
-      customFields: Array.isArray(parsed?.customFields)
+          : fallback.categories,
+      customFields: Array.isArray(parsed.customFields)
         ? parsed.customFields
-        : DEFAULT_PAYLOAD.customFields,
+        : fallback.customFields,
       templates:
-        Array.isArray(parsed?.templates) && parsed.templates.length > 0
+        Array.isArray(parsed.templates) && parsed.templates.length > 0
           ? parsed.templates
-          : DEFAULT_PAYLOAD.templates,
-      reflectedContractIds: Array.isArray(parsed?.reflectedContractIds)
+          : fallback.templates,
+      reflectedContractIds: Array.isArray(parsed.reflectedContractIds)
         ? parsed.reflectedContractIds
         : [],
     };
   } catch {
-    return DEFAULT_PAYLOAD;
+    return cloneDefaultTemplatesPayload();
   }
 }
 
@@ -70,13 +85,12 @@ async function writeTemplatesPayload(
   supabaseAdmin: SupabaseClient,
   payload: StoredContractTemplatesPayload
 ): Promise<void> {
-  const bytes = new TextEncoder().encode(JSON.stringify(payload, null, 2));
-  await supabaseAdmin.storage
-    .from(SETTINGS_STORAGE_BUCKET)
-    .upload(CONTRACT_TEMPLATES_PATH, bytes, {
-      contentType: "application/json",
-      upsert: true,
-    });
+  await writeHqKvPayload(
+    supabaseAdmin,
+    CONTRACT_TEMPLATES_SETTING_KEY,
+    payload,
+    CONTRACT_TEMPLATES_PATH
+  );
 }
 
 export async function GET(req: NextRequest) {

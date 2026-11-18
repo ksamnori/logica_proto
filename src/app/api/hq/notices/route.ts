@@ -2,7 +2,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { appendHqAuditLog } from "@/lib/hq/auditLogServer";
-import { SETTINGS_STORAGE_BUCKET } from "@/lib/hq/companySettingsServer";
+import { readHqKvPayload, writeHqKvPayload } from "@/lib/hq/hqKvStoreServer";
 import {
   apiFail,
   getSupabaseAdmin,
@@ -12,6 +12,7 @@ import type { HqNoticeItem } from "@/lib/hq/types";
 
 export const runtime = "nodejs";
 
+const NOTICES_SETTING_KEY = "HQ_NOTICES";
 const NOTICES_STORAGE_PATH = "hq_system_config/notices.json";
 
 interface StoredNoticesPayload {
@@ -56,26 +57,37 @@ const DEFAULT_NOTICES_DATA: StoredNoticesPayload = {
   ],
 };
 
+function cloneDefaultNoticesData(): StoredNoticesPayload {
+  return {
+    categories: [...DEFAULT_NOTICES_DATA.categories],
+    notices: DEFAULT_NOTICES_DATA.notices.map((n) => ({
+      ...n,
+      reactions: { ...(n.reactions || {}) },
+      comments: [...(n.comments || [])],
+    })),
+  };
+}
+
 async function readNoticesPayload(
   supabaseAdmin: SupabaseClient
 ): Promise<StoredNoticesPayload> {
   try {
-    const { data: blob, error } = await supabaseAdmin.storage
-      .from(SETTINGS_STORAGE_BUCKET)
-      .download(NOTICES_STORAGE_PATH);
-    if (error || !blob) return DEFAULT_NOTICES_DATA;
-    const text = await blob.text();
-    const parsed = JSON.parse(text);
+    const parsed = await readHqKvPayload<Partial<StoredNoticesPayload>>(
+      supabaseAdmin,
+      NOTICES_SETTING_KEY,
+      NOTICES_STORAGE_PATH
+    );
+    if (!parsed) return cloneDefaultNoticesData();
     const categories =
-      Array.isArray(parsed?.categories) && parsed.categories.length > 0
+      Array.isArray(parsed.categories) && parsed.categories.length > 0
         ? parsed.categories
-        : DEFAULT_NOTICES_DATA.categories;
-    const notices = Array.isArray(parsed?.notices)
+        : [...DEFAULT_NOTICES_DATA.categories];
+    const notices = Array.isArray(parsed.notices)
       ? parsed.notices
-      : DEFAULT_NOTICES_DATA.notices;
+      : cloneDefaultNoticesData().notices;
     return { categories, notices };
   } catch {
-    return DEFAULT_NOTICES_DATA;
+    return cloneDefaultNoticesData();
   }
 }
 
@@ -83,13 +95,12 @@ async function writeNoticesPayload(
   supabaseAdmin: SupabaseClient,
   payload: StoredNoticesPayload
 ): Promise<void> {
-  const bytes = new TextEncoder().encode(JSON.stringify(payload, null, 2));
-  await supabaseAdmin.storage
-    .from(SETTINGS_STORAGE_BUCKET)
-    .upload(NOTICES_STORAGE_PATH, bytes, {
-      contentType: "application/json",
-      upsert: true,
-    });
+  await writeHqKvPayload(
+    supabaseAdmin,
+    NOTICES_SETTING_KEY,
+    payload,
+    NOTICES_STORAGE_PATH
+  );
 }
 
 function refreshScheduledAndExpiredStatuses(

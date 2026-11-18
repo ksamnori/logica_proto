@@ -1,8 +1,8 @@
 // src/app/api/hq/calendar/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import { google } from "googleapis";
-import { SETTINGS_STORAGE_BUCKET } from "@/lib/hq/companySettingsServer";
 import { ATTENDANCE_MODES, FALLBACK_HQ_TENANT_ID } from "@/lib/hq/constants";
+import { readHqKvPayload } from "@/lib/hq/hqKvStoreServer";
 import {
   getMergedIntegrationSettings,
   resolveHqCalendarId,
@@ -42,6 +42,7 @@ export interface HqCalendarEventItem {
   externalUrl?: string | null;
 }
 
+const MEETINGS_SETTING_KEY = "HQ_MEETINGS";
 const MEETINGS_STORAGE_PATH = "hq_system_config/meetings.json";
 
 function getGoogleCalendarClientOrNull() {
@@ -187,7 +188,7 @@ export async function GET(req: NextRequest) {
       aprRes,
       attRes,
       pubRes,
-      meetingsBlobRes,
+      meetingsPayload,
     ] = await Promise.all([
       supabaseAdmin
         .from("instructor")
@@ -218,10 +219,11 @@ export async function GET(req: NextRequest) {
         .neq("stage", "PUBLISHED")
         .gte("press_deadline", windowStart)
         .lte("press_deadline", windowEnd),
-      supabaseAdmin.storage
-        .from(SETTINGS_STORAGE_BUCKET)
-        .download(MEETINGS_STORAGE_PATH)
-        .catch(() => ({ data: null, error: null })),
+      readHqKvPayload<{ meetings?: HqMeetingItem[] }>(
+        supabaseAdmin,
+        MEETINGS_SETTING_KEY,
+        MEETINGS_STORAGE_PATH
+      ).catch(() => null),
     ]);
 
     const profMap = new Map<string, any>();
@@ -345,40 +347,32 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    // 3) 사내 미팅 (meetings.json)
-    if (meetingsBlobRes?.data) {
-      try {
-        const text = await meetingsBlobRes.data.text();
-        const parsed = JSON.parse(text);
-        const meetings: HqMeetingItem[] = Array.isArray(parsed?.meetings)
-          ? parsed.meetings
-          : [];
-        for (const mtg of meetings) {
-          if (!mtg.has_schedule || !mtg.start_at) continue;
-          const sDate = toKstYmd(mtg.start_at);
-          const eDate = mtg.end_at ? toKstYmd(mtg.end_at) : sDate;
-          if (eDate < windowStart || sDate > windowEnd) continue;
+    // 3) 사내 미팅 (HQ_MEETINGS / meetings.json)
+    const meetings: HqMeetingItem[] = Array.isArray(meetingsPayload?.meetings)
+      ? meetingsPayload.meetings
+      : [];
+    for (const mtg of meetings) {
+      if (!mtg.has_schedule || !mtg.start_at) continue;
+      const sDate = toKstYmd(mtg.start_at);
+      const eDate = mtg.end_at ? toKstYmd(mtg.end_at) : sDate;
+      if (eDate < windowStart || sDate > windowEnd) continue;
 
-          const startHm = formatKstHm(mtg.start_at);
-          const endHm = mtg.end_at ? formatKstHm(mtg.end_at) : "";
-          internalEvents.push({
-            id: `mtg-${mtg.id}`,
-            category: "MEETING",
-            title: mtg.title,
-            subtitle:
-              mtg.location_or_url ||
-              `${mtg.organizer_name} 주최 (${mtg.attendees?.length || 1}명)`,
-            description: mtg.agenda || undefined,
-            startDate: sDate,
-            endDate: eDate >= sDate ? eDate : sDate,
-            timeLabel: endHm ? `${startHm} ~ ${endHm}` : startHm || "시간 미정",
-            isMultiDay: eDate > sDate,
-            linkPath: "/hq/meetings",
-          });
-        }
-      } catch {
-        // ignore malformed meetings json
-      }
+      const startHm = formatKstHm(mtg.start_at);
+      const endHm = mtg.end_at ? formatKstHm(mtg.end_at) : "";
+      internalEvents.push({
+        id: `mtg-${mtg.id}`,
+        category: "MEETING",
+        title: mtg.title,
+        subtitle:
+          mtg.location_or_url ||
+          `${mtg.organizer_name} 주최 (${mtg.attendees?.length || 1}명)`,
+        description: mtg.agenda || undefined,
+        startDate: sDate,
+        endDate: eDate >= sDate ? eDate : sDate,
+        timeLabel: endHm ? `${startHm} ~ ${endHm}` : startHm || "시간 미정",
+        isMultiDay: eDate > sDate,
+        linkPath: "/hq/meetings",
+      });
     }
 
     // 4) 출판 공정 인쇄 하판 마감일

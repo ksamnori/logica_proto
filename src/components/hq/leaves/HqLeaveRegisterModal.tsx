@@ -89,6 +89,11 @@ interface Props {
 }
 
 const WEEKDAY_HEADER = ["일", "월", "화", "수", "목", "금", "토"] as const;
+const DEFAULT_INITIAL_KIND: LeaveRegisterKind = { type: "ANNUAL" };
+const EMPTY_LEAVE_DOCS: HqApprovalDoc[] = [];
+const EMPTY_ADJUSTMENTS: HqLeaveAdjustmentItem[] = [];
+const EMPTY_UPLOADED_MONTHLY: HqUploadedMonthlyUsageItem[] = [];
+const EMPTY_WORKING_DATES: string[] = [];
 
 function pad2(n: number): string {
   return String(n).padStart(2, "0");
@@ -276,12 +281,12 @@ function CoffeeCupIcon({
 export default function HqLeaveRegisterModal({
   isOpen,
   onClose,
-  initialKind = { type: "ANNUAL" },
+  initialKind = DEFAULT_INITIAL_KIND,
   availableAnnualDays,
   allowSwitchLeaveKind = false,
-  leaveDocs = [],
-  adjustments = [],
-  uploadedMonthly = [],
+  leaveDocs = EMPTY_LEAVE_DOCS,
+  adjustments = EMPTY_ADJUSTMENTS,
+  uploadedMonthly = EMPTY_UPLOADED_MONTHLY,
   onSubmitted,
 }: Props) {
   const {
@@ -486,6 +491,9 @@ export default function HqLeaveRegisterModal({
     );
   };
 
+  const initialKindKey =
+    initialKind.type === "ANNUAL" ? "ANNUAL" : `CUSTOM:${initialKind.item.id}`;
+
   useEffect(() => {
     if (!isOpen) return;
     setStepView("CALENDAR");
@@ -507,7 +515,7 @@ export default function HqLeaveRegisterModal({
     setAutoProceedMenuStepId(null);
     syncApprovalLineFromKind(initialKind);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isOpen, initialKind, me?.instructor_id]);
+  }, [isOpen, initialKindKey, me?.instructor_id]);
 
   const secondMonthYm = useMemo(() => {
     if (calBaseYm.month === 12) {
@@ -518,7 +526,7 @@ export default function HqLeaveRegisterModal({
 
   // 선택한 구간 내 실제 휴가 적용 근무일 목록 (주말·공휴일 자동 제외)
   const workingDates = useMemo(() => {
-    if (!pickStart) return [];
+    if (!pickStart) return EMPTY_WORKING_DATES;
     const end = pickEnd || pickStart;
     const deductHol =
       leaveKind.type === "CUSTOM" && Boolean(leaveKind.item.deduct_on_holidays);
@@ -539,6 +547,9 @@ export default function HqLeaveRegisterModal({
   // workingDates 변경 시 기본 DayScheduleItem('하루 종일') 동기화
   useEffect(() => {
     setDaySchedules((prev) => {
+      if (workingDates.length === 0 && Object.keys(prev).length === 0) {
+        return prev;
+      }
       const next: Record<string, DayScheduleItem> = {};
       workingDates.forEach((ymd) => {
         next[ymd] = prev[ymd] || {

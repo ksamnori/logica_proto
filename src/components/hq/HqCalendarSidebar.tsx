@@ -12,6 +12,16 @@ import { hqFetch } from "@/lib/hq/clientApi";
 import { useHqHref } from "@/lib/hq/hqRoutes";
 
 type FilterTab = "ALL" | "GOOGLE" | "LEAVE_WORK" | "PUB_MEETING" | "HOLIDAY_BDAY";
+type GoogleSubType = "MEETING" | "LECTURE" | "LEAVE" | "GROUP_BUY" | "GENERAL";
+
+interface EventVisualMeta {
+  label: string;
+  icon: string;
+  dotClass: string;
+  badgeClass: string;
+  multiBarClass: string;
+  barClass: string;
+}
 
 interface GoogleStatusInfo {
   configured: boolean;
@@ -22,38 +32,75 @@ interface GoogleStatusInfo {
 }
 
 const CALENDAR_MAX_LANES = 3; // 한 날짜 칸에 표시할 최대 일정 줄 수 (초과분은 +N)
-const CALENDAR_LANE_PX = 14; // 일정 막대 한 줄 높이
-const CALENDAR_DAYNUM_PX = 22; // 날짜 숫자 영역 높이
-const AGENDA_ITEM_PX = 76; // 하단 일정 카드 1개 높이
-const AGENDA_GAP_PX = 6; // 일정 카드 간격
-const AGENDA_VISIBLE_COUNT = 8; // 스크롤 없이 보이는 일정 수
+const CALENDAR_LANE_PX = 21; // 일정 막대 한 줄 높이 (기존 14px 대비 1.5배)
+const CALENDAR_DAYNUM_PX = 33; // 날짜 숫자 영역 높이 (기존 22px 대비 1.5배)
+const CALENDAR_OVERFLOW_PX = 18; // +N 초과 표시 영역 높이 (기존 12px 대비 1.5배)
+const CALENDAR_MIN_ROW_PX = 88; // 일정이 적은 주간 행 최소 높이
+const AGENDA_STEP_COUNT = 8; // 스크롤 없이 기본 노출할 일정 수 (더보기 단위)
 
-const CATEGORY_META: Record<
-  HqCalendarCategory,
-  {
-    label: string;
-    icon: string;
-    dotClass: string;
-    badgeClass: string;
-    multiBarClass: string;
-    barClass: string;
-  }
+const GOOGLE_SUBTYPE_META: Record<
+  GoogleSubType,
+  EventVisualMeta & { shortLabel: string }
 > = {
-  GOOGLE: {
-    label: "구글 일정",
-    icon: "📆",
-    dotClass: "bg-purple-500",
-    badgeClass: "bg-purple-50 text-purple-700 border-purple-200",
-    multiBarClass: "bg-purple-100/80",
-    barClass: "bg-purple-500 text-white",
+  MEETING: {
+    label: "구글 · 미팅/회의",
+    shortLabel: "미팅·회의",
+    icon: "💬",
+    dotClass: "bg-blue-600",
+    badgeClass: "bg-blue-50 text-blue-700 border-blue-200",
+    multiBarClass: "bg-blue-100/80",
+    barClass: "bg-blue-600 text-white",
   },
+  LECTURE: {
+    label: "구글 · 특강",
+    shortLabel: "특강",
+    icon: "🎤",
+    dotClass: "bg-orange-500",
+    badgeClass: "bg-orange-50 text-orange-700 border-orange-200",
+    multiBarClass: "bg-orange-100/80",
+    barClass: "bg-orange-500 text-white",
+  },
+  LEAVE: {
+    label: "구글 · 연차/반차",
+    shortLabel: "연차·반차",
+    icon: "🌴",
+    dotClass: "bg-emerald-200 ring-1 ring-inset ring-emerald-400",
+    badgeClass: "bg-emerald-50 text-emerald-700 border-emerald-200",
+    multiBarClass: "bg-emerald-100/80",
+    barClass:
+      "bg-emerald-100/95 text-emerald-800 ring-1 ring-inset ring-emerald-200/90",
+  },
+  GROUP_BUY: {
+    label: "구글 · 공구",
+    shortLabel: "공구",
+    icon: "🛍️",
+    dotClass: "bg-violet-200 ring-1 ring-inset ring-violet-400",
+    badgeClass: "bg-violet-50 text-violet-700 border-violet-200",
+    multiBarClass: "bg-violet-100/80",
+    barClass:
+      "bg-violet-100/95 text-violet-800 ring-1 ring-inset ring-violet-200/90",
+  },
+  GENERAL: {
+    label: "구글 일정",
+    shortLabel: "기타 구글",
+    icon: "📆",
+    dotClass: "bg-slate-600",
+    badgeClass: "bg-slate-100 text-slate-700 border-slate-200",
+    multiBarClass: "bg-slate-200/80",
+    barClass: "bg-slate-600 text-white",
+  },
+};
+
+const CATEGORY_META: Record<HqCalendarCategory, EventVisualMeta> = {
+  GOOGLE: GOOGLE_SUBTYPE_META.GENERAL,
   LEAVE: {
     label: "연차·휴가",
     icon: "🌴",
-    dotClass: "bg-emerald-500",
+    dotClass: "bg-emerald-200 ring-1 ring-inset ring-emerald-400",
     badgeClass: "bg-emerald-50 text-emerald-700 border-emerald-200",
     multiBarClass: "bg-emerald-100/80",
-    barClass: "bg-emerald-500 text-white",
+    barClass:
+      "bg-emerald-100/95 text-emerald-800 ring-1 ring-inset ring-emerald-200/90",
   },
   REMOTE: {
     label: "유연·외근",
@@ -66,10 +113,10 @@ const CATEGORY_META: Record<
   MEETING: {
     label: "사내 미팅",
     icon: "💬",
-    dotClass: "bg-amber-500",
-    badgeClass: "bg-amber-50 text-amber-800 border-amber-200",
-    multiBarClass: "bg-amber-100/80",
-    barClass: "bg-amber-400 text-amber-950",
+    dotClass: "bg-blue-600",
+    badgeClass: "bg-blue-50 text-blue-700 border-blue-200",
+    multiBarClass: "bg-blue-100/80",
+    barClass: "bg-blue-600 text-white",
   },
   PUBLISHING: {
     label: "하판 마감",
@@ -96,6 +143,24 @@ const CATEGORY_META: Record<
     barClass: "bg-pink-400 text-white",
   },
 };
+
+function classifyGoogleEvent(ev: HqCalendarEventItem): GoogleSubType {
+  const t = ev.title || "";
+  if (/(연차|반반차|반차)/.test(t)) return "LEAVE";
+  if (/특강/.test(t)) return "LECTURE";
+  // 기간형 공구 일정은 '공구' 우선, 단 하루짜리 '공구 미팅/회의'는 미팅으로 분류
+  if (ev.isMultiDay && /(공구|공동구매)/.test(t)) return "GROUP_BUY";
+  if (/(미팅|회의)/.test(t)) return "MEETING";
+  if (/(공구|공동구매)/.test(t)) return "GROUP_BUY";
+  return "GENERAL";
+}
+
+function getEventVisualMeta(ev: HqCalendarEventItem): EventVisualMeta {
+  if (ev.category === "GOOGLE") {
+    return GOOGLE_SUBTYPE_META[classifyGoogleEvent(ev)];
+  }
+  return CATEGORY_META[ev.category];
+}
 
 function toLocalYmd(d: Date): string {
   const y = d.getFullYear();
@@ -125,6 +190,10 @@ export default function HqCalendarSidebar() {
   const [calendarMonth, setCalendarMonth] = useState<Date>(() => new Date());
   const [selectedYmd, setSelectedYmd] = useState<string | null>(null);
   const [filterTab, setFilterTab] = useState<FilterTab>("ALL");
+  const [googleSubFilter, setGoogleSubFilter] = useState<GoogleSubType | null>(
+    null
+  );
+  const [visibleCount, setVisibleCount] = useState<number>(AGENDA_STEP_COUNT);
 
   const [events, setEvents] = useState<HqCalendarEventItem[]>([]);
   const [googleStatus, setGoogleStatus] = useState<GoogleStatusInfo>({
@@ -208,24 +277,40 @@ export default function HqCalendarSidebar() {
   }, [events]);
 
   const filteredEvents = useMemo(() => {
-    if (filterTab === "ALL") return events;
+    let base = events;
     if (filterTab === "GOOGLE") {
-      return events.filter((e) => e.category === "GOOGLE");
-    }
-    if (filterTab === "LEAVE_WORK") {
-      return events.filter(
-        (e) => e.category === "LEAVE" || e.category === "REMOTE"
+      base = events.filter((e) => e.category === "GOOGLE");
+    } else if (filterTab === "LEAVE_WORK") {
+      base = events.filter(
+        (e) =>
+          e.category === "LEAVE" ||
+          e.category === "REMOTE" ||
+          (e.category === "GOOGLE" && classifyGoogleEvent(e) === "LEAVE")
+      );
+    } else if (filterTab === "PUB_MEETING") {
+      base = events.filter(
+        (e) =>
+          e.category === "PUBLISHING" ||
+          e.category === "MEETING" ||
+          (e.category === "GOOGLE" && classifyGoogleEvent(e) === "MEETING")
+      );
+    } else if (filterTab === "HOLIDAY_BDAY") {
+      base = events.filter(
+        (e) => e.category === "HOLIDAY" || e.category === "BIRTHDAY"
       );
     }
-    if (filterTab === "PUB_MEETING") {
-      return events.filter(
-        (e) => e.category === "PUBLISHING" || e.category === "MEETING"
+
+    if (
+      googleSubFilter &&
+      (filterTab === "ALL" || filterTab === "GOOGLE")
+    ) {
+      return base.filter(
+        (e) =>
+          e.category === "GOOGLE" && classifyGoogleEvent(e) === googleSubFilter
       );
     }
-    return events.filter(
-      (e) => e.category === "HOLIDAY" || e.category === "BIRTHDAY"
-    );
-  }, [events, filterTab]);
+    return base;
+  }, [events, filterTab, googleSubFilter]);
 
   const agendaList = useMemo(() => {
     if (selectedYmd) {
@@ -238,6 +323,17 @@ export default function HqCalendarSidebar() {
       (ev) => ev.endDate >= todayYmd && ev.startDate <= maxFutureYmd
     );
   }, [filteredEvents, selectedYmd, todayYmd]);
+
+  // 날짜/필터/월 변경 시 기본 8개 노출 상태로 리셋
+  useEffect(() => {
+    setVisibleCount(AGENDA_STEP_COUNT);
+  }, [selectedYmd, filterTab, googleSubFilter, viewedYear, viewedMonth]);
+
+  const visibleAgendaList = useMemo(
+    () => agendaList.slice(0, visibleCount),
+    [agendaList, visibleCount]
+  );
+  const remainingAgendaCount = Math.max(0, agendaList.length - visibleCount);
 
   const openQuickAdd = () => {
     const baseDate = selectedYmd || todayYmd;
@@ -295,18 +391,20 @@ export default function HqCalendarSidebar() {
 
   return (
     <>
-      <aside className="mx-4 sm:mx-6 mb-6 xl:mx-0 xl:mb-0 xl:w-[344px] shrink-0 bg-white rounded-2xl xl:rounded-none border border-slate-200 xl:border-y-0 xl:border-r-0 xl:border-l shadow-xs xl:shadow-none flex flex-col xl:self-stretch overflow-hidden print:hidden">
+      <aside className="mx-4 sm:mx-6 mb-6 xl:mx-0 xl:mb-0 xl:w-[516px] shrink-0 bg-white rounded-2xl xl:rounded-none border border-slate-200 xl:border-y-0 xl:border-r-0 xl:border-l shadow-xs xl:shadow-none flex flex-col xl:self-stretch overflow-hidden xl:min-h-0 print:hidden">
+        {/* 상단 캘린더 영역 (타이틀~월간 달력): xl 이상에서 고정 영역 */}
+        <div className="flex flex-col shrink-0 bg-white">
         {/* 상단 타이틀 & 구글 연동 배지 */}
-        <div className="px-4 py-3.5 border-b border-slate-200 bg-slate-50/70 flex items-center justify-between gap-2 shrink-0">
+        <div className="px-5 py-4 border-b border-slate-200 bg-slate-50/70 flex items-center justify-between gap-3 shrink-0">
           <div className="min-w-0">
-            <div className="flex items-center gap-1.5">
-              <span className="text-sm font-extrabold text-slate-900">
+            <div className="flex items-center gap-2">
+              <span className="text-base font-extrabold text-slate-900">
                 📅 본부 통합 캘린더
               </span>
               {googleStatus.connected ? (
                 <span
                   title={googleStatus.calendarTitle}
-                  className="px-1.5 py-0.5 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-700 text-[10px] font-extrabold"
+                  className="px-2 py-0.5 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-700 text-[11px] font-extrabold"
                 >
                   Google 연동
                 </span>
@@ -314,14 +412,14 @@ export default function HqCalendarSidebar() {
                 <button
                   type="button"
                   onClick={() => openSettingsModal("integration")}
-                  className="px-1.5 py-0.5 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-600 text-[10px] font-bold"
+                  className="px-2 py-0.5 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-600 text-[11px] font-bold"
                   title="Google 캘린더 연결 설정 열기"
                 >
                   ⚙️ 연결 설정
                 </button>
               ) : null}
             </div>
-            <p className="text-[11px] text-slate-500 mt-0.5 truncate">
+            <p className="text-xs text-slate-500 mt-0.5 truncate">
               구글 일정 · 휴가/재택 · 하판 마감 · 미팅
             </p>
           </div>
@@ -329,23 +427,23 @@ export default function HqCalendarSidebar() {
           <button
             type="button"
             onClick={openQuickAdd}
-            className="px-2.5 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-[11px] font-extrabold shrink-0 transition-colors"
+            className="px-3.5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-extrabold shrink-0 transition-colors"
           >
             + 일정
           </button>
         </div>
 
         {/* 월 이동 네비게이션 */}
-        <div className="px-4 py-2.5 border-b border-slate-100 flex items-center justify-between bg-white shrink-0">
-          <h3 className="text-sm font-extrabold text-slate-800 tracking-tight">
+        <div className="px-5 py-3 border-b border-slate-100 flex items-center justify-between bg-white shrink-0">
+          <h3 className="text-base font-extrabold text-slate-800 tracking-tight">
             {viewedYear}년 {viewedMonth}월
           </h3>
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-1.5">
             <button
               type="button"
               onClick={loadCalendar}
               title="일정 동기화 새로고침"
-              className="w-6 h-6 flex items-center justify-center rounded-lg border border-blue-200 bg-blue-50 hover:bg-blue-100 text-blue-600 text-xs font-bold transition-colors"
+              className="w-7 h-7 flex items-center justify-center rounded-lg border border-blue-200 bg-blue-50 hover:bg-blue-100 text-blue-600 text-xs font-bold transition-colors"
             >
               <span className={loading ? "animate-spin inline-block" : ""}>
                 🔄
@@ -356,7 +454,7 @@ export default function HqCalendarSidebar() {
               onClick={() =>
                 setCalendarMonth(new Date(viewedYear, viewedMonth - 2, 1))
               }
-              className="w-6 h-6 flex items-center justify-center rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-600 text-[11px] font-bold"
+              className="w-7 h-7 flex items-center justify-center rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-600 text-xs font-bold"
             >
               ◀
             </button>
@@ -366,7 +464,7 @@ export default function HqCalendarSidebar() {
                 setCalendarMonth(new Date());
                 setSelectedYmd(null);
               }}
-              className="px-2 py-0.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-[11px] font-bold text-slate-700"
+              className="px-2.5 py-1 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-xs font-bold text-slate-700"
             >
               오늘
             </button>
@@ -375,51 +473,96 @@ export default function HqCalendarSidebar() {
               onClick={() =>
                 setCalendarMonth(new Date(viewedYear, viewedMonth, 1))
               }
-              className="w-6 h-6 flex items-center justify-center rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-600 text-[11px] font-bold"
+              className="w-7 h-7 flex items-center justify-center rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-600 text-xs font-bold"
             >
               ▶
             </button>
           </div>
         </div>
 
-        {/* 카테고리 빠른 필터 */}
-        <div className="px-3 py-2 border-b border-slate-100 flex items-center gap-1 overflow-x-auto bg-white shrink-0 no-scrollbar">
-          {(
-            [
-              { id: "ALL", label: "전체" },
-              { id: "GOOGLE", label: "📆 구글" },
-              { id: "LEAVE_WORK", label: "🌴 휴가·유연" },
-              { id: "PUB_MEETING", label: "📚 하판·미팅" },
-              { id: "HOLIDAY_BDAY", label: "🎌 휴일·생일" },
-            ] as { id: FilterTab; label: string }[]
-          ).map((t) => (
-            <button
-              key={t.id}
-              type="button"
-              onClick={() => setFilterTab(t.id)}
-              className={`px-2 py-1 rounded-lg text-[11px] font-bold whitespace-nowrap transition-colors ${
-                filterTab === t.id
-                  ? "bg-slate-900 text-white"
-                  : "bg-slate-100 text-slate-600 hover:bg-slate-200"
-              }`}
-            >
-              {t.label}
-            </button>
-          ))}
+        {/* 카테고리 빠른 필터 (가로 스크롤바 없이 한 줄/줄바꿈 정돈) */}
+        <div className="px-4 py-2.5 border-b border-slate-100 flex flex-col gap-2 bg-white shrink-0">
+          <div className="flex flex-wrap items-center gap-1.5">
+            {(
+              [
+                { id: "ALL", label: "전체" },
+                { id: "GOOGLE", label: "📆 구글" },
+                { id: "LEAVE_WORK", label: "🌴 휴가·유연" },
+                { id: "PUB_MEETING", label: "📚 하판·미팅" },
+                { id: "HOLIDAY_BDAY", label: "🎌 휴일·생일" },
+              ] as { id: FilterTab; label: string }[]
+            ).map((t) => (
+              <button
+                key={t.id}
+                type="button"
+                onClick={() => {
+                  setFilterTab(t.id);
+                  if (t.id !== "ALL" && t.id !== "GOOGLE") {
+                    setGoogleSubFilter(null);
+                  }
+                }}
+                className={`px-2.5 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap transition-colors ${
+                  filterTab === t.id
+                    ? "bg-slate-900 text-white shadow-2xs"
+                    : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                }`}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
+
+          {/* 구글 일정 세부 색상 범례 (클릭 시 해당 유형만 필터링 가능) */}
+          {(filterTab === "ALL" || filterTab === "GOOGLE") && (
+            <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
+              {(
+                [
+                  "MEETING",
+                  "LECTURE",
+                  "LEAVE",
+                  "GROUP_BUY",
+                  "GENERAL",
+                ] as GoogleSubType[]
+              ).map((sub) => {
+                const sm = GOOGLE_SUBTYPE_META[sub];
+                const active = googleSubFilter === sub;
+                return (
+                  <button
+                    key={sub}
+                    type="button"
+                    onClick={() =>
+                      setGoogleSubFilter((prev) => (prev === sub ? null : sub))
+                    }
+                    title={`클릭하여 '${sm.shortLabel}' 일정만 보기 / 해제`}
+                    className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md border text-[11px] font-bold transition-all ${
+                      active
+                        ? `${sm.badgeClass} ring-1 ring-slate-900/20 shadow-2xs`
+                        : "bg-slate-50/80 border-slate-200/80 text-slate-600 hover:bg-slate-100"
+                    }`}
+                  >
+                    <span
+                      className={`w-2.5 h-2.5 rounded-[3px] shrink-0 ${sm.dotClass}`}
+                    />
+                    <span>{sm.shortLabel}</span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
         </div>
 
-        {/* 월간 달력 그리드 (구글 캘린더처럼 한 날짜 칸에 여러 줄 일정 막대 표시) */}
-        <div className="px-2 pt-2 pb-2.5 border-b border-slate-100 bg-white shrink-0 select-none">
-          <div className="grid grid-cols-7 mb-1">
+        {/* 월간 달력 그리드 (기존 대비 1.5배 확대 + 세로 구분선으로 가독성 강화) */}
+        <div className="border-b border-slate-200 bg-white shrink-0 select-none">
+          <div className="grid grid-cols-7 border-b border-slate-100 bg-slate-50/50">
             {["일", "월", "화", "수", "목", "금", "토"].map((dow, idx) => (
               <div
                 key={dow}
-                className={`text-center text-[11px] font-extrabold ${
+                className={`py-2 text-center text-xs font-extrabold border-r border-slate-100 last:border-r-0 ${
                   idx === 0
                     ? "text-rose-500"
                     : idx === 6
                       ? "text-blue-600"
-                      : "text-slate-400"
+                      : "text-slate-500"
                 }`}
               >
                 {dow}
@@ -519,8 +662,12 @@ export default function HqCalendarSidebar() {
                   const usedLanes = Math.min(CALENDAR_MAX_LANES, lanes.length);
                   const hasOverflow = overflowByCol.some((n) => n > 0);
                   const laneAreaPx = usedLanes * CALENDAR_LANE_PX;
-                  const rowHeightPx =
-                    CALENDAR_DAYNUM_PX + laneAreaPx + (hasOverflow ? 12 : 4);
+                  const rowHeightPx = Math.max(
+                    CALENDAR_MIN_ROW_PX,
+                    CALENDAR_DAYNUM_PX +
+                      laneAreaPx +
+                      (hasOverflow ? CALENDAR_OVERFLOW_PX : 6)
+                  );
 
                   return (
                     <div
@@ -528,7 +675,7 @@ export default function HqCalendarSidebar() {
                       className="relative"
                       style={{ height: `${rowHeightPx}px` }}
                     >
-                      {/* 날짜 셀 (클릭 영역) */}
+                      {/* 날짜 셀 (클릭 영역 + 세로 격자선) */}
                       <div className="absolute inset-0 grid grid-cols-7">
                         {wd.map((ymd, idx) => {
                           const inMonth = ymd.slice(0, 7) === monthPrefix;
@@ -551,17 +698,17 @@ export default function HqCalendarSidebar() {
                               onClick={() =>
                                 setSelectedYmd((prev) => (prev === ymd ? null : ymd))
                               }
-                              className={`relative flex flex-col items-center pt-0.5 rounded-md hover:bg-slate-100/80 transition-colors ${
-                                isSelected ? "bg-slate-100/70" : ""
-                              } ${inMonth ? "" : "opacity-40"}`}
+                              className={`relative flex flex-col items-center pt-1.5 border-r border-slate-100 last:border-r-0 hover:bg-slate-50/90 transition-colors ${
+                                isSelected ? "bg-blue-50/50 ring-1 ring-inset ring-brand/25" : ""
+                              } ${inMonth ? "" : "bg-slate-50/40 opacity-45"}`}
                             >
                               <span
-                                className={`text-[11px] w-5 h-5 flex items-center justify-center rounded-full ${numColor}`}
+                                className={`text-[13px] w-6 h-6 flex items-center justify-center rounded-full ${numColor}`}
                               >
                                 {Number(ymd.slice(8, 10))}
                               </span>
                               {overflowByCol[idx] > 0 && (
-                                <span className="absolute bottom-0 inset-x-0 text-center text-[9px] font-extrabold text-slate-500 leading-[11px]">
+                                <span className="absolute bottom-1 inset-x-0 text-center text-[11px] font-extrabold text-slate-500 leading-[14px]">
                                   +{overflowByCol[idx]}
                                 </span>
                               )}
@@ -582,6 +729,7 @@ export default function HqCalendarSidebar() {
                           {placed.map(({ ev, colStart, colEnd, lane }) => {
                             const roundL = ev.startDate >= weekStart;
                             const roundR = ev.endDate <= weekEnd;
+                            const vMeta = getEventVisualMeta(ev);
                             return (
                               <div
                                 key={`${ev.id}-${weekStart}`}
@@ -590,11 +738,11 @@ export default function HqCalendarSidebar() {
                                   gridColumn: `${colStart + 1} / ${colEnd + 2}`,
                                   gridRow: `${lane + 1}`,
                                 }}
-                                className={`h-[12px] self-center px-1 text-[9px] leading-[12px] font-bold truncate ${
-                                  CATEGORY_META[ev.category].barClass
+                                className={`h-[18px] self-center px-1.5 text-[11px] leading-[18px] font-bold truncate shadow-[0_1px_1px_rgba(15,23,42,0.06)] ${
+                                  vMeta.barClass
                                 } ${ev.statusLabel ? "opacity-60" : ""} ${
-                                  roundL ? "rounded-l-[3px] ml-[2px]" : ""
-                                } ${roundR ? "rounded-r-[3px] mr-[2px]" : ""}`}
+                                  roundL ? "rounded-l-[4px] ml-[3px]" : ""
+                                } ${roundR ? "rounded-r-[4px] mr-[3px]" : ""}`}
                               >
                                 {ev.title}
                               </div>
@@ -609,11 +757,12 @@ export default function HqCalendarSidebar() {
             );
           })()}
         </div>
+        </div>
 
-        {/* 하단 일정 타임라인 목록 (스크롤 없이 8개까지 표시) */}
-        <div className="flex-1 flex flex-col bg-slate-50/50 p-3.5">
-          <div className="flex items-center justify-between mb-2.5 shrink-0">
-            <h4 className="text-xs font-extrabold text-slate-800">
+        {/* 하단 일정 타임라인 목록 (내부 스크롤바 없이 기본 8개 전체 노출 + 더보기 지원) */}
+        <div className="flex-1 flex flex-col bg-slate-50/60 p-4 xl:min-h-0 xl:overflow-y-auto custom-scroll">
+          <div className="flex items-center justify-between mb-3 shrink-0">
+            <h4 className="text-[13px] font-extrabold text-slate-800">
               {selectedYmd
                 ? `${formatKoreanDateLabel(selectedYmd)} 일정 (${agendaList.length})`
                 : `오늘 · 다가오는 일정 (${agendaList.length})`}
@@ -622,23 +771,14 @@ export default function HqCalendarSidebar() {
               <button
                 type="button"
                 onClick={() => setSelectedYmd(null)}
-                className="text-[11px] font-bold text-brand hover:underline"
+                className="text-xs font-bold text-brand hover:underline"
               >
                 전체 다가오는 일정
               </button>
             )}
           </div>
 
-          <div
-            className="overflow-y-auto custom-scroll pr-0.5 flex flex-col"
-            style={{
-              gap: `${AGENDA_GAP_PX}px`,
-              maxHeight: `${
-                AGENDA_ITEM_PX * AGENDA_VISIBLE_COUNT +
-                AGENDA_GAP_PX * (AGENDA_VISIBLE_COUNT - 1)
-              }px`,
-            }}
-          >
+          <div className="flex flex-col gap-2">
             {loading && events.length === 0 ? (
               <div className="py-10 text-center text-xs font-bold text-slate-400">
                 캘린더 일정을 불러오는 중입니다...
@@ -653,71 +793,110 @@ export default function HqCalendarSidebar() {
                 </p>
               </div>
             ) : (
-              agendaList.map((ev) => {
-                const meta = CATEGORY_META[ev.category];
-                const clickable = Boolean(
-                  ev.externalUrl || (ev.linkPath && canAccessMenu(ev.linkPath))
-                );
-                const isTodayItem =
-                  ev.startDate <= todayYmd && ev.endDate >= todayYmd;
+              <>
+                {visibleAgendaList.map((ev) => {
+                  const meta = getEventVisualMeta(ev);
+                  const clickable = Boolean(
+                    ev.externalUrl || (ev.linkPath && canAccessMenu(ev.linkPath))
+                  );
+                  const isTodayItem =
+                    ev.startDate <= todayYmd && ev.endDate >= todayYmd;
 
-                return (
-                  <div
-                    key={ev.id}
-                    onClick={() => clickable && handleItemClick(ev)}
-                    style={{ height: `${AGENDA_ITEM_PX}px` }}
-                    className={`shrink-0 rounded-xl bg-white border px-3 py-2.5 overflow-hidden transition-all ${
-                      isTodayItem
-                        ? "border-brand/35 shadow-xs"
-                        : "border-slate-200/90"
-                    } ${
-                      clickable
-                        ? "cursor-pointer hover:border-brand/50 hover:bg-slate-50/70"
-                        : ""
-                    }`}
-                  >
-                    <div className="flex items-center justify-between gap-1.5 mb-[3px]">
-                      <div className="flex items-center gap-1 min-w-0">
-                        <span
-                          className={`px-1.5 py-0.5 rounded border text-[10px] leading-[12px] font-extrabold shrink-0 ${meta.badgeClass}`}
-                        >
-                          {meta.icon} {meta.label}
+                  return (
+                    <div
+                      key={ev.id}
+                      onClick={() => clickable && handleItemClick(ev)}
+                      className={`shrink-0 rounded-xl bg-white border px-3.5 py-3 transition-all ${
+                        isTodayItem
+                          ? "border-brand/35 shadow-xs"
+                          : "border-slate-200/90"
+                      } ${
+                        clickable
+                          ? "cursor-pointer hover:border-brand/50 hover:bg-slate-50/70"
+                          : ""
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-2 mb-1">
+                        <div className="flex items-center gap-1.5 min-w-0">
+                          <span
+                            className={`px-2 py-0.5 rounded-md border text-[11px] leading-[14px] font-extrabold shrink-0 ${meta.badgeClass}`}
+                          >
+                            {meta.icon} {meta.label}
+                          </span>
+                          {ev.statusLabel && (
+                            <span className="px-1.5 py-0.5 rounded-md bg-amber-100 text-amber-800 text-[10px] leading-[14px] font-extrabold shrink-0">
+                              {ev.statusLabel}
+                            </span>
+                          )}
+                        </div>
+                        <span className="text-xs font-bold text-slate-500 shrink-0">
+                          {ev.isMultiDay
+                            ? `${ev.startDate.slice(5).replace("-", ".")}~${ev.endDate
+                                .slice(5)
+                                .replace("-", ".")}`
+                            : formatKoreanDateLabel(ev.startDate)}
                         </span>
-                        {ev.statusLabel && (
-                          <span className="px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 text-[10px] leading-[12px] font-extrabold shrink-0">
-                            {ev.statusLabel}
+                      </div>
+
+                      <div
+                        title={ev.title}
+                        className="text-[13px] leading-5 font-extrabold text-slate-800 truncate"
+                      >
+                        {ev.title}
+                      </div>
+
+                      <div className="mt-0.5 flex items-center justify-between gap-2 text-xs leading-4 text-slate-500">
+                        <span className="truncate">
+                          {ev.subtitle || "-"}
+                        </span>
+                        {ev.timeLabel && (
+                          <span className="font-semibold text-slate-400 shrink-0">
+                            {ev.timeLabel}
                           </span>
                         )}
                       </div>
-                      <span className="text-[11px] font-bold text-slate-500 shrink-0">
-                        {ev.isMultiDay
-                          ? `${ev.startDate.slice(5).replace("-", ".")}~${ev.endDate
-                              .slice(5)
-                              .replace("-", ".")}`
-                          : formatKoreanDateLabel(ev.startDate)}
-                      </span>
                     </div>
+                  );
+                })}
 
-                    <div
-                      title={ev.title}
-                      className="text-xs leading-4 font-extrabold text-slate-800 truncate"
-                    >
-                      {ev.title}
-                    </div>
-
-                    <div className="mt-0.5 flex items-center justify-between gap-2 text-[11px] leading-[15px] text-slate-500">
-                      <span className="truncate">
-                        {ev.subtitle || "-"}
-                      </span>
-                      {ev.timeLabel && (
-                        <span className="font-semibold text-slate-400 shrink-0">
-                          {ev.timeLabel}
-                        </span>
-                      )}
-                    </div>
+                {/* 추가 일정 더보기 / 접기 컨트롤 */}
+                {agendaList.length > AGENDA_STEP_COUNT && (
+                  <div className="pt-1 flex items-center gap-2">
+                    {remainingAgendaCount > 0 ? (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setVisibleCount((prev) => prev + AGENDA_STEP_COUNT)
+                          }
+                          className="flex-1 py-2.5 rounded-xl bg-white hover:bg-slate-100 border border-slate-200 text-xs font-extrabold text-slate-700 transition-colors"
+                        >
+                          ▼ 일정 더보기 (+
+                          {Math.min(AGENDA_STEP_COUNT, remainingAgendaCount)}건 · 남은{" "}
+                          {remainingAgendaCount}건)
+                        </button>
+                        {remainingAgendaCount > AGENDA_STEP_COUNT && (
+                          <button
+                            type="button"
+                            onClick={() => setVisibleCount(agendaList.length)}
+                            className="px-3 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-xs font-bold text-slate-600 transition-colors shrink-0"
+                          >
+                            전체 펼치기
+                          </button>
+                        )}
+                      </>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => setVisibleCount(AGENDA_STEP_COUNT)}
+                        className="w-full py-2.5 rounded-xl bg-white hover:bg-slate-100 border border-slate-200 text-xs font-bold text-slate-600 transition-colors"
+                      >
+                        ▲ 8개만 간단히 보기
+                      </button>
+                    )}
                   </div>
-                );
-              })
+                )}
+              </>
             )}
           </div>
         </div>

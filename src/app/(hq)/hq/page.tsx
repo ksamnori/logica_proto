@@ -376,9 +376,11 @@ export default function HqHomeDashboardPage() {
 
   return (
     <>
-      <div className="flex-1 flex flex-col xl:flex-row min-h-0 w-full break-keep print:hidden">
-        <div className="flex-1 min-w-0 p-4 sm:p-6 space-y-6">
-        {/* 1. 상단 직급·맥락 기반 워크스페이스 브리핑 & 빠른 액션 */}
+      <div className="grow shrink-0 flex flex-col xl:flex-row xl:items-stretch xl:h-full xl:min-h-0 xl:shrink xl:overflow-hidden w-full break-keep print:hidden">
+        {/* 좌측 영역 (xl 이상: 인사 패널 고정 + 하단 콘텐츠 독립 스크롤) */}
+        <div className="flex-1 min-w-0 xl:flex xl:flex-col xl:min-h-0 xl:overflow-hidden">
+        {/* 1. 상단 직급·맥락 기반 워크스페이스 브리핑 & 빠른 액션 (xl 이상: 고정 영역) */}
+        <div className="shrink-0 px-4 sm:px-6 pt-4 sm:pt-6 pb-6">
         <section className="rounded-3xl bg-gradient-to-br from-slate-900 via-slate-800 to-brand text-white p-5 sm:p-7 shadow-lg border border-slate-800">
           <div className="flex flex-col gap-5">
             <div className="space-y-2 min-w-0">
@@ -468,7 +470,7 @@ export default function HqHomeDashboardPage() {
           </div>
 
           {/* 선제적 업무 제안 스트립 */}
-          <div className="mt-5 pt-5 border-t border-white/10 grid grid-cols-1 xl:grid-cols-2 gap-2.5">
+          <div className="mt-5 pt-5 border-t border-white/10 grid grid-cols-1 2xl:grid-cols-2 gap-2.5">
             {proactiveNotices.map((notice) => {
               const badgeStyle =
                 notice.tone === "urgent"
@@ -507,7 +509,10 @@ export default function HqHomeDashboardPage() {
             })}
           </div>
         </section>
+        </div>
 
+        {/* 인사 패널 하단 콘텐츠 (xl 이상: 독립 스크롤 영역) */}
+        <div className="space-y-6 px-4 sm:px-6 pb-4 sm:pb-6 xl:flex-1 xl:min-h-0 xl:overflow-y-auto custom-scroll">
         {/* 2. 핵심 HR · 결재 · 비용 KPI 요약 카드 4종 */}
         <section className="grid grid-cols-1 sm:grid-cols-2 2xl:grid-cols-4 gap-4">
           <div
@@ -782,72 +787,6 @@ export default function HqHomeDashboardPage() {
 
           {/* 우측 5칸: 직급별 결재 단계 규정 & 부서 조직 요약 */}
           <div className="2xl:col-span-5 space-y-5 min-w-0">
-            {/* 직급별 결재 단계 및 자동 전결 기준 안내 */}
-            <div className="bg-white rounded-2xl border border-slate-200 shadow-xs p-5 space-y-4">
-              <div className="flex items-center justify-between">
-                <h3 className="text-sm font-extrabold text-slate-800">
-                  🏛️ 본부 직급 체계 · 결재 전결 기준
-                </h3>
-                <button
-                  type="button"
-                  onClick={() => goHq("/hq/members")}
-                  className="text-xs font-bold text-brand hover:underline"
-                >
-                  구성원 관리 →
-                </button>
-              </div>
-
-              <div className="space-y-2">
-                {[...HQ_RANK_LIST].reverse().map((rk) => {
-                  const count = activeMembers.filter(
-                    (m) => m.rank_code === rk.code
-                  ).length;
-                  return (
-                    <div
-                      key={rk.code}
-                      className="p-3 rounded-xl bg-slate-50 border border-slate-200/80 flex items-center justify-between gap-2"
-                    >
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-2">
-                          <span
-                            className={`px-2 py-0.5 rounded border text-[10px] font-extrabold ${rk.badgeClass}`}
-                          >
-                            Lv.{rk.level} {rk.shortLabel}
-                          </span>
-                          <span className="text-xs font-bold text-slate-700 truncate">
-                            {rk.description}
-                          </span>
-                        </div>
-                      </div>
-                      <span className="text-xs font-extrabold text-slate-700 shrink-0">
-                        {count}명
-                      </span>
-                    </div>
-                  );
-                })}
-              </div>
-
-              <div className="rounded-xl bg-blue-50/70 border border-blue-200/70 p-3.5 text-xs text-slate-700 space-y-1">
-                <div className="font-extrabold text-brand">
-                  ⚡ 자동 전결 워크플로우 규정
-                </div>
-                <p>
-                  • 단기 휴가({AUTO_DELEGATION_RULES.TEAM_LEAD_MAX_LEAVE_DAYS}일 이하) 및 소액 지출·품의(
-                  {(AUTO_DELEGATION_RULES.TEAM_LEAD_MAX_AMOUNT / 10000).toFixed(0)}만원 이하):{" "}
-                  <b>팀장·실장(Lv.3) 전결</b>
-                </p>
-                <p>
-                  • 중액 지출·품의(
-                  {(AUTO_DELEGATION_RULES.DIRECTOR_MAX_AMOUNT / 10000).toFixed(0)}만원 이하):{" "}
-                  <b>본부장·이사(Lv.4) 전결</b>
-                </p>
-                <p>
-                  • 100만원 초과 고액 품의 · 장기 휴가 · 중요 기안:{" "}
-                  <b>대표·소장(Lv.5) 최종 승인</b>
-                </p>
-              </div>
-            </div>
-
             {/* 부서별 재직 인원 & 리더 현황 */}
             <div className="bg-white rounded-2xl border border-slate-200 shadow-xs p-5 space-y-3">
               <div className="flex items-center justify-between">
@@ -925,8 +864,75 @@ export default function HqHomeDashboardPage() {
                 </div>
               )}
             </div>
+
+            {/* 직급별 결재 단계 및 자동 전결 기준 안내 */}
+            <div className="bg-white rounded-2xl border border-slate-200 shadow-xs p-5 space-y-4">
+              <div className="flex items-center justify-between">
+                <h3 className="text-sm font-extrabold text-slate-800">
+                  🏛️ 본부 직급 체계 · 결재 전결 기준
+                </h3>
+                <button
+                  type="button"
+                  onClick={() => goHq("/hq/members")}
+                  className="text-xs font-bold text-brand hover:underline"
+                >
+                  구성원 관리 →
+                </button>
+              </div>
+
+              <div className="space-y-2">
+                {[...HQ_RANK_LIST].reverse().map((rk) => {
+                  const count = activeMembers.filter(
+                    (m) => m.rank_code === rk.code
+                  ).length;
+                  return (
+                    <div
+                      key={rk.code}
+                      className="p-3 rounded-xl bg-slate-50 border border-slate-200/80 flex items-center justify-between gap-2"
+                    >
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span
+                            className={`px-2 py-0.5 rounded border text-[10px] font-extrabold ${rk.badgeClass}`}
+                          >
+                            Lv.{rk.level} {rk.shortLabel}
+                          </span>
+                          <span className="text-xs font-bold text-slate-700 truncate">
+                            {rk.description}
+                          </span>
+                        </div>
+                      </div>
+                      <span className="text-xs font-extrabold text-slate-700 shrink-0">
+                        {count}명
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+
+              <div className="rounded-xl bg-blue-50/70 border border-blue-200/70 p-3.5 text-xs text-slate-700 space-y-1">
+                <div className="font-extrabold text-brand">
+                  ⚡ 자동 전결 워크플로우 규정
+                </div>
+                <p>
+                  • 단기 휴가({AUTO_DELEGATION_RULES.TEAM_LEAD_MAX_LEAVE_DAYS}일 이하) 및 소액 지출·품의(
+                  {(AUTO_DELEGATION_RULES.TEAM_LEAD_MAX_AMOUNT / 10000).toFixed(0)}만원 이하):{" "}
+                  <b>팀장·실장(Lv.3) 전결</b>
+                </p>
+                <p>
+                  • 중액 지출·품의(
+                  {(AUTO_DELEGATION_RULES.DIRECTOR_MAX_AMOUNT / 10000).toFixed(0)}만원 이하):{" "}
+                  <b>본부장·이사(Lv.4) 전결</b>
+                </p>
+                <p>
+                  • 100만원 초과 고액 품의 · 장기 휴가 · 중요 기안:{" "}
+                  <b>대표·소장(Lv.5) 최종 승인</b>
+                </p>
+              </div>
+            </div>
           </div>
         </section>
+        </div>
         </div>
 
         {/* 우측: Google 캘린더 + 본부 통합 일정 사이드바 */}
