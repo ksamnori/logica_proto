@@ -508,6 +508,15 @@ export function HqShellProvider({
     [effectiveIsHqAdmin, myPermissions]
   );
 
+  // 지정 출·퇴근 시각 도래 시 자동 근무 시작·퇴근 상태가 즉시 반영되도록 1분 주기 동기화
+  useEffect(() => {
+    if (!me?.instructor_id) return;
+    const timer = setInterval(() => {
+      refreshAttendanceState();
+    }, 60_000);
+    return () => clearInterval(timer);
+  }, [me?.instructor_id, refreshAttendanceState]);
+
   const openSettingsModal = useCallback(
     (initialTab?: string) => {
       if (onOpenSettings) {

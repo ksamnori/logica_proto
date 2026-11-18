@@ -60,6 +60,16 @@ export function formatHmToKoreanAmPm(hm?: string): string {
 }
 
 export function calcWeeklyWorkHours(rule: HqWorkRuleItem): number {
+  if (rule.per_day_custom_enabled && rule.per_day_schedule) {
+    let totalMin = 0;
+    rule.work_days.forEach((d) => {
+      const sc = rule.per_day_schedule?.[d];
+      const h = sc ? Number(sc.work_hours ?? rule.daily_work_hours ?? 8) : Number(rule.daily_work_hours ?? 8);
+      const m = sc ? Number(sc.work_minutes ?? rule.daily_work_minutes ?? 0) : Number(rule.daily_work_minutes ?? 0);
+      totalMin += h * 60 + m;
+    });
+    return Math.round((totalMin / 60) * 10) / 10;
+  }
   const dayCount = rule.work_days.length;
   const dailyHours =
     Number(rule.daily_work_hours || 0) +
@@ -114,7 +124,12 @@ export function formatWorkRuleSummary(rule: HqWorkRuleItem): string {
   const startText = formatHmToKoreanAmPm(rule.start_time);
   const weekly = calcWeeklyWorkHours(rule);
   const offDays = ALL_WEEKDAYS.filter((d) => !rule.work_days.includes(d));
-  const shortTag = rule.worker_type === "단시간 근로자" ? " 단시간" : "";
+  const shortTag =
+    rule.worker_type === "초단시간 근로자"
+      ? " 초단시간"
+      : rule.worker_type === "단시간 근로자"
+        ? " 단시간"
+        : "";
   const offText = offDays.length > 0 ? offDays.join(", ") : "없음";
   return `출근 시간: ${startText} · 주 ${weekly}시간 근무${shortTag} · 쉬는 날: ${offText}`;
 }
@@ -122,8 +137,13 @@ export function formatWorkRuleSummary(rule: HqWorkRuleItem): string {
 export function patternShortBadge(
   pattern: HqWorkRuleItem["pattern_type"]
 ): string {
-  if (pattern === "시차 출퇴근 유형") return "시차";
-  if (pattern === "선택적 근로시간 유형") return "선택";
+  if (pattern === "시차 출퇴근 유형" || pattern === "시차 근무 유형") {
+    return "시차";
+  }
+  if (pattern === "선택적 근로시간 유형" || pattern === "선택적 근무 유형") {
+    return "선택적";
+  }
+  if (pattern === "교대 근무 유형") return "교대";
   return "고정";
 }
 

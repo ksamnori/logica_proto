@@ -229,6 +229,101 @@ export async function GET(req: NextRequest) {
       stepsByDoc.set(key, list);
     });
 
+    // 자동 진행(D+N) 기한 도래 승인 단계 자동 승인 처리
+    const nowMs = Date.now();
+    const nowIso = new Date(nowMs).toISOString();
+    for (const d of docRes.data || []) {
+      if (d.status !== "PENDING" && d.status !== "IN_PROGRESS") continue;
+      const idStr = String(d.approval_id);
+      const docMeta = metaPayload.docMetaById[idStr];
+      const autoMap = docMeta?.step_auto_proceed;
+      if (!autoMap || typeof autoMap !== "object") continue;
+
+      const docSteps = stepsByDoc.get(idStr) || [];
+      let curOrder = Number(d.current_step_order || 1);
+      const totalSteps = Number(d.total_steps || docSteps.length || 1);
+      let safety = 0;
+
+      while (safety < 10) {
+        safety += 1;
+        const rule = autoMap[String(curOrder)];
+        if (!rule?.enabled) break;
+        const curStep = docSteps.find((s) => s.step_order === curOrder);
+        if (!curStep || curStep.status !== "CURRENT") break;
+
+        const prevStep =
+          curOrder > 1
+            ? docSteps.find((s) => s.step_order === curOrder - 1)
+            : null;
+        const baseTimeStr = prevStep?.acted_at || d.submitted_at;
+        const baseMs = baseTimeStr ? new Date(baseTimeStr).getTime() : NaN;
+        const waitDays = Math.max(1, Number(rule.days || 1));
+        if (Number.isNaN(baseMs) || nowMs < baseMs + waitDays * 86400_000) {
+          break;
+        }
+
+        const autoComment = `자동 진행 설정(D+${waitDays})에 의해 자동 승인됨`;
+        curStep.status = "APPROVED";
+        curStep.comment = autoComment;
+        curStep.acted_at = nowIso;
+
+        if (curStep.step_id) {
+          await supabaseAdmin
+            .from("hq_approval_step")
+            .update({
+              status: "APPROVED",
+              comment: autoComment,
+              acted_at: nowIso,
+            })
+            .eq("step_id", curStep.step_id);
+        }
+
+        if (curOrder >= totalSteps) {
+          d.status = "APPROVED";
+          d.completed_at = nowIso;
+          d.updated_at = nowIso;
+          await supabaseAdmin
+            .from("hq_approval_doc")
+            .update({
+              status: "APPROVED",
+              completed_at: nowIso,
+              updated_at: nowIso,
+            })
+            .eq("approval_id", idStr);
+          await applyPostApprovalSideEffects(
+            supabaseAdmin,
+            d,
+            `${curStep.approver_name} (자동 진행)`
+          );
+          break;
+        } else {
+          const nextOrder = curOrder + 1;
+          const nextStep = docSteps.find((s) => s.step_order === nextOrder);
+          if (nextStep) {
+            nextStep.status = "CURRENT";
+            if (nextStep.step_id) {
+              await supabaseAdmin
+                .from("hq_approval_step")
+                .update({ status: "CURRENT" })
+                .eq("step_id", nextStep.step_id);
+            }
+          }
+          d.status = "IN_PROGRESS";
+          d.current_step_order = nextOrder;
+          d.updated_at = nowIso;
+          await supabaseAdmin
+            .from("hq_approval_doc")
+            .update({
+              status: "IN_PROGRESS",
+              current_step_order: nextOrder,
+              updated_at: nowIso,
+            })
+            .eq("approval_id", idStr);
+          curOrder = nextOrder;
+        }
+      }
+    }
+
     const allDocs: HqApprovalDoc[] = (docRes.data || []).map((d: any) => {
       const idStr = String(d.approval_id);
       return {
@@ -456,6 +551,11 @@ export async function POST(req: NextRequest) {
             rawMeta.field_labels && typeof rawMeta.field_labels === "object"
               ? rawMeta.field_labels
               : {},
+          step_auto_proceed:
+            rawMeta.step_auto_proceed &&
+            typeof rawMeta.step_auto_proceed === "object"
+              ? rawMeta.step_auto_proceed
+              : undefined,
           ref_doc_id: rawMeta.ref_doc_id ? String(rawMeta.ref_doc_id) : null,
           ref_doc_no: rawMeta.ref_doc_no ? String(rawMeta.ref_doc_no) : null,
           ref_doc_title: rawMeta.ref_doc_title ? String(rawMeta.ref_doc_title) : null,

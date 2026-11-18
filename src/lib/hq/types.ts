@@ -596,6 +596,8 @@ export interface HqPolicyAssignee {
 export interface HqPolicyStep {
   step_order: number;
   assignees: HqPolicyAssignee[];
+  auto_proceed_enabled?: boolean;
+  auto_proceed_days?: number;
 }
 
 export interface HqPolicyRequesterRule {
@@ -674,24 +676,57 @@ export interface HqWorkRuleItem {
   is_default?: boolean;
   is_hidden?: boolean;
   // 1) 기본 설정
-  pattern_type: "고정 근무 유형" | "시차 출퇴근 유형" | "선택적 근로시간 유형";
-  worker_type: "통상 근로자" | "단시간 근로자";
-  cycle_start_day: "월요일" | "일요일";
+  pattern_type:
+    | "고정 근무 유형"
+    | "시차 근무 유형"
+    | "시차 출퇴근 유형"
+    | "선택적 근무 유형"
+    | "선택적 근로시간 유형"
+    | "교대 근무 유형";
+  worker_type: "통상 근로자" | "단시간 근로자" | "초단시간 근로자";
+  cycle_start_day:
+    | "월요일"
+    | "화요일"
+    | "수요일"
+    | "목요일"
+    | "금요일"
+    | "토요일"
+    | "일요일";
   work_days: string[]; // ["월", "화", "수", "목", "금"]
   paid_rest_days: string[]; // ["일"]
   start_time: string; // "08:30" | "09:00" | "09:30" | "10:00" 등 24시간 표기
   daily_work_hours: number; // 예: 4 또는 8
   daily_work_minutes: number; // 예: 0 또는 30
+  per_day_custom_enabled?: boolean;
+  per_day_schedule?: Record<
+    string,
+    { start_time: string; work_hours: number; work_minutes: number }
+  >;
   break_start_1?: string; // "12:00" | "13:00"
   break_end_1?: string; // "13:00" | "14:00"
   break_start_2?: string;
   break_end_2?: string;
   custom_leave_day_hours?: boolean;
+  custom_leave_day_hours_val?: number;
+  custom_leave_day_minutes_val?: number;
   leave_include_break_mode:
     | "구성원이 사용 시 선택"
+    | "항상 포함"
+    | "항상 미포함"
+    | "휴가 사용 단위별 설정"
     | "휴게 시간 제외"
     | "휴게 시간 포함";
+  leave_half_include_break?:
+    | "구성원이 사용 시 선택"
+    | "항상 포함"
+    | "항상 미포함";
+  leave_hourly_include_break?:
+    | "구성원이 사용 시 선택"
+    | "항상 포함"
+    | "항상 미포함";
   leave_break_duration: "30분" | "1시간" | "1시간 30분" | "2시간";
+  leave_break_hours?: number;
+  leave_break_minutes?: number;
   // 2) 적용 구성원
   assigned_members: HqWorkRuleAssignedMember[];
   past_assigned_count?: number;
@@ -700,13 +735,49 @@ export interface HqWorkRuleItem {
   overtime_cycle_day: string; // "매월 1일" 등
   overtime_allow_mode:
     | "한도 없이 허용"
+    | "한도 내 허용"
     | "주 12시간 한도 내 허용"
     | "허용 안 함";
+  overtime_cap_monthly_enabled?: boolean;
+  overtime_cap_monthly_hours?: number;
+  overtime_cap_monthly_minutes?: number;
+  overtime_cap_weekly_enabled?: boolean;
+  overtime_cap_weekly_hours?: number;
+  overtime_cap_weekly_minutes?: number;
+  overtime_cap_daily_enabled?: boolean;
+  overtime_cap_daily_hours?: number;
+  overtime_cap_daily_minutes?: number;
   split_within_statutory_overtime: boolean;
-  overtime_input_unit: "제한 안 함" | "10분 단위" | "30분 단위" | "1시간 단위";
-  overtime_min_duration: "제한 안 함" | "30분 이상" | "1시간 이상";
-  night_work_allow_mode: "한도 없이 허용" | "허용 안 함";
-  holiday_work_allow_mode: "한도 없이 허용" | "허용 안 함";
+  overtime_input_unit:
+    | "제한 안 함"
+    | "5분 단위로 입력"
+    | "10분 단위로 입력"
+    | "15분 단위로 입력"
+    | "30분 단위로 입력"
+    | "60분 단위로 입력"
+    | "90분 단위로 입력"
+    | "120분 단위로 입력"
+    | "10분 단위"
+    | "30분 단위"
+    | "1시간 단위";
+  overtime_min_duration:
+    | "제한 안 함"
+    | "5분 이상"
+    | "10분 이상"
+    | "15분 이상"
+    | "30분 이상"
+    | "60분 이상"
+    | "90분 이상"
+    | "120분 이상"
+    | "1시간 이상";
+  night_work_allow_mode: "한도 없이 허용" | "한도 내 허용" | "허용 안 함";
+  night_cap_weekly_enabled?: boolean;
+  night_cap_weekly_hours?: number;
+  night_cap_weekly_minutes?: number;
+  holiday_work_allow_mode: "한도 없이 허용" | "한도 내 허용" | "허용 안 함";
+  holiday_cap_weekly_enabled?: boolean;
+  holiday_cap_weekly_hours?: number;
+  holiday_cap_weekly_minutes?: number;
   // 4) 실시간 근무 기록
   realtime_enabled: boolean;
   grace_minutes: number; // 0 | 5 | 10 | 15 | 30
@@ -1630,6 +1701,7 @@ export interface HqWorkflowDocMeta {
   cc_member_names: string[];
   field_values: Record<string, string>;
   field_labels?: Record<string, string>;
+  step_auto_proceed?: Record<string, { enabled: boolean; days: number }>;
   ref_doc_id?: string | null;
   ref_doc_no?: string | null;
   ref_doc_title?: string | null;

@@ -9,7 +9,9 @@ import React, {
   useState,
 } from "react";
 import { useHqShell } from "@/components/hq/HqShellContext";
-import ApprovalCreateModal from "@/components/hq/approvals/ApprovalCreateModal";
+import HqLeaveRegisterModal, {
+  type LeaveRegisterKind,
+} from "@/components/hq/leaves/HqLeaveRegisterModal";
 import {
   AttendanceEntryModal,
   AttendanceUploadModal,
@@ -57,6 +59,17 @@ interface LeaveApprovalLite {
 }
 
 const WEEKDAY_KO = ["일", "월", "화", "수", "목", "금", "토"] as const;
+const MONDAY_FIRST_KO = ["월", "화", "수", "목", "금", "토", "일"] as const;
+
+const CYCLE_START_DOW_MAP: Record<string, number> = {
+  일요일: 0,
+  월요일: 1,
+  화요일: 2,
+  수요일: 3,
+  목요일: 4,
+  금요일: 5,
+  토요일: 6,
+};
 
 const AVATAR_PALETTE = [
   "#2dd4bf", // 민트 (근식, 시연)
@@ -106,6 +119,15 @@ function getMondayOfYmd(ymd: string): string {
   const dow = dt.getDay();
   const diff = dow === 0 ? -6 : 1 - dow;
   dt.setDate(dt.getDate() + diff);
+  return toYmd(dt);
+}
+
+function getCycleStartOfYmd(ymd: string, cycleStartDay?: string): string {
+  const targetDow = CYCLE_START_DOW_MAP[cycleStartDay || "월요일"] ?? 1;
+  const dt = parseYmdLocal(ymd);
+  const curDow = dt.getDay();
+  const diff = (curDow - targetDow + 7) % 7;
+  dt.setDate(dt.getDate() - diff);
   return toYmd(dt);
 }
 
@@ -213,6 +235,9 @@ export default function HqAttendancePage() {
   const [teamAnchorDate, setTeamAnchorDate] = useState(() => toYmd(new Date()));
   const [deptFilter, setDeptFilter] = useState("ALL");
   const [deptMenuOpen, setDeptMenuOpen] = useState(false);
+  const [teamRuleFilter, setTeamRuleFilter] = useState("ALL");
+  const [teamRuleMenuOpen, setTeamRuleMenuOpen] = useState(false);
+  const [includeLeaveInCycle, setIncludeLeaveInCycle] = useState(true);
   const [teamSearchOpen, setTeamSearchOpen] = useState(false);
   const [teamKeyword, setTeamKeyword] = useState("");
   const [teamStatusFilter, setTeamStatusFilter] =
@@ -248,8 +273,8 @@ export default function HqAttendancePage() {
   const [recurringOpen, setRecurringOpen] = useState(false);
   const [uploadModalOpen, setUploadModalOpen] = useState(false);
   const [leaveModalOpen, setLeaveModalOpen] = useState(false);
-  const [leaveModalPolicyId, setLeaveModalPolicyId] = useState<string | null>(
-    null
+  const [leaveRegisterKind, setLeaveRegisterKind] = useState<LeaveRegisterKind>(
+    { type: "ANNUAL" }
   );
 
   const headerAreaRef = useRef<HTMLDivElement | null>(null);
@@ -270,6 +295,7 @@ export default function HqAttendancePage() {
         setAddMenuOpen(false);
         setRecordMgmtOpen(false);
         setDeptMenuOpen(false);
+        setTeamRuleMenuOpen(false);
       }
     };
     document.addEventListener("mousedown", onDocClick);
@@ -364,6 +390,13 @@ export default function HqAttendancePage() {
       if (myPeriodMode === "MONTH") {
         return getMonthRangeOfYmd(myAnchorDate);
       }
+      if (myPeriodMode === "CYCLE") {
+        const cycStart = getCycleStartOfYmd(
+          myAnchorDate,
+          myRule.cycle_start_day
+        );
+        return { start: cycStart, end: addDaysYmd(cycStart, 6) };
+      }
       const mon = getMondayOfYmd(myAnchorDate);
       return { start: mon, end: addDaysYmd(mon, 6) };
     }
@@ -373,9 +406,29 @@ export default function HqAttendancePage() {
     if (teamPeriodMode === "MONTH") {
       return getMonthRangeOfYmd(teamAnchorDate);
     }
+    if (teamPeriodMode === "CYCLE") {
+      const targetRule =
+        teamRuleFilter !== "ALL"
+          ? workRules.find((r) => r.id === teamRuleFilter)
+          : undefined;
+      const cycStart = getCycleStartOfYmd(
+        teamAnchorDate,
+        targetRule?.cycle_start_day || "월요일"
+      );
+      return { start: cycStart, end: addDaysYmd(cycStart, 6) };
+    }
     const mon = getMondayOfYmd(teamAnchorDate);
     return { start: mon, end: addDaysYmd(mon, 6) };
-  }, [mainTab, myPeriodMode, myAnchorDate, teamPeriodMode, teamAnchorDate]);
+  }, [
+    mainTab,
+    myPeriodMode,
+    myAnchorDate,
+    myRule.cycle_start_day,
+    teamPeriodMode,
+    teamAnchorDate,
+    teamRuleFilter,
+    workRules,
+  ]);
 
   const loadAttendance = useCallback(async () => {
     setLoading(true);
@@ -750,6 +803,13 @@ export default function HqAttendancePage() {
 
     return activeMembers.filter((m) => {
       if (deptFilter !== "ALL" && m.department !== deptFilter) return false;
+      if (teamPeriodMode === "CYCLE" && teamRuleFilter !== "ALL") {
+        const mRule = resolveMemberWorkRule(
+          m.name,
+          m.profile_extra?.work_schedule_type
+        );
+        if (mRule.id !== teamRuleFilter) return false;
+      }
       if (teamKeyword.trim()) {
         const q = teamKeyword.trim().toLowerCase();
         if (
@@ -795,6 +855,8 @@ export default function HqAttendancePage() {
   }, [
     activeMembers,
     deptFilter,
+    teamRuleFilter,
+    resolveMemberWorkRule,
     teamKeyword,
     teamStatusFilter,
     teamPeriodMode,
@@ -804,7 +866,7 @@ export default function HqAttendancePage() {
     leaveApprovalByMemberDate,
   ]);
 
-  // 24시간 타임라인 행 블록 렌더링 헬퍼 (내 근무 & 구성원 일간 공통)
+  // 24시간 타임라인 행 블록 렌더링 헬퍼 (내 근무[주기] & 구성원[일] 공통 — Flex 104833 & 104619 100% 재현)
   const render24hBarForMemberDate = (member: HqMember, ymd: string) => {
     const rec = recordByMemberDate.get(`${member.instructor_id}__${ymd}`);
     const lvDoc = leaveApprovalByMemberDate.get(`${member.instructor_id}__${ymd}`);
@@ -816,33 +878,48 @@ export default function HqAttendancePage() {
     const holiday = holidayMap.get(ymd);
     const isScheduledWorkday = rule.work_days.includes(dowKo) && !holiday;
 
-    const ruleStartMin = parseHmToMinutes(rule.start_time) ?? 540;
+    const dayCustom =
+      rule.per_day_custom_enabled && rule.per_day_schedule?.[dowKo]
+        ? rule.per_day_schedule[dowKo]
+        : null;
+    const ruleStartMin =
+      parseHmToMinutes(dayCustom?.start_time || rule.start_time) ?? 540;
     const ruleWorkMin =
-      Number(rule.daily_work_hours || 8) * 60 +
-      Number(rule.daily_work_minutes || 0);
+      Number(dayCustom ? dayCustom.work_hours : rule.daily_work_hours ?? 8) *
+        60 +
+      Number(dayCustom ? dayCustom.work_minutes : rule.daily_work_minutes ?? 0);
     const b1Start = parseHmToMinutes(rule.break_start_1);
     const b1End = parseHmToMinutes(rule.break_end_1);
     const ruleBreakMin = calcBreakMinutes(rule);
     const ruleEndMin = ruleStartMin + ruleWorkMin + ruleBreakMin;
 
-    // 1) 휴가 상태(실제 기록 또는 결재 문서)인 경우
-    if (
-      rec?.work_mode === "LEAVE" ||
+    const leaveLabel = String(
+      lvDoc?.leave_type ||
+        (rec?.work_mode === "LEAVE" ? rec.location_note : "") ||
+        ""
+    );
+    const isHalfAm = leaveLabel.includes("오전 반차");
+    const isHalfPm =
+      leaveLabel.includes("오후 반차") ||
+      ((rec?.status === "HALF_LEAVE" || leaveLabel.includes("반차")) &&
+        !isHalfAm);
+    const isHourlyLeave =
+      leaveLabel.includes("반반차") || leaveLabel.includes("시간차");
+    const hasFullLeave =
+      (rec?.work_mode === "LEAVE" && rec?.status !== "HALF_LEAVE") ||
       rec?.status === "LEAVE" ||
-      rec?.status === "HALF_LEAVE" ||
-      lvDoc
-    ) {
-      const isHalf =
-        rec?.status === "HALF_LEAVE" ||
-        (lvDoc?.leave_type || "").includes("반차");
+      (Boolean(lvDoc) && !isHalfAm && !isHalfPm && !isHourlyLeave);
+
+    // 1) 종일 휴가 상태인 경우
+    if (hasFullLeave) {
       const barStart = ruleStartMin;
-      const barEnd = isHalf ? ruleStartMin + 240 : ruleEndMin;
+      const barEnd = ruleEndMin;
       const leftPct = Math.max(0, (barStart / 1440) * 100);
-      const widthPct = Math.min(100 - leftPct, ((barEnd - barStart) / 1440) * 100);
-      const label =
-        rec?.location_note ||
-        lvDoc?.leave_type ||
-        (isHalf ? "반차" : "연차 휴가");
+      const widthPct = Math.min(
+        100 - leftPct,
+        ((barEnd - barStart) / 1440) * 100
+      );
+      const label = leaveLabel || "연차";
       const isPending = lvDoc && lvDoc.status !== "APPROVED" && !rec;
 
       return (
@@ -851,24 +928,22 @@ export default function HqAttendancePage() {
           className="absolute top-2.5 bottom-4 z-10 group"
         >
           <div
-            className={`h-7 rounded-md border px-2.5 flex items-center justify-between text-[11px] font-extrabold shadow-2xs transition-all ${
+            className={`h-6.5 rounded-[5px] border px-2.5 flex items-center justify-between text-[11px] font-extrabold shadow-2xs transition-all ${
               isPending
-                ? "bg-amber-50/90 border-amber-300 border-dashed text-amber-800"
-                : "bg-emerald-50/95 border-emerald-400 text-emerald-800"
+                ? "bg-purple-50/90 border-purple-400 border-dashed text-purple-800"
+                : "bg-[#8b5cf6] border-[#7c3aed] text-white"
             }`}
           >
             <span className="truncate flex items-center gap-1">
-              <span>🏖️</span>
+              <span>☂</span>
               <span>{label}</span>
               {isPending && (
-                <span className="text-[10px] opacity-80">(승인대기)</span>
+                <span className="text-[10px] opacity-85">(승인대기)</span>
               )}
             </span>
-            <span className="text-[10px] font-bold opacity-80">
-              {isHalf ? "4h" : "8h"}
-            </span>
+            <span className="text-[10px] font-bold opacity-90">8h</span>
           </div>
-          <div className="flex items-center justify-between text-[10px] text-emerald-700 font-semibold mt-0.5 px-0.5">
+          <div className="flex items-center justify-between text-[10px] text-purple-700 font-semibold mt-0.5 px-0.5">
             <span>{formatMinutesToKoreanAmPm(barStart)}</span>
             <span>{formatMinutesToKoreanAmPm(barEnd)}</span>
           </div>
@@ -876,101 +951,129 @@ export default function HqAttendancePage() {
       );
     }
 
-    // 2) 실제 출퇴근/근무 기록이 존재하는 경우 (우리 색깔: 선명한 브랜드 블록 + 실시간 WORKING 표시)
+    // 반차/시간차 병행 블록 준비
+    const halfLeaveOverlay =
+      isHalfAm || isHalfPm ? (
+        <div
+          style={{
+            left: `${
+              ((isHalfAm ? ruleStartMin : ruleEndMin - 240) / 1440) * 100
+            }%`,
+            width: `${(240 / 1440) * 100}%`,
+          }}
+          className="absolute top-2.5 bottom-4 z-15 pointer-events-none"
+        >
+          <div className="h-6.5 rounded-[5px] bg-[#8b5cf6] border border-[#7c3aed] text-white px-2 flex items-center justify-between text-[10.5px] font-extrabold shadow-2xs">
+            <span className="truncate">☂ {isHalfAm ? "오전 반차" : "오후 반차"}</span>
+            <span className="text-[9.5px] opacity-90">4h</span>
+          </div>
+        </div>
+      ) : null;
+
+    // 2) 실제 출퇴근/자동 근무 기록이 존재하는 경우
     if (rec && rec.check_in_at) {
       const actualInMin = isoToMinutesOfDay(rec.check_in_at, ymd) ?? ruleStartMin;
-      const rawOutMin = rec.check_out_at
-        ? isoToMinutesOfDay(rec.check_out_at, ymd)
-        : ymd === todayStr
-        ? Math.max(actualInMin + 30, nowMinutesOfDay)
-        : ruleEndMin;
-      const actualOutMin = Math.max(actualInMin + 25, rawOutMin ?? ruleEndMin);
+      const isCurrentlyWorkingToday =
+        rec.status === "WORKING" && !rec.check_out_at && ymd === todayStr;
+
+      // 오늘 근무중(특히 자동 근무 기록)인 경우 전체 예정 바 틀을 그리되 빨간 현재시각 세로선까지 민트 색상을 채움 (Screenshot 104833 완벽 재현!)
+      const containerEndMin = isCurrentlyWorkingToday
+        ? Math.max(ruleEndMin, nowMinutesOfDay, actualInMin + 60)
+        : Math.max(
+            actualInMin + 25,
+            isoToMinutesOfDay(rec.check_out_at, ymd) ?? ruleEndMin
+          );
 
       const leftPct = Math.max(0, Math.min(96, (actualInMin / 1440) * 100));
       const widthPct = Math.max(
         3,
-        Math.min(100 - leftPct, ((actualOutMin - actualInMin) / 1440) * 100)
+        Math.min(100 - leftPct, ((containerEndMin - actualInMin) / 1440) * 100)
       );
 
-      const palette =
+      const fillRatioPct = isCurrentlyWorkingToday
+        ? Math.max(
+            0,
+            Math.min(
+              100,
+              ((nowMinutesOfDay - actualInMin) /
+                Math.max(1, containerEndMin - actualInMin)) *
+                100
+            )
+          )
+        : 100;
+
+      const isCustomWorkMode =
+        rec.work_mode === "REMOTE" ||
+        rec.work_mode === "OUTSIDE" ||
+        rec.work_mode.startsWith("FLEX_");
+
+      const fillColorClass =
         rec.work_mode === "REMOTE"
-          ? {
-              bar: "bg-teal-500/15 border-teal-500 text-teal-900",
-              icon: "🏠",
-              tag: "원격",
-            }
+          ? "bg-teal-200/80"
           : rec.work_mode === "OUTSIDE"
-          ? {
-              bar: "bg-amber-500/15 border-amber-500 text-amber-950",
-              icon: "🚗",
-              tag: rec.location_note === "출장지" ? "출장" : "외근",
-            }
-          : rec.work_mode.startsWith("FLEX_")
-          ? {
-              bar: "bg-indigo-500/15 border-indigo-500 text-indigo-950",
-              icon: "🌅",
-              tag: "시차",
-            }
-          : {
-              bar: "bg-blue-600/14 border-blue-600 text-slate-900",
-              icon: "💼",
-              tag: "근무",
-            };
+            ? "bg-amber-200/80"
+            : rec.work_mode.startsWith("FLEX_")
+              ? "bg-indigo-200/80"
+              : "bg-[#aef4e8]/90";
+
+      const borderColorClass =
+        rec.work_mode === "REMOTE"
+          ? "border-teal-500 text-teal-900"
+          : rec.work_mode === "OUTSIDE"
+            ? "border-amber-500 text-amber-950"
+            : rec.work_mode.startsWith("FLEX_")
+              ? "border-indigo-500 text-indigo-950"
+              : "border-[#2dd4bf] text-[#0f766e]";
+
+      const modeIcon =
+        rec.work_mode === "REMOTE"
+          ? "🏠"
+          : rec.work_mode === "OUTSIDE"
+            ? "🚗"
+            : rec.work_mode.startsWith("FLEX_")
+              ? "🌅"
+              : "💼";
 
       const hasBreakInside =
         b1Start !== null &&
         b1End !== null &&
         actualInMin < b1Start &&
-        actualOutMin > b1End &&
+        containerEndMin > b1End &&
         (rec.break_minutes ?? 60) > 0;
 
       const breakLeftInBar =
         hasBreakInside && b1Start !== null
-          ? ((b1Start - actualInMin) / (actualOutMin - actualInMin)) * 100
+          ? ((b1Start - actualInMin) / (containerEndMin - actualInMin)) * 100
           : 0;
       const breakWidthInBar =
         hasBreakInside && b1Start !== null && b1End !== null
-          ? ((b1End - b1Start) / (actualOutMin - actualInMin)) * 100
+          ? ((b1End - b1Start) / (containerEndMin - actualInMin)) * 100
           : 0;
 
       return (
         <>
-          {/* 배경에 계획 스케줄 점선 가이드 */}
-          {showPlannedGuide && isScheduledWorkday && (
-            <div
-              style={{
-                left: `${(ruleStartMin / 1440) * 100}%`,
-                width: `${((ruleEndMin - ruleStartMin) / 1440) * 100}%`,
-              }}
-              className="absolute top-3 h-6 rounded-md border border-dashed border-slate-300/80 pointer-events-none"
-            />
-          )}
-
+          {halfLeaveOverlay}
           <div
             style={{ left: `${leftPct}%`, width: `${widthPct}%` }}
             className="absolute top-2.5 bottom-4 z-10"
           >
             <div
-              className={`relative h-6.5 rounded-[5px] border-[1.5px] px-2 flex items-center justify-between overflow-hidden shadow-2xs transition-all hover:brightness-95 ${palette.bar}`}
+              className={`relative h-6.5 rounded-[5px] border px-2 flex items-center justify-between overflow-hidden bg-white transition-all hover:brightness-97 ${borderColorClass}`}
             >
-              <div className="flex items-center gap-1.5 min-w-0 z-10">
-                <span className="text-[11px]">{palette.icon}</span>
-                <span className="text-[11px] font-extrabold truncate">
-                  {palette.tag}
-                  {rec.memo
-                    ? ` · ${rec.memo}`
-                    : rec.location_note
-                    ? ` · ${rec.location_note}`
-                    : ""}
-                </span>
-              </div>
+              {/* 좌측부터 빨간 현재시각 세로선(또는 퇴근시각)까지 채워지는 민트 진행 바 */}
+              <div
+                style={{ width: `${fillRatioPct}%` }}
+                className={`absolute inset-y-0 left-0 pointer-events-none transition-all duration-500 ${fillColorClass}`}
+              />
 
-              {rec.status === "WORKING" && (
-                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-emerald-600 text-white text-[9px] font-extrabold shrink-0 z-10">
-                  <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
-                  근무중
-                </span>
-              )}
+              <div className="flex items-center gap-1.5 min-w-0 z-10">
+                <span className="text-[11px]">{modeIcon}</span>
+                {isCustomWorkMode && (
+                  <span className="text-[11px] font-extrabold truncate">
+                    {ATTENDANCE_MODES[rec.work_mode]?.shortLabel || "근무"}
+                  </span>
+                )}
+              </div>
 
               {hasBreakInside && (
                 <div
@@ -978,76 +1081,81 @@ export default function HqAttendancePage() {
                     left: `${breakLeftInBar}%`,
                     width: `${breakWidthInBar}%`,
                   }}
-                  className="absolute top-0.5 bottom-0.5 rounded-[3px] bg-white/95 border border-slate-300 flex items-center px-1 text-[10px] text-slate-500 pointer-events-none"
+                  className="absolute top-1 bottom-1 rounded-[3px] bg-white/95 border border-slate-200/90 flex items-center px-1.5 text-[10px] text-slate-500 pointer-events-none z-10"
                 >
                   ☕
                 </div>
               )}
             </div>
 
-            <div className="flex items-center justify-between text-[10px] text-slate-500 font-semibold mt-0.5 px-0.5 whitespace-nowrap">
+            <div className="flex items-center justify-between text-[10px] text-slate-500 font-medium mt-0.5 px-0.5 whitespace-nowrap">
               <span>
                 {formatMinutesToKoreanAmPm(actualInMin)}
                 {(rec.break_minutes || 0) > 0 && (
                   <span className="text-slate-400 ml-1">휴게 1건</span>
                 )}
               </span>
-              <span>
-                {rec.status === "WORKING"
-                  ? "현재 근무중"
-                  : formatMinutesToKoreanAmPm(actualOutMin)}
-              </span>
+              <span>{formatMinutesToKoreanAmPm(containerEndMin)}</span>
             </div>
           </div>
         </>
       );
     }
 
-    // 3) 아직 출퇴근 기록이 없는 평일(소정근로일) -> Flex 스타일 민트 윤곽선 예정 근무 바 표시
+    // 3) 아직 출퇴근 기록이 없는 평일(미래 소정근로일 등) -> Flex 스타일 민트 윤곽선 예정 근무 바 표시
     if (isScheduledWorkday && showPlannedGuide) {
-      const leftPct = (ruleStartMin / 1440) * 100;
-      const widthPct = ((ruleEndMin - ruleStartMin) / 1440) * 100;
+      const workBarStart = isHalfAm ? ruleStartMin + 240 + ruleBreakMin : ruleStartMin;
+      const workBarEnd = isHalfPm ? ruleStartMin + 240 : ruleEndMin;
+      const leftPct = (workBarStart / 1440) * 100;
+      const widthPct = ((workBarEnd - workBarStart) / 1440) * 100;
       const hasBreak =
+        !isHalfAm &&
+        !isHalfPm &&
         b1Start !== null &&
         b1End !== null &&
-        b1Start >= ruleStartMin &&
-        b1End <= ruleEndMin;
+        b1Start >= workBarStart &&
+        b1End <= workBarEnd;
       const breakLeftPct =
         hasBreak && b1Start !== null
-          ? ((b1Start - ruleStartMin) / (ruleEndMin - ruleStartMin)) * 100
+          ? ((b1Start - workBarStart) / (workBarEnd - workBarStart)) * 100
           : 44;
       const breakWidthPct =
         hasBreak && b1Start !== null && b1End !== null
-          ? ((b1End - b1Start) / (ruleEndMin - ruleStartMin)) * 100
+          ? ((b1End - b1Start) / (workBarEnd - workBarStart)) * 100
           : 11;
 
       return (
-        <div
-          style={{ left: `${leftPct}%`, width: `${widthPct}%` }}
-          className="absolute top-2.5 bottom-4 z-10"
-        >
-          <div className="relative h-6 rounded-[4px] border border-[#2ec4b6] bg-white/85 hover:bg-teal-50/40 transition-colors flex items-center px-2">
-            <span className="text-[11px] text-[#2ec4b6]">🧳</span>
-            {hasBreak && (
-              <div
-                style={{
-                  left: `${breakLeftPct}%`,
-                  width: `${breakWidthPct}%`,
-                }}
-                className="absolute top-0.5 bottom-0.5 rounded-[3px] border border-slate-200 bg-slate-50/90 flex items-center px-1.5 text-[10px] text-slate-500"
-              >
-                ☕
-              </div>
-            )}
+        <>
+          {halfLeaveOverlay}
+          <div
+            style={{ left: `${leftPct}%`, width: `${widthPct}%` }}
+            className="absolute top-2.5 bottom-4 z-10"
+          >
+            <div className="relative h-6.5 rounded-[5px] border border-[#5eead4] bg-white hover:bg-teal-50/30 transition-colors flex items-center px-2">
+              <span className="text-[11px] text-[#14b8a6]">💼</span>
+              {hasBreak && (
+                <div
+                  style={{
+                    left: `${breakLeftPct}%`,
+                    width: `${breakWidthPct}%`,
+                  }}
+                  className="absolute top-1 bottom-1 rounded-[3px] border border-slate-200 bg-slate-50/90 flex items-center px-1.5 text-[10px] text-slate-500"
+                >
+                  ☕
+                </div>
+              )}
+            </div>
+            <div className="flex items-center justify-between text-[10px] font-medium text-slate-500 mt-0.5 px-0.5 whitespace-nowrap">
+              <span>
+                {formatMinutesToKoreanAmPm(workBarStart)}{" "}
+                {hasBreak && (
+                  <span className="text-slate-400 ml-0.5">휴게 1건</span>
+                )}
+              </span>
+              <span>{formatMinutesToKoreanAmPm(workBarEnd)}</span>
+            </div>
           </div>
-          <div className="flex items-center justify-between text-[10px] font-medium text-slate-500 mt-0.5 px-0.5 whitespace-nowrap">
-            <span>
-              {formatMinutesToKoreanAmPm(ruleStartMin)}{" "}
-              {hasBreak && <span className="text-slate-400 ml-0.5">휴게 1건</span>}
-            </span>
-            <span>{formatMinutesToKoreanAmPm(ruleEndMin)}</span>
-          </div>
-        </div>
+        </>
       );
     }
 
@@ -1064,16 +1172,18 @@ export default function HqAttendancePage() {
     return null;
   };
 
-  // 월간 달력 셀 생성 (내 근무 - 월 뷰)
+  // 월간 달력 셀 생성 (내 근무 - 월 뷰: 월요일 시작 + 인접월 날짜 포함 — Screenshot 104312 동일)
   const myMonthCalendarCells = useMemo(() => {
     const { start, end } = getMonthRangeOfYmd(myAnchorDate);
-    const firstDow = parseYmdLocal(start).getDay(); // 0(일)~6(토)
-    const days = buildDateList(start, end);
-    const cells: (string | null)[] = [];
-    for (let i = 0; i < firstDow; i += 1) cells.push(null);
-    days.forEach((d) => cells.push(d));
-    while (cells.length % 7 !== 0) cells.push(null);
-    return cells;
+    const gridStart = getMondayOfYmd(start);
+    const endDt = parseYmdLocal(end);
+    const endDow = endDt.getDay(); // 0=일
+    const trailingDays = endDow === 0 ? 0 : 7 - endDow;
+    const gridEnd = addDaysYmd(end, trailingDays);
+    return buildDateList(gridStart, gridEnd).map((ymd) => ({
+      ymd,
+      inCurrentMonth: ymd >= start && ymd <= end,
+    }));
   }, [myAnchorDate]);
 
   // 주간 진행률 계산 (소정 40h = 2400m, 상한 52h = 3120m)
@@ -1345,7 +1455,7 @@ export default function HqAttendancePage() {
                         type="button"
                         onClick={() => {
                           setAddMenuOpen(false);
-                          setLeaveModalPolicyId("lv-annual");
+                          setLeaveRegisterKind({ type: "ANNUAL" });
                           setLeaveModalOpen(true);
                         }}
                         className="w-full px-3.5 py-2 text-left hover:bg-slate-50 font-semibold text-slate-800 flex items-center gap-2"
@@ -1359,7 +1469,7 @@ export default function HqAttendancePage() {
                           type="button"
                           onClick={() => {
                             setAddMenuOpen(false);
-                            setLeaveModalPolicyId(lv.policy_id || "lv-annual");
+                            setLeaveRegisterKind({ type: "CUSTOM", item: lv });
                             setLeaveModalOpen(true);
                           }}
                           className="w-full px-3.5 py-2 text-left hover:bg-slate-50 font-semibold text-slate-700 flex items-center gap-2"
@@ -1702,7 +1812,7 @@ export default function HqAttendancePage() {
          ===================================================================== */}
       {mainTab === "MY" && (
         <div className="flex-1 flex flex-col">
-          {/* 날짜 네비게이터 + 우측 40:00 / +12:00 게이지 바 */}
+          {/* 날짜 네비게이터 + 우측 주기/주/월 총시간 프로그레스 게이지 */}
           <div className="px-7 py-4 border-b border-slate-200 flex flex-wrap items-center justify-between gap-4">
             <div className="flex items-center gap-2">
               <div className="inline-flex items-center rounded-lg border border-slate-200 bg-white">
@@ -1714,14 +1824,10 @@ export default function HqAttendancePage() {
                   ‹
                 </button>
                 <span className="px-3 py-1.5 text-xs font-bold text-slate-800 tabular-nums">
-                  {myPeriodMode === "MONTH"
-                    ? `${parseYmdLocal(myAnchorDate).getFullYear()}. ${
-                        parseYmdLocal(myAnchorDate).getMonth() + 1
-                      }`
-                    : formatRangeHeader(
-                        activeQueryRange.start,
-                        activeQueryRange.end
-                      )}
+                  {formatRangeHeader(
+                    activeQueryRange.start,
+                    activeQueryRange.end
+                  )}
                 </span>
                 <button
                   type="button"
@@ -1739,40 +1845,64 @@ export default function HqAttendancePage() {
               >
                 오늘
               </button>
+
+              {myPeriodMode === "CYCLE" && (
+                <span className="hidden md:inline-flex items-center px-2 py-0.5 rounded bg-teal-50 text-teal-700 text-[11px] font-bold">
+                  근무 주기 ({myRule.cycle_start_day} 시작)
+                </span>
+              )}
+              {myPeriodMode === "WEEK" && (
+                <span className="hidden md:inline-flex items-center px-2 py-0.5 rounded bg-slate-100 text-slate-600 text-[11px] font-bold">
+                  주간 세로 타임라인
+                </span>
+              )}
             </div>
 
-            {/* 우측: 40:00 + +12:00 프로그레스 바 (스크린샷 100% + 실기록 배지) */}
-            {myPeriodMode !== "MONTH" && (
-              <div className="flex items-center gap-4">
-                <div className="text-right">
-                  <div className="flex items-baseline gap-2 justify-end">
-                    <span className="text-[22px] font-bold text-slate-700 tabular-nums tracking-tight">
-                      {formatHmColon(myPeriodStats.totalEffectiveMin)}
-                    </span>
-                    {myPeriodStats.totalLoggedMin > 0 && (
-                      <span className="px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 text-[10px] font-extrabold">
-                        실체크 {formatHmColon(myPeriodStats.totalLoggedMin)}
-                      </span>
-                    )}
-                  </div>
-                </div>
+            {/* 우측: 주기/주 (40:00 + ⚑ -12:00) 또는 월 (168:00) 게이지 바 */}
+            <div className="flex items-center gap-4">
+              <div className="text-right">
+                <span className="text-[21px] font-bold text-slate-700 tabular-nums tracking-tight">
+                  {formatHmColon(myPeriodStats.totalEffectiveMin)}
+                </span>
+              </div>
 
+              {myPeriodMode === "MONTH" ? (
+                <div className="w-36 h-2 rounded-full bg-slate-100 overflow-hidden">
+                  <div
+                    style={{
+                      width: `${Math.min(
+                        100,
+                        Math.round(
+                          (myPeriodStats.totalLoggedMin /
+                            Math.max(60, myPeriodStats.totalEffectiveMin)) *
+                            100
+                        )
+                      )}%`,
+                    }}
+                    className="h-full bg-[#4ecdc4] transition-all duration-300"
+                  />
+                </div>
+              ) : (
                 <div className="w-52">
                   <div className="flex items-center justify-end text-[10px] font-bold text-slate-400 mb-1">
-                    <span className="flex items-center gap-0.5">
+                    <span className="flex items-center gap-0.5 tabular-nums">
                       <span>⚑</span>
-                      <span>+12:00</span>
+                      <span>
+                        {myPeriodStats.totalEffectiveMin > 2400
+                          ? `+${formatHmColon(
+                              myPeriodStats.totalEffectiveMin - 2400
+                            )}`
+                          : "-12:00"}
+                      </span>
                     </span>
                   </div>
                   <div className="h-2 rounded-full bg-slate-100 overflow-hidden flex">
-                    {/* 소정 40시간 구간 (76.9%) */}
                     <div className="w-[77%] h-full bg-slate-100 border-r border-white relative overflow-hidden">
                       <div
                         style={{ width: `${regularBarPct}%` }}
                         className="h-full bg-[#4ecdc4] transition-all duration-300"
                       />
                     </div>
-                    {/* 연장 12시간 구간 (23.1%) */}
                     <div className="w-[23%] h-full bg-slate-100 relative overflow-hidden">
                       <div
                         style={{ width: `${overtimeBarPct}%` }}
@@ -1781,59 +1911,22 @@ export default function HqAttendancePage() {
                     </div>
                   </div>
                 </div>
-              </div>
-            )}
+              )}
+            </div>
           </div>
 
           {myPeriodMode === "MONTH" ? (
-            /* 내 근무 > [월] 캘린더 뷰 */
-            <div className="p-7 space-y-4">
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                <div className="p-3.5 rounded-xl border border-slate-200 bg-slate-50/70">
-                  <div className="text-[11px] font-bold text-slate-500">
-                    월간 계획·인정 총시간
-                  </div>
-                  <div className="text-lg font-black text-slate-900 mt-0.5 tabular-nums">
-                    {formatHmColon(myPeriodStats.totalEffectiveMin)}
-                  </div>
-                </div>
-                <div className="p-3.5 rounded-xl border border-blue-200 bg-blue-50/40">
-                  <div className="text-[11px] font-bold text-blue-700">
-                    실제 체크인 누적시간
-                  </div>
-                  <div className="text-lg font-black text-blue-900 mt-0.5 tabular-nums">
-                    {formatHmColon(myPeriodStats.totalLoggedMin)}
-                  </div>
-                </div>
-                <div className="p-3.5 rounded-xl border border-amber-200 bg-amber-50/40">
-                  <div className="text-[11px] font-bold text-amber-800">
-                    초과 근무 누적시간
-                  </div>
-                  <div className="text-lg font-black text-amber-900 mt-0.5 tabular-nums">
-                    {formatHmColon(myPeriodStats.totalOvertimeMin)}
-                  </div>
-                </div>
-                <div className="p-3.5 rounded-xl border border-emerald-200 bg-emerald-50/40">
-                  <div className="text-[11px] font-bold text-emerald-700">
-                    내 잔여 연차
-                  </div>
-                  <div className="text-lg font-black text-emerald-900 mt-0.5">
-                    {me?.annual_leave_remain ?? 15}일
-                  </div>
-                </div>
-              </div>
-
-              <div className="rounded-2xl border border-slate-200 overflow-hidden">
-                <div className="grid grid-cols-7 bg-slate-50 border-b border-slate-200 text-center text-xs font-bold text-slate-500">
-                  {WEEKDAY_KO.map((w, idx) => (
+            /* ===============================================================
+               내 근무 > [월] 플렉스 월간 캘린더 뷰 (Screenshot 104312 100% 재현)
+               =============================================================== */
+            <div className="flex-1 overflow-x-auto">
+              <div className="min-w-[920px]">
+                <div className="grid grid-cols-7 border-b border-slate-200 bg-white text-xs font-bold text-slate-500">
+                  {MONDAY_FIRST_KO.map((w, idx) => (
                     <div
                       key={w}
-                      className={`py-2.5 ${
-                        idx === 0
-                          ? "text-rose-500"
-                          : idx === 6
-                          ? "text-blue-500"
-                          : ""
+                      className={`px-3.5 py-2.5 ${
+                        idx >= 5 ? "text-[#e85d3f]" : "text-slate-600"
                       }`}
                     >
                       {w}
@@ -1841,87 +1934,579 @@ export default function HqAttendancePage() {
                   ))}
                 </div>
 
-                <div className="grid grid-cols-7 divide-x divide-y divide-slate-200">
-                  {myMonthCalendarCells.map((ymd, idx) => {
-                    if (!ymd) {
-                      return (
-                        <div
-                          key={`empty-${idx}`}
-                          className="min-h-[98px] bg-slate-50/40"
-                        />
-                      );
-                    }
+                <div className="grid grid-cols-7 divide-x divide-y divide-slate-100 border-b border-slate-200">
+                  {myMonthCalendarCells.map(({ ymd, inCurrentMonth }) => {
                     const d = parseYmdLocal(ymd);
                     const dow = d.getDay();
+                    const dowKo = WEEKDAY_KO[dow];
                     const rec = me
                       ? recordByMemberDate.get(`${me.instructor_id}__${ymd}`)
                       : undefined;
+                    const lvDoc = me
+                      ? leaveApprovalByMemberDate.get(
+                          `${me.instructor_id}__${ymd}`
+                        )
+                      : undefined;
                     const holiday = holidayMap.get(ymd);
                     const isToday = ymd === todayStr;
+                    const isOff = dow === 0 || dow === 6 || Boolean(holiday);
+                    const isWorkDay =
+                      myRule.work_days.includes(dowKo) && !holiday;
+
+                    const ruleStartMin =
+                      parseHmToMinutes(myRule.start_time) ?? 540;
+                    const ruleWorkMin =
+                      Number(myRule.daily_work_hours || 8) * 60 +
+                      Number(myRule.daily_work_minutes || 0);
+                    const ruleBreakMin = calcBreakMinutes(myRule);
+                    const ruleEndMin = ruleStartMin + ruleWorkMin + ruleBreakMin;
+
+                    const dayMin = rec
+                      ? rec.status === "WORKING" && ymd === todayStr
+                        ? ruleWorkMin
+                        : rec.work_mode === "LEAVE" && rec.status === "LEAVE"
+                          ? ruleWorkMin
+                          : Number(rec.worked_minutes || ruleWorkMin)
+                      : isWorkDay
+                        ? ruleWorkMin
+                        : 0;
+
+                    const isPastOrDone =
+                      ymd < todayStr || rec?.status === "DONE";
+                    const hasFullLeave =
+                      (rec?.work_mode === "LEAVE" &&
+                        rec?.status !== "HALF_LEAVE") ||
+                      rec?.status === "LEAVE" ||
+                      (Boolean(lvDoc) &&
+                        !String(lvDoc?.leave_type || "").includes("반차") &&
+                        !String(lvDoc?.leave_type || "").includes("시간차"));
 
                     return (
                       <div
                         key={ymd}
                         onClick={() => openEntryForDate(me, ymd)}
-                        className="min-h-[98px] p-2.5 bg-white hover:bg-slate-50 cursor-pointer transition-colors flex flex-col justify-between"
+                        className={`min-h-[116px] p-3 bg-white hover:bg-slate-50/70 cursor-pointer transition-colors flex flex-col justify-between group ${
+                          inCurrentMonth ? "" : "opacity-55 bg-slate-50/25"
+                        }`}
                       >
                         <div className="flex items-center justify-between">
-                          <span
-                            className={`text-xs font-extrabold ${
-                              isToday
-                                ? "px-1.5 py-0.5 rounded bg-[#ea580c] text-white"
-                                : dow === 0 || holiday
-                                ? "text-rose-500"
-                                : dow === 6
-                                ? "text-blue-500"
-                                : "text-slate-700"
-                            }`}
-                          >
-                            {d.getDate()}
-                          </span>
-                          {holiday && (
-                            <span className="text-[10px] font-bold text-rose-500 truncate max-w-[80px]">
-                              {holiday.name}
-                            </span>
-                          )}
-                        </div>
-
-                        {rec ? (
-                          <div className="mt-1.5 space-y-1">
+                          <div className="flex items-center gap-1.5">
                             <span
-                              className={`inline-block px-1.5 py-0.5 rounded border text-[10px] font-bold ${
-                                ATTENDANCE_MODES[rec.work_mode]?.badgeClass ||
-                                "bg-slate-100 text-slate-700"
+                              className={`text-xs font-extrabold tabular-nums ${
+                                isToday
+                                  ? "w-6 h-6 rounded-md bg-[#ea580c] text-white inline-flex items-center justify-center"
+                                  : isOff
+                                    ? "text-[#e85d3f]"
+                                    : "text-slate-700"
                               }`}
                             >
-                              {ATTENDANCE_MODES[rec.work_mode]?.shortLabel ||
-                                "근무"}
+                              {d.getDate()}
                             </span>
-                            {rec.check_in_at && (
-                              <div className="text-[10px] font-semibold text-slate-600 tabular-nums">
-                                {formatClock24(rec.check_in_at)} ~{" "}
-                                {rec.status === "WORKING"
-                                  ? "근무중"
-                                  : formatClock24(rec.check_out_at)}
-                              </div>
-                            )}
+                            <span
+                              className={`px-1.5 py-0.5 rounded bg-slate-100 text-[10.5px] font-bold tabular-nums ${
+                                dayMin > 0 ? "text-slate-600" : "text-slate-300"
+                              }`}
+                            >
+                              {formatHmColon(dayMin)}
+                            </span>
                           </div>
-                        ) : (
-                          myRule.work_days.includes(WEEKDAY_KO[dow]) &&
-                          !holiday && (
-                            <div className="text-[10px] text-slate-400 font-medium">
-                              예정 {myRule.start_time} (8h)
+
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              openEntryForDate(me, ymd);
+                            }}
+                            className="w-5 h-5 rounded text-slate-300 hover:text-slate-700 hover:bg-slate-100 flex items-center justify-center text-xs font-bold"
+                          >
+                            +
+                          </button>
+                        </div>
+
+                        <div className="mt-2 space-y-1">
+                          {holiday && (
+                            <div className="text-[10.5px] font-bold text-[#e85d3f] truncate">
+                              {holiday.name}
                             </div>
-                          )
-                        )}
+                          )}
+
+                          {hasFullLeave ? (
+                            <div className="px-2 py-1 rounded-md bg-[#8b5cf6] text-white text-[10.5px] font-extrabold flex items-center justify-between">
+                              <span>
+                                ☂ {lvDoc?.leave_type || rec?.location_note || "연차"}
+                              </span>
+                              <span>8h</span>
+                            </div>
+                          ) : isWorkDay || rec ? (
+                            isPastOrDone ? (
+                              <div className="space-y-0.5">
+                                <div className="flex items-center justify-between text-[11px] pl-1.5 border-l-2 border-[#14b8a6]">
+                                  <span className="font-extrabold text-slate-800">
+                                    {rec &&
+                                    rec.work_mode !== "OFFICE" &&
+                                    ATTENDANCE_MODES[rec.work_mode]
+                                      ? ATTENDANCE_MODES[rec.work_mode]
+                                          .shortLabel
+                                      : "근무"}
+                                  </span>
+                                  <span className="text-[10.5px] text-slate-500 tabular-nums">
+                                    {formatMinutesToKoreanAmPm(
+                                      isoToMinutesOfDay(rec?.check_in_at, ymd) ??
+                                        ruleStartMin
+                                    )}{" "}
+                                    -{" "}
+                                    {formatMinutesToKoreanAmPm(
+                                      isoToMinutesOfDay(
+                                        rec?.check_out_at,
+                                        ymd
+                                      ) ?? ruleEndMin
+                                    )}
+                                  </span>
+                                </div>
+                                {ruleBreakMin > 0 && (
+                                  <div className="text-right text-[10px] text-slate-400">
+                                    휴게 1건
+                                  </div>
+                                )}
+                              </div>
+                            ) : (
+                              <div className="space-y-0.5">
+                                <div className="px-2 py-1 rounded-[5px] border border-dashed border-[#4fd1c5] bg-white flex items-center justify-between text-[11px]">
+                                  <span className="font-extrabold text-slate-800 pl-1 border-l-2 border-[#14b8a6]">
+                                    근무
+                                  </span>
+                                  <span className="text-[10px] text-slate-500 tabular-nums">
+                                    {formatMinutesToKoreanAmPm(ruleStartMin)} -{" "}
+                                    {formatMinutesToKoreanAmPm(ruleEndMin)}
+                                  </span>
+                                </div>
+                                {ruleBreakMin > 0 && (
+                                  <div className="text-right text-[10px] text-slate-400">
+                                    휴게 1건
+                                  </div>
+                                )}
+                              </div>
+                            )
+                          ) : null}
+                        </div>
                       </div>
                     );
                   })}
                 </div>
               </div>
             </div>
+          ) : myPeriodMode === "WEEK" ? (
+            /* ===============================================================
+               내 근무 > [주] 주단위 세로 7열 타임라인 뷰 (Screenshot 104346 100% 재현!)
+               =============================================================== */
+            <div className="flex-1 overflow-x-auto">
+              {(() => {
+                const startHour = 6; // 오전 6시 ~ 자정(24시)
+                const endHour = 24;
+                const totalHours = endHour - startHour;
+                const hourHeightPx = Math.round(52 * (zoomPct / 100));
+                const gridTotalPx = totalHours * hourHeightPx;
+                const colCount = myWeekDates.length;
+                const showHorizNow =
+                  showNowLine &&
+                  myWeekDates.includes(todayStr) &&
+                  nowMinutesOfDay >= startHour * 60 &&
+                  nowMinutesOfDay <= endHour * 60;
+                const nowTopPx =
+                  ((nowMinutesOfDay - startHour * 60) / 60) * hourHeightPx;
+
+                return (
+                  <div className="min-w-[960px]">
+                    {/* 상단 고정 요일 7열 헤더 */}
+                    <div className="flex border-b border-slate-200 bg-white sticky top-0 z-30">
+                      <div className="w-16 shrink-0 border-r border-slate-100" />
+                      <div
+                        style={{
+                          gridTemplateColumns: `repeat(${colCount}, minmax(0, 1fr))`,
+                        }}
+                        className="flex-1 grid divide-x divide-slate-100"
+                      >
+                        {myWeekDates.map((ymd) => {
+                          const dt = parseYmdLocal(ymd);
+                          const dow = dt.getDay();
+                          const dowKo = WEEKDAY_KO[dow];
+                          const isToday = ymd === todayStr;
+                          const holiday = holidayMap.get(ymd);
+                          const isOff =
+                            dow === 0 || dow === 6 || Boolean(holiday);
+                          const rec = me
+                            ? recordByMemberDate.get(
+                                `${me.instructor_id}__${ymd}`
+                              )
+                            : undefined;
+                          const isWorkDay =
+                            myRule.work_days.includes(dowKo) && !holiday;
+                          const plannedMin = isWorkDay
+                            ? Number(myRule.daily_work_hours || 8) * 60 +
+                              Number(myRule.daily_work_minutes || 0)
+                            : 0;
+                          const displayMin = rec
+                            ? rec.status === "WORKING" && ymd === todayStr
+                              ? plannedMin
+                              : rec.work_mode === "LEAVE" &&
+                                  rec.status === "LEAVE"
+                                ? plannedMin || 480
+                                : Number(rec.worked_minutes || plannedMin)
+                            : plannedMin;
+
+                          return (
+                            <div
+                              key={ymd}
+                              onClick={() => me && openEntryForDate(me, ymd)}
+                              className="px-3.5 py-2.5 hover:bg-slate-50/70 cursor-pointer transition-colors"
+                            >
+                              <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-1.5">
+                                  <span
+                                    className={`text-xs font-extrabold tabular-nums ${
+                                      isToday
+                                        ? "w-6 h-6 rounded-md bg-[#ea580c] text-white inline-flex items-center justify-center"
+                                        : isOff
+                                          ? "text-[#e85d3f]"
+                                          : "text-slate-800"
+                                    }`}
+                                  >
+                                    {dt.getDate()}
+                                  </span>
+                                  <span
+                                    className={`text-xs font-bold ${
+                                      isOff
+                                        ? "text-[#e85d3f]"
+                                        : "text-slate-600"
+                                    }`}
+                                  >
+                                    {dowKo}
+                                  </span>
+                                </div>
+
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    if (me) openEntryForDate(me, ymd);
+                                  }}
+                                  className="w-5 h-5 rounded text-slate-400 hover:text-slate-800 hover:bg-slate-100 flex items-center justify-center text-xs font-bold"
+                                >
+                                  +
+                                </button>
+                              </div>
+
+                              <div className="mt-1.5">
+                                <span
+                                  className={`inline-block px-2 py-0.5 rounded bg-slate-100 text-[11px] font-bold tabular-nums ${
+                                    displayMin > 0
+                                      ? "text-slate-700"
+                                      : "text-slate-300"
+                                  }`}
+                                >
+                                  {formatHmColon(displayMin)}
+                                </span>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    {/* 본문 세로 시간축(오전 6 ~ 오후 11) + 요일별 세로 근무 카드 */}
+                    <div
+                      style={{ height: `${gridTotalPx}px` }}
+                      className="flex relative"
+                    >
+                      {/* 좌측 시간 라벨 거터 */}
+                      <div className="w-16 shrink-0 border-r border-slate-100 relative bg-white">
+                        {Array.from({ length: totalHours }, (_, idx) => {
+                          const h = startHour + idx;
+                          const label =
+                            h === 12
+                              ? "정오"
+                              : h < 12
+                                ? `오전 ${h}`
+                                : `오후 ${h - 12}`;
+                          return (
+                            <div
+                              key={h}
+                              style={{
+                                top: `${idx * hourHeightPx}px`,
+                                height: `${hourHeightPx}px`,
+                              }}
+                              className="absolute inset-x-0 pr-2.5 flex items-start justify-end"
+                            >
+                              <span className="-translate-y-2 text-[10.5px] font-medium text-slate-400 tabular-nums">
+                                {label}
+                              </span>
+                            </div>
+                          );
+                        })}
+
+                        {showHorizNow && (
+                          <div
+                            style={{ top: `${nowTopPx}px` }}
+                            className="absolute right-1.5 -translate-y-1/2 bg-white px-1 py-0.5 text-[10px] font-extrabold text-[#e85d3f] leading-tight text-right z-30 tabular-nums"
+                          >
+                            {nowKoreanLabel.split(" ").map((part, pIdx) => (
+                              <div key={pIdx}>{part}</div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* 7열 세로 그리드 영역 */}
+                      <div
+                        style={{
+                          gridTemplateColumns: `repeat(${colCount}, minmax(0, 1fr))`,
+                        }}
+                        className="flex-1 grid divide-x divide-slate-100 relative"
+                      >
+                        {/* 수평 현재 시각 빨간 기준선 (Screenshot 104346 동일) */}
+                        {showHorizNow && (
+                          <div
+                            style={{ top: `${nowTopPx}px` }}
+                            className="pointer-events-none absolute inset-x-0 h-[1.5px] bg-[#e85d3f] z-25"
+                          />
+                        )}
+
+                        {myWeekDates.map((ymd) => {
+                          const dowKo = WEEKDAY_KO[parseYmdLocal(ymd).getDay()];
+                          const holiday = holidayMap.get(ymd);
+                          const rec = me
+                            ? recordByMemberDate.get(
+                                `${me.instructor_id}__${ymd}`
+                              )
+                            : undefined;
+                          const lvDoc = me
+                            ? leaveApprovalByMemberDate.get(
+                                `${me.instructor_id}__${ymd}`
+                              )
+                            : undefined;
+                          const isWorkDay =
+                            myRule.work_days.includes(dowKo) && !holiday;
+
+                          const dayCustom =
+                            myRule.per_day_custom_enabled &&
+                            myRule.per_day_schedule?.[dowKo]
+                              ? myRule.per_day_schedule[dowKo]
+                              : null;
+                          const ruleStartMin =
+                            parseHmToMinutes(
+                              dayCustom?.start_time || myRule.start_time
+                            ) ?? 540;
+                          const ruleWorkMin =
+                            Number(
+                              dayCustom
+                                ? dayCustom.work_hours
+                                : myRule.daily_work_hours ?? 8
+                            ) *
+                              60 +
+                            Number(
+                              dayCustom
+                                ? dayCustom.work_minutes
+                                : myRule.daily_work_minutes ?? 0
+                            );
+                          const b1Start = parseHmToMinutes(myRule.break_start_1);
+                          const b1End = parseHmToMinutes(myRule.break_end_1);
+                          const ruleBreakMin = calcBreakMinutes(myRule);
+                          const ruleEndMin =
+                            ruleStartMin + ruleWorkMin + ruleBreakMin;
+
+                          const leaveLabel = String(
+                            lvDoc?.leave_type ||
+                              (rec?.work_mode === "LEAVE"
+                                ? rec.location_note
+                                : "") ||
+                              ""
+                          );
+                          const isHalfAm = leaveLabel.includes("오전 반차");
+                          const isHalfPm =
+                            leaveLabel.includes("오후 반차") ||
+                            ((rec?.status === "HALF_LEAVE" ||
+                              leaveLabel.includes("반차")) &&
+                              !isHalfAm);
+                          const hasFullLeave =
+                            (rec?.work_mode === "LEAVE" &&
+                              rec?.status !== "HALF_LEAVE") ||
+                            rec?.status === "LEAVE" ||
+                            (Boolean(lvDoc) &&
+                              !isHalfAm &&
+                              !isHalfPm &&
+                              !leaveLabel.includes("시간차"));
+
+                          const blockStartMin = rec?.check_in_at
+                            ? isoToMinutesOfDay(rec.check_in_at, ymd) ??
+                              ruleStartMin
+                            : isHalfAm
+                              ? ruleStartMin + 240 + ruleBreakMin
+                              : ruleStartMin;
+                          const blockEndMin =
+                            rec?.check_out_at && rec.status === "DONE"
+                              ? isoToMinutesOfDay(rec.check_out_at, ymd) ??
+                                ruleEndMin
+                              : isHalfPm
+                                ? ruleStartMin + 240
+                                : ruleEndMin;
+
+                          const clampedTopPx = Math.max(
+                            0,
+                            ((blockStartMin - startHour * 60) / 60) *
+                              hourHeightPx
+                          );
+                          const clampedHeightPx = Math.max(
+                            36,
+                            ((blockEndMin - blockStartMin) / 60) * hourHeightPx
+                          );
+
+                          const isPastOrDone =
+                            ymd < todayStr || rec?.status === "DONE";
+                          const isWorkingToday =
+                            ymd === todayStr &&
+                            !isPastOrDone &&
+                            nowMinutesOfDay >= blockStartMin;
+                          const verticalFillPct = isPastOrDone
+                            ? 100
+                            : isWorkingToday
+                              ? Math.max(
+                                  0,
+                                  Math.min(
+                                    100,
+                                    ((nowMinutesOfDay - blockStartMin) /
+                                      Math.max(1, blockEndMin - blockStartMin)) *
+                                      100
+                                  )
+                                )
+                              : 0;
+
+                          const hasBreakBox =
+                            !hasFullLeave &&
+                            !isHalfAm &&
+                            !isHalfPm &&
+                            b1Start !== null &&
+                            b1End !== null &&
+                            b1Start >= blockStartMin &&
+                            b1End <= blockEndMin;
+
+                          const breakTopPct =
+                            hasBreakBox && b1Start !== null
+                              ? ((b1Start - blockStartMin) /
+                                  (blockEndMin - blockStartMin)) *
+                                100
+                              : 44;
+                          const breakHeightPct =
+                            hasBreakBox && b1Start !== null && b1End !== null
+                              ? ((b1End - b1Start) /
+                                  (blockEndMin - blockStartMin)) *
+                                100
+                              : 11;
+
+                          return (
+                            <div
+                              key={ymd}
+                              onClick={() => me && openEntryForDate(me, ymd)}
+                              className="relative cursor-pointer hover:bg-slate-50/40"
+                            >
+                              {/* 가로 정시 그리드 라인 */}
+                              {Array.from({ length: totalHours }, (_, idx) => (
+                                <div
+                                  key={idx}
+                                  style={{
+                                    top: `${idx * hourHeightPx}px`,
+                                    height: `${hourHeightPx}px`,
+                                  }}
+                                  className="absolute inset-x-0 border-b border-slate-100 pointer-events-none"
+                                />
+                              ))}
+
+                              {holiday && (
+                                <div className="p-2 text-[11px] font-bold text-[#e85d3f]">
+                                  {holiday.name}
+                                </div>
+                              )}
+
+                              {hasFullLeave ? (
+                                <div
+                                  style={{
+                                    top: `${clampedTopPx}px`,
+                                    height: `${clampedHeightPx}px`,
+                                  }}
+                                  className="absolute left-2 right-2 rounded-lg bg-[#8b5cf6] border border-[#7c3aed] text-white p-2.5 shadow-2xs z-10"
+                                >
+                                  <div className="text-xs font-extrabold">
+                                    ☂ {leaveLabel || "연차"}
+                                  </div>
+                                  <div className="text-[10.5px] opacity-90 mt-0.5 tabular-nums">
+                                    {formatMinutesToKoreanAmPm(blockStartMin)} –{" "}
+                                    {formatMinutesToKoreanAmPm(blockEndMin)}
+                                  </div>
+                                </div>
+                              ) : isWorkDay || rec ? (
+                                <div
+                                  style={{
+                                    top: `${clampedTopPx}px`,
+                                    height: `${clampedHeightPx}px`,
+                                  }}
+                                  className="absolute left-2 right-2 z-10"
+                                >
+                                  <div className="w-full h-full rounded-lg border border-[#38d9a9] bg-white relative overflow-hidden p-2.5">
+                                    {verticalFillPct > 0 && (
+                                      <div
+                                        style={{ height: `${verticalFillPct}%` }}
+                                        className="pointer-events-none absolute inset-x-0 top-0 bg-[#aef4e8]/90 transition-all duration-500"
+                                      />
+                                    )}
+
+                                    <div className="relative z-10">
+                                      <div className="text-xs font-extrabold text-[#0f766e]">
+                                        {rec &&
+                                        rec.work_mode !== "OFFICE" &&
+                                        ATTENDANCE_MODES[rec.work_mode]
+                                          ? ATTENDANCE_MODES[rec.work_mode]
+                                              .shortLabel
+                                          : "근무"}
+                                      </div>
+                                      <div className="text-[10.5px] font-semibold text-[#0f766e]/80 mt-0.5 tabular-nums">
+                                        {formatMinutesToKoreanAmPm(blockStartMin)}{" "}
+                                        –{" "}
+                                        {formatMinutesToKoreanAmPm(blockEndMin)}
+                                      </div>
+                                    </div>
+
+                                    {hasBreakBox && (
+                                      <div
+                                        style={{
+                                          top: `${breakTopPct}%`,
+                                          height: `${breakHeightPct}%`,
+                                        }}
+                                        className="absolute left-1.5 right-1.5 rounded-md bg-slate-50/95 border border-slate-200 px-2 flex items-center text-[11px] text-slate-500 z-10"
+                                      >
+                                        ☕
+                                      </div>
+                                    )}
+                                  </div>
+
+                                  {hasBreakBox && (
+                                    <div className="mt-1 pl-1 text-[10.5px] font-medium text-slate-400">
+                                      휴게 1건
+                                    </div>
+                                  )}
+                                </div>
+                              ) : null}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
+            </div>
           ) : (
-            /* 내 근무 > [주기 / 주] 24시간 타임라인 그리드 */
+            /* ===============================================================
+               내 근무 > [주기] 수평 24시간 근무주기 타임라인 (Screenshot 104833 100% 재현)
+               =============================================================== */
             <div className="flex-1 overflow-x-auto">
               <div
                 style={{
@@ -2168,6 +2753,65 @@ export default function HqAttendancePage() {
               오늘
             </button>
 
+            {/* 주기 뷰 전용 [💼 근무 유형 ▾] 필터 (Screenshot 104600 동일) */}
+            {teamPeriodMode === "CYCLE" && (
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setTeamRuleMenuOpen((v) => !v);
+                    setDeptMenuOpen(false);
+                  }}
+                  className="px-3 py-1.5 rounded-lg border border-slate-200 hover:bg-slate-50 text-xs font-bold text-slate-700 flex items-center gap-1.5"
+                >
+                  <span className="text-slate-400">💼</span>
+                  <span className="text-slate-500 font-semibold">근무 유형</span>
+                  <span className="text-slate-900">
+                    {teamRuleFilter === "ALL"
+                      ? "전체"
+                      : workRules.find((r) => r.id === teamRuleFilter)?.name ||
+                        "기본 9시"}
+                  </span>
+                  <span className="text-[10px] text-slate-400">▾</span>
+                </button>
+                {teamRuleMenuOpen && (
+                  <div className="absolute left-0 top-full mt-1.5 w-48 rounded-xl bg-white border border-slate-200 shadow-xl py-1.5 z-40 text-xs">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setTeamRuleFilter("ALL");
+                        setTeamRuleMenuOpen(false);
+                      }}
+                      className="w-full px-3.5 py-2 text-left hover:bg-slate-50 font-semibold text-slate-800 flex items-center justify-between"
+                    >
+                      <span>전체 근무 유형</span>
+                      {teamRuleFilter === "ALL" && (
+                        <span className="text-emerald-600">✓</span>
+                      )}
+                    </button>
+                    {workRules
+                      .filter((r) => !r.is_hidden)
+                      .map((r) => (
+                        <button
+                          key={r.id}
+                          type="button"
+                          onClick={() => {
+                            setTeamRuleFilter(r.id);
+                            setTeamRuleMenuOpen(false);
+                          }}
+                          className="w-full px-3.5 py-2 text-left hover:bg-slate-50 font-semibold text-slate-700 flex items-center justify-between"
+                        >
+                          <span>{r.name}</span>
+                          {teamRuleFilter === r.id && (
+                            <span className="text-emerald-600">✓</span>
+                          )}
+                        </button>
+                      ))}
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* [조직 ▾] 드롭다운 */}
             <div className="relative">
               <button
@@ -2215,7 +2859,43 @@ export default function HqAttendancePage() {
             </div>
           </div>
 
-          {/* 휴가 / 초과 근무 / 맞춤 근무 / 실시간 근무중 요약 필터 바 */}
+          {/* 주기 뷰에서는 휴가 시간 포함 토글 + 범례 바 표시 (Screenshot 104600 동일) */}
+          {teamPeriodMode === "CYCLE" ? (
+            <div className="px-7 pb-3.5 border-b border-slate-200 flex flex-wrap items-center gap-4 text-xs">
+              <div className="flex items-center gap-2 pr-3 border-r border-slate-200">
+                <span className="font-semibold text-slate-700">
+                  휴가 시간 포함
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setIncludeLeaveInCycle((v) => !v)}
+                  className={`relative inline-flex h-5 w-9 shrink-0 rounded-full border-2 border-transparent transition-colors ${
+                    includeLeaveInCycle ? "bg-[#16cc3b]" : "bg-slate-300"
+                  }`}
+                >
+                  <span
+                    className={`inline-block h-4 w-4 transform rounded-full bg-white shadow-sm transition ${
+                      includeLeaveInCycle ? "translate-x-4" : "translate-x-0"
+                    }`}
+                  />
+                </button>
+              </div>
+
+              <div className="flex items-center gap-1.5 font-semibold text-slate-600">
+                <span className="w-3 h-3 rounded-[3px] bg-[#a855f7] inline-block" />
+                <span>휴가 시간</span>
+              </div>
+              <div className="flex items-center gap-1.5 font-semibold text-slate-600">
+                <span className="w-3 h-3 rounded-[3px] bg-[#00bfa5] inline-block" />
+                <span>소정 근무 시간</span>
+              </div>
+              <div className="flex items-center gap-1.5 font-semibold text-slate-600">
+                <span className="w-3 h-3 rounded-[3px] bg-[#ea6a47] inline-block" />
+                <span>초과 근무 시간</span>
+              </div>
+            </div>
+          ) : (
+          /* 휴가 / 초과 근무 / 맞춤 근무 / 실시간 근무중 요약 필터 바 */
           <div className="px-7 pb-3.5 border-b border-slate-200 flex flex-wrap items-center gap-5 text-xs">
             <button
               type="button"
@@ -2311,6 +2991,7 @@ export default function HqAttendancePage() {
               </button>
             )}
           </div>
+          )}
 
           {teamPeriodMode === "DAY" ? (
             /* 구성원 근무 > [일] 24시간 수평 타임라인 (스크린샷 100% 재현) */
@@ -2483,156 +3164,648 @@ export default function HqAttendancePage() {
                 </div>
               </div>
             </div>
-          ) : (
-            /* 구성원 근무 > [주 / 주기 / 월] 멀티데이 요약 매트릭스 */
-            <div className="p-7 overflow-x-auto">
-              <table className="w-full text-left border-collapse border border-slate-200 rounded-2xl overflow-hidden">
-                <thead>
-                  <tr className="bg-slate-50 border-b border-slate-200 text-[11px] font-extrabold text-slate-500">
-                    <th className="py-3 px-4 w-52">구성원</th>
-                    <th className="py-3 px-4 w-32">적용 근무유형</th>
-                    {teamPeriodMode !== "MONTH" &&
-                      buildDateList(
-                        activeQueryRange.start,
-                        activeQueryRange.end
-                      ).map((ymd) => {
-                        const dt = parseYmdLocal(ymd);
-                        return (
-                          <th
-                            key={ymd}
-                            className="py-3 px-2.5 text-center whitespace-nowrap"
+          ) : teamPeriodMode === "CYCLE" ? (
+            /* ===============================================================
+               구성원 근무 > [주기] 플렉스 근무주기 스택 바 뷰 (Screenshot 104600 100% 재현!)
+               =============================================================== */
+            <div className="flex-1 overflow-x-auto">
+              <div className="min-w-[860px] divide-y divide-slate-100 border-b border-slate-100">
+                {filteredTeamMembers.map((m) => {
+                  const rule = resolveMemberWorkRule(
+                    m.name,
+                    m.profile_extra?.work_schedule_type
+                  );
+                  const cycleDays = buildDateList(
+                    activeQueryRange.start,
+                    activeQueryRange.end
+                  );
+                  const ruleDailyMin =
+                    Number(rule.daily_work_hours || 8) * 60 +
+                    Number(rule.daily_work_minutes || 0);
+                  const targetRegularMin =
+                    Math.max(1, rule.work_days.length) * ruleDailyMin; // 예: 40h = 2400m
+                  const maxScaleMin = targetRegularMin + 720; // 예: 52h = 3120m
+
+                  let leaveMin = 0;
+                  let regularWorkMin = 0;
+                  let overtimeMin = 0;
+
+                  cycleDays.forEach((ymd) => {
+                    const rec = recordByMemberDate.get(
+                      `${m.instructor_id}__${ymd}`
+                    );
+                    const lvDoc = leaveApprovalByMemberDate.get(
+                      `${m.instructor_id}__${ymd}`
+                    );
+                    const dowKo = WEEKDAY_KO[parseYmdLocal(ymd).getDay()];
+                    const holiday = holidayMap.get(ymd);
+                    const isWorkDay = rule.work_days.includes(dowKo) && !holiday;
+
+                    const lvLabel = String(
+                      lvDoc?.leave_type ||
+                        (rec?.work_mode === "LEAVE" ? rec.location_note : "") ||
+                        ""
+                    );
+                    const isHalf =
+                      rec?.status === "HALF_LEAVE" || lvLabel.includes("반차");
+                    const hasFullLv =
+                      (rec?.work_mode === "LEAVE" &&
+                        rec?.status !== "HALF_LEAVE") ||
+                      rec?.status === "LEAVE" ||
+                      (Boolean(lvDoc) &&
+                        !isHalf &&
+                        !lvLabel.includes("시간차"));
+
+                    if (hasFullLv) {
+                      leaveMin += ruleDailyMin;
+                    } else if (isHalf) {
+                      leaveMin += 240;
+                      const wMin = rec
+                        ? Number(rec.worked_minutes || 240)
+                        : isWorkDay
+                          ? Math.max(0, ruleDailyMin - 240)
+                          : 0;
+                      regularWorkMin += wMin;
+                    } else if (rec) {
+                      const wMin =
+                        rec.status === "WORKING"
+                          ? ruleDailyMin
+                          : Number(rec.worked_minutes || ruleDailyMin);
+                      const ot = Number(
+                        rec.overtime_minutes || Math.max(0, wMin - ruleDailyMin)
+                      );
+                      regularWorkMin += Math.max(0, wMin - ot);
+                      overtimeMin += ot;
+                    } else if (isWorkDay) {
+                      regularWorkMin += ruleDailyMin;
+                    }
+                  });
+
+                  const countedLeave = includeLeaveInCycle ? leaveMin : 0;
+                  const totalDisplayMin =
+                    countedLeave + regularWorkMin + overtimeMin;
+
+                  const regularMarkerPct = (targetRegularMin / maxScaleMin) * 100;
+                  const leaveWidthPct = Math.min(
+                    100,
+                    (countedLeave / maxScaleMin) * 100
+                  );
+                  const regCapLeft = Math.max(
+                    0,
+                    regularMarkerPct - leaveWidthPct
+                  );
+                  const regWidthPct = Math.min(
+                    regCapLeft,
+                    (regularWorkMin / maxScaleMin) * 100
+                  );
+                  const extraOverPct = Math.min(
+                    100 - leaveWidthPct - regWidthPct,
+                    ((Math.max(
+                      0,
+                      countedLeave + regularWorkMin - targetRegularMin
+                    ) +
+                      overtimeMin) /
+                      maxScaleMin) *
+                      100
+                  );
+
+                  const subRole =
+                    m.job_description ||
+                    (m.department !== "미지정" ? m.department : "");
+
+                  return (
+                    <div
+                      key={m.instructor_id}
+                      onClick={() => openEntryForDate(m, todayStr)}
+                      className="flex items-center h-[62px] hover:bg-slate-50/70 cursor-pointer transition-colors"
+                    >
+                      {/* 좌측 구성원 + [40:00 / 40:00] 배지 */}
+                      <div className="w-80 shrink-0 px-7 flex items-center justify-between border-r border-slate-100 h-full">
+                        <div className="flex items-center gap-3 min-w-0">
+                          <span
+                            style={{
+                              backgroundColor: avatarColorForName(m.name),
+                            }}
+                            className="w-8 h-8 rounded-full text-white text-[11px] font-extrabold inline-flex items-center justify-center shrink-0"
                           >
-                            {dt.getMonth() + 1}/{dt.getDate()} (
-                            {WEEKDAY_KO[dt.getDay()]})
-                          </th>
+                            {m.name.slice(-2)}
+                          </span>
+                          <div className="min-w-0">
+                            <div className="text-[13px] font-bold text-slate-900 truncate">
+                              {m.name}
+                            </div>
+                            {subRole && (
+                              <div className="text-[11px] text-slate-400 truncate">
+                                {subRole}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+
+                        <span className="px-2 py-0.5 rounded border border-slate-200 bg-white text-[11px] font-bold text-slate-800 tabular-nums shrink-0">
+                          <span>{formatHmColon(totalDisplayMin)}</span>
+                          <span className="text-slate-400 font-semibold">
+                            {" "}
+                            / {formatHmColon(targetRegularMin)}
+                          </span>
+                        </span>
+                      </div>
+
+                      {/* 우측 수평 주기 프로그레스 바 */}
+                      <div className="flex-1 px-6 flex items-center">
+                        <div className="w-full h-2.5 rounded-full bg-slate-100 relative flex items-center">
+                          <div className="w-full h-full rounded-full overflow-hidden flex">
+                            {leaveWidthPct > 0 && (
+                              <div
+                                style={{ width: `${leaveWidthPct}%` }}
+                                className="h-full bg-[#b07cfb] transition-all duration-300"
+                              />
+                            )}
+                            {regWidthPct > 0 && (
+                              <div
+                                style={{ width: `${regWidthPct}%` }}
+                                className="h-full bg-[#00c4a7] transition-all duration-300"
+                              />
+                            )}
+                            {extraOverPct > 0 && (
+                              <div
+                                style={{ width: `${extraOverPct}%` }}
+                                className="h-full bg-[#ea6a47] transition-all duration-300"
+                              />
+                            )}
+                          </div>
+
+                          {/* 40시간 소정근로 기준 세로 마커 틱 */}
+                          <span
+                            style={{ left: `${regularMarkerPct}%` }}
+                            className="pointer-events-none absolute -top-1 -bottom-1 w-[2px] rounded-full bg-[#00a896]"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ) : teamPeriodMode === "WEEK" ? (
+            /* ===============================================================
+               구성원 근무 > [주] 주단위 일정·기록 매트릭스 (Screenshot 104427 100% 재현!)
+               =============================================================== */
+            <div className="flex-1 overflow-x-auto">
+              {(() => {
+                const weekDays = buildDateList(
+                  activeQueryRange.start,
+                  activeQueryRange.end
+                );
+                const anchorMonthLabel = `${
+                  parseYmdLocal(activeQueryRange.start).getMonth() + 1
+                }월`;
+
+                return (
+                  <div className="min-w-[1080px]">
+                    <div className="flex border-b border-slate-200 bg-white sticky top-0 z-20 text-xs font-bold text-slate-600">
+                      <div className="w-64 shrink-0 px-7 py-2.5 border-r border-slate-100">
+                        {anchorMonthLabel}
+                      </div>
+                      <div className="flex-1 grid grid-cols-7 divide-x divide-slate-100">
+                        {weekDays.map((ymd) => {
+                          const dt = parseYmdLocal(ymd);
+                          const dow = dt.getDay();
+                          const isToday = ymd === todayStr;
+                          const isOff =
+                            dow === 0 || dow === 6 || holidayMap.has(ymd);
+                          return (
+                            <div
+                              key={ymd}
+                              className="px-2.5 py-2.5 flex items-center gap-1"
+                            >
+                              <span
+                                className={`tabular-nums font-extrabold ${
+                                  isToday
+                                    ? "w-5.5 h-5.5 rounded-md bg-[#ea580c] text-white inline-flex items-center justify-center text-[11px]"
+                                    : isOff
+                                      ? "text-[#e85d3f]"
+                                      : "text-slate-700"
+                                }`}
+                              >
+                                {dt.getDate()}
+                              </span>
+                              <span
+                                className={
+                                  isOff ? "text-[#e85d3f]" : "text-slate-500"
+                                }
+                              >
+                                {WEEKDAY_KO[dow]}
+                              </span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    <div className="divide-y divide-slate-100 border-b border-slate-100">
+                      {filteredTeamMembers.map((m) => {
+                        const rule = resolveMemberWorkRule(
+                          m.name,
+                          m.profile_extra?.work_schedule_type
+                        );
+                        const ruleStartMin =
+                          parseHmToMinutes(rule.start_time) ?? 540;
+                        const ruleWorkMin =
+                          Number(rule.daily_work_hours || 8) * 60 +
+                          Number(rule.daily_work_minutes || 0);
+                        const ruleBreakMin = calcBreakMinutes(rule);
+                        const ruleEndMin =
+                          ruleStartMin + ruleWorkMin + ruleBreakMin;
+
+                        let weekTotalMin = 0;
+                        weekDays.forEach((ymd) => {
+                          const rec = recordByMemberDate.get(
+                            `${m.instructor_id}__${ymd}`
+                          );
+                          const lvDoc = leaveApprovalByMemberDate.get(
+                            `${m.instructor_id}__${ymd}`
+                          );
+                          const dowKo = WEEKDAY_KO[parseYmdLocal(ymd).getDay()];
+                          const isWorkDay =
+                            rule.work_days.includes(dowKo) &&
+                            !holidayMap.has(ymd);
+                          if (lvDoc || rec?.work_mode === "LEAVE") {
+                            weekTotalMin += ruleWorkMin;
+                          } else if (rec) {
+                            weekTotalMin +=
+                              rec.status === "WORKING"
+                                ? ruleWorkMin
+                                : Number(rec.worked_minutes || ruleWorkMin);
+                          } else if (isWorkDay) {
+                            weekTotalMin += ruleWorkMin;
+                          }
+                        });
+
+                        const subRole =
+                          m.job_description ||
+                          (m.department !== "미지정" ? m.department : "");
+
+                        return (
+                          <div
+                            key={m.instructor_id}
+                            className="flex min-h-[60px] hover:bg-slate-50/50 transition-colors"
+                          >
+                            <div className="w-64 shrink-0 px-7 py-2.5 border-r border-slate-100 flex items-center justify-between bg-white">
+                              <div className="flex items-center gap-3 min-w-0">
+                                <span
+                                  style={{
+                                    backgroundColor: avatarColorForName(m.name),
+                                  }}
+                                  className="w-8 h-8 rounded-full text-white text-[11px] font-extrabold inline-flex items-center justify-center shrink-0"
+                                >
+                                  {m.name.slice(-2)}
+                                </span>
+                                <div className="min-w-0">
+                                  <div className="text-[13px] font-bold text-slate-900 truncate">
+                                    {m.name}
+                                  </div>
+                                  {subRole && (
+                                    <div className="text-[11px] text-slate-400 truncate">
+                                      {subRole}
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+
+                              <span className="px-2 py-0.5 rounded border border-slate-200 bg-white text-[11px] font-bold text-slate-700 tabular-nums shrink-0">
+                                {formatHmColon(weekTotalMin)}
+                              </span>
+                            </div>
+
+                            <div className="flex-1 grid grid-cols-7 divide-x divide-slate-100">
+                              {weekDays.map((ymd) => {
+                                const rec = recordByMemberDate.get(
+                                  `${m.instructor_id}__${ymd}`
+                                );
+                                const lvDoc = leaveApprovalByMemberDate.get(
+                                  `${m.instructor_id}__${ymd}`
+                                );
+                                const dowKo =
+                                  WEEKDAY_KO[parseYmdLocal(ymd).getDay()];
+                                const holiday = holidayMap.get(ymd);
+                                const isWorkDay =
+                                  rule.work_days.includes(dowKo) && !holiday;
+
+                                const lvLabel = String(
+                                  lvDoc?.leave_type ||
+                                    (rec?.work_mode === "LEAVE"
+                                      ? rec.location_note
+                                      : "") ||
+                                    ""
+                                );
+                                const isHalf =
+                                  rec?.status === "HALF_LEAVE" ||
+                                  lvLabel.includes("반차");
+                                const hasFullLv =
+                                  (rec?.work_mode === "LEAVE" &&
+                                    rec?.status !== "HALF_LEAVE") ||
+                                  rec?.status === "LEAVE" ||
+                                  (Boolean(lvDoc) &&
+                                    !isHalf &&
+                                    !lvLabel.includes("시간차"));
+
+                                const inMin =
+                                  isoToMinutesOfDay(rec?.check_in_at, ymd) ??
+                                  ruleStartMin;
+                                const outMin =
+                                  isoToMinutesOfDay(rec?.check_out_at, ymd) ??
+                                  ruleEndMin;
+                                const isPastOrDone =
+                                  ymd < todayStr || rec?.status === "DONE";
+
+                                return (
+                                  <div
+                                    key={ymd}
+                                    onClick={() => openEntryForDate(m, ymd)}
+                                    className="p-1.5 cursor-pointer hover:bg-slate-50 space-y-1"
+                                  >
+                                    {hasFullLv ? (
+                                      <div className="px-2 py-1 rounded-[4px] bg-[#8b5cf6] text-white text-[10.5px] font-bold truncate">
+                                        ☂ {lvLabel || "연차"} 하루종일
+                                      </div>
+                                    ) : isHalf ? (
+                                      <>
+                                        <div className="px-2 py-0.5 rounded-[4px] bg-[#8b5cf6] text-white text-[10px] font-bold truncate">
+                                          ☂ {lvLabel || "반차"}
+                                        </div>
+                                        <div
+                                          className={`px-2 py-0.5 rounded-[4px] border text-[10px] font-bold truncate ${
+                                            isPastOrDone
+                                              ? "bg-[#d4f7ef] border-[#5eead4] text-[#0f766e]"
+                                              : "bg-white border-[#5eead4] text-[#0f766e]"
+                                          }`}
+                                        >
+                                          근무 4h
+                                        </div>
+                                      </>
+                                    ) : isWorkDay || rec ? (
+                                      <div
+                                        className={`px-2 py-1 rounded-[4px] border text-[10.5px] font-semibold truncate ${
+                                          isPastOrDone
+                                            ? "bg-[#d4f7ef] border-[#6ee7d8] text-[#0f766e]"
+                                            : "bg-white border-[#6ee7d8] text-[#0f766e]"
+                                        }`}
+                                      >
+                                        <span className="font-extrabold">
+                                          근무
+                                        </span>{" "}
+                                        <span className="text-slate-600 tabular-nums">
+                                          {formatMinutesToKoreanAmPm(inMin)} –{" "}
+                                          {formatMinutesToKoreanAmPm(outMin)}
+                                        </span>
+                                      </div>
+                                    ) : null}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
                         );
                       })}
-                    <th className="py-3 px-4 text-right">실근무 합계</th>
-                    <th className="py-3 px-4 text-right">초과근무</th>
-                    <th className="py-3 px-4 w-40">52h 준수율</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100 text-xs">
-                  {filteredTeamMembers.map((m) => {
-                    const rule = resolveMemberWorkRule(
-                      m.name,
-                      m.profile_extra?.work_schedule_type
-                    );
-                    const rangeDays = buildDateList(
-                      activeQueryRange.start,
-                      activeQueryRange.end
-                    );
-                    let sumWorked = 0;
-                    let sumOvertime = 0;
+                    </div>
+                  </div>
+                );
+              })()}
+            </div>
+          ) : (
+            /* ===============================================================
+               구성원 근무 > [월] 월단위 일별 매트릭스 (Screenshot 104534 100% 재현!)
+               =============================================================== */
+            <div className="flex-1 overflow-x-auto">
+              {(() => {
+                const monthDays = buildDateList(
+                  activeQueryRange.start,
+                  activeQueryRange.end
+                );
+                const monthLabel = `${
+                  parseYmdLocal(activeQueryRange.start).getMonth() + 1
+                }월`;
 
-                    rangeDays.forEach((ymd) => {
-                      const rec = recordByMemberDate.get(
-                        `${m.instructor_id}__${ymd}`
-                      );
-                      if (rec) {
-                        sumWorked += Number(rec.worked_minutes || 0);
-                        sumOvertime += Number(rec.overtime_minutes || 0);
-                      }
-                    });
-
-                    const limitMin =
-                      teamPeriodMode === "MONTH"
-                        ? WEEKLY_MAX_MINUTES * 4
-                        : WEEKLY_MAX_MINUTES;
-                    const pct = Math.min(
-                      100,
-                      Math.round((sumWorked / limitMin) * 100)
-                    );
-
-                    return (
-                      <tr
-                        key={m.instructor_id}
-                        className="hover:bg-slate-50/70"
+                return (
+                  <div
+                    style={{
+                      minWidth: `${256 + monthDays.length * 88}px`,
+                    }}
+                  >
+                    <div className="flex border-b border-slate-200 bg-white sticky top-0 z-20 text-xs font-bold text-slate-600">
+                      <div className="w-64 shrink-0 px-7 py-2.5 border-r border-slate-100 bg-white sticky left-0 z-30">
+                        {monthLabel}
+                      </div>
+                      <div
+                        style={{
+                          gridTemplateColumns: `repeat(${monthDays.length}, minmax(88px, 1fr))`,
+                        }}
+                        className="flex-1 grid divide-x divide-slate-100"
                       >
-                        <td className="py-3 px-4">
-                          <div className="flex items-center gap-2.5">
-                            <span
-                              style={{
-                                backgroundColor: avatarColorForName(m.name),
-                              }}
-                              className="w-7 h-7 rounded-full text-white text-[10px] font-extrabold inline-flex items-center justify-center shrink-0"
+                        {monthDays.map((ymd) => {
+                          const dt = parseYmdLocal(ymd);
+                          const dow = dt.getDay();
+                          const isToday = ymd === todayStr;
+                          const isOff =
+                            dow === 0 || dow === 6 || holidayMap.has(ymd);
+                          return (
+                            <div
+                              key={ymd}
+                              className="px-2.5 py-2.5 flex items-center gap-1"
                             >
-                              {m.name.slice(-2)}
-                            </span>
-                            <div>
-                              <div className="font-bold text-slate-900">
-                                {m.name}
-                              </div>
-                              <div className="text-[11px] text-slate-400">
-                                {m.department}
-                              </div>
-                            </div>
-                          </div>
-                        </td>
-                        <td className="py-3 px-4 text-[11px] font-semibold text-slate-600">
-                          {rule.name} ({rule.start_time})
-                        </td>
-
-                        {teamPeriodMode !== "MONTH" &&
-                          rangeDays.map((ymd) => {
-                            const rec = recordByMemberDate.get(
-                              `${m.instructor_id}__${ymd}`
-                            );
-                            return (
-                              <td
-                                key={ymd}
-                                onClick={() => openEntryForDate(m, ymd)}
-                                className="py-3 px-2 text-center cursor-pointer hover:bg-blue-50/40"
-                              >
-                                {rec ? (
-                                  <div>
-                                    <span className="font-extrabold text-slate-800 tabular-nums">
-                                      {formatHmColon(rec.worked_minutes)}
-                                    </span>
-                                    <div className="text-[10px] text-slate-400">
-                                      {ATTENDANCE_MODES[rec.work_mode]
-                                        ?.shortLabel || ""}
-                                    </div>
-                                  </div>
-                                ) : (
-                                  <span className="text-slate-300">-</span>
-                                )}
-                              </td>
-                            );
-                          })}
-
-                        <td className="py-3 px-4 text-right font-extrabold text-slate-900 tabular-nums">
-                          {formatHmColon(sumWorked)}
-                        </td>
-                        <td className="py-3 px-4 text-right font-bold text-amber-700 tabular-nums">
-                          {sumOvertime > 0
-                            ? `+${formatHmColon(sumOvertime)}`
-                            : "0:00"}
-                        </td>
-                        <td className="py-3 px-4">
-                          <div className="flex items-center gap-2">
-                            <div className="flex-1 h-2 rounded-full bg-slate-100 overflow-hidden">
-                              <div
-                                style={{ width: `${pct}%` }}
-                                className={`h-full ${
-                                  pct >= 95
-                                    ? "bg-rose-500"
-                                    : pct >= 80
-                                    ? "bg-amber-500"
-                                    : "bg-brand"
+                              <span
+                                className={`tabular-nums font-extrabold ${
+                                  isToday
+                                    ? "w-5 h-5 rounded bg-[#ea580c] text-white inline-flex items-center justify-center text-[10.5px]"
+                                    : isOff
+                                      ? "text-[#e85d3f]"
+                                      : "text-slate-700"
                                 }`}
-                              />
+                              >
+                                {dt.getDate()}
+                              </span>
+                              <span
+                                className={
+                                  isOff ? "text-[#e85d3f]" : "text-slate-500"
+                                }
+                              >
+                                {WEEKDAY_KO[dow]}
+                              </span>
                             </div>
-                            <span className="text-[11px] font-bold text-slate-500 w-9 text-right tabular-nums">
-                              {pct}%
-                            </span>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    <div className="divide-y divide-slate-100 border-b border-slate-100">
+                      {filteredTeamMembers.map((m) => {
+                        const rule = resolveMemberWorkRule(
+                          m.name,
+                          m.profile_extra?.work_schedule_type
+                        );
+                        const ruleWorkMin =
+                          Number(rule.daily_work_hours || 8) * 60 +
+                          Number(rule.daily_work_minutes || 0);
+
+                        let monthTotalMin = 0;
+                        monthDays.forEach((ymd) => {
+                          const rec = recordByMemberDate.get(
+                            `${m.instructor_id}__${ymd}`
+                          );
+                          const lvDoc = leaveApprovalByMemberDate.get(
+                            `${m.instructor_id}__${ymd}`
+                          );
+                          const dowKo = WEEKDAY_KO[parseYmdLocal(ymd).getDay()];
+                          const isWorkDay =
+                            rule.work_days.includes(dowKo) &&
+                            !holidayMap.has(ymd);
+                          if (lvDoc || rec?.work_mode === "LEAVE") {
+                            monthTotalMin += ruleWorkMin;
+                          } else if (rec) {
+                            monthTotalMin +=
+                              rec.status === "WORKING"
+                                ? ruleWorkMin
+                                : Number(rec.worked_minutes || ruleWorkMin);
+                          } else if (isWorkDay) {
+                            monthTotalMin += ruleWorkMin;
+                          }
+                        });
+
+                        const subRole =
+                          m.job_description ||
+                          (m.department !== "미지정" ? m.department : "");
+
+                        return (
+                          <div
+                            key={m.instructor_id}
+                            className="flex min-h-[60px] hover:bg-slate-50/50 transition-colors"
+                          >
+                            <div className="w-64 shrink-0 px-7 py-2.5 border-r border-slate-100 flex items-center justify-between bg-white sticky left-0 z-10">
+                              <div className="flex items-center gap-3 min-w-0">
+                                <span
+                                  style={{
+                                    backgroundColor: avatarColorForName(m.name),
+                                  }}
+                                  className="w-8 h-8 rounded-full text-white text-[11px] font-extrabold inline-flex items-center justify-center shrink-0"
+                                >
+                                  {m.name.slice(-2)}
+                                </span>
+                                <div className="min-w-0">
+                                  <div className="text-[13px] font-bold text-slate-900 truncate">
+                                    {m.name}
+                                  </div>
+                                  {subRole && (
+                                    <div className="text-[11px] text-slate-400 truncate">
+                                      {subRole}
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+
+                              <span className="px-2 py-0.5 rounded border border-slate-200 bg-white text-[11px] font-bold text-slate-700 tabular-nums shrink-0">
+                                {formatHmColon(monthTotalMin)}
+                              </span>
+                            </div>
+
+                            <div
+                              style={{
+                                gridTemplateColumns: `repeat(${monthDays.length}, minmax(88px, 1fr))`,
+                              }}
+                              className="flex-1 grid divide-x divide-slate-100"
+                            >
+                              {monthDays.map((ymd) => {
+                                const rec = recordByMemberDate.get(
+                                  `${m.instructor_id}__${ymd}`
+                                );
+                                const lvDoc = leaveApprovalByMemberDate.get(
+                                  `${m.instructor_id}__${ymd}`
+                                );
+                                const dowKo =
+                                  WEEKDAY_KO[parseYmdLocal(ymd).getDay()];
+                                const holiday = holidayMap.get(ymd);
+                                const isWorkDay =
+                                  rule.work_days.includes(dowKo) && !holiday;
+
+                                const lvLabel = String(
+                                  lvDoc?.leave_type ||
+                                    (rec?.work_mode === "LEAVE"
+                                      ? rec.location_note
+                                      : "") ||
+                                    ""
+                                );
+                                const isHalf =
+                                  rec?.status === "HALF_LEAVE" ||
+                                  lvLabel.includes("반차");
+                                const isHourly =
+                                  lvLabel.includes("반반차") ||
+                                  lvLabel.includes("시간차");
+                                const hasFullLv =
+                                  (rec?.work_mode === "LEAVE" &&
+                                    rec?.status !== "HALF_LEAVE") ||
+                                  rec?.status === "LEAVE" ||
+                                  (Boolean(lvDoc) && !isHalf && !isHourly);
+
+                                const isPastOrDone =
+                                  ymd < todayStr || rec?.status === "DONE";
+                                const wHours = Math.round(
+                                  ((rec && rec.status === "DONE"
+                                    ? Number(rec.worked_minutes || ruleWorkMin)
+                                    : ruleWorkMin) /
+                                    60) *
+                                    10
+                                ) / 10;
+
+                                return (
+                                  <div
+                                    key={ymd}
+                                    onClick={() => openEntryForDate(m, ymd)}
+                                    className="p-1.5 cursor-pointer hover:bg-slate-50 space-y-1"
+                                  >
+                                    {hasFullLv ? (
+                                      <div className="px-1.5 py-0.5 rounded-[4px] bg-[#8b5cf6] text-white text-[10.5px] font-bold truncate">
+                                        ☂ 연차 8h
+                                      </div>
+                                    ) : isHalf ? (
+                                      <>
+                                        <div className="px-1.5 py-0.5 rounded-[4px] bg-[#d4f7ef] border border-[#6ee7d8] text-[#0f766e] text-[10px] font-bold truncate">
+                                          근무 4h
+                                        </div>
+                                        <div className="px-1.5 py-0.5 rounded-[4px] bg-[#8b5cf6] text-white text-[10px] font-bold truncate">
+                                          ☂ 연차 4h
+                                        </div>
+                                      </>
+                                    ) : isHourly ? (
+                                      <>
+                                        <div className="px-1.5 py-0.5 rounded-[4px] bg-[#d4f7ef] border border-[#6ee7d8] text-[#0f766e] text-[10px] font-bold truncate">
+                                          근무 6h
+                                        </div>
+                                        <div className="px-1.5 py-0.5 rounded-[4px] bg-[#8b5cf6] text-white text-[10px] font-bold truncate">
+                                          ☂ 연차 2h
+                                        </div>
+                                      </>
+                                    ) : isWorkDay || rec ? (
+                                      <div
+                                        className={`px-1.5 py-0.5 rounded-[4px] border text-[10.5px] font-bold truncate ${
+                                          isPastOrDone
+                                            ? "bg-[#d4f7ef] border-[#6ee7d8] text-[#0f766e]"
+                                            : "bg-white border-[#6ee7d8] text-[#0f766e]"
+                                        }`}
+                                      >
+                                        근무 {wHours}h
+                                      </div>
+                                    ) : null}
+                                  </div>
+                                );
+                              })}
+                            </div>
                           </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })()}
             </div>
           )}
         </div>
@@ -2680,16 +3853,14 @@ export default function HqAttendancePage() {
         />
       )}
 
-      <ApprovalCreateModal
+      <HqLeaveRegisterModal
         isOpen={leaveModalOpen}
-        me={me}
-        members={members}
-        defaultDocType="LEAVE"
-        defaultPolicyId={leaveModalPolicyId}
         onClose={() => setLeaveModalOpen(false)}
-        onCreated={() => {
+        initialKind={leaveRegisterKind}
+        allowSwitchLeaveKind={true}
+        onSubmitted={async () => {
           setLeaveModalOpen(false);
-          loadAttendance();
+          await loadAttendance();
         }}
       />
 

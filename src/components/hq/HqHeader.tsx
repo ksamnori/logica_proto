@@ -216,15 +216,31 @@ export default function HqHeader() {
             </button>
           </div>
         ) : myTodayAttendance.status === "WORKING" ? (
-          <div className="hidden lg:flex items-center gap-1.5 rounded-xl border border-blue-200 bg-blue-50 px-2.5 py-1">
+          <div
+            className={`hidden lg:flex items-center gap-1.5 rounded-xl px-2.5 py-1 border ${
+              myTodayAttendance.location_note === "자동 근무 기록"
+                ? "border-teal-200 bg-teal-50/80"
+                : "border-blue-200 bg-blue-50"
+            }`}
+          >
             <button
               type="button"
               onClick={() => router.push(hqHref("/hq/attendance"))}
-              className="text-xs font-bold text-blue-800 hover:underline flex items-center gap-1"
+              className={`text-xs font-bold hover:underline flex items-center gap-1 ${
+                myTodayAttendance.location_note === "자동 근무 기록"
+                  ? "text-teal-800"
+                  : "text-blue-800"
+              }`}
             >
-              <span>{modeMeta?.icon || "🏢"}</span>
               <span>
-                {modeMeta?.shortLabel || "근무중"}{" "}
+                {myTodayAttendance.location_note === "자동 근무 기록"
+                  ? "⏱️"
+                  : modeMeta?.icon || "🏢"}
+              </span>
+              <span>
+                {myTodayAttendance.location_note === "자동 근무 기록"
+                  ? "자동 기록 중"
+                  : modeMeta?.shortLabel || "근무중"}{" "}
                 {formatKstTime(myTodayAttendance.check_in_at)}~
               </span>
             </button>

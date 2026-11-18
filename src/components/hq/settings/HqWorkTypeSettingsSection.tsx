@@ -1,14 +1,16 @@
 // src/components/hq/settings/HqWorkTypeSettingsSection.tsx
 "use client";
 
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   ALL_WEEKDAYS,
+  calcBreakMinutes,
   calcStandardCheckInOutPreview,
   calcWeeklyWorkHours,
   DEFAULT_WORK_RULES,
   formatHmToKoreanAmPm,
   formatWorkRuleSummary,
+  parseHmToMinutes,
   patternShortBadge,
   TIME_OPTIONS_30M,
 } from "@/lib/hq/defaultWorkRules";
@@ -29,6 +31,222 @@ function shortAvatarText(name: string): string {
   const clean = name.trim();
   if (clean.length >= 2) return clean.slice(-2);
   return clean || "HQ";
+}
+
+function formatShortAmPmLabel(totalMin: number): string {
+  const norm = ((Math.round(totalMin) % 1440) + 1440) % 1440;
+  const h24 = Math.floor(norm / 60);
+  const m = norm % 60;
+  const ap = h24 < 12 ? "AM" : "PM";
+  const h12 = h24 % 12 === 0 ? 12 : h24 % 12;
+  return m === 0 ? `${ap} ${h12}` : `${ap} ${h12}:${String(m).padStart(2, "0")}`;
+}
+
+/**
+ * 플렉스 자동 근무 기록 애니메이션 프리뷰 (Screenshots 105232 -> 105238 -> 105244)
+ * 빨간 세로바(현재 시각 기준선)가 좌 -> 우로 부드럽게 이동하며 오늘의 근무 바 색상을 실시간으로 채우고,
+ * 퇴근 시각을 통과하는 순간 초록 체크(✓)로 자동 퇴근 기록이 완료되는 모습을 시연합니다.
+ */
+function AutoRecordRedBarAnimation({
+  enabled,
+  startTime,
+  dailyWorkHours,
+  dailyWorkMinutes,
+  breakMinutes,
+}: {
+  enabled: boolean;
+  startTime: string;
+  dailyWorkHours: number;
+  dailyWorkMinutes: number;
+  breakMinutes: number;
+}) {
+  // progress: -8 ~ 112 (% 기준, 0~100 구간이 근무 바 폭)
+  const [progress, setProgress] = useState(28);
+  const [paused, setPaused] = useState(false);
+
+  useEffect(() => {
+    if (!enabled || paused) return;
+    let rafId = 0;
+    let lastTs = performance.now();
+    let holdMs = 0;
+
+    const tick = (now: number) => {
+      const dt = Math.min(64, now - lastTs);
+      lastTs = now;
+
+      setProgress((prev) => {
+        if (prev >= 106) {
+          holdMs += dt;
+          if (holdMs >= 1150) {
+            holdMs = 0;
+            return -6;
+          }
+          return prev;
+        }
+        // 약 3.8초 동안 -6% -> 106% 부드럽게 이동
+        return prev + (dt / 3800) * 112;
+      });
+
+      rafId = requestAnimationFrame(tick);
+    };
+
+    rafId = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(rafId);
+  }, [enabled, paused]);
+
+  const startMin = parseHmToMinutes(startTime) ?? 540;
+  const endMin =
+    startMin +
+    Number(dailyWorkHours || 8) * 60 +
+    Number(dailyWorkMinutes || 0) +
+    Number(breakMinutes || 60);
+  const startLabel = formatShortAmPmLabel(startMin);
+  const endLabel = formatShortAmPmLabel(endMin);
+
+  const clampedFill = enabled ? Math.max(0, Math.min(100, progress)) : 0;
+  const todayCompleted = enabled && progress >= 100;
+  // 바 영역이 전체 row의 중앙 56% 폭(left: 22% ~ 78%)을 차지하도록 배치하여 플렉스 비율과 일치
+  const redLineLeftPct = 22 + (progress / 100) * 56;
+
+  const rows = [
+    { kind: "PAST_FADED" as const },
+    { kind: "PAST" as const },
+    { kind: "TODAY" as const },
+    { kind: "FUTURE" as const },
+    { kind: "FUTURE_FADED" as const },
+  ];
+
+  return (
+    <div className="group relative bg-white px-6 py-4 select-none overflow-hidden">
+      {/* 상·하단 소프트 페이드 그라데이션 (Screenshots 105232~105244 동일) */}
+      <div className="pointer-events-none absolute inset-x-0 top-0 h-11 bg-gradient-to-b from-white via-white/70 to-transparent z-10" />
+      <div className="pointer-events-none absolute inset-x-0 bottom-0 h-11 bg-gradient-to-t from-white via-white/75 to-transparent z-10" />
+
+      {/* 호버 시 리플레이 / 일시정지 미니 컨트롤 (Screenshot 105244 동일) */}
+      <div className="opacity-0 group-hover:opacity-100 transition-opacity absolute top-4 left-1/2 -translate-x-1/2 z-30 flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-slate-800/85 text-white shadow-lg">
+        <button
+          type="button"
+          onClick={() => {
+            setProgress(-4);
+            setPaused(false);
+          }}
+          title="처음부터 다시 재생"
+          className="px-1.5 py-0.5 rounded hover:bg-white/15 text-[11px] font-bold"
+        >
+          ⟲
+        </button>
+        <span className="w-px h-3 bg-white/25" />
+        <button
+          type="button"
+          onClick={() => setPaused((p) => !p)}
+          title={paused ? "애니메이션 재생" : "일시정지"}
+          className="px-1.5 py-0.5 rounded hover:bg-white/15 text-[11px] font-bold"
+        >
+          {paused ? "▶" : "⏸"}
+        </button>
+      </div>
+
+      {/* 빨간 세로 기준선 (좌 -> 우 실시간 이동) */}
+      {enabled && (
+        <div
+          style={{ left: `${redLineLeftPct}%` }}
+          className="pointer-events-none absolute top-2 bottom-2 w-[1.5px] bg-[#e05243]/85 z-20"
+        />
+      )}
+
+      <div className="divide-y divide-slate-100">
+        {rows.map((row, idx) => {
+          const isPast = row.kind === "PAST_FADED" || row.kind === "PAST";
+          const isToday = row.kind === "TODAY";
+          const rowOpacity =
+            row.kind === "PAST_FADED"
+              ? "opacity-45"
+              : row.kind === "FUTURE_FADED"
+                ? "opacity-40"
+                : "opacity-100";
+
+          const fillWidthPct = isPast
+            ? enabled
+              ? 100
+              : 0
+            : isToday
+              ? clampedFill
+              : 0;
+          const showDoneCheck = enabled && (isPast || todayCompleted);
+          const isSolidComplete = enabled && (isPast || todayCompleted);
+
+          return (
+            <div key={idx} className={`py-2.5 ${rowOpacity}`}>
+              <div className="w-[56%] mx-auto">
+                <div
+                  className={`h-6 rounded-[5px] relative overflow-hidden flex items-center ${
+                    isSolidComplete
+                      ? "border border-[#5eead4] bg-[#c7f5ec]"
+                      : "border border-dashed border-[#6ee7d8] bg-white"
+                  }`}
+                >
+                  {fillWidthPct > 0 && !isSolidComplete && (
+                    <div
+                      style={{ width: `${fillWidthPct}%` }}
+                      className="absolute inset-y-0 left-0 bg-[#c7f5ec] border-r border-[#4fd1c5]"
+                    />
+                  )}
+                  {/* 서류가방 아이콘 */}
+                  <span
+                    className={`relative z-10 ml-2 inline-flex items-center justify-center ${
+                      fillWidthPct > 4 || isSolidComplete
+                        ? "text-[#0d9488]"
+                        : "text-[#5eead4]"
+                    }`}
+                  >
+                    <svg
+                      viewBox="0 0 20 20"
+                      fill="currentColor"
+                      className="w-3.5 h-3.5"
+                    >
+                      <path
+                        fillRule="evenodd"
+                        d="M6 3.75A1.75 1.75 0 017.75 2h4.5A1.75 1.75 0 0114 3.75V5h2.25A1.75 1.75 0 0118 6.75v8.5A1.75 1.75 0 0116.25 17H3.75A1.75 1.75 0 012 15.25v-8.5A1.75 1.75 0 013.75 5H6V3.75zm1.5 0a.25.25 0 01.25-.25h4.5a.25.25 0 01.25.25V5h-5V3.75z"
+                        clipRule="evenodd"
+                      />
+                    </svg>
+                  </span>
+                </div>
+
+                <div className="flex items-center justify-between text-[9.5px] mt-1 px-0.5 tabular-nums">
+                  <span
+                    className={
+                      isToday && enabled && progress >= 0
+                        ? "font-extrabold text-slate-700"
+                        : "font-semibold text-slate-400"
+                    }
+                  >
+                    {startLabel}
+                  </span>
+                  <span className="inline-flex items-center gap-1">
+                    <span
+                      className={
+                        isToday && todayCompleted
+                          ? "font-extrabold text-slate-700"
+                          : "font-semibold text-slate-400"
+                      }
+                    >
+                      {endLabel}
+                    </span>
+                    {showDoneCheck && (
+                      <span className="w-3 h-3 rounded-full bg-[#16cc3b] text-white text-[8px] font-extrabold inline-flex items-center justify-center leading-none">
+                        ✓
+                      </span>
+                    )}
+                  </span>
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
 }
 
 type ModalSubPage =
@@ -80,6 +298,8 @@ export default function HqWorkTypeSettingsSection({
   const [subPage, setSubPage] = useState<ModalSubPage>("basic");
   const [modalGuideTipOpen, setModalGuideTipOpen] = useState(false);
   const [modalTopMenuOpen, setModalTopMenuOpen] = useState(false);
+  const [openRulePopover, setOpenRulePopover] = useState<string | null>(null);
+  const [customStartTimeInput, setCustomStartTimeInput] = useState("");
   const [memberSubTab, setMemberSubTab] = useState<
     "ACTIVE" | "SCHEDULED" | "PAST"
   >("ACTIVE");
@@ -584,9 +804,27 @@ export default function HqWorkTypeSettingsSection({
           setDraft({ ...draft, paid_rest_days: nextDays });
         };
 
+        const isOvertimeCapMode =
+          draft.overtime_allow_mode === "한도 내 허용" ||
+          draft.overtime_allow_mode === "주 12시간 한도 내 허용";
+        const hasAnyOvertimeCapChecked = Boolean(
+          draft.overtime_cap_monthly_enabled ||
+            draft.overtime_cap_weekly_enabled ||
+            draft.overtime_cap_daily_enabled ||
+            draft.overtime_allow_mode === "주 12시간 한도 내 허용"
+        );
+        const showOvertimeWarnDot =
+          isOvertimeCapMode && !hasAnyOvertimeCapChecked;
+
         return (
           <div className="fixed inset-0 bg-slate-900/45 z-[75] flex items-center justify-center p-3 sm:p-4">
-            <div className="bg-white w-full max-w-[920px] h-[86vh] max-h-[820px] rounded-2xl shadow-2xl border border-slate-200 flex overflow-hidden relative">
+            <div
+              onClick={() => {
+                setOpenRulePopover(null);
+                setModalTopMenuOpen(false);
+              }}
+              className="bg-white w-full max-w-[920px] h-[86vh] max-h-[820px] rounded-2xl shadow-2xl border border-slate-200 flex overflow-hidden relative"
+            >
               {/* 좌측 서브 네비게이션 사이드바 */}
               <aside className="w-[210px] bg-[#f8f9fa] border-r border-slate-200/80 p-3.5 flex flex-col shrink-0 select-none relative">
                 {/* 상단 현재 근무 유형 이름 칩 */}
@@ -602,7 +840,10 @@ export default function HqWorkTypeSettingsSection({
                 <div className="space-y-0.5">
                   <button
                     type="button"
-                    onClick={() => setSubPage("basic")}
+                    onClick={() => {
+                      setSubPage("basic");
+                      setOpenRulePopover(null);
+                    }}
                     className={leftNavClass("basic")}
                   >
                     <span className="flex items-center gap-2">
@@ -613,7 +854,10 @@ export default function HqWorkTypeSettingsSection({
 
                   <button
                     type="button"
-                    onClick={() => setSubPage("members")}
+                    onClick={() => {
+                      setSubPage("members");
+                      setOpenRulePopover(null);
+                    }}
                     className={leftNavClass("members")}
                   >
                     <span className="flex items-center gap-2">
@@ -635,13 +879,21 @@ export default function HqWorkTypeSettingsSection({
                 <div className="space-y-0.5">
                   <button
                     type="button"
-                    onClick={() => setSubPage("overtime")}
+                    onClick={() => {
+                      setSubPage("overtime");
+                      setOpenRulePopover(null);
+                    }}
                     className={leftNavClass("overtime")}
                   >
                     <span className="flex items-center gap-2">
                       <span className="text-slate-400">🔥</span>
                       <span>초과 근무</span>
                     </span>
+                    {showOvertimeWarnDot && (
+                      <span className="w-4 h-4 rounded-full bg-[#e05243] text-white text-[10px] font-extrabold inline-flex items-center justify-center leading-none">
+                        !
+                      </span>
+                    )}
                   </button>
 
                   <button
@@ -775,7 +1027,7 @@ export default function HqWorkTypeSettingsSection({
                 {/* 서브페이지 스크롤 영역 */}
                 <div className="flex-1 overflow-y-auto px-8 py-8 custom-scroll text-xs">
                   {/* ===================================================== */}
-                  {/* SUB-PAGE 1: 기본 설정 (Images 2, 3, 9, 11)             */}
+                  {/* SUB-PAGE 1: 기본 설정 (Flex Screenshots 105012~105051) */}
                   {/* ===================================================== */}
                   {subPage === "basic" && (
                     <div className="space-y-7 max-w-[600px]">
@@ -791,7 +1043,9 @@ export default function HqWorkTypeSettingsSection({
                       {/* 근무 유형 이름 */}
                       <div className="px-5 py-4 rounded-2xl border border-slate-200 flex items-center justify-between gap-4">
                         <div className="flex items-center gap-2.5 font-bold text-slate-800">
-                          <span className="text-slate-400">🏷️</span>
+                          <span className="w-5 h-5 rounded border border-slate-300 text-[10px] font-extrabold text-slate-500 inline-flex items-center justify-center">
+                            T
+                          </span>
                           <span>근무 유형 이름</span>
                         </div>
                         <input
@@ -804,13 +1058,14 @@ export default function HqWorkTypeSettingsSection({
                         />
                       </div>
 
-                      {/* 근무 유형 속성 */}
+                      {/* 근무 유형 속성 (Screenshots 105012 & 105017) */}
                       <section className="space-y-2.5">
                         <h4 className="text-[13px] font-extrabold text-slate-800">
                           근무 유형 속성
                         </h4>
                         <div className="rounded-2xl border border-slate-200 divide-y divide-slate-100">
-                          <div className="px-5 py-4 flex items-center justify-between gap-4">
+                          {/* 근무 유형 종류 리치 팝오버 */}
+                          <div className="px-5 py-4 flex items-center justify-between gap-4 relative">
                             <div className="flex items-center gap-3">
                               <span className="text-slate-400 text-sm">💼</span>
                               <div>
@@ -822,27 +1077,108 @@ export default function HqWorkTypeSettingsSection({
                                 </div>
                               </div>
                             </div>
-                            <select
-                              disabled={!canEdit}
-                              value={draft.pattern_type}
-                              onChange={(e) =>
-                                setDraft({
-                                  ...draft,
-                                  pattern_type:
-                                    e.target.value as HqWorkRuleItem["pattern_type"],
-                                })
-                              }
-                              className="px-3 py-1.5 rounded-lg font-bold text-slate-700 bg-transparent focus:outline-none"
-                            >
-                              <option value="고정 근무 유형">고정 근무 유형</option>
-                              <option value="시차 출퇴근 유형">시차 출퇴근 유형</option>
-                              <option value="선택적 근로시간 유형">
-                                선택적 근로시간 유형
-                              </option>
-                            </select>
+
+                            <div className="relative">
+                              <button
+                                type="button"
+                                disabled={!canEdit}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setOpenRulePopover((p) =>
+                                    p === "pattern" ? null : "pattern"
+                                  );
+                                }}
+                                className="px-2.5 py-1.5 rounded-lg hover:bg-slate-50 font-bold text-slate-800 flex items-center gap-1.5"
+                              >
+                                <span>
+                                  {draft.pattern_type === "시차 출퇴근 유형"
+                                    ? "시차 근무 유형"
+                                    : draft.pattern_type ===
+                                        "선택적 근로시간 유형"
+                                      ? "선택적 근무 유형"
+                                      : draft.pattern_type}
+                                </span>
+                                <span className="text-slate-400 text-[10px]">
+                                  ⌄
+                                </span>
+                              </button>
+
+                              {openRulePopover === "pattern" && (
+                                <div
+                                  onClick={(e) => e.stopPropagation()}
+                                  className="absolute right-0 top-9 z-40 w-[264px] rounded-2xl bg-white border border-slate-200 shadow-[0_14px_36px_rgba(15,23,42,0.14)] p-1.5 space-y-0.5"
+                                >
+                                  {(
+                                    [
+                                      {
+                                        value: "고정 근무 유형" as const,
+                                        match: ["고정 근무 유형"],
+                                        desc: "출퇴근 시각이 고정되어있어요.",
+                                      },
+                                      {
+                                        value: "시차 근무 유형" as const,
+                                        match: [
+                                          "시차 근무 유형",
+                                          "시차 출퇴근 유형",
+                                        ],
+                                        desc: "출퇴근 시각을 유연하게 설정할 수 있어요.",
+                                      },
+                                      {
+                                        value: "선택적 근무 유형" as const,
+                                        match: [
+                                          "선택적 근무 유형",
+                                          "선택적 근로시간 유형",
+                                        ],
+                                        desc: "출퇴근 시각의 제약이 없고, 정해진 총 근무 시간 내에서 자유롭게 근무해요.",
+                                      },
+                                      {
+                                        value: "교대 근무 유형" as const,
+                                        match: ["교대 근무 유형"],
+                                        desc: "작성한 근무표에 따라 교대로 근무해요.",
+                                      },
+                                    ]
+                                  ).map((opt) => {
+                                    const active = opt.match.includes(
+                                      draft.pattern_type
+                                    );
+                                    return (
+                                      <button
+                                        key={opt.value}
+                                        type="button"
+                                        onClick={() => {
+                                          setDraft({
+                                            ...draft,
+                                            pattern_type: opt.value,
+                                          });
+                                          setOpenRulePopover(null);
+                                        }}
+                                        className={`w-full px-3 py-2.5 rounded-xl text-left flex items-start gap-2 transition-colors ${
+                                          active
+                                            ? "bg-slate-100/80"
+                                            : "hover:bg-slate-50"
+                                        }`}
+                                      >
+                                        <span className="w-4 text-[#16cc3b] font-extrabold mt-0.5 shrink-0">
+                                          {active ? "✓" : ""}
+                                        </span>
+                                        <div>
+                                          <div className="font-bold text-slate-900">
+                                            {opt.value}
+                                          </div>
+                                          <div className="text-[11px] text-slate-400 leading-snug mt-0.5">
+                                            {opt.desc}
+                                          </div>
+                                        </div>
+                                      </button>
+                                    );
+                                  })}
+                                </div>
+                              )}
+                            </div>
                           </div>
 
-                          <div className="px-5 py-4 flex items-center justify-between gap-4">
+                          {/* 근로자 유형 리치 팝오버 */}
+                          <div className="px-5 py-4 flex items-center justify-between gap-4 relative">
                             <div className="flex items-center gap-3">
                               <span className="text-slate-400 text-sm">👤</span>
                               <div>
@@ -854,26 +1190,96 @@ export default function HqWorkTypeSettingsSection({
                                 </div>
                               </div>
                             </div>
-                            <select
-                              disabled={!canEdit}
-                              value={draft.worker_type}
-                              onChange={(e) =>
-                                setDraft({
-                                  ...draft,
-                                  worker_type:
-                                    e.target.value as HqWorkRuleItem["worker_type"],
-                                })
-                              }
-                              className="px-3 py-1.5 rounded-lg font-bold text-slate-700 bg-transparent focus:outline-none"
-                            >
-                              <option value="통상 근로자">통상 근로자</option>
-                              <option value="단시간 근로자">단시간 근로자</option>
-                            </select>
+
+                            <div className="relative">
+                              <button
+                                type="button"
+                                disabled={!canEdit}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setOpenRulePopover((p) =>
+                                    p === "worker" ? null : "worker"
+                                  );
+                                }}
+                                className="px-2.5 py-1.5 rounded-lg hover:bg-slate-50 font-bold text-slate-800 flex items-center gap-1.5"
+                              >
+                                <span>{draft.worker_type}</span>
+                                <span className="text-slate-400 text-[10px]">
+                                  ⌄
+                                </span>
+                              </button>
+
+                              {openRulePopover === "worker" && (
+                                <div
+                                  onClick={(e) => e.stopPropagation()}
+                                  className="absolute right-0 top-9 z-40 w-[280px] rounded-2xl bg-white border border-slate-200 shadow-[0_14px_36px_rgba(15,23,42,0.14)] p-1.5 space-y-0.5"
+                                >
+                                  {(
+                                    [
+                                      {
+                                        value: "통상 근로자" as const,
+                                        desc: "1주 소정근로시간이 가장 긴 근로자 유형이에요.",
+                                      },
+                                      {
+                                        value: "단시간 근로자" as const,
+                                        desc: "1주 40시간 미만으로 일하며, 상대적으로 통상 근로자보다 짧게 일하는 근로자 유형이에요.",
+                                      },
+                                      {
+                                        value: "초단시간 근로자" as const,
+                                        desc: "단시간 근로자 중, 1주 15시간 미만으로 일하는 근로자 유형이에요. 퇴직금 · 연차 · 주휴수당에 대한 법적 지급 의무가 없어요.",
+                                      },
+                                    ]
+                                  ).map((opt) => {
+                                    const active =
+                                      draft.worker_type === opt.value;
+                                    return (
+                                      <button
+                                        key={opt.value}
+                                        type="button"
+                                        onClick={() => {
+                                          const nextHours =
+                                            opt.value === "초단시간 근로자" &&
+                                            draft.daily_work_hours >= 4
+                                              ? 2
+                                              : opt.value === "단시간 근로자" &&
+                                                  draft.daily_work_hours >= 8
+                                                ? 4
+                                                : draft.daily_work_hours;
+                                          setDraft({
+                                            ...draft,
+                                            worker_type: opt.value,
+                                            daily_work_hours: nextHours,
+                                          });
+                                          setOpenRulePopover(null);
+                                        }}
+                                        className={`w-full px-3 py-2.5 rounded-xl text-left flex items-start gap-2 transition-colors ${
+                                          active
+                                            ? "bg-slate-100/80"
+                                            : "hover:bg-slate-50"
+                                        }`}
+                                      >
+                                        <span className="w-4 text-[#16cc3b] font-extrabold mt-0.5 shrink-0">
+                                          {active ? "✓" : ""}
+                                        </span>
+                                        <div>
+                                          <div className="font-bold text-slate-900">
+                                            {opt.value}
+                                          </div>
+                                          <div className="text-[11px] text-slate-400 leading-snug mt-0.5">
+                                            {opt.desc}
+                                          </div>
+                                        </div>
+                                      </button>
+                                    );
+                                  })}
+                                </div>
+                              )}
+                            </div>
                           </div>
                         </div>
                       </section>
 
-                      {/* 일하는 방식 */}
+                      {/* 일하는 방식 (Screenshots 105026, 105039, 105051) */}
                       <section className="space-y-3">
                         <div className="flex items-center justify-between">
                           <div className="flex items-center gap-2">
@@ -881,20 +1287,57 @@ export default function HqWorkTypeSettingsSection({
                               일하는 방식
                             </h4>
                             <span className="text-[11px] font-extrabold text-[#00a84d] flex items-center gap-1">
-                              <span>●</span>
+                              <span className="w-3.5 h-3.5 rounded-full bg-[#16cc3b] text-white text-[9px] inline-flex items-center justify-center">
+                                ✓
+                              </span>
                               <span>1주 소정근로시간 {weeklyHours}시간</span>
                             </span>
                           </div>
-                          {draft.worker_type === "통상 근로자" && (
-                            <span className="text-[11px] font-semibold text-slate-400">
-                              + 요일별 근무 설정
-                            </span>
+                          {canEdit && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const nextOn = !draft.per_day_custom_enabled;
+                                const seedSchedule: Record<
+                                  string,
+                                  {
+                                    start_time: string;
+                                    work_hours: number;
+                                    work_minutes: number;
+                                  }
+                                > = { ...(draft.per_day_schedule || {}) };
+                                draft.work_days.forEach((d) => {
+                                  if (!seedSchedule[d]) {
+                                    seedSchedule[d] = {
+                                      start_time: draft.start_time || "09:00",
+                                      work_hours: draft.daily_work_hours ?? 8,
+                                      work_minutes:
+                                        draft.daily_work_minutes ?? 0,
+                                    };
+                                  }
+                                });
+                                setDraft({
+                                  ...draft,
+                                  per_day_custom_enabled: nextOn,
+                                  per_day_schedule: seedSchedule,
+                                });
+                              }}
+                              className={`text-[11px] font-bold transition-colors ${
+                                draft.per_day_custom_enabled
+                                  ? "text-[#00a84d]"
+                                  : "text-slate-500 hover:text-slate-800"
+                              }`}
+                            >
+                              {draft.per_day_custom_enabled
+                                ? "✓ 요일별 근무 설정 중"
+                                : "+ 요일별 근무 설정"}
+                            </button>
                           )}
                         </div>
 
                         {/* 주기 / 근무 요일 / 주휴일 카드 */}
                         <div className="rounded-2xl border border-slate-200 divide-y divide-slate-100">
-                          <div className="px-5 py-4 flex items-center justify-between gap-4">
+                          <div className="px-5 py-4 flex items-center justify-between gap-4 relative">
                             <div>
                               <div className="font-bold text-slate-800">
                                 근무 주기 시작 요일
@@ -903,21 +1346,98 @@ export default function HqWorkTypeSettingsSection({
                                 근무 주기가 시작되는 요일을 선택해주세요.
                               </div>
                             </div>
-                            <select
-                              disabled={!canEdit}
-                              value={draft.cycle_start_day}
-                              onChange={(e) =>
-                                setDraft({
-                                  ...draft,
-                                  cycle_start_day:
-                                    e.target.value as HqWorkRuleItem["cycle_start_day"],
-                                })
-                              }
-                              className="px-2 py-1 rounded-lg font-bold text-slate-700 bg-transparent focus:outline-none"
-                            >
-                              <option value="월요일">월요일</option>
-                              <option value="일요일">일요일</option>
-                            </select>
+
+                            <div className="relative">
+                              <button
+                                type="button"
+                                disabled={!canEdit}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setOpenRulePopover((p) =>
+                                    p === "cycle_day" ? null : "cycle_day"
+                                  );
+                                }}
+                                className="px-2.5 py-1.5 rounded-lg hover:bg-slate-50 font-bold text-slate-800 flex items-center gap-1.5"
+                              >
+                                <span>{draft.cycle_start_day}</span>
+                                <span className="text-slate-400 text-[10px]">
+                                  ⌄
+                                </span>
+                              </button>
+
+                              {openRulePopover === "cycle_day" && (
+                                <div
+                                  onClick={(e) => e.stopPropagation()}
+                                  className="absolute right-0 top-9 z-40 w-[220px] rounded-2xl bg-white border border-slate-200 shadow-[0_14px_36px_rgba(15,23,42,0.14)] p-1.5 space-y-0.5"
+                                >
+                                  {(
+                                    [
+                                      {
+                                        day: "월요일" as const,
+                                        sub: "월요일 시작 → 일요일 종료",
+                                      },
+                                      {
+                                        day: "화요일" as const,
+                                        sub: "화요일 시작 → 월요일 종료",
+                                      },
+                                      {
+                                        day: "수요일" as const,
+                                        sub: "수요일 시작 → 화요일 종료",
+                                      },
+                                      {
+                                        day: "목요일" as const,
+                                        sub: "목요일 시작 → 수요일 종료",
+                                      },
+                                      {
+                                        day: "금요일" as const,
+                                        sub: "금요일 시작 → 목요일 종료",
+                                      },
+                                      {
+                                        day: "토요일" as const,
+                                        sub: "토요일 시작 → 금요일 종료",
+                                      },
+                                      {
+                                        day: "일요일" as const,
+                                        sub: "일요일 시작 → 토요일 종료",
+                                      },
+                                    ]
+                                  ).map((opt) => {
+                                    const active =
+                                      draft.cycle_start_day === opt.day;
+                                    return (
+                                      <button
+                                        key={opt.day}
+                                        type="button"
+                                        onClick={() => {
+                                          setDraft({
+                                            ...draft,
+                                            cycle_start_day: opt.day,
+                                          });
+                                          setOpenRulePopover(null);
+                                        }}
+                                        className={`w-full px-3 py-2 rounded-xl text-left flex items-start gap-2 ${
+                                          active
+                                            ? "bg-slate-100/80"
+                                            : "hover:bg-slate-50"
+                                        }`}
+                                      >
+                                        <span className="w-4 text-[#16cc3b] font-extrabold mt-0.5 shrink-0">
+                                          {active ? "✓" : ""}
+                                        </span>
+                                        <div>
+                                          <div className="font-bold text-slate-900">
+                                            {opt.day}
+                                          </div>
+                                          <div className="text-[10.5px] text-slate-400">
+                                            {opt.sub}
+                                          </div>
+                                        </div>
+                                      </button>
+                                    );
+                                  })}
+                                </div>
+                              )}
+                            </div>
                           </div>
 
                           <div className="px-5 py-4 flex flex-wrap items-center justify-between gap-3">
@@ -939,7 +1459,7 @@ export default function HqWorkTypeSettingsSection({
                                     onClick={() => toggleWorkDay(day)}
                                     className={`w-7 h-7 rounded-md text-[11px] font-bold transition-colors ${
                                       sel
-                                        ? "bg-slate-600 text-white"
+                                        ? "bg-slate-700 text-white"
                                         : "bg-slate-100 text-slate-400 hover:bg-slate-200"
                                     }`}
                                   >
@@ -969,7 +1489,7 @@ export default function HqWorkTypeSettingsSection({
                                     onClick={() => togglePaidRestDay(day)}
                                     className={`w-7 h-7 rounded-md text-[11px] font-bold transition-colors ${
                                       sel
-                                        ? "bg-slate-600 text-white"
+                                        ? "bg-slate-700 text-white"
                                         : "bg-slate-100 text-slate-400 hover:bg-slate-200"
                                     }`}
                                   >
@@ -983,32 +1503,112 @@ export default function HqWorkTypeSettingsSection({
 
                         {/* 출근 시각 / 하루 근무 시간 / 추천 휴게 시간 카드 */}
                         <div className="rounded-2xl border border-slate-200 divide-y divide-slate-100">
-                          <div className="px-5 py-4 flex items-center justify-between gap-4">
+                          <div className="px-5 py-4 flex items-center justify-between gap-4 relative">
                             <div>
                               <div className="font-bold text-slate-800">
                                 출근 시각
                               </div>
                               <div className="text-[11px] text-slate-400 mt-0.5">
-                                근무을 시작하는 시각을 선택해주세요.
+                                근무를 시작하는 시각을 선택해주세요.
                               </div>
                             </div>
-                            <select
-                              disabled={!canEdit}
-                              value={draft.start_time}
-                              onChange={(e) =>
-                                setDraft({
-                                  ...draft,
-                                  start_time: e.target.value,
-                                })
-                              }
-                              className="px-2 py-1 rounded-lg font-bold text-slate-700 bg-transparent focus:outline-none"
-                            >
-                              {TIME_OPTIONS_30M.map((hm) => (
-                                <option key={hm} value={hm}>
-                                  {formatHmToKoreanAmPm(hm)}
-                                </option>
-                              ))}
-                            </select>
+
+                            <div className="relative">
+                              <button
+                                type="button"
+                                disabled={!canEdit}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setCustomStartTimeInput("");
+                                  setOpenRulePopover((p) =>
+                                    p === "start_time" ? null : "start_time"
+                                  );
+                                }}
+                                className="px-2.5 py-1.5 rounded-lg hover:bg-slate-50 font-bold text-slate-800 flex items-center gap-1.5"
+                              >
+                                <span>
+                                  {formatHmToKoreanAmPm(draft.start_time)}
+                                </span>
+                                <span className="text-slate-400 text-[10px]">
+                                  ⌄
+                                </span>
+                              </button>
+
+                              {/* Screenshot 105039: 직접 입력 + 시간 목록 팝오버 */}
+                              {openRulePopover === "start_time" && (
+                                <div
+                                  onClick={(e) => e.stopPropagation()}
+                                  className="absolute right-0 top-9 z-40 w-[212px] rounded-2xl bg-white border border-slate-200 shadow-[0_14px_36px_rgba(15,23,42,0.14)] p-2 space-y-1.5"
+                                >
+                                  <input
+                                    value={customStartTimeInput}
+                                    onChange={(e) =>
+                                      setCustomStartTimeInput(e.target.value)
+                                    }
+                                    onKeyDown={(e) => {
+                                      if (e.key === "Enter") {
+                                        const m = /^(\d{1,2}):(\d{2})$/.exec(
+                                          customStartTimeInput.trim()
+                                        );
+                                        if (m) {
+                                          const hh = Math.min(
+                                            23,
+                                            Math.max(0, Number(m[1]))
+                                          );
+                                          const mm = Math.min(
+                                            59,
+                                            Math.max(0, Number(m[2]))
+                                          );
+                                          const normalized = `${String(
+                                            hh
+                                          ).padStart(2, "0")}:${String(
+                                            mm
+                                          ).padStart(2, "0")}`;
+                                          setDraft({
+                                            ...draft,
+                                            start_time: normalized,
+                                          });
+                                          setOpenRulePopover(null);
+                                        }
+                                      }
+                                    }}
+                                    placeholder="직접 입력도 가능해요."
+                                    className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs font-semibold text-slate-800 placeholder:text-slate-300 focus:outline-none focus:border-[#16cc3b]"
+                                  />
+
+                                  <div className="max-h-56 overflow-y-auto custom-scroll space-y-0.5">
+                                    {TIME_OPTIONS_30M.map((hm) => {
+                                      const active = draft.start_time === hm;
+                                      return (
+                                        <button
+                                          key={hm}
+                                          type="button"
+                                          onClick={() => {
+                                            setDraft({
+                                              ...draft,
+                                              start_time: hm,
+                                            });
+                                            setOpenRulePopover(null);
+                                          }}
+                                          className={`w-full px-3 py-2 rounded-lg text-left font-bold text-slate-800 flex items-center gap-2 ${
+                                            active
+                                              ? "bg-slate-100/80"
+                                              : "hover:bg-slate-50"
+                                          }`}
+                                        >
+                                          <span className="w-4 text-[#16cc3b] font-extrabold">
+                                            {active ? "✓" : ""}
+                                          </span>
+                                          <span>
+                                            {formatHmToKoreanAmPm(hm)}
+                                          </span>
+                                        </button>
+                                      );
+                                    })}
+                                  </div>
+                                </div>
+                              )}
+                            </div>
                           </div>
 
                           <div className="px-5 py-4 flex flex-wrap items-center justify-between gap-4">
@@ -1024,8 +1624,8 @@ export default function HqWorkTypeSettingsSection({
                               <div className="flex items-center border border-slate-200 rounded-lg px-2.5 py-1.5 bg-white">
                                 <input
                                   type="number"
-                                  min={1}
-                                  max={12}
+                                  min={0}
+                                  max={16}
                                   disabled={!canEdit}
                                   value={draft.daily_work_hours}
                                   onChange={(e) =>
@@ -1047,8 +1647,8 @@ export default function HqWorkTypeSettingsSection({
                                 <input
                                   type="number"
                                   min={0}
-                                  max={50}
-                                  step={10}
+                                  max={55}
+                                  step={5}
                                   disabled={!canEdit}
                                   value={draft.daily_work_minutes}
                                   onChange={(e) =>
@@ -1068,6 +1668,114 @@ export default function HqWorkTypeSettingsSection({
                               </div>
                             </div>
                           </div>
+
+                          {/* + 요일별 근무 설정 활성화 시 요일별 출근시각·근무시간 편집 */}
+                          {draft.per_day_custom_enabled && (
+                            <div className="px-5 py-4 bg-slate-50/60 space-y-2.5">
+                              <div className="text-[11px] font-extrabold text-slate-600">
+                                요일별 상세 근무 시간 설정
+                              </div>
+                              {draft.work_days.map((day) => {
+                                const dRow = draft.per_day_schedule?.[day] || {
+                                  start_time: draft.start_time || "09:00",
+                                  work_hours: draft.daily_work_hours ?? 8,
+                                  work_minutes: draft.daily_work_minutes ?? 0,
+                                };
+                                return (
+                                  <div
+                                    key={day}
+                                    className="flex items-center justify-between gap-2 bg-white px-3 py-2 rounded-xl border border-slate-200/80"
+                                  >
+                                    <span className="w-8 font-extrabold text-slate-700">
+                                      {day}요일
+                                    </span>
+                                    <div className="flex items-center gap-2">
+                                      <select
+                                        disabled={!canEdit}
+                                        value={dRow.start_time}
+                                        onChange={(e) =>
+                                          setDraft({
+                                            ...draft,
+                                            per_day_schedule: {
+                                              ...(draft.per_day_schedule || {}),
+                                              [day]: {
+                                                ...dRow,
+                                                start_time: e.target.value,
+                                              },
+                                            },
+                                          })
+                                        }
+                                        className="px-2 py-1 rounded-lg border border-slate-200 text-xs font-bold text-slate-700"
+                                      >
+                                        {TIME_OPTIONS_30M.map((hm) => (
+                                          <option key={hm} value={hm}>
+                                            {formatHmToKoreanAmPm(hm)}
+                                          </option>
+                                        ))}
+                                      </select>
+                                      <div className="flex items-center border border-slate-200 rounded-lg px-2 py-1 bg-white">
+                                        <input
+                                          type="number"
+                                          min={0}
+                                          max={16}
+                                          value={dRow.work_hours}
+                                          onChange={(e) =>
+                                            setDraft({
+                                              ...draft,
+                                              per_day_schedule: {
+                                                ...(draft.per_day_schedule ||
+                                                  {}),
+                                                [day]: {
+                                                  ...dRow,
+                                                  work_hours: Math.max(
+                                                    0,
+                                                    Number(e.target.value)
+                                                  ),
+                                                },
+                                              },
+                                            })
+                                          }
+                                          className="w-8 font-bold text-slate-800 focus:outline-none"
+                                        />
+                                        <span className="text-[10px] text-slate-400">
+                                          시간
+                                        </span>
+                                      </div>
+                                      <div className="flex items-center border border-slate-200 rounded-lg px-2 py-1 bg-white">
+                                        <input
+                                          type="number"
+                                          min={0}
+                                          max={55}
+                                          step={5}
+                                          value={dRow.work_minutes}
+                                          onChange={(e) =>
+                                            setDraft({
+                                              ...draft,
+                                              per_day_schedule: {
+                                                ...(draft.per_day_schedule ||
+                                                  {}),
+                                                [day]: {
+                                                  ...dRow,
+                                                  work_minutes: Math.max(
+                                                    0,
+                                                    Number(e.target.value)
+                                                  ),
+                                                },
+                                              },
+                                            })
+                                          }
+                                          className="w-8 font-bold text-slate-800 focus:outline-none"
+                                        />
+                                        <span className="text-[10px] text-slate-400">
+                                          분
+                                        </span>
+                                      </div>
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
 
                           <div className="px-5 py-4 flex flex-wrap items-start justify-between gap-4">
                             <div>
@@ -1166,45 +1874,47 @@ export default function HqWorkTypeSettingsSection({
                           </div>
                         </div>
 
-                        {/* 주휴 시간 · 휴가 휴게 시간 카드 (Image 3 하단 동일) */}
+                        {/* 휴가 휴게 시간 카드 (Screenshot 105051 동일) */}
                         <div className="rounded-2xl border border-slate-200 divide-y divide-slate-100">
-                          <div className="px-5 py-4 flex items-center justify-between gap-4">
-                            <div>
-                              <div className="font-bold text-slate-800">
-                                주휴 시간 · 휴가 1일 기준 시간 별도 설정{" "}
-                                <span className="text-slate-300">ⓘ</span>
+                          {draft.worker_type !== "통상 근로자" && (
+                            <div className="px-5 py-4 flex items-center justify-between gap-4">
+                              <div>
+                                <div className="font-bold text-slate-800">
+                                  주휴 시간 · 휴가 1일 기준 시간 별도 설정{" "}
+                                  <span className="text-slate-300">ⓘ</span>
+                                </div>
+                                <div className="text-[11px] text-slate-400 mt-0.5">
+                                  주휴 시간과 휴가 1일의 기준 시간을 일하는 시간과 다르게 설정할 수 있어요.
+                                </div>
                               </div>
-                              <div className="text-[11px] text-slate-400 mt-0.5">
-                                주휴 시간과 휴가 1일의 기준 시간을 일하는 시간과 다르게 설정할 수 있어요.
-                              </div>
-                            </div>
-                            <button
-                              type="button"
-                              disabled={!canEdit}
-                              onClick={() =>
-                                setDraft({
-                                  ...draft,
-                                  custom_leave_day_hours:
-                                    !draft.custom_leave_day_hours,
-                                })
-                              }
-                              className={`relative inline-flex h-6 w-11 shrink-0 rounded-full border-2 border-transparent transition-colors ${
-                                draft.custom_leave_day_hours
-                                  ? "bg-[#00c458]"
-                                  : "bg-slate-200"
-                              }`}
-                            >
-                              <span
-                                className={`inline-block h-5 w-5 transform rounded-full bg-white shadow-sm transition ${
+                              <button
+                                type="button"
+                                disabled={!canEdit}
+                                onClick={() =>
+                                  setDraft({
+                                    ...draft,
+                                    custom_leave_day_hours:
+                                      !draft.custom_leave_day_hours,
+                                  })
+                                }
+                                className={`relative inline-flex h-6 w-11 shrink-0 rounded-full border-2 border-transparent transition-colors ${
                                   draft.custom_leave_day_hours
-                                    ? "translate-x-5"
-                                    : "translate-x-0"
+                                    ? "bg-[#00c458]"
+                                    : "bg-slate-200"
                                 }`}
-                              />
-                            </button>
-                          </div>
+                              >
+                                <span
+                                  className={`inline-block h-5 w-5 transform rounded-full bg-white shadow-sm transition ${
+                                    draft.custom_leave_day_hours
+                                      ? "translate-x-5"
+                                      : "translate-x-0"
+                                  }`}
+                                />
+                              </button>
+                            </div>
+                          )}
 
-                          <div className="px-5 py-4 flex items-center justify-between gap-4">
+                          <div className="px-5 py-4 flex items-center justify-between gap-4 relative">
                             <div>
                               <div className="font-bold text-slate-800">
                                 휴가 사용 시 휴게 시간 포함 여부
@@ -1213,25 +1923,170 @@ export default function HqWorkTypeSettingsSection({
                                 반차 또는 시간차 사용 시, 휴게를 포함할지 선택할 수 있어요.
                               </div>
                             </div>
-                            <select
-                              disabled={!canEdit}
-                              value={draft.leave_include_break_mode}
-                              onChange={(e) =>
-                                setDraft({
-                                  ...draft,
-                                  leave_include_break_mode:
-                                    e.target.value as HqWorkRuleItem["leave_include_break_mode"],
-                                })
-                              }
-                              className="px-2 py-1 rounded-lg font-bold text-slate-700 bg-transparent focus:outline-none"
-                            >
-                              <option value="구성원이 사용 시 선택">
-                                구성원이 사용 시 선택
-                              </option>
-                              <option value="휴게 시간 제외">휴게 시간 제외</option>
-                              <option value="휴게 시간 포함">휴게 시간 포함</option>
-                            </select>
+
+                            <div className="relative">
+                              <button
+                                type="button"
+                                disabled={!canEdit}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setOpenRulePopover((p) =>
+                                    p === "leave_break_mode"
+                                      ? null
+                                      : "leave_break_mode"
+                                  );
+                                }}
+                                className="px-2.5 py-1.5 rounded-lg hover:bg-slate-50 font-bold text-slate-800 flex items-center gap-1.5"
+                              >
+                                <span>
+                                  {draft.leave_include_break_mode ===
+                                  "휴게 시간 포함"
+                                    ? "항상 포함"
+                                    : draft.leave_include_break_mode ===
+                                        "휴게 시간 제외"
+                                      ? "항상 미포함"
+                                      : draft.leave_include_break_mode}
+                                </span>
+                                <span className="text-slate-400 text-[10px]">
+                                  ⌄
+                                </span>
+                              </button>
+
+                              {openRulePopover === "leave_break_mode" && (
+                                <div
+                                  onClick={(e) => e.stopPropagation()}
+                                  className="absolute right-0 bottom-9 z-40 w-[252px] rounded-2xl bg-white border border-slate-200 shadow-[0_14px_36px_rgba(15,23,42,0.14)] p-1.5 space-y-0.5"
+                                >
+                                  {(
+                                    [
+                                      {
+                                        value: "구성원이 사용 시 선택" as const,
+                                        match: ["구성원이 사용 시 선택"],
+                                        desc: "",
+                                      },
+                                      {
+                                        value: "항상 포함" as const,
+                                        match: ["항상 포함", "휴게 시간 포함"],
+                                        desc: "",
+                                      },
+                                      {
+                                        value: "항상 미포함" as const,
+                                        match: ["항상 미포함", "휴게 시간 제외"],
+                                        desc: "",
+                                      },
+                                      {
+                                        value: "휴가 사용 단위별 설정" as const,
+                                        match: ["휴가 사용 단위별 설정"],
+                                        desc: "오전 · 오후 반차, 시간차에 따라 포함 여부를 다르게 설정해요.",
+                                      },
+                                    ]
+                                  ).map((opt) => {
+                                    const active = opt.match.includes(
+                                      draft.leave_include_break_mode
+                                    );
+                                    return (
+                                      <button
+                                        key={opt.value}
+                                        type="button"
+                                        onClick={() => {
+                                          setDraft({
+                                            ...draft,
+                                            leave_include_break_mode: opt.value,
+                                          });
+                                          setOpenRulePopover(null);
+                                        }}
+                                        className={`w-full px-3.5 py-2.5 rounded-xl text-left flex items-start justify-between gap-2 ${
+                                          active
+                                            ? "bg-slate-100/80"
+                                            : "hover:bg-slate-50"
+                                        }`}
+                                      >
+                                        <div>
+                                          <div className="font-bold text-slate-900">
+                                            {opt.value}
+                                          </div>
+                                          {opt.desc && (
+                                            <div className="text-[10.5px] text-slate-400 leading-snug mt-0.5">
+                                              {opt.desc}
+                                            </div>
+                                          )}
+                                        </div>
+                                        {active && (
+                                          <span className="text-[#16cc3b] font-extrabold shrink-0">
+                                            ✓
+                                          </span>
+                                        )}
+                                      </button>
+                                    );
+                                  })}
+                                </div>
+                              )}
+                            </div>
                           </div>
+
+                          {draft.leave_include_break_mode ===
+                            "휴가 사용 단위별 설정" && (
+                            <div className="px-5 py-3.5 bg-slate-50/60 space-y-2.5">
+                              <div className="flex items-center justify-between">
+                                <span className="font-bold text-slate-700">
+                                  오전 · 오후 반차 사용 시
+                                </span>
+                                <select
+                                  disabled={!canEdit}
+                                  value={
+                                    draft.leave_half_include_break ||
+                                    "항상 미포함"
+                                  }
+                                  onChange={(e) =>
+                                    setDraft({
+                                      ...draft,
+                                      leave_half_include_break:
+                                        e.target
+                                          .value as HqWorkRuleItem["leave_half_include_break"],
+                                    })
+                                  }
+                                  className="px-2.5 py-1 rounded-lg border border-slate-200 bg-white font-bold text-slate-700"
+                                >
+                                  <option value="구성원이 사용 시 선택">
+                                    구성원이 사용 시 선택
+                                  </option>
+                                  <option value="항상 포함">항상 포함</option>
+                                  <option value="항상 미포함">
+                                    항상 미포함
+                                  </option>
+                                </select>
+                              </div>
+                              <div className="flex items-center justify-between">
+                                <span className="font-bold text-slate-700">
+                                  시간차 사용 시
+                                </span>
+                                <select
+                                  disabled={!canEdit}
+                                  value={
+                                    draft.leave_hourly_include_break ||
+                                    "구성원이 사용 시 선택"
+                                  }
+                                  onChange={(e) =>
+                                    setDraft({
+                                      ...draft,
+                                      leave_hourly_include_break:
+                                        e.target
+                                          .value as HqWorkRuleItem["leave_hourly_include_break"],
+                                    })
+                                  }
+                                  className="px-2.5 py-1 rounded-lg border border-slate-200 bg-white font-bold text-slate-700"
+                                >
+                                  <option value="구성원이 사용 시 선택">
+                                    구성원이 사용 시 선택
+                                  </option>
+                                  <option value="항상 포함">항상 포함</option>
+                                  <option value="항상 미포함">
+                                    항상 미포함
+                                  </option>
+                                </select>
+                              </div>
+                            </div>
+                          )}
 
                           <div className="px-5 py-4 flex items-center justify-between gap-4">
                             <div>
@@ -1242,23 +2097,66 @@ export default function HqWorkTypeSettingsSection({
                                 반차 또는 시간차에 포함할 휴게 시간을 입력해주세요.
                               </div>
                             </div>
-                            <select
-                              disabled={!canEdit}
-                              value={draft.leave_break_duration}
-                              onChange={(e) =>
-                                setDraft({
-                                  ...draft,
-                                  leave_break_duration:
-                                    e.target.value as HqWorkRuleItem["leave_break_duration"],
-                                })
-                              }
-                              className="px-2 py-1 rounded-lg font-bold text-slate-700 bg-transparent focus:outline-none"
-                            >
-                              <option value="30분">30분</option>
-                              <option value="1시간">1시간</option>
-                              <option value="1시간 30분">1시간 30분</option>
-                              <option value="2시간">2시간</option>
-                            </select>
+                            <div className="flex items-center gap-2">
+                              <div className="flex items-center border border-slate-200 rounded-lg px-2.5 py-1.5 bg-white">
+                                <input
+                                  type="number"
+                                  min={0}
+                                  max={4}
+                                  disabled={!canEdit}
+                                  value={
+                                    draft.leave_break_hours ??
+                                    (draft.leave_break_duration === "30분"
+                                      ? 0
+                                      : draft.leave_break_duration === "2시간"
+                                        ? 2
+                                        : 1)
+                                  }
+                                  onChange={(e) =>
+                                    setDraft({
+                                      ...draft,
+                                      leave_break_hours: Math.max(
+                                        0,
+                                        Number(e.target.value)
+                                      ),
+                                    })
+                                  }
+                                  className="w-10 font-bold text-slate-800 focus:outline-none"
+                                />
+                                <span className="text-slate-400 text-[11px]">
+                                  시간
+                                </span>
+                              </div>
+                              <div className="flex items-center border border-slate-200 rounded-lg px-2.5 py-1.5 bg-white">
+                                <input
+                                  type="number"
+                                  min={0}
+                                  max={55}
+                                  step={10}
+                                  disabled={!canEdit}
+                                  value={
+                                    draft.leave_break_minutes ??
+                                    (draft.leave_break_duration === "30분" ||
+                                    draft.leave_break_duration === "1시간 30분"
+                                      ? 30
+                                      : 0)
+                                  }
+                                  onChange={(e) =>
+                                    setDraft({
+                                      ...draft,
+                                      leave_break_minutes: Math.max(
+                                        0,
+                                        Number(e.target.value)
+                                      ),
+                                    })
+                                  }
+                                  className="w-10 font-bold text-slate-800 focus:outline-none"
+                                />
+                                <span className="text-slate-400 text-[11px]">
+                                  분
+                                </span>
+                              </div>
+                            </div>
                           </div>
                         </div>
                       </section>
@@ -1420,7 +2318,7 @@ export default function HqWorkTypeSettingsSection({
                   )}
 
                   {/* ===================================================== */}
-                  {/* SUB-PAGE 3: 초과 근무 (Image 4 동일)                   */}
+                  {/* SUB-PAGE 3: 초과 근무 (Flex Screenshots 105141~105204) */}
                   {/* ===================================================== */}
                   {subPage === "overtime" && (
                     <div className="space-y-7 max-w-[600px]">
@@ -1439,8 +2337,11 @@ export default function HqWorkTypeSettingsSection({
                           <h4 className="text-[13px] font-extrabold text-slate-800">
                             초과 근무 한도 주기
                           </h4>
-                          <span className="text-[11px] font-extrabold text-[#00a84d]">
-                            ● 연장·야간·휴일 공통
+                          <span className="text-[11px] font-extrabold text-[#00a84d] inline-flex items-center gap-1">
+                            <span className="w-3.5 h-3.5 rounded-full bg-[#16cc3b] text-white text-[9px] inline-flex items-center justify-center">
+                              ✓
+                            </span>
+                            <span>연장·야간·휴일 공통</span>
                           </span>
                         </div>
 
@@ -1461,35 +2362,49 @@ export default function HqWorkTypeSettingsSection({
                             <option value="주 단위">주 단위</option>
                           </select>
 
-                          <select
-                            disabled={!canEdit}
-                            value={draft.overtime_cycle_day}
-                            onChange={(e) =>
-                              setDraft({
-                                ...draft,
-                                overtime_cycle_day: e.target.value,
-                              })
-                            }
-                            className="font-bold text-slate-700 bg-transparent focus:outline-none"
-                          >
-                            <option value="매월 1일">매월 1일</option>
-                            <option value="매월 15일">매월 15일</option>
-                            <option value="매월 25일">매월 25일</option>
-                          </select>
+                          {draft.overtime_cycle_unit === "월 단위" ? (
+                            <select
+                              disabled={!canEdit}
+                              value={draft.overtime_cycle_day}
+                              onChange={(e) =>
+                                setDraft({
+                                  ...draft,
+                                  overtime_cycle_day: e.target.value,
+                                })
+                              }
+                              className="font-bold text-slate-700 bg-transparent focus:outline-none"
+                            >
+                              <option value="매월 1일">매월 1일</option>
+                              <option value="매월 15일">매월 15일</option>
+                              <option value="매월 25일">매월 25일</option>
+                            </select>
+                          ) : (
+                            <span className="font-bold text-slate-700">
+                              매주 {draft.cycle_start_day}
+                            </span>
+                          )}
                         </div>
                         <p className="text-[11px] text-slate-400">
-                          ⓘ 초과 근무 한도가 있을 때 판단하는 기준이에요. 주 단위는 기본 설정의 근무 주기({draft.cycle_start_day})를 따라요.
+                          ⓘ 초과 근무 한도가 있을 때 판단하는 기준이에요. 주 단위는 기본 설정의 근무 주기(
+                          {draft.cycle_start_day})를 따라요.{" "}
+                          <button
+                            type="button"
+                            onClick={() => setSubPage("basic")}
+                            className="text-blue-600 font-bold hover:underline"
+                          >
+                            근무 주기 변경
+                          </button>
                         </p>
                       </section>
 
-                      {/* 연장 근무 */}
+                      {/* 연장 근무 (Screenshots 105141 & 105152) */}
                       <section className="space-y-3">
                         <h4 className="text-[13px] font-extrabold text-slate-800">
                           연장 근무
                         </h4>
 
                         <div className="rounded-2xl border border-slate-200 divide-y divide-slate-100">
-                          <div className="px-5 py-4 flex items-center justify-between gap-4">
+                          <div className="px-5 py-4 flex items-center justify-between gap-4 relative">
                             <div>
                               <div className="font-bold text-slate-800">
                                 연장 근무 허용
@@ -1498,25 +2413,265 @@ export default function HqWorkTypeSettingsSection({
                                 소정근로시간을 초과한 근무가 연장 근무로 집계돼요.
                               </div>
                             </div>
-                            <select
-                              disabled={!canEdit}
-                              value={draft.overtime_allow_mode}
-                              onChange={(e) =>
-                                setDraft({
-                                  ...draft,
-                                  overtime_allow_mode:
-                                    e.target.value as HqWorkRuleItem["overtime_allow_mode"],
-                                })
-                              }
-                              className="font-bold text-slate-700 bg-transparent focus:outline-none"
-                            >
-                              <option value="한도 없이 허용">한도 없이 허용</option>
-                              <option value="주 12시간 한도 내 허용">
-                                주 12시간 한도 내 허용
-                              </option>
-                              <option value="허용 안 함">허용 안 함</option>
-                            </select>
+
+                            <div className="relative">
+                              <button
+                                type="button"
+                                disabled={!canEdit}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setOpenRulePopover((p) =>
+                                    p === "ot_allow" ? null : "ot_allow"
+                                  );
+                                }}
+                                className="px-2.5 py-1.5 rounded-lg hover:bg-slate-50 font-bold text-slate-800 flex items-center gap-1.5"
+                              >
+                                <span>
+                                  {isOvertimeCapMode
+                                    ? "한도 내 허용"
+                                    : draft.overtime_allow_mode}
+                                </span>
+                                <span className="text-slate-400 text-[10px]">
+                                  ⌄
+                                </span>
+                              </button>
+
+                              {openRulePopover === "ot_allow" && (
+                                <div
+                                  onClick={(e) => e.stopPropagation()}
+                                  className="absolute right-0 top-9 z-40 w-[236px] rounded-2xl bg-white border border-slate-200 shadow-[0_14px_36px_rgba(15,23,42,0.14)] p-1.5 space-y-0.5"
+                                >
+                                  {(
+                                    [
+                                      {
+                                        value: "한도 없이 허용" as const,
+                                        active:
+                                          draft.overtime_allow_mode ===
+                                          "한도 없이 허용",
+                                        desc: "",
+                                      },
+                                      {
+                                        value: "한도 내 허용" as const,
+                                        active: isOvertimeCapMode,
+                                        desc: "일·주·월 단위로 한도를 정할 수 있어요.",
+                                      },
+                                      {
+                                        value: "허용 안 함" as const,
+                                        active:
+                                          draft.overtime_allow_mode ===
+                                          "허용 안 함",
+                                        desc: "",
+                                      },
+                                    ]
+                                  ).map((opt) => (
+                                    <button
+                                      key={opt.value}
+                                      type="button"
+                                      onClick={() => {
+                                        setDraft({
+                                          ...draft,
+                                          overtime_allow_mode: opt.value,
+                                          overtime_cap_weekly_enabled:
+                                            opt.value === "한도 내 허용"
+                                              ? draft.overtime_cap_weekly_enabled ??
+                                                (draft.overtime_allow_mode ===
+                                                  "주 12시간 한도 내 허용"
+                                                  ? true
+                                                  : false)
+                                              : draft.overtime_cap_weekly_enabled,
+                                          overtime_cap_weekly_hours:
+                                            draft.overtime_cap_weekly_hours ??
+                                            12,
+                                        });
+                                        setOpenRulePopover(null);
+                                      }}
+                                      className={`w-full px-3 py-2.5 rounded-xl text-left flex items-start gap-2 ${
+                                        opt.active
+                                          ? "bg-slate-100/80"
+                                          : "hover:bg-slate-50"
+                                      }`}
+                                    >
+                                      <span className="w-4 text-[#16cc3b] font-extrabold mt-0.5 shrink-0">
+                                        {opt.active ? "✓" : ""}
+                                      </span>
+                                      <div>
+                                        <div className="font-bold text-slate-900">
+                                          {opt.value}
+                                        </div>
+                                        {opt.desc && (
+                                          <div className="text-[10.5px] text-slate-400 mt-0.5">
+                                            {opt.desc}
+                                          </div>
+                                        )}
+                                      </div>
+                                    </button>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
                           </div>
+
+                          {/* Screenshot 105141: 한도 내 허용 선택 시 월/주/일 한도 설정 행 */}
+                          {isOvertimeCapMode && (
+                            <div className="divide-y divide-slate-100 bg-white">
+                              {(
+                                [
+                                  {
+                                    key: "monthly",
+                                    label: "월 한도 사용",
+                                    checked: Boolean(
+                                      draft.overtime_cap_monthly_enabled
+                                    ),
+                                    hours:
+                                      draft.overtime_cap_monthly_hours ?? 52,
+                                    minutes:
+                                      draft.overtime_cap_monthly_minutes ?? 0,
+                                    onToggle: (v: boolean) =>
+                                      setDraft({
+                                        ...draft,
+                                        overtime_allow_mode: "한도 내 허용",
+                                        overtime_cap_monthly_enabled: v,
+                                      }),
+                                    onHours: (h: number) =>
+                                      setDraft({
+                                        ...draft,
+                                        overtime_cap_monthly_hours: h,
+                                      }),
+                                    onMinutes: (m: number) =>
+                                      setDraft({
+                                        ...draft,
+                                        overtime_cap_monthly_minutes: m,
+                                      }),
+                                  },
+                                  {
+                                    key: "weekly",
+                                    label: "주 한도 사용",
+                                    checked: Boolean(
+                                      draft.overtime_cap_weekly_enabled ||
+                                        draft.overtime_allow_mode ===
+                                          "주 12시간 한도 내 허용"
+                                    ),
+                                    hours:
+                                      draft.overtime_cap_weekly_hours ?? 12,
+                                    minutes:
+                                      draft.overtime_cap_weekly_minutes ?? 0,
+                                    onToggle: (v: boolean) =>
+                                      setDraft({
+                                        ...draft,
+                                        overtime_allow_mode: "한도 내 허용",
+                                        overtime_cap_weekly_enabled: v,
+                                      }),
+                                    onHours: (h: number) =>
+                                      setDraft({
+                                        ...draft,
+                                        overtime_cap_weekly_hours: h,
+                                      }),
+                                    onMinutes: (m: number) =>
+                                      setDraft({
+                                        ...draft,
+                                        overtime_cap_weekly_minutes: m,
+                                      }),
+                                  },
+                                  {
+                                    key: "daily",
+                                    label: "일 한도 사용",
+                                    checked: Boolean(
+                                      draft.overtime_cap_daily_enabled
+                                    ),
+                                    hours: draft.overtime_cap_daily_hours ?? 0,
+                                    minutes:
+                                      draft.overtime_cap_daily_minutes ?? 0,
+                                    onToggle: (v: boolean) =>
+                                      setDraft({
+                                        ...draft,
+                                        overtime_allow_mode: "한도 내 허용",
+                                        overtime_cap_daily_enabled: v,
+                                      }),
+                                    onHours: (h: number) =>
+                                      setDraft({
+                                        ...draft,
+                                        overtime_cap_daily_hours: h,
+                                      }),
+                                    onMinutes: (m: number) =>
+                                      setDraft({
+                                        ...draft,
+                                        overtime_cap_daily_minutes: m,
+                                      }),
+                                  },
+                                ] as const
+                              ).map((row) => (
+                                <div
+                                  key={row.key}
+                                  className="px-5 py-3.5 flex items-center justify-between gap-4"
+                                >
+                                  <label className="flex items-center gap-2.5 cursor-pointer font-semibold text-slate-700">
+                                    <input
+                                      type="checkbox"
+                                      disabled={!canEdit}
+                                      checked={row.checked}
+                                      onChange={(e) =>
+                                        row.onToggle(e.target.checked)
+                                      }
+                                      className="w-4 h-4 rounded border-slate-300 accent-[#16cc3b]"
+                                    />
+                                    <span>{row.label}</span>
+                                  </label>
+
+                                  <div className="flex items-center gap-2">
+                                    <div
+                                      className={`flex items-center border rounded-lg px-2.5 py-1.5 ${
+                                        row.checked
+                                          ? "border-slate-200 bg-white"
+                                          : "border-slate-100 bg-slate-50 text-slate-400"
+                                      }`}
+                                    >
+                                      <input
+                                        type="number"
+                                        min={0}
+                                        max={200}
+                                        disabled={!canEdit || !row.checked}
+                                        value={row.hours}
+                                        onChange={(e) =>
+                                          row.onHours(
+                                            Math.max(0, Number(e.target.value))
+                                          )
+                                        }
+                                        className="w-10 font-bold focus:outline-none bg-transparent"
+                                      />
+                                      <span className="text-[11px] text-slate-400">
+                                        시간
+                                      </span>
+                                    </div>
+                                    <div
+                                      className={`flex items-center border rounded-lg px-2.5 py-1.5 ${
+                                        row.checked
+                                          ? "border-slate-200 bg-white"
+                                          : "border-slate-100 bg-slate-50 text-slate-400"
+                                      }`}
+                                    >
+                                      <input
+                                        type="number"
+                                        min={0}
+                                        max={55}
+                                        step={10}
+                                        disabled={!canEdit || !row.checked}
+                                        value={row.minutes}
+                                        onChange={(e) =>
+                                          row.onMinutes(
+                                            Math.max(0, Number(e.target.value))
+                                          )
+                                        }
+                                        className="w-10 font-bold focus:outline-none bg-transparent"
+                                      />
+                                      <span className="text-[11px] text-slate-400">
+                                        분
+                                      </span>
+                                    </div>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          )}
 
                           <div className="px-5 py-4 flex items-center justify-between gap-4">
                             <div>
@@ -1555,8 +2710,29 @@ export default function HqWorkTypeSettingsSection({
                           </div>
                         </div>
 
+                        <p className="text-[11px] text-slate-400">
+                          ⓘ 포괄 계약 시, 법정근로 내 연장 공제 여부는{" "}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setDraft(null);
+                              onNavigateTab("overtime-comp");
+                            }}
+                            className="text-blue-600 font-bold hover:underline"
+                          >
+                            초과 근무 보상 설정
+                          </button>
+                          에 의해 정해져요. (현재 설정:{" "}
+                          {ex.overtime_comp_settings
+                            ?.deduct_within_statutory_from_inclusive
+                            ? "공제 함"
+                            : "공제 안 함"}
+                          )
+                        </p>
+
+                        {/* Screenshot 105152: 입력 단위 제한 & 최소 시간 제한 리치 팝오버 */}
                         <div className="rounded-2xl border border-slate-200 divide-y divide-slate-100">
-                          <div className="px-5 py-4 flex items-center justify-between gap-4">
+                          <div className="px-5 py-4 flex items-center justify-between gap-4 relative">
                             <div>
                               <div className="font-bold text-slate-800">
                                 입력 단위 제한
@@ -1565,26 +2741,107 @@ export default function HqWorkTypeSettingsSection({
                                 연장 근무 입력 시 입력 시간 단위를 제한할 수 있어요.
                               </div>
                             </div>
-                            <select
-                              disabled={!canEdit}
-                              value={draft.overtime_input_unit}
-                              onChange={(e) =>
-                                setDraft({
-                                  ...draft,
-                                  overtime_input_unit:
-                                    e.target.value as HqWorkRuleItem["overtime_input_unit"],
-                                })
-                              }
-                              className="font-bold text-slate-700 bg-transparent focus:outline-none"
-                            >
-                              <option value="제한 안 함">제한 안 함</option>
-                              <option value="10분 단위">10분 단위</option>
-                              <option value="30분 단위">30분 단위</option>
-                              <option value="1시간 단위">1시간 단위</option>
-                            </select>
+
+                            <div className="relative">
+                              <button
+                                type="button"
+                                disabled={!canEdit}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setOpenRulePopover((p) =>
+                                    p === "ot_unit" ? null : "ot_unit"
+                                  );
+                                }}
+                                className="px-2.5 py-1.5 rounded-lg hover:bg-slate-50 font-bold text-slate-800 flex items-center gap-1.5"
+                              >
+                                <span>{draft.overtime_input_unit}</span>
+                                <span className="text-slate-400 text-[10px]">
+                                  ⌄
+                                </span>
+                              </button>
+
+                              {openRulePopover === "ot_unit" && (
+                                <div
+                                  onClick={(e) => e.stopPropagation()}
+                                  className="absolute right-0 bottom-9 z-40 w-[236px] rounded-2xl bg-white border border-slate-200 shadow-[0_14px_36px_rgba(15,23,42,0.14)] p-1.5 space-y-0.5"
+                                >
+                                  {(
+                                    [
+                                      {
+                                        value: "제한 안 함" as const,
+                                        desc: "입력 단위 제한없이 자유롭게 입력 가능",
+                                      },
+                                      {
+                                        value: "5분 단위로 입력" as const,
+                                        desc: "",
+                                      },
+                                      {
+                                        value: "10분 단위로 입력" as const,
+                                        desc: "",
+                                      },
+                                      {
+                                        value: "15분 단위로 입력" as const,
+                                        desc: "",
+                                      },
+                                      {
+                                        value: "30분 단위로 입력" as const,
+                                        desc: "",
+                                      },
+                                      {
+                                        value: "60분 단위로 입력" as const,
+                                        desc: "",
+                                      },
+                                      {
+                                        value: "90분 단위로 입력" as const,
+                                        desc: "",
+                                      },
+                                      {
+                                        value: "120분 단위로 입력" as const,
+                                        desc: "",
+                                      },
+                                    ]
+                                  ).map((opt) => {
+                                    const active =
+                                      draft.overtime_input_unit === opt.value;
+                                    return (
+                                      <button
+                                        key={opt.value}
+                                        type="button"
+                                        onClick={() => {
+                                          setDraft({
+                                            ...draft,
+                                            overtime_input_unit: opt.value,
+                                          });
+                                          setOpenRulePopover(null);
+                                        }}
+                                        className={`w-full px-3 py-2 rounded-xl text-left flex items-start gap-2 ${
+                                          active
+                                            ? "bg-slate-100/80"
+                                            : "hover:bg-slate-50"
+                                        }`}
+                                      >
+                                        <span className="w-4 text-[#16cc3b] font-extrabold mt-0.5 shrink-0">
+                                          {active ? "✓" : ""}
+                                        </span>
+                                        <div>
+                                          <div className="font-bold text-slate-900">
+                                            {opt.value}
+                                          </div>
+                                          {opt.desc && (
+                                            <div className="text-[10px] text-slate-400 mt-0.5">
+                                              {opt.desc}
+                                            </div>
+                                          )}
+                                        </div>
+                                      </button>
+                                    );
+                                  })}
+                                </div>
+                              )}
+                            </div>
                           </div>
 
-                          <div className="px-5 py-4 flex items-center justify-between gap-4">
+                          <div className="px-5 py-4 flex items-center justify-between gap-4 relative">
                             <div>
                               <div className="font-bold text-slate-800">
                                 최소 시간 제한
@@ -1593,32 +2850,81 @@ export default function HqWorkTypeSettingsSection({
                                 연장 근무 입력 시 최소 시간을 제한할 수 있어요.
                               </div>
                             </div>
-                            <select
-                              disabled={!canEdit}
-                              value={draft.overtime_min_duration}
-                              onChange={(e) =>
-                                setDraft({
-                                  ...draft,
-                                  overtime_min_duration:
-                                    e.target.value as HqWorkRuleItem["overtime_min_duration"],
-                                })
-                              }
-                              className="font-bold text-slate-700 bg-transparent focus:outline-none"
-                            >
-                              <option value="제한 안 함">제한 안 함</option>
-                              <option value="30분 이상">30분 이상</option>
-                              <option value="1시간 이상">1시간 이상</option>
-                            </select>
+
+                            <div className="relative">
+                              <button
+                                type="button"
+                                disabled={!canEdit}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setOpenRulePopover((p) =>
+                                    p === "ot_min" ? null : "ot_min"
+                                  );
+                                }}
+                                className="px-2.5 py-1.5 rounded-lg hover:bg-slate-50 font-bold text-slate-800 flex items-center gap-1.5"
+                              >
+                                <span>{draft.overtime_min_duration}</span>
+                                <span className="text-slate-400 text-[10px]">
+                                  ⌄
+                                </span>
+                              </button>
+
+                              {openRulePopover === "ot_min" && (
+                                <div
+                                  onClick={(e) => e.stopPropagation()}
+                                  className="absolute right-0 bottom-9 z-40 w-[210px] rounded-2xl bg-white border border-slate-200 shadow-[0_14px_36px_rgba(15,23,42,0.14)] p-1.5 space-y-0.5"
+                                >
+                                  {(
+                                    [
+                                      "제한 안 함",
+                                      "5분 이상",
+                                      "10분 이상",
+                                      "15분 이상",
+                                      "30분 이상",
+                                      "60분 이상",
+                                      "90분 이상",
+                                      "120분 이상",
+                                    ] as const
+                                  ).map((val) => {
+                                    const active =
+                                      draft.overtime_min_duration === val;
+                                    return (
+                                      <button
+                                        key={val}
+                                        type="button"
+                                        onClick={() => {
+                                          setDraft({
+                                            ...draft,
+                                            overtime_min_duration: val,
+                                          });
+                                          setOpenRulePopover(null);
+                                        }}
+                                        className={`w-full px-3 py-2 rounded-xl text-left flex items-center gap-2 font-bold text-slate-900 ${
+                                          active
+                                            ? "bg-slate-100/80"
+                                            : "hover:bg-slate-50"
+                                        }`}
+                                      >
+                                        <span className="w-4 text-[#16cc3b] font-extrabold">
+                                          {active ? "✓" : ""}
+                                        </span>
+                                        <span>{val}</span>
+                                      </button>
+                                    );
+                                  })}
+                                </div>
+                              )}
+                            </div>
                           </div>
                         </div>
                       </section>
 
-                      {/* 야간 근무 */}
+                      {/* 야간 근무 (Screenshot 105204) */}
                       <section className="space-y-2.5">
                         <h4 className="text-[13px] font-extrabold text-slate-800">
                           야간 근무
                         </h4>
-                        <div className="px-5 py-4 rounded-2xl border border-slate-200 flex items-center justify-between gap-4">
+                        <div className="px-5 py-4 rounded-2xl border border-slate-200 flex items-center justify-between gap-4 relative">
                           <div>
                             <div className="font-bold text-slate-800">
                               야간 근무 허용
@@ -1627,21 +2933,78 @@ export default function HqWorkTypeSettingsSection({
                               22시부터 다음 날 6시 사이의 근무가 야간 근무로 집계돼요.
                             </div>
                           </div>
-                          <select
-                            disabled={!canEdit}
-                            value={draft.night_work_allow_mode}
-                            onChange={(e) =>
-                              setDraft({
-                                ...draft,
-                                night_work_allow_mode:
-                                  e.target.value as HqWorkRuleItem["night_work_allow_mode"],
-                              })
-                            }
-                            className="font-bold text-slate-700 bg-transparent focus:outline-none"
-                          >
-                            <option value="한도 없이 허용">한도 없이 허용</option>
-                            <option value="허용 안 함">허용 안 함</option>
-                          </select>
+
+                          <div className="relative">
+                            <button
+                              type="button"
+                              disabled={!canEdit}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setOpenRulePopover((p) =>
+                                  p === "night_allow" ? null : "night_allow"
+                                );
+                              }}
+                              className="px-2.5 py-1.5 rounded-lg hover:bg-slate-50 font-bold text-slate-800 flex items-center gap-1.5"
+                            >
+                              <span>{draft.night_work_allow_mode}</span>
+                              <span className="text-slate-400 text-[10px]">
+                                ⌄
+                              </span>
+                            </button>
+
+                            {openRulePopover === "night_allow" && (
+                              <div
+                                onClick={(e) => e.stopPropagation()}
+                                className="absolute right-0 bottom-9 z-40 w-[236px] rounded-2xl bg-white border border-slate-200 shadow-[0_14px_36px_rgba(15,23,42,0.14)] p-1.5 space-y-0.5"
+                              >
+                                {(
+                                  [
+                                    { value: "한도 없이 허용" as const, desc: "" },
+                                    {
+                                      value: "한도 내 허용" as const,
+                                      desc: "일·주·월 단위로 한도를 정할 수 있어요.",
+                                    },
+                                    { value: "허용 안 함" as const, desc: "" },
+                                  ]
+                                ).map((opt) => {
+                                  const active =
+                                    draft.night_work_allow_mode === opt.value;
+                                  return (
+                                    <button
+                                      key={opt.value}
+                                      type="button"
+                                      onClick={() => {
+                                        setDraft({
+                                          ...draft,
+                                          night_work_allow_mode: opt.value,
+                                        });
+                                        setOpenRulePopover(null);
+                                      }}
+                                      className={`w-full px-3 py-2.5 rounded-xl text-left flex items-start gap-2 ${
+                                        active
+                                          ? "bg-slate-100/80"
+                                          : "hover:bg-slate-50"
+                                      }`}
+                                    >
+                                      <span className="w-4 text-[#16cc3b] font-extrabold mt-0.5 shrink-0">
+                                        {active ? "✓" : ""}
+                                      </span>
+                                      <div>
+                                        <div className="font-bold text-slate-900">
+                                          {opt.value}
+                                        </div>
+                                        {opt.desc && (
+                                          <div className="text-[10.5px] text-slate-400 mt-0.5">
+                                            {opt.desc}
+                                          </div>
+                                        )}
+                                      </div>
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            )}
+                          </div>
                         </div>
                       </section>
 
@@ -1650,7 +3013,7 @@ export default function HqWorkTypeSettingsSection({
                         <h4 className="text-[13px] font-extrabold text-slate-800">
                           휴일 근무
                         </h4>
-                        <div className="px-5 py-4 rounded-2xl border border-slate-200 flex items-center justify-between gap-4">
+                        <div className="px-5 py-4 rounded-2xl border border-slate-200 flex items-center justify-between gap-4 relative">
                           <div>
                             <div className="font-bold text-slate-800">
                               휴일 근무 허용
@@ -1659,21 +3022,78 @@ export default function HqWorkTypeSettingsSection({
                               주휴일 및 회사 지정 쉬는 날의 근무가 휴일 근무로 집계돼요.
                             </div>
                           </div>
-                          <select
-                            disabled={!canEdit}
-                            value={draft.holiday_work_allow_mode}
-                            onChange={(e) =>
-                              setDraft({
-                                ...draft,
-                                holiday_work_allow_mode:
-                                  e.target.value as HqWorkRuleItem["holiday_work_allow_mode"],
-                              })
-                            }
-                            className="font-bold text-slate-700 bg-transparent focus:outline-none"
-                          >
-                            <option value="한도 없이 허용">한도 없이 허용</option>
-                            <option value="허용 안 함">허용 안 함</option>
-                          </select>
+
+                          <div className="relative">
+                            <button
+                              type="button"
+                              disabled={!canEdit}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setOpenRulePopover((p) =>
+                                  p === "holiday_allow" ? null : "holiday_allow"
+                                );
+                              }}
+                              className="px-2.5 py-1.5 rounded-lg hover:bg-slate-50 font-bold text-slate-800 flex items-center gap-1.5"
+                            >
+                              <span>{draft.holiday_work_allow_mode}</span>
+                              <span className="text-slate-400 text-[10px]">
+                                ⌄
+                              </span>
+                            </button>
+
+                            {openRulePopover === "holiday_allow" && (
+                              <div
+                                onClick={(e) => e.stopPropagation()}
+                                className="absolute right-0 bottom-9 z-40 w-[236px] rounded-2xl bg-white border border-slate-200 shadow-[0_14px_36px_rgba(15,23,42,0.14)] p-1.5 space-y-0.5"
+                              >
+                                {(
+                                  [
+                                    { value: "한도 없이 허용" as const, desc: "" },
+                                    {
+                                      value: "한도 내 허용" as const,
+                                      desc: "일·주·월 단위로 한도를 정할 수 있어요.",
+                                    },
+                                    { value: "허용 안 함" as const, desc: "" },
+                                  ]
+                                ).map((opt) => {
+                                  const active =
+                                    draft.holiday_work_allow_mode === opt.value;
+                                  return (
+                                    <button
+                                      key={opt.value}
+                                      type="button"
+                                      onClick={() => {
+                                        setDraft({
+                                          ...draft,
+                                          holiday_work_allow_mode: opt.value,
+                                        });
+                                        setOpenRulePopover(null);
+                                      }}
+                                      className={`w-full px-3 py-2.5 rounded-xl text-left flex items-start gap-2 ${
+                                        active
+                                          ? "bg-slate-100/80"
+                                          : "hover:bg-slate-50"
+                                      }`}
+                                    >
+                                      <span className="w-4 text-[#16cc3b] font-extrabold mt-0.5 shrink-0">
+                                        {active ? "✓" : ""}
+                                      </span>
+                                      <div>
+                                        <div className="font-bold text-slate-900">
+                                          {opt.value}
+                                        </div>
+                                        {opt.desc && (
+                                          <div className="text-[10.5px] text-slate-400 mt-0.5">
+                                            {opt.desc}
+                                          </div>
+                                        )}
+                                      </div>
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            )}
+                          </div>
                         </div>
                       </section>
                     </div>
@@ -2092,7 +3512,7 @@ export default function HqWorkTypeSettingsSection({
                   )}
 
                   {/* ===================================================== */}
-                  {/* SUB-PAGE 5: 자동 근무 기록 (Image 7 동일)              */}
+                  {/* SUB-PAGE 5: 자동 근무 기록 (Flex 105232~105244 동일)   */}
                   {/* ===================================================== */}
                   {subPage === "auto_record" && (
                     <div className="space-y-6 max-w-[600px]">
@@ -2105,43 +3525,17 @@ export default function HqWorkTypeSettingsSection({
                         </p>
                       </div>
 
-                      <div className="rounded-2xl border border-slate-200 overflow-hidden">
-                        {/* 스케줄 자동 채움 일러스트 (Image 7 동일) */}
-                        <div className="p-6 bg-[#f8f9fa] flex justify-center relative overflow-hidden">
-                          <div className="w-64 space-y-2.5 relative">
-                            <div className="absolute top-0 bottom-0 left-[62%] w-[1.5px] bg-amber-700/40 z-10" />
-                            {[
-                              { fill: "full", done: true, opacity: "opacity-55" },
-                              { fill: "full", done: true, opacity: "opacity-100" },
-                              { fill: "half", done: false, opacity: "opacity-100" },
-                              { fill: "none", done: false, opacity: "opacity-80" },
-                              { fill: "none", done: false, opacity: "opacity-45" },
-                            ].map((bar, i) => (
-                              <div key={i} className={bar.opacity}>
-                                <div className="h-6 rounded-md border border-dashed border-teal-300 bg-white overflow-hidden flex items-center relative">
-                                  {bar.fill === "full" && (
-                                    <div className="w-full h-full bg-teal-100/90 border border-teal-300 rounded-md" />
-                                  )}
-                                  {bar.fill === "half" && (
-                                    <div className="w-[62%] h-full bg-teal-100/90 border-r border-teal-300" />
-                                  )}
-                                  <span className="absolute left-2 text-[10px]">
-                                    💼
-                                  </span>
-                                </div>
-                                <div className="flex items-center justify-between text-[9px] text-slate-400 mt-0.5 px-0.5">
-                                  <span>AM 9</span>
-                                  <span>
-                                    PM 6{" "}
-                                    {bar.done && (
-                                      <span className="text-emerald-500 font-bold">
-                                        ✓
-                                      </span>
-                                    )}
-                                  </span>
-                                </div>
-                              </div>
-                            ))}
+                      <div className="rounded-2xl border border-slate-200 overflow-hidden bg-white">
+                        {/* 빨간 세로바가 우측으로 이동하며 근무 바 색상이 차오르는 실시간 애니메이션 */}
+                        <div className="p-3 bg-white">
+                          <div className="rounded-xl border border-slate-100 overflow-hidden">
+                            <AutoRecordRedBarAnimation
+                              enabled={draft.auto_record_enabled}
+                              startTime={draft.start_time || "09:00"}
+                              dailyWorkHours={draft.daily_work_hours ?? 8}
+                              dailyWorkMinutes={draft.daily_work_minutes ?? 0}
+                              breakMinutes={calcBreakMinutes(draft)}
+                            />
                           </div>
                         </div>
 

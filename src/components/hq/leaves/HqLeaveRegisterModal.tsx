@@ -59,6 +59,21 @@ interface ApprovalStepDraft {
     rank_code: string;
     job_title: string;
   }[];
+  autoProceedEnabled?: boolean;
+  autoProceedDays?: number;
+}
+
+interface FloatingDropdownState {
+  key: string;
+  ymd: string;
+  kind: "MODE" | "START" | "END";
+  rect: {
+    top: number;
+    bottom: number;
+    left: number;
+    right: number;
+    width: number;
+  };
 }
 
 interface Props {
@@ -307,7 +322,8 @@ export default function HqLeaveRegisterModal({
   const [daySchedules, setDaySchedules] = useState<
     Record<string, DayScheduleItem>
   >({});
-  const [openDropdownKey, setOpenDropdownKey] = useState<string | null>(null);
+  const [floatingDropdown, setFloatingDropdown] =
+    useState<FloatingDropdownState | null>(null);
   const [customTimeText, setCustomTimeText] = useState("");
   const [breakToastForYmd, setBreakToastForYmd] = useState<{
     ymd: string;
@@ -323,6 +339,9 @@ export default function HqLeaveRegisterModal({
   const [notifyMenuTargetId, setNotifyMenuTargetId] = useState<string | null>(
     null
   );
+  const [autoProceedMenuStepId, setAutoProceedMenuStepId] = useState<
+    string | null
+  >(null);
   const [pickerContext, setPickerContext] = useState<
     null | { kind: "CC" } | { kind: "STEP"; stepId: string }
   >(null);
@@ -447,18 +466,23 @@ export default function HqLeaveRegisterModal({
       }))
     );
     setApprovalSteps(
-      resolved.steps.map((s, idx) => ({
-        id: `step-${idx + 1}-${Date.now()}`,
-        assignees: [
-          {
-            id: s.approver_id,
-            name: s.approver_name,
-            dept: s.approver_dept,
-            rank_code: s.approver_rank,
-            job_title: s.approver_title,
-          },
-        ],
-      }))
+      resolved.steps.map((s, idx) => {
+        const polStep = matchedPol.steps?.[idx];
+        return {
+          id: `step-${idx + 1}-${Date.now()}`,
+          assignees: [
+            {
+              id: s.approver_id,
+              name: s.approver_name,
+              dept: s.approver_dept,
+              rank_code: s.approver_rank,
+              job_title: s.approver_title,
+            },
+          ],
+          autoProceedEnabled: Boolean(polStep?.auto_proceed_enabled),
+          autoProceedDays: Math.max(1, Number(polStep?.auto_proceed_days || 1)),
+        };
+      })
     );
   };
 
@@ -474,12 +498,13 @@ export default function HqLeaveRegisterModal({
     setPickStart("");
     setPickEnd("");
     setDaySchedules({});
-    setOpenDropdownKey(null);
+    setFloatingDropdown(null);
     setReason("");
     setLinePanelOpen(false);
     setPickerContext(null);
     setPickerSearch("");
     setNotifyMenuTargetId(null);
+    setAutoProceedMenuStepId(null);
     syncApprovalLineFromKind(initialKind);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen, initialKind, me?.instructor_id]);
@@ -727,7 +752,7 @@ export default function HqLeaveRegisterModal({
         },
       };
     });
-    setOpenDropdownKey(null);
+    setFloatingDropdown(null);
   };
 
   const updateDayStartMin = (ymd: string, nextStart: number) => {
@@ -747,7 +772,7 @@ export default function HqLeaveRegisterModal({
         [ymd]: { ...cur, startMin: nextStart, endMin: nextEnd },
       };
     });
-    setOpenDropdownKey(null);
+    setFloatingDropdown(null);
   };
 
   const updateDayEndMin = (ymd: string, nextEnd: number) => {
@@ -759,7 +784,7 @@ export default function HqLeaveRegisterModal({
         [ymd]: { ...cur, endMin: nextEnd },
       };
     });
-    setOpenDropdownKey(null);
+    setFloatingDropdown(null);
   };
 
   const toggleDayBreak = (ymd: string) => {
@@ -993,6 +1018,22 @@ export default function HqLeaveRegisterModal({
       })`;
     });
 
+    // 승인 단계별 자동 진행 설정 매핑 (apiSteps 순번 기준)
+    const stepAutoProceed: Record<string, { enabled: boolean; days: number }> =
+      {};
+    let flatOrder = 0;
+    approvalSteps.forEach((st) => {
+      st.assignees.forEach(() => {
+        flatOrder += 1;
+        if (st.autoProceedEnabled) {
+          stepAutoProceed[String(flatOrder)] = {
+            enabled: true,
+            days: Math.max(1, Math.min(365, Number(st.autoProceedDays || 1))),
+          };
+        }
+      });
+    });
+
     const apiSteps = flattenedApprovers.map((ap, idx) => ({
       step_order: idx + 1,
       step_role:
@@ -1050,6 +1091,7 @@ export default function HqLeaveRegisterModal({
             field_labels: {
               schedule_summary: "휴가 일정",
             },
+            step_auto_proceed: stepAutoProceed,
             attachments: [],
           },
         },
@@ -1105,8 +1147,9 @@ export default function HqLeaveRegisterModal({
         onClick={() => {
           setInfoPopoverOpen(false);
           setKindMenuOpen(false);
-          setOpenDropdownKey(null);
+          setFloatingDropdown(null);
           setNotifyMenuTargetId(null);
+          setAutoProceedMenuStepId(null);
         }}
         className={`bg-white rounded-3xl border border-slate-200/90 shadow-2xl w-full transition-all duration-200 relative overflow-visible flex flex-col lg:flex-row ${
           stepView === "CONFIRM" && linePanelOpen
@@ -1545,15 +1588,15 @@ export default function HqLeaveRegisterModal({
              ================================================================= */}
           {detailSheetOpen && (
             <div
-              onClick={() => setOpenDropdownKey(null)}
+              onClick={() => setFloatingDropdown(null)}
               className="absolute inset-0 z-30 bg-slate-900/20 rounded-3xl flex flex-col justify-end"
             >
               <div
                 onClick={(e) => {
                   e.stopPropagation();
-                  setOpenDropdownKey(null);
+                  setFloatingDropdown(null);
                 }}
-                className="bg-white rounded-3xl border-t border-slate-200 shadow-2xl max-h-[78%] flex flex-col"
+                className="bg-white rounded-3xl border-t border-slate-200 shadow-2xl max-h-[78%] flex flex-col relative"
               >
                 <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between shrink-0">
                   <h4 className="text-[14px] font-extrabold text-slate-900">
@@ -1563,7 +1606,7 @@ export default function HqLeaveRegisterModal({
                     type="button"
                     onClick={() => {
                       setDetailSheetOpen(false);
-                      setOpenDropdownKey(null);
+                      setFloatingDropdown(null);
                     }}
                     className="w-7 h-7 rounded-full bg-slate-200/80 hover:bg-slate-300 text-slate-600 flex items-center justify-center text-xs font-bold"
                   >
@@ -1571,7 +1614,10 @@ export default function HqLeaveRegisterModal({
                   </button>
                 </div>
 
-                <div className="flex-1 overflow-y-auto custom-scroll px-6 py-5 space-y-6 text-xs">
+                <div
+                  onScroll={() => setFloatingDropdown(null)}
+                  className="flex-1 overflow-y-auto custom-scroll px-6 py-5 space-y-6 text-xs"
+                >
                   {workingDates.map((ymd, idx) => {
                     const sc = daySchedules[ymd] || {
                       ymd,
@@ -1584,29 +1630,6 @@ export default function HqLeaveRegisterModal({
                     const modeKey = `mode-${ymd}`;
                     const startKey = `start-${ymd}`;
                     const endKey = `end-${ymd}`;
-
-                    // 종료 시간 후보 (정책 단위: 기본 2시간 반반차 단위 [2h, 4h, 6h, 8h])
-                    const endCandidates: { endMin: number; netHours: number }[] =
-                      [];
-                    const stepMin =
-                      sc.mode === "HOURLY" ? hourlyUnitMinutes : 240;
-                    for (
-                      let netM = stepMin;
-                      netM <= 8 * 60;
-                      netM += stepMin
-                    ) {
-                      const candidateEnd =
-                        sc.startMin + netM + (sc.includeBreak ? 60 : 0);
-                      if (candidateEnd <= 23 * 60 + 30) {
-                        endCandidates.push({
-                          endMin: candidateEnd,
-                          netHours: Math.round((netM / 60) * 100) / 100,
-                        });
-                      }
-                    }
-
-                    const dt = parseYmdLocal(ymd);
-                    const mdLabel = `${dt.getMonth() + 1}월 ${dt.getDate()}일`;
 
                     return (
                       <div key={ymd} className="space-y-2 relative">
@@ -1621,8 +1644,23 @@ export default function HqLeaveRegisterModal({
                               type="button"
                               onClick={(e) => {
                                 e.stopPropagation();
-                                setOpenDropdownKey(
-                                  openDropdownKey === modeKey ? null : modeKey
+                                const r =
+                                  e.currentTarget.getBoundingClientRect();
+                                setFloatingDropdown((prev) =>
+                                  prev?.key === modeKey
+                                    ? null
+                                    : {
+                                        key: modeKey,
+                                        ymd,
+                                        kind: "MODE",
+                                        rect: {
+                                          top: r.top,
+                                          bottom: r.bottom,
+                                          left: r.left,
+                                          right: r.right,
+                                          width: r.width,
+                                        },
+                                      }
                                 );
                               }}
                               className="w-full px-3 py-2.5 rounded-xl border border-slate-200 bg-white font-bold text-slate-800 flex items-center justify-between hover:border-slate-300"
@@ -1640,36 +1678,6 @@ export default function HqLeaveRegisterModal({
                                 ▾
                               </span>
                             </button>
-
-                            {openDropdownKey === modeKey && (
-                              <div
-                                onClick={(e) => e.stopPropagation()}
-                                className="absolute left-0 top-11 z-40 w-44 rounded-2xl bg-white border border-slate-200 shadow-2xl py-1.5"
-                              >
-                                {(
-                                  [
-                                    { key: "FULL", label: "하루 종일" },
-                                    { key: "AM_HALF", label: "오전 반차" },
-                                    { key: "PM_HALF", label: "오후 반차" },
-                                    { key: "HOURLY", label: "시간차" },
-                                  ] as const
-                                ).map((opt) => (
-                                  <button
-                                    key={opt.key}
-                                    type="button"
-                                    onClick={() => updateDayMode(ymd, opt.key)}
-                                    className="w-full px-4 py-2.5 text-left font-bold text-slate-800 hover:bg-slate-50 flex items-center justify-between"
-                                  >
-                                    <span>{opt.label}</span>
-                                    {sc.mode === opt.key && (
-                                      <span className="text-[#00c73c] font-extrabold">
-                                        ✓
-                                      </span>
-                                    )}
-                                  </button>
-                                ))}
-                              </div>
-                            )}
                           </div>
 
                           {/* 2) 시작 시간 / 종료 시간 결합 박스 */}
@@ -1681,11 +1689,24 @@ export default function HqLeaveRegisterModal({
                                 disabled={isFull}
                                 onClick={(e) => {
                                   e.stopPropagation();
+                                  const r =
+                                    e.currentTarget.getBoundingClientRect();
                                   setCustomTimeText(minutesToHm24(sc.startMin));
-                                  setOpenDropdownKey(
-                                    openDropdownKey === startKey
+                                  setFloatingDropdown((prev) =>
+                                    prev?.key === startKey
                                       ? null
-                                      : startKey
+                                      : {
+                                          key: startKey,
+                                          ymd,
+                                          kind: "START",
+                                          rect: {
+                                            top: r.top,
+                                            bottom: r.bottom,
+                                            left: r.left,
+                                            right: r.right,
+                                            width: r.width,
+                                          },
+                                        }
                                   );
                                 }}
                                 className="w-full px-3 py-2.5 text-left font-semibold flex items-center justify-between disabled:bg-slate-50/70 disabled:text-slate-300 text-slate-800"
@@ -1699,55 +1720,6 @@ export default function HqLeaveRegisterModal({
                                   ▾
                                 </span>
                               </button>
-
-                              {openDropdownKey === startKey && (
-                                <div
-                                  onClick={(e) => e.stopPropagation()}
-                                  className="absolute left-0 top-11 z-40 w-56 rounded-2xl bg-white border border-slate-200 shadow-2xl p-2 space-y-1"
-                                >
-                                  <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border border-[#00c73c]">
-                                    <span className="text-slate-400">🕒</span>
-                                    <input
-                                      value={customTimeText}
-                                      onChange={(e) =>
-                                        setCustomTimeText(e.target.value)
-                                      }
-                                      onKeyDown={(e) => {
-                                        if (e.key === "Enter") {
-                                          const parsed =
-                                            parseHmInputToMinutes(
-                                              customTimeText
-                                            );
-                                          if (parsed !== null) {
-                                            updateDayStartMin(ymd, parsed);
-                                          }
-                                        }
-                                      }}
-                                      placeholder="시간 입력 (예: 09:00)"
-                                      className="w-full text-xs font-bold text-slate-800 focus:outline-none"
-                                    />
-                                  </div>
-                                  <div className="max-h-48 overflow-y-auto custom-scroll py-1">
-                                    {startOptionsMin.map((mVal) => (
-                                      <button
-                                        key={mVal}
-                                        type="button"
-                                        onClick={() =>
-                                          updateDayStartMin(ymd, mVal)
-                                        }
-                                        className="w-full px-3 py-2 rounded-lg hover:bg-slate-50 text-left font-bold text-slate-800 flex items-center justify-between"
-                                      >
-                                        <span>{minutesToKoreanAmPm(mVal)}</span>
-                                        {sc.startMin === mVal && (
-                                          <span className="text-[#00c73c]">
-                                            ✓
-                                          </span>
-                                        )}
-                                      </button>
-                                    ))}
-                                  </div>
-                                </div>
-                              )}
                             </div>
 
                             {/* 종료 시간 */}
@@ -1757,9 +1729,24 @@ export default function HqLeaveRegisterModal({
                                 disabled={isFull}
                                 onClick={(e) => {
                                   e.stopPropagation();
+                                  const r =
+                                    e.currentTarget.getBoundingClientRect();
                                   setCustomTimeText(minutesToHm24(sc.endMin));
-                                  setOpenDropdownKey(
-                                    openDropdownKey === endKey ? null : endKey
+                                  setFloatingDropdown((prev) =>
+                                    prev?.key === endKey
+                                      ? null
+                                      : {
+                                          key: endKey,
+                                          ymd,
+                                          kind: "END",
+                                          rect: {
+                                            top: r.top,
+                                            bottom: r.bottom,
+                                            left: r.left,
+                                            right: r.right,
+                                            width: r.width,
+                                          },
+                                        }
                                   );
                                 }}
                                 className="w-full px-3 py-2.5 text-left font-semibold flex items-center justify-between disabled:bg-slate-50/70 disabled:text-slate-300 text-slate-800"
@@ -1773,68 +1760,6 @@ export default function HqLeaveRegisterModal({
                                   ▾
                                 </span>
                               </button>
-
-                              {openDropdownKey === endKey && (
-                                <div
-                                  onClick={(e) => e.stopPropagation()}
-                                  className="absolute right-0 top-11 z-40 w-60 rounded-2xl bg-white border border-slate-200 shadow-2xl p-2 space-y-1"
-                                >
-                                  <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border border-[#00c73c]">
-                                    <span className="text-slate-400">🕒</span>
-                                    <input
-                                      value={customTimeText}
-                                      onChange={(e) =>
-                                        setCustomTimeText(e.target.value)
-                                      }
-                                      onKeyDown={(e) => {
-                                        if (e.key === "Enter") {
-                                          const parsed =
-                                            parseHmInputToMinutes(
-                                              customTimeText
-                                            );
-                                          if (
-                                            parsed !== null &&
-                                            parsed > sc.startMin
-                                          ) {
-                                            updateDayEndMin(ymd, parsed);
-                                          }
-                                        }
-                                      }}
-                                      placeholder="시간 입력 (예: 11:00)"
-                                      className="w-full text-xs font-bold text-slate-800 focus:outline-none"
-                                    />
-                                  </div>
-                                  <div className="px-3 pt-1.5 pb-0.5 text-[11px] font-bold text-slate-400">
-                                    {mdLabel}
-                                  </div>
-                                  <div className="max-h-48 overflow-y-auto custom-scroll py-1">
-                                    {endCandidates.map((cand) => (
-                                      <button
-                                        key={cand.endMin}
-                                        type="button"
-                                        onClick={() =>
-                                          updateDayEndMin(ymd, cand.endMin)
-                                        }
-                                        className="w-full px-3 py-2 rounded-lg hover:bg-slate-50 text-left font-bold text-slate-800 flex items-center justify-between"
-                                      >
-                                        <span className="flex items-center gap-1.5">
-                                          <span>
-                                            {minutesToKoreanAmPm(cand.endMin)}
-                                          </span>
-                                          <span className="px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 text-[10px] font-bold">
-                                            {cand.netHours}시간
-                                          </span>
-                                        </span>
-                                        {sc.endMin === cand.endMin && (
-                                          <span className="text-[#00c73c]">
-                                            ✓
-                                          </span>
-                                        )}
-                                      </button>
-                                    ))}
-                                  </div>
-                                </div>
-                              )}
                             </div>
                           </div>
 
@@ -1886,13 +1811,239 @@ export default function HqLeaveRegisterModal({
                     type="button"
                     onClick={() => {
                       setDetailSheetOpen(false);
-                      setOpenDropdownKey(null);
+                      setFloatingDropdown(null);
                     }}
                     className="px-5 py-2.5 rounded-xl bg-[#00c73c] hover:brightness-95 text-white text-xs font-extrabold"
                   >
                     적용 완료 ({usageSummary.label})
                   </button>
                 </div>
+
+                {/* =============================================================
+                    플로팅 드롭다운 오버레이 (스크롤 내부에 가려지지 않고 모달 위로 부상!)
+                   ============================================================= */}
+                {floatingDropdown &&
+                  (() => {
+                    const activeYmd = floatingDropdown.ymd;
+                    const activeSc = daySchedules[activeYmd] || {
+                      ymd: activeYmd,
+                      mode: "FULL" as const,
+                      startMin: 540,
+                      endMin: 1080,
+                      includeBreak: true,
+                    };
+                    const viewportH =
+                      typeof window !== "undefined" ? window.innerHeight : 900;
+                    const viewportW =
+                      typeof window !== "undefined" ? window.innerWidth : 1280;
+                    const estHeight =
+                      floatingDropdown.kind === "MODE" ? 184 : 268;
+                    const openUpward =
+                      floatingDropdown.rect.bottom + estHeight > viewportH - 16;
+                    const posStyle: React.CSSProperties = openUpward
+                      ? {
+                          position: "fixed",
+                          bottom: Math.max(
+                            12,
+                            viewportH - floatingDropdown.rect.top + 6
+                          ),
+                          left:
+                            floatingDropdown.kind === "END"
+                              ? Math.max(
+                                  12,
+                                  Math.min(
+                                    viewportW - 252,
+                                    floatingDropdown.rect.right - 240
+                                  )
+                                )
+                              : Math.max(
+                                  12,
+                                  Math.min(
+                                    viewportW - 240,
+                                    floatingDropdown.rect.left
+                                  )
+                                ),
+                        }
+                      : {
+                          position: "fixed",
+                          top: floatingDropdown.rect.bottom + 6,
+                          left:
+                            floatingDropdown.kind === "END"
+                              ? Math.max(
+                                  12,
+                                  Math.min(
+                                    viewportW - 252,
+                                    floatingDropdown.rect.right - 240
+                                  )
+                                )
+                              : Math.max(
+                                  12,
+                                  Math.min(
+                                    viewportW - 240,
+                                    floatingDropdown.rect.left
+                                  )
+                                ),
+                        };
+
+                    if (floatingDropdown.kind === "MODE") {
+                      return (
+                        <div
+                          style={posStyle}
+                          onClick={(e) => e.stopPropagation()}
+                          className="z-[150] w-44 rounded-2xl bg-white border border-slate-200/90 shadow-[0_14px_38px_rgba(15,23,42,0.16)] py-1.5 text-xs"
+                        >
+                          {(
+                            [
+                              { key: "FULL", label: "하루 종일" },
+                              { key: "AM_HALF", label: "오전 반차" },
+                              { key: "PM_HALF", label: "오후 반차" },
+                              { key: "HOURLY", label: "시간차" },
+                            ] as const
+                          ).map((opt) => (
+                            <button
+                              key={opt.key}
+                              type="button"
+                              onClick={() => updateDayMode(activeYmd, opt.key)}
+                              className="w-full px-4 py-2.5 text-left font-bold text-slate-800 hover:bg-slate-50 flex items-center justify-between"
+                            >
+                              <span>{opt.label}</span>
+                              {activeSc.mode === opt.key && (
+                                <span className="text-[#00c73c] font-extrabold">
+                                  ✓
+                                </span>
+                              )}
+                            </button>
+                          ))}
+                        </div>
+                      );
+                    }
+
+                    if (floatingDropdown.kind === "START") {
+                      return (
+                        <div
+                          style={posStyle}
+                          onClick={(e) => e.stopPropagation()}
+                          className="z-[150] w-56 rounded-2xl bg-white border border-slate-200/90 shadow-[0_14px_38px_rgba(15,23,42,0.16)] p-2 space-y-1 text-xs"
+                        >
+                          <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border border-[#00c73c]">
+                            <span className="text-slate-400">🕒</span>
+                            <input
+                              value={customTimeText}
+                              onChange={(e) =>
+                                setCustomTimeText(e.target.value)
+                              }
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") {
+                                  const parsed =
+                                    parseHmInputToMinutes(customTimeText);
+                                  if (parsed !== null) {
+                                    updateDayStartMin(activeYmd, parsed);
+                                  }
+                                }
+                              }}
+                              placeholder="시간 입력 (예: 09:00)"
+                              className="w-full text-xs font-bold text-slate-800 focus:outline-none"
+                            />
+                          </div>
+                          <div className="max-h-48 overflow-y-auto custom-scroll py-1">
+                            {startOptionsMin.map((mVal) => (
+                              <button
+                                key={mVal}
+                                type="button"
+                                onClick={() =>
+                                  updateDayStartMin(activeYmd, mVal)
+                                }
+                                className="w-full px-3 py-2 rounded-lg hover:bg-slate-50 text-left font-bold text-slate-800 flex items-center justify-between"
+                              >
+                                <span>{minutesToKoreanAmPm(mVal)}</span>
+                                {activeSc.startMin === mVal && (
+                                  <span className="text-[#00c73c]">✓</span>
+                                )}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    }
+
+                    const endCandidates: { endMin: number; netHours: number }[] =
+                      [];
+                    const stepMin =
+                      activeSc.mode === "HOURLY" ? hourlyUnitMinutes : 240;
+                    for (
+                      let netM = stepMin;
+                      netM <= 8 * 60;
+                      netM += stepMin
+                    ) {
+                      const candidateEnd =
+                        activeSc.startMin +
+                        netM +
+                        (activeSc.includeBreak ? 60 : 0);
+                      if (candidateEnd <= 23 * 60 + 30) {
+                        endCandidates.push({
+                          endMin: candidateEnd,
+                          netHours: Math.round((netM / 60) * 100) / 100,
+                        });
+                      }
+                    }
+                    const dt = parseYmdLocal(activeYmd);
+                    const mdLabel = `${dt.getMonth() + 1}월 ${dt.getDate()}일`;
+
+                    return (
+                      <div
+                        style={posStyle}
+                        onClick={(e) => e.stopPropagation()}
+                        className="z-[150] w-60 rounded-2xl bg-white border border-slate-200/90 shadow-[0_14px_38px_rgba(15,23,42,0.16)] p-2 space-y-1 text-xs"
+                      >
+                        <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border border-[#00c73c]">
+                          <span className="text-slate-400">🕒</span>
+                          <input
+                            value={customTimeText}
+                            onChange={(e) => setCustomTimeText(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") {
+                                const parsed =
+                                  parseHmInputToMinutes(customTimeText);
+                                if (
+                                  parsed !== null &&
+                                  parsed > activeSc.startMin
+                                ) {
+                                  updateDayEndMin(activeYmd, parsed);
+                                }
+                              }
+                            }}
+                            placeholder="시간 입력 (예: 11:00)"
+                            className="w-full text-xs font-bold text-slate-800 focus:outline-none"
+                          />
+                        </div>
+                        <div className="px-3 pt-1.5 pb-0.5 text-[11px] font-bold text-slate-400">
+                          {mdLabel}
+                        </div>
+                        <div className="max-h-48 overflow-y-auto custom-scroll py-1">
+                          {endCandidates.map((cand) => (
+                            <button
+                              key={cand.endMin}
+                              type="button"
+                              onClick={() =>
+                                updateDayEndMin(activeYmd, cand.endMin)
+                              }
+                              className="w-full px-3 py-2 rounded-lg hover:bg-slate-50 text-left font-bold text-slate-800 flex items-center justify-between"
+                            >
+                              <span className="flex items-center gap-1.5">
+                                <span>{minutesToKoreanAmPm(cand.endMin)}</span>
+                                <span className="px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 text-[10px] font-bold">
+                                  {cand.netHours}시간
+                                </span>
+                              </span>
+                              {activeSc.endMin === cand.endMin && (
+                                <span className="text-[#00c73c]">✓</span>
+                              )}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })()}
               </div>
             </div>
           )}
@@ -2073,7 +2224,14 @@ export default function HqLeaveRegisterModal({
                     type="button"
                     onClick={() => {
                       const newId = `step-1-${Date.now()}`;
-                      setApprovalSteps([{ id: newId, assignees: [] }]);
+                      setApprovalSteps([
+                        {
+                          id: newId,
+                          assignees: [],
+                          autoProceedEnabled: false,
+                          autoProceedDays: 1,
+                        },
+                      ]);
                     }}
                     className="w-full py-3 rounded-xl bg-[#f1f5f9] hover:bg-slate-200/70 text-[#1d4ed8] text-xs font-extrabold flex items-center justify-center gap-1.5 transition-colors"
                   >
@@ -2085,15 +2243,161 @@ export default function HqLeaveRegisterModal({
                     {approvalSteps.map((st, sIdx) => (
                       <div
                         key={st.id}
-                        className="p-2.5 rounded-2xl hover:bg-slate-50/80 transition-colors space-y-2.5 group"
+                        className="p-2.5 rounded-2xl hover:bg-slate-50/80 transition-colors space-y-2.5 group relative"
                       >
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs font-bold text-slate-500">
+                        <div className="flex items-center gap-2 relative">
+                          <span className="text-xs font-bold text-slate-500 shrink-0">
                             {sIdx + 1} 단계 승인
                           </span>
-                          <span className="px-1.5 py-0.5 rounded border border-slate-200 bg-white text-[10px] font-bold text-slate-500">
-                            자동 진행
-                          </span>
+
+                          {/* 플렉스 자동 진행 설정 버튼 + 팝오버 (Screenshots 104045 & 104126) */}
+                          <div className="relative shrink-0">
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setNotifyMenuTargetId(null);
+                                setAutoProceedMenuStepId((prev) =>
+                                  prev === st.id ? null : st.id
+                                );
+                              }}
+                              className={`px-2 py-1 rounded-lg text-[11px] transition-colors ${
+                                st.autoProceedEnabled
+                                  ? "bg-slate-100 hover:bg-slate-200 text-slate-800 font-extrabold"
+                                  : "border border-slate-200 bg-white hover:bg-slate-50 text-slate-600 font-bold"
+                              }`}
+                            >
+                              {st.autoProceedEnabled
+                                ? `자동 진행 D+${st.autoProceedDays || 1}`
+                                : "자동 진행"}
+                            </button>
+
+                            {autoProceedMenuStepId === st.id && (
+                              <div
+                                onClick={(e) => e.stopPropagation()}
+                                className="absolute left-0 top-8 z-[140] w-[236px] rounded-2xl bg-white border border-slate-200/90 shadow-[0_14px_38px_rgba(15,23,42,0.16)] overflow-hidden text-xs"
+                              >
+                                <div className="px-4 py-3.5 flex items-center justify-between gap-2">
+                                  <span className="text-[13px] font-extrabold text-slate-900">
+                                    자동 진행 설정
+                                  </span>
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      setApprovalSteps((prev) =>
+                                        prev.map((x) =>
+                                          x.id === st.id
+                                            ? {
+                                                ...x,
+                                                autoProceedEnabled:
+                                                  !x.autoProceedEnabled,
+                                                autoProceedDays:
+                                                  x.autoProceedDays || 1,
+                                              }
+                                            : x
+                                        )
+                                      )
+                                    }
+                                    className={`relative inline-flex h-6 w-11 shrink-0 rounded-full border-2 border-transparent transition-colors ${
+                                      st.autoProceedEnabled
+                                        ? "bg-[#16cc3b]"
+                                        : "bg-slate-300"
+                                    }`}
+                                  >
+                                    <span
+                                      className={`inline-block h-5 w-5 transform rounded-full bg-white shadow-sm transition ${
+                                        st.autoProceedEnabled
+                                          ? "translate-x-5"
+                                          : "translate-x-0"
+                                      }`}
+                                    />
+                                  </button>
+                                </div>
+
+                                {!st.autoProceedEnabled ? (
+                                  <div className="px-4 pb-4 text-[11.5px] text-slate-400 leading-relaxed font-medium">
+                                    일정 기간이 지난 후에 자동으로 승인되도록
+                                    설정할 수 있어요.
+                                  </div>
+                                ) : (
+                                  <>
+                                    <div className="border-t border-slate-100 py-1.5">
+                                      {[1, 3, 5, 7].map((dVal) => {
+                                        const active =
+                                          (st.autoProceedDays || 1) === dVal;
+                                        return (
+                                          <button
+                                            key={dVal}
+                                            type="button"
+                                            onClick={() =>
+                                              setApprovalSteps((prev) =>
+                                                prev.map((x) =>
+                                                  x.id === st.id
+                                                    ? {
+                                                        ...x,
+                                                        autoProceedDays: dVal,
+                                                      }
+                                                    : x
+                                                )
+                                              )
+                                            }
+                                            className="w-full px-4 py-2 text-left text-[13px] font-bold text-slate-800 hover:bg-slate-50 flex items-center justify-between"
+                                          >
+                                            <span>{dVal}일 후</span>
+                                            {active && (
+                                              <span className="text-[#16cc3b] font-extrabold">
+                                                ✓
+                                              </span>
+                                            )}
+                                          </button>
+                                        );
+                                      })}
+                                    </div>
+
+                                    <div className="border-t border-slate-100 px-4 py-3 space-y-2">
+                                      <div className="text-[11px] font-bold text-slate-400">
+                                        직접 입력
+                                      </div>
+                                      <div className="flex items-center justify-between px-3 py-2 rounded-xl border border-slate-200 bg-white focus-within:border-[#16cc3b]">
+                                        <input
+                                          type="number"
+                                          min={1}
+                                          max={365}
+                                          value={st.autoProceedDays || 1}
+                                          onChange={(e) => {
+                                            const n = Math.max(
+                                              1,
+                                              Math.min(
+                                                365,
+                                                Math.round(
+                                                  Number(e.target.value) || 1
+                                                )
+                                              )
+                                            );
+                                            setApprovalSteps((prev) =>
+                                              prev.map((x) =>
+                                                x.id === st.id
+                                                  ? {
+                                                      ...x,
+                                                      autoProceedDays: n,
+                                                    }
+                                                  : x
+                                              )
+                                            );
+                                          }}
+                                          className="w-full text-[13px] font-bold text-slate-900 focus:outline-none tabular-nums"
+                                        />
+                                        <span className="text-xs font-semibold text-slate-400 shrink-0 ml-2">
+                                          일 후
+                                        </span>
+                                      </div>
+                                    </div>
+                                  </>
+                                )}
+                              </div>
+                            )}
+                          </div>
+
                           <div className="flex-1 h-px bg-slate-100" />
                           <button
                             type="button"
@@ -2101,6 +2405,9 @@ export default function HqLeaveRegisterModal({
                               setApprovalSteps((prev) =>
                                 prev.filter((x) => x.id !== st.id)
                               );
+                              if (autoProceedMenuStepId === st.id) {
+                                setAutoProceedMenuStepId(null);
+                              }
                               if (
                                 pickerContext?.kind === "STEP" &&
                                 pickerContext.stepId === st.id
@@ -2109,7 +2416,7 @@ export default function HqLeaveRegisterModal({
                               }
                             }}
                             title="단계 삭제하기"
-                            className="w-6 h-6 rounded-lg border border-slate-200 bg-white hover:bg-rose-50 text-rose-500 flex items-center justify-center text-xs"
+                            className="w-6 h-6 rounded-lg border border-slate-200 bg-white hover:bg-rose-50 text-rose-500 flex items-center justify-center text-xs opacity-0 group-hover:opacity-100 transition-opacity"
                           >
                             🗑️
                           </button>

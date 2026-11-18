@@ -1,7 +1,9 @@
 // src/app/api/hq/attendance/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import { appendHqAuditLog } from "@/lib/hq/auditLogServer";
+import { readCompanySettingsServer } from "@/lib/hq/companySettingsServer";
 import { ATTENDANCE_MODES } from "@/lib/hq/constants";
+import { DEFAULT_WORK_RULES } from "@/lib/hq/defaultWorkRules";
 import { notifySlackIfEnabled } from "@/lib/hq/integrationServer";
 import { readWorkMgmtStateServer } from "@/lib/hq/leavesLedgerServer";
 import {
@@ -10,15 +12,74 @@ import {
   isMissingHqTableError,
   requireHqCaller,
 } from "@/lib/hq/serverAuth";
-import type { HqAttendanceStatus, HqWorkMode } from "@/lib/hq/types";
+import type {
+  HqAttendanceStatus,
+  HqWorkMode,
+  HqWorkRuleItem,
+} from "@/lib/hq/types";
 
 export const runtime = "nodejs";
+
+const WEEKDAY_KO_UTC = ["일", "월", "화", "수", "목", "금", "토"] as const;
+
+function parseHmMinutes(hm?: string | null, fallback = 540): number {
+  const m = /^(\d{1,2}):(\d{2})$/.exec(String(hm || "").trim());
+  if (!m) return fallback;
+  return Number(m[1]) * 60 + Number(m[2]);
+}
+
+function minutesToHmStr(totalMin: number): string {
+  const clamped = ((Math.round(totalMin) % 1440) + 1440) % 1440;
+  const hh = String(Math.floor(clamped / 60)).padStart(2, "0");
+  const mm = String(clamped % 60).padStart(2, "0");
+  return `${hh}:${mm}`;
+}
+
+function resolveMemberWorkRuleServer(
+  memberName: string,
+  scheduleType: string | undefined,
+  rules: HqWorkRuleItem[]
+): HqWorkRuleItem {
+  const byAssigned = rules.find((r) =>
+    (r.assigned_members || []).some(
+      (m) => m.status === "ACTIVE" && m.name === memberName
+    )
+  );
+  if (byAssigned) return byAssigned;
+  if (scheduleType) {
+    const byName = rules.find((r) => r.name === scheduleType);
+    if (byName) return byName;
+  }
+  return rules.find((r) => r.is_default) || rules[0] || DEFAULT_WORK_RULES[0];
+}
+
+function calcRuleBreakMinutes(
+  rule: HqWorkRuleItem,
+  dailyWorkMinutes: number
+): number {
+  let sum = 0;
+  if (rule.break_start_1 && rule.break_end_1) {
+    const s1 = parseHmMinutes(rule.break_start_1, -1);
+    const e1 = parseHmMinutes(rule.break_end_1, -1);
+    if (s1 >= 0 && e1 > s1) sum += e1 - s1;
+  }
+  if (rule.break_start_2 && rule.break_end_2) {
+    const s2 = parseHmMinutes(rule.break_start_2, -1);
+    const e2 = parseHmMinutes(rule.break_end_2, -1);
+    if (s2 >= 0 && e2 > s2) sum += e2 - s2;
+  }
+  if (sum > 0) return sum;
+  if (dailyWorkMinutes >= 480) return 60;
+  if (dailyWorkMinutes >= 240) return 30;
+  return 0;
+}
 
 function getKstNowParts() {
   const now = new Date();
   const kst = new Date(now.getTime() + 9 * 60 * 60 * 1000);
   const todayStr = kst.toISOString().slice(0, 10);
   const currentMonth = todayStr.slice(0, 7);
+  const nowKstMinutes = kst.getUTCHours() * 60 + kst.getUTCMinutes();
 
   // 이번 주 월요일 ~ 일요일 (KST 기준)
   const day = kst.getUTCDay(); // 0(일) ~ 6(토)
@@ -32,6 +93,7 @@ function getKstNowParts() {
     nowIso: now.toISOString(),
     todayStr,
     currentMonth,
+    nowKstMinutes,
     weekStartStr: mon.toISOString().slice(0, 10),
     weekEndStr: sun.toISOString().slice(0, 10),
   };
@@ -96,7 +158,14 @@ export async function GET(req: NextRequest) {
     const caller = await requireHqCaller(req);
     if (caller instanceof NextResponse) return caller;
 
-    const { todayStr, currentMonth, weekStartStr, weekEndStr } = getKstNowParts();
+    const {
+      nowIso,
+      todayStr,
+      currentMonth,
+      nowKstMinutes,
+      weekStartStr,
+      weekEndStr,
+    } = getKstNowParts();
     const startParam = req.nextUrl.searchParams.get("start_date");
     const endParam = req.nextUrl.searchParams.get("end_date");
     const monthParam = req.nextUrl.searchParams.get("month") || currentMonth;
@@ -128,14 +197,25 @@ export async function GET(req: NextRequest) {
     const maxDate = [rangeEnd, weekEndStr, todayStr].sort()[2];
 
     const supabaseAdmin = getSupabaseAdmin();
-    const { data, error } = await supabaseAdmin
-      .from("hq_attendance")
-      .select("*")
-      .gte("work_date", minDate)
-      .lte("work_date", maxDate)
-      .order("work_date", { ascending: false })
-      .order("check_in_at", { ascending: true });
+    const [attRes, settingsRes, wmState, instRes, profRes] = await Promise.all([
+      supabaseAdmin
+        .from("hq_attendance")
+        .select("*")
+        .gte("work_date", minDate)
+        .lte("work_date", maxDate)
+        .order("work_date", { ascending: false })
+        .order("check_in_at", { ascending: true }),
+      readCompanySettingsServer(supabaseAdmin).catch(() => null),
+      readWorkMgmtStateServer(supabaseAdmin).catch(() => ({
+        attendanceLocks: [],
+        compensatoryGrants: [],
+        holidaySubstitutions: [],
+      })),
+      supabaseAdmin.from("instructor").select("*"),
+      supabaseAdmin.from("hq_member_profile").select("*"),
+    ]);
 
+    const { data, error } = attRes;
     if (error) {
       if (isMissingHqTableError(error)) {
         return NextResponse.json({
@@ -159,8 +239,8 @@ export async function GET(req: NextRequest) {
       return apiFail(`근태 내역 조회 실패: ${error.message}`, 500);
     }
 
-    // 승인 또는 결재진행 중인 휴가 문서를 함께 조회하여 타임라인에 연동 표시
-    let leaveApprovals: any[] = [];
+    // 승인 또는 결재진행 중인 휴가 문서를 함께 조회하여 타임라인 및 자동 근무 기록 판정에 반영
+    let allLeaveInWindow: any[] = [];
     try {
       const { data: leaveRows } = await supabaseAdmin
         .from("hq_approval_doc")
@@ -169,19 +249,336 @@ export async function GET(req: NextRequest) {
         )
         .eq("doc_type", "LEAVE")
         .in("status", ["APPROVED", "PENDING", "IN_PROGRESS"])
-        .lte("effective_date", rangeEnd)
+        .lte("effective_date", maxDate)
         .order("effective_date", { ascending: true });
 
-      leaveApprovals = (leaveRows || []).filter((doc: any) => {
+      allLeaveInWindow = (leaveRows || []).filter((doc: any) => {
         const eff = doc.effective_date || "";
         const end = doc.end_date || eff;
-        return eff <= rangeEnd && end >= rangeStart;
+        return eff <= maxDate && end >= minDate;
       });
     } catch {
-      leaveApprovals = [];
+      allLeaveInWindow = [];
     }
 
-    const allRows = data || [];
+    const leaveApprovals = allLeaveInWindow.filter((doc: any) => {
+      const eff = doc.effective_date || "";
+      const end = doc.end_date || eff;
+      return eff <= rangeEnd && end >= rangeStart;
+    });
+
+    // =======================================================================
+    // 자동 근무 기록 (auto_record_enabled) 실시간 출근·업무시작·퇴근 자동 반영 엔진
+    // =======================================================================
+    const allRowsMap = new Map<string, any>();
+    (data || []).forEach((r: any) => {
+      allRowsMap.set(`${r.instructor_id}__${r.work_date}`, r);
+    });
+
+    try {
+      const settings = settingsRes?.settings;
+      const savedRules = settings?.extra_settings?.work_rules;
+      const workRules: HqWorkRuleItem[] =
+        Array.isArray(savedRules) && savedRules.length > 0
+          ? savedRules
+          : DEFAULT_WORK_RULES;
+
+      const holidaySet = new Set<string>();
+      Object.values(settings?.holidays_by_year || {}).forEach((arr: any) => {
+        (arr || []).forEach((h: any) => {
+          if (!h?.start_date) return;
+          const s = String(h.start_date).slice(0, 10);
+          const e = String(h.end_date || h.start_date).slice(0, 10);
+          let c = s;
+          let g = 0;
+          while (c <= e && g < 35) {
+            holidaySet.add(c);
+            c = addOneDayYmd(c);
+            g += 1;
+          }
+        });
+      });
+
+      const profById = new Map<string, any>();
+      (profRes.data || []).forEach((p: any) => {
+        profById.set(String(p.instructor_id), p);
+      });
+
+      const activeHqMembers = (instRes.data || []).filter((inst: any) => {
+        const idStr = String(inst.instructor_id);
+        const tId = inst.tenant_id ? String(inst.tenant_id) : "";
+        if (!caller.hqTenantIds.has(tId) && idStr !== caller.userId) {
+          return false;
+        }
+        const prof = profById.get(idStr);
+        const workStatus = prof?.work_status || inst.status || "재직";
+        if (workStatus === "퇴직" || workStatus === "퇴사") return false;
+        return true;
+      });
+
+      const autoEndCap = maxDate < todayStr ? maxDate : todayStr;
+      // 최근 120일 이내 범위만 자동 머티리얼라이즈하여 대량 과거 쿼리 부하 방지
+      const [ty, tm, td] = todayStr.split("-").map(Number);
+      const minFloorDt = new Date(Date.UTC(ty, (tm || 1) - 1, (td || 1) - 120));
+      const floorYmd = minFloorDt.toISOString().slice(0, 10);
+      const autoStart = minDate > floorYmd ? minDate : floorYmd;
+
+      const autoUpserts: Record<string, any>[] = [];
+
+      if (autoStart <= autoEndCap && activeHqMembers.length > 0) {
+        for (const inst of activeHqMembers) {
+          const memberId = String(inst.instructor_id);
+          const memberName = String(inst.name || "구성원");
+          const prof = profById.get(memberId);
+          const dept = String(
+            prof?.department || inst.department || "미지정"
+          ).trim() || "미지정";
+          const profExtra =
+            prof?.profile_extra && typeof prof.profile_extra === "object"
+              ? prof.profile_extra
+              : {};
+
+          const rule = resolveMemberWorkRuleServer(
+            memberName,
+            profExtra.work_schedule_type,
+            workRules
+          );
+          const autoEnabled = rule.auto_record_enabled !== false;
+          const autoMissingCheckout =
+            rule.missing_checkout_policy === "정시 퇴근 시각으로 자동 기록";
+
+          if (!autoEnabled && !autoMissingCheckout) continue;
+
+          const rawHire = prof?.hire_date
+            ? String(prof.hire_date).slice(0, 10)
+            : inst.created_at
+              ? String(inst.created_at).slice(0, 10)
+              : "2020-01-01";
+          const groupHire =
+            profExtra.use_group_hire_date !== false && profExtra.group_hire_date
+              ? String(profExtra.group_hire_date).slice(0, 10)
+              : rawHire;
+          const joinYmd = groupHire < rawHire ? groupHire : rawHire;
+          const resignYmd = prof?.resign_date
+            ? String(prof.resign_date).slice(0, 10)
+            : "";
+
+          let cursor = autoStart > joinYmd ? autoStart : joinYmd;
+          let guard = 0;
+          while (cursor <= autoEndCap && guard < 130) {
+            guard += 1;
+            const ymd = cursor;
+            cursor = addOneDayYmd(cursor);
+
+            if (resignYmd && ymd > resignYmd) continue;
+            if (holidaySet.has(ymd)) continue;
+
+            const [cy, cm, cd] = ymd.split("-").map(Number);
+            const dow = new Date(Date.UTC(cy, (cm || 1) - 1, cd || 1)).getUTCDay();
+            const dowKo = WEEKDAY_KO_UTC[dow];
+            const workDays =
+              Array.isArray(rule.work_days) && rule.work_days.length > 0
+                ? rule.work_days
+                : ["월", "화", "수", "목", "금"];
+            if (!workDays.includes(dowKo)) continue;
+
+            const isLocked = (wmState.attendanceLocks || []).some(
+              (l: any) =>
+                ymd >= l.start_date &&
+                ymd <= l.end_date &&
+                (l.target_scope === "ALL" ||
+                  (l.target_departments || []).includes(dept))
+            );
+            if (isLocked) continue;
+
+            // 해당 날짜 휴가 확인
+            const memberLeave = allLeaveInWindow.find((lv: any) => {
+              if (String(lv.drafter_id) !== memberId) return false;
+              const eff = String(lv.effective_date || "");
+              const end = String(lv.end_date || eff);
+              return ymd >= eff && ymd <= end;
+            });
+
+            const leaveLabel = String(memberLeave?.leave_type || "");
+            const isHalfAm = leaveLabel.includes("오전 반차");
+            const isHalfPm =
+              leaveLabel.includes("오후 반차") ||
+              (leaveLabel.includes("반차") && !isHalfAm);
+            const isHourlyLeave =
+              leaveLabel.includes("반반차") || leaveLabel.includes("시간차");
+            const isFullDayLeave =
+              Boolean(memberLeave) && !isHalfAm && !isHalfPm && !isHourlyLeave;
+
+            if (isFullDayLeave) continue;
+
+            const dayCustom =
+              rule.per_day_custom_enabled && rule.per_day_schedule?.[dowKo]
+                ? rule.per_day_schedule[dowKo]
+                : null;
+            const baseStartMin = parseHmMinutes(
+              dayCustom?.start_time || rule.start_time || "09:00",
+              540
+            );
+            const baseWorkMin =
+              Number(
+                dayCustom ? dayCustom.work_hours : rule.daily_work_hours ?? 8
+              ) *
+                60 +
+              Number(
+                dayCustom
+                  ? dayCustom.work_minutes
+                  : rule.daily_work_minutes ?? 0
+              );
+            const baseBreakMin = calcRuleBreakMinutes(rule, baseWorkMin);
+
+            let schedStartMin = baseStartMin;
+            let schedWorkMin = baseWorkMin;
+            let schedBreakMin = baseBreakMin;
+
+            if (isHalfAm) {
+              schedStartMin = baseStartMin + 240 + baseBreakMin;
+              schedWorkMin = Math.max(0, baseWorkMin - 240);
+              schedBreakMin = 0;
+            } else if (isHalfPm) {
+              schedStartMin = baseStartMin;
+              schedWorkMin = Math.max(0, baseWorkMin - 240);
+              schedBreakMin = 0;
+            }
+
+            if (schedWorkMin <= 0) continue;
+
+            const schedEndMin = schedStartMin + schedWorkMin + schedBreakMin;
+            const startHm = minutesToHmStr(schedStartMin);
+            const endHm = minutesToHmStr(schedEndMin);
+            const { checkInIso, checkOutIso } = buildCheckInOutIso(
+              ymd,
+              startHm,
+              endHm
+            );
+
+            const mapKey = `${memberId}__${ymd}`;
+            const existing = allRowsMap.get(mapKey);
+
+            if (!existing) {
+              if (!autoEnabled) continue;
+
+              if (ymd < todayStr) {
+                const rowPayload = {
+                  instructor_id: memberId,
+                  member_name: memberName,
+                  department: dept,
+                  work_date: ymd,
+                  work_mode: "OFFICE" as HqWorkMode,
+                  status: (isHalfAm || isHalfPm
+                    ? "HALF_LEAVE"
+                    : "DONE") as HqAttendanceStatus,
+                  check_in_at: checkInIso,
+                  check_out_at: checkOutIso,
+                  break_minutes: schedBreakMin,
+                  worked_minutes: schedWorkMin,
+                  overtime_minutes: Math.max(0, schedWorkMin - 480),
+                  location_note: "자동 근무 기록",
+                  memo: "근무 유형 자동 출퇴근 기록",
+                  updated_at: nowIso,
+                };
+                autoUpserts.push(rowPayload);
+                allRowsMap.set(mapKey, rowPayload);
+              } else if (ymd === todayStr) {
+                if (nowKstMinutes >= schedEndMin) {
+                  const rowPayload = {
+                    instructor_id: memberId,
+                    member_name: memberName,
+                    department: dept,
+                    work_date: ymd,
+                    work_mode: "OFFICE" as HqWorkMode,
+                    status: (isHalfAm || isHalfPm
+                      ? "HALF_LEAVE"
+                      : "DONE") as HqAttendanceStatus,
+                    check_in_at: checkInIso,
+                    check_out_at: checkOutIso,
+                    break_minutes: schedBreakMin,
+                    worked_minutes: schedWorkMin,
+                    overtime_minutes: Math.max(0, schedWorkMin - 480),
+                    location_note: "자동 근무 기록",
+                    memo: "지정 퇴근 시각 자동 기록",
+                    updated_at: nowIso,
+                  };
+                  autoUpserts.push(rowPayload);
+                  allRowsMap.set(mapKey, rowPayload);
+                } else if (nowKstMinutes >= schedStartMin) {
+                  const rowPayload = {
+                    instructor_id: memberId,
+                    member_name: memberName,
+                    department: dept,
+                    work_date: ymd,
+                    work_mode: "OFFICE" as HqWorkMode,
+                    status: "WORKING" as HqAttendanceStatus,
+                    check_in_at: checkInIso,
+                    check_out_at: null,
+                    break_minutes: schedBreakMin,
+                    worked_minutes: 0,
+                    overtime_minutes: 0,
+                    location_note: "자동 근무 기록",
+                    memo: "지정 출근 시각 자동 업무 시작",
+                    updated_at: nowIso,
+                  };
+                  autoUpserts.push(rowPayload);
+                  allRowsMap.set(mapKey, rowPayload);
+                }
+              }
+            } else if (
+              existing.status === "WORKING" &&
+              !existing.check_out_at &&
+              (ymd < todayStr ||
+                (ymd === todayStr &&
+                  autoEnabled &&
+                  nowKstMinutes >= schedEndMin))
+            ) {
+              const effInIso = existing.check_in_at || checkInIso;
+              const calc = calcWorkedMinutes(
+                effInIso,
+                checkOutIso,
+                existing.break_minutes ?? schedBreakMin
+              );
+              const updatedRow = {
+                instructor_id: existing.instructor_id,
+                member_name: existing.member_name || memberName,
+                department: existing.department || dept,
+                work_date: ymd,
+                work_mode: existing.work_mode || "OFFICE",
+                status: "DONE" as HqAttendanceStatus,
+                check_in_at: effInIso,
+                check_out_at: checkOutIso,
+                break_minutes: calc.breakMinutes,
+                worked_minutes: calc.workedMinutes,
+                overtime_minutes: calc.overtimeMinutes,
+                location_note: existing.location_note || "자동 근무 기록",
+                memo: existing.memo || "지정 퇴근 시각 자동 퇴근 처리",
+                updated_at: nowIso,
+              };
+              autoUpserts.push(updatedRow);
+              allRowsMap.set(mapKey, { ...existing, ...updatedRow });
+            }
+          }
+        }
+
+        if (autoUpserts.length > 0) {
+          const { data: savedAuto } = await supabaseAdmin
+            .from("hq_attendance")
+            .upsert(autoUpserts, { onConflict: "instructor_id,work_date" })
+            .select("*");
+          (savedAuto || []).forEach((sr: any) => {
+            allRowsMap.set(`${sr.instructor_id}__${sr.work_date}`, sr);
+          });
+        }
+      }
+    } catch (autoErr) {
+      console.warn("Auto attendance materialization warning:", autoErr);
+    }
+
+    const allRows = Array.from(allRowsMap.values()).sort((a, b) =>
+      String(b.work_date || "").localeCompare(String(a.work_date || ""))
+    );
     const nowMs = Date.now();
 
     const todayRecords = allRows.filter((r: any) => r.work_date === todayStr);
@@ -198,8 +595,10 @@ export async function GET(req: NextRequest) {
           0,
           Math.round((nowMs - new Date(r.check_in_at).getTime()) / 60000)
         );
-        const autoBreak = elapsed >= 300 ? 60 : 0;
-        mins = Math.max(0, elapsed - autoBreak);
+        const brk = Number(r.break_minutes ?? 60);
+        const deductBreak =
+          brk > 0 && elapsed > 240 ? Math.min(brk, elapsed - 240) : 0;
+        mins = Math.max(0, elapsed - deductBreak);
       }
       weeklySummary[r.instructor_id] =
         (weeklySummary[r.instructor_id] || 0) + mins;
