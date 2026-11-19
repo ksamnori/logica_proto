@@ -622,6 +622,35 @@ export default function HqChatDrawer() {
           <button
             type="button"
             onClick={() => {
+              if (activeRoomId) {
+                const roomTitle =
+                  activeRoomName || currentRoomObj?.displayTitle || "대화방";
+                const handoffPayload = {
+                  roomId: activeRoomId,
+                  roomName: roomTitle,
+                  draftText: chatInput || "",
+                };
+                try {
+                  sessionStorage.setItem(
+                    "hq_messenger_open_room",
+                    JSON.stringify(handoffPayload)
+                  );
+                } catch {
+                  // ignore storage error
+                }
+                window.dispatchEvent(
+                  new CustomEvent("hq:open-messenger-room", {
+                    detail: handoffPayload,
+                  })
+                );
+                closeChatDrawer();
+                router.push(
+                  `${hqHref("/hq/messenger")}?roomId=${encodeURIComponent(
+                    activeRoomId
+                  )}`
+                );
+                return;
+              }
               closeChatDrawer();
               router.push(hqHref("/hq/messenger"));
             }}

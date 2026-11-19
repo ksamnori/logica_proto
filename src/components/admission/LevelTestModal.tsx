@@ -493,8 +493,7 @@ export default function LevelTestModal({ onClose, onSuccess, tenantId }: LevelTe
 
       if (idsArray.length > 0) {
         await Promise.all([
-          supabase.from("student_answer").delete().in("assignment_id", idsArray),
-          supabase.from("student_answer").delete().in("exam_assignment_id", idsArray), 
+          supabase.from("student_answer").delete().in("exam_assignment_id", idsArray),
           supabase.from("student_exam_result").delete().in("assignment_id", idsArray),
           supabase.from("student_progress").delete().in("assignment_id", idsArray),
           supabase.from("admission_test_report").delete().in("assignment_id", idsArray)
@@ -669,7 +668,7 @@ export default function LevelTestModal({ onClose, onSuccess, tenantId }: LevelTe
           if (assignments && assignments.length > 0) {
             for (let a of assignments) {
               const pk = a.assignment_id;
-              await supabase.from("student_answer").delete().eq("assignment_id", pk);
+              await supabase.from("student_answer").delete().eq("exam_assignment_id", pk);
               await supabase.from("student_exam_result").delete().eq("assignment_id", pk);
               await supabase.from("student_progress").delete().eq("assignment_id", pk);
               await supabase.from("admission_test_report").delete().eq("assignment_id", pk);

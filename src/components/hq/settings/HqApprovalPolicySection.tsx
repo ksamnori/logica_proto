@@ -2173,7 +2173,7 @@ export function HqApprovalLabelsSection({
               <span>승인</span>
             </div>
             <div className="text-xs text-slate-400 mt-1">
-              플렉스에서 제공하는 기본 라벨이에요.
+              기본으로 제공되는 라벨이에요.
             </div>
           </div>
 

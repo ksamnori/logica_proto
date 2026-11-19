@@ -1,12 +1,18 @@
 // src/app/hq/org-chart/page.tsx
 "use client";
 
-import React, { useMemo, useState } from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useHqShell } from "@/components/hq/HqShellContext";
 import HqMemberProfileModal from "@/components/hq/members/HqMemberProfileModal";
 import HqOrgChartSettingsModal from "@/components/hq/org-chart/HqOrgChartSettingsModal";
 import { hqFetch } from "@/lib/hq/clientApi";
-import { getRankLevel } from "@/lib/hq/constants";
 import { DEFAULT_ORG_CHART_NODES } from "@/lib/hq/defaultCompanySettings";
 import { findOrgNodeLeader, getRegisteredOrgNames } from "@/lib/hq/orgTreeHelper";
 import type { HqMember, HqOrgChartNode } from "@/lib/hq/types";
@@ -34,13 +40,16 @@ export default function HqOrgChartPage() {
     instId,
     members,
     companySettings,
+    isBooting,
     isHrManager,
     isHqAdmin,
+    canAccessAnalytics,
     refreshMembers,
     refreshCompanySettings,
   } = useHqShell();
 
   const canManageOrg = isHrManager || isHqAdmin;
+  const canViewSalaryTrend = isHrManager || isHqAdmin || canAccessAnalytics;
   const todayIso = useMemo(() => new Date().toISOString().slice(0, 10), []);
 
   const [manageMode, setManageMode] = useState<boolean>(false);
@@ -50,17 +59,35 @@ export default function HqOrgChartPage() {
   const [includeOnLeave, setIncludeOnLeave] = useState(true);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
-  const [zoomPct, setZoomPct] = useState<number>(85);
+  const [zoomPct, setZoomPct] = useState<number>(100);
+  const [treeSize, setTreeSize] = useState<{ width: number; height: number }>({
+    width: 0,
+    height: 0,
+  });
+  const [isPanning, setIsPanning] = useState(false);
+
+  const viewportRef = useRef<HTMLDivElement | null>(null);
+  const treeRef = useRef<HTMLDivElement | null>(null);
+  const pendingCenterScrollRef = useRef<boolean>(false);
+  const userTouchedZoomRef = useRef<boolean>(false);
+  const didInitialBootFitRef = useRef<boolean>(false);
+  const panStartRef = useRef<{
+    x: number;
+    y: number;
+    scrollLeft: number;
+    scrollTop: number;
+  } | null>(null);
 
   const [openTool, setOpenTool] = useState<null | "TREND" | "VIEW">(null);
   const [direction, setDirection] = useState<"DOWN" | "RIGHT">("DOWN");
   const [countMode, setCountMode] = useState<"INCLUDE_SUB" | "DIRECT_ONLY">(
     "INCLUDE_SUB"
   );
-  const [selectedTrends, setSelectedTrends] = useState<TrendMetricKey[]>([
-    "SALARY_SUM",
-    "RETENTION",
-  ]);
+  const [selectedTrends, setSelectedTrends] = useState<TrendMetricKey[]>([]);
+  const userTouchedTrendsRef = useRef<boolean>(false);
+  const [monthlyOtByMember, setMonthlyOtByMember] = useState<
+    Record<string, number>
+  >({});
 
   const [collapsedNodeIds, setCollapsedNodeIds] = useState<string[]>([]);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
@@ -191,9 +218,59 @@ export default function HqOrgChartPage() {
     );
   };
 
+  // 특정 노드와 모든 하위 조직 이름 집합
+  const collectSubtreeOrgNames = (node: HqOrgChartNode): Set<string> => {
+    const names = new Set<string>();
+    const walk = (cur: HqOrgChartNode) => {
+      names.add(cur.name);
+      (childrenByParent.get(cur.id) || []).forEach(walk);
+    };
+    walk(node);
+    return names;
+  };
+
+  // 평균 초과 근무 지표 선택 시 기준월 근태 데이터 로드
+  const asOfMonth = asOfDate.slice(0, 7);
+  const needsOtFetch = selectedTrends.includes("AVG_OT");
+  useEffect(() => {
+    if (!needsOtFetch) return;
+    let cancelled = false;
+    hqFetch<{
+      success: boolean;
+      data?: {
+        records?: {
+          instructor_id?: string;
+          work_date?: string;
+          overtime_minutes?: number;
+        }[];
+      };
+    }>(`/api/hq/attendance?month=${encodeURIComponent(asOfMonth)}`)
+      .then((res) => {
+        if (cancelled) return;
+        const map: Record<string, number> = {};
+        (res.data?.records || []).forEach((r) => {
+          const id = String(r.instructor_id || "");
+          const wd = String(r.work_date || "");
+          if (!id || (wd && wd > asOfDate)) return;
+          const ot = Math.max(0, Number(r.overtime_minutes || 0));
+          if (ot > 0) {
+            map[id] = (map[id] || 0) + ot;
+          }
+        });
+        setMonthlyOtByMember(map);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [asOfMonth, asOfDate, needsOtFetch]);
+
   const calcNodeMetrics = (node: HqOrgChartNode, includeSub: boolean) => {
     const directList = directMembersByDept.get(node.name) || [];
     const targetMembers = includeSub ? collectSubtreeMembers(node) : directList;
+    const scopeOrgNames = includeSub
+      ? collectSubtreeOrgNames(node)
+      : new Set<string>([node.name]);
 
     const salarySum = targetMembers.reduce((acc, m) => {
       const wc = m.profile_extra?.wage_contract;
@@ -204,48 +281,261 @@ export default function HqOrgChartPage() {
     }, 0);
 
     const activeCnt = targetMembers.length;
-    const allEverCnt = Math.max(
-      activeCnt,
-      members.filter((m) =>
-        includeSub ? true : (m.department || "").trim() === node.name
-      ).length
-    );
+    const allEverInScope = members.filter((m) => {
+      if (m.is_ghost) return false;
+      if (m.hire_date && m.hire_date > asOfDate) return false;
+      const primaryDept =
+        m.rank_code === "CEO" && !m.department
+          ? "대표"
+          : (m.department || "").trim();
+      if (primaryDept && scopeOrgNames.has(primaryDept)) return true;
+      if (m.rank_code === "CEO" && scopeOrgNames.has("대표")) return true;
+      return (m.profile_extra?.org_assignments || []).some(
+        (asg) => asg.org_name && scopeOrgNames.has(asg.org_name.trim())
+      );
+    }).length;
+    const allEverCnt = Math.max(activeCnt, allEverInScope);
     const retentionPct =
       allEverCnt > 0 ? Math.round((activeCnt / allEverCnt) * 100) : null;
 
+    const totalOtMinutes = targetMembers.reduce(
+      (acc, m) => acc + Number(monthlyOtByMember[m.instructor_id] || 0),
+      0
+    );
+    const avgOtHours =
+      activeCnt > 0
+        ? Number((totalOtMinutes / 60 / activeCnt).toFixed(1))
+        : null;
+
     const avgLeaveUsed =
       activeCnt > 0
-        ? (
-            targetMembers.reduce(
-              (acc, m) => acc + Number(m.annual_leave_used || 0),
-              0
-            ) / activeCnt
-          ).toFixed(1)
+        ? Number(
+            (
+              targetMembers.reduce(
+                (acc, m) => acc + Number(m.annual_leave_used || 0),
+                0
+              ) / activeCnt
+            ).toFixed(1)
+          )
         : null;
 
     return {
       directCount: directList.length,
       totalCount: collectSubtreeMembers(node).length,
+      activeCnt,
       salarySum,
       retentionPct,
+      avgOtHours,
       avgLeaveUsed,
     };
   };
 
-  const subtreeMatchesQuery = (node: HqOrgChartNode, kw: string): boolean => {
-    if (!kw) return true;
-    if (node.name.toLowerCase().includes(kw)) return true;
-    const direct = directMembersByDept.get(node.name) || [];
-    if (direct.some((m) => m.name.toLowerCase().includes(kw))) return true;
-    return (childrenByParent.get(node.id) || []).some((ch) =>
-      subtreeMatchesQuery(ch, kw)
-    );
+  const subtreeMatchesQuery = useCallback(
+    (rootTarget: HqOrgChartNode, kw: string): boolean => {
+      if (!kw) return true;
+      const walkMatch = (cur: HqOrgChartNode): boolean => {
+        if (cur.name.toLowerCase().includes(kw)) return true;
+        const direct = directMembersByDept.get(cur.name) || [];
+        if (direct.some((m) => m.name.toLowerCase().includes(kw))) return true;
+        return (childrenByParent.get(cur.id) || []).some(walkMatch);
+      };
+      return walkMatch(rootTarget);
+    },
+    [directMembersByDept, childrenByParent]
+  );
+
+  const normalizedQuery = searchQuery.trim().toLowerCase();
+
+  // 하위 조직이 존재하는 모든 노드 ID 목록
+  const collapsibleNodeIds = useMemo(() => {
+    return visibleNodes
+      .filter((n) =>
+        (childrenByParent.get(n.id) || []).some((ch) =>
+          subtreeMatchesQuery(ch, normalizedQuery)
+        )
+      )
+      .map((n) => n.id);
+  }, [visibleNodes, childrenByParent, subtreeMatchesQuery, normalizedQuery]);
+
+  // 현재 화면상 펼쳐져 있는 하위 조직이 하나라도 있는지 여부
+  const hasExpandedBranches = useMemo(() => {
+    const collapsedSet = new Set(collapsedNodeIds);
+    const checkExpanded = (node: HqOrgChartNode): boolean => {
+      if (!subtreeMatchesQuery(node, normalizedQuery)) return false;
+      const visChildren = (childrenByParent.get(node.id) || []).filter((ch) =>
+        subtreeMatchesQuery(ch, normalizedQuery)
+      );
+      if (visChildren.length === 0) return false;
+      if (!collapsedSet.has(node.id)) return true;
+      return false;
+    };
+    return rootNodes.some(checkExpanded);
+  }, [
+    rootNodes,
+    collapsedNodeIds,
+    childrenByParent,
+    subtreeMatchesQuery,
+    normalizedQuery,
+  ]);
+
+  const centerCanvasScroll = useCallback(() => {
+    const vp = viewportRef.current;
+    if (!vp) return;
+    vp.scrollLeft = Math.max(0, (vp.scrollWidth - vp.clientWidth) / 2);
+    vp.scrollTop = Math.max(0, (vp.scrollHeight - vp.clientHeight) / 2);
+  }, []);
+
+  const fitToScreen = useCallback(
+    (markUserAction = false) => {
+      const viewport = viewportRef.current;
+      const treeEl = treeRef.current;
+      if (!viewport || !treeEl) return;
+
+      const treeW = treeEl.offsetWidth;
+      const treeH = treeEl.offsetHeight;
+      if (treeW <= 0 || treeH <= 0) return;
+
+      if (markUserAction) {
+        userTouchedZoomRef.current = true;
+      }
+
+      const drawerWidth = selectedNodeId ? 330 : 0;
+      const availW = Math.max(240, viewport.clientWidth - drawerWidth - 160);
+      const availH = Math.max(180, viewport.clientHeight - 150);
+
+      const rawScale = Math.min(availW / treeW, availH / treeH, 1);
+      const nextZoom = Math.max(20, Math.min(100, Math.floor(rawScale * 100)));
+
+      pendingCenterScrollRef.current = true;
+      setTreeSize((prev) =>
+        prev.width === treeW && prev.height === treeH
+          ? prev
+          : { width: treeW, height: treeH }
+      );
+      setZoomPct(nextZoom);
+
+      requestAnimationFrame(() => {
+        centerCanvasScroll();
+      });
+    },
+    [selectedNodeId, centerCanvasScroll]
+  );
+
+  const handleToggleCollapseAll = useCallback(() => {
+    pendingCenterScrollRef.current = true;
+    if (hasExpandedBranches) {
+      setCollapsedNodeIds(collapsibleNodeIds);
+    } else {
+      setCollapsedNodeIds([]);
+    }
+  }, [hasExpandedBranches, collapsibleNodeIds]);
+
+  // 트리 원본(100%) 크기 동기 측정 및 리사이즈 감지
+  useLayoutEffect(() => {
+    const el = treeRef.current;
+    if (!el) return;
+    const measure = () => {
+      const w = el.offsetWidth;
+      const h = el.offsetHeight;
+      setTreeSize((prev) =>
+        prev.width === w && prev.height === h ? prev : { width: w, height: h }
+      );
+    };
+    measure();
+
+    if (typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(() => measure());
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [
+    rootNodes,
+    collapsedNodeIds,
+    direction,
+    manageMode,
+    selectedTrends,
+    countMode,
+    normalizedQuery,
+    snapshotMembers,
+  ]);
+
+  // 줌/접기 변경 직후 캔버스 스크롤 중앙 정렬
+  useLayoutEffect(() => {
+    if (!pendingCenterScrollRef.current) return;
+    pendingCenterScrollRef.current = false;
+    centerCanvasScroll();
+  }, [zoomPct, treeSize, collapsedNodeIds, centerCanvasScroll]);
+
+  // 초기 데이터 로드 완료 시 전체 조직도가 한눈에 들어오도록 자동 맞춤
+  useEffect(() => {
+    if (isBooting || didInitialBootFitRef.current) return;
+    if (treeSize.width <= 0 || treeSize.height <= 0) return;
+    didInitialBootFitRef.current = true;
+    if (!userTouchedZoomRef.current) {
+      fitToScreen(false);
+    }
+  }, [isBooting, treeSize.width, treeSize.height, fitToScreen]);
+
+  // 빈 캔버스 드래그 이동 (패닝)
+  useEffect(() => {
+    if (!isPanning) return;
+    const onMove = (e: MouseEvent) => {
+      const start = panStartRef.current;
+      const vp = viewportRef.current;
+      if (!start || !vp) return;
+      vp.scrollLeft = start.scrollLeft - (e.clientX - start.x);
+      vp.scrollTop = start.scrollTop - (e.clientY - start.y);
+    };
+    const onUp = () => {
+      panStartRef.current = null;
+      setIsPanning(false);
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+    return () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+  }, [isPanning]);
+
+  const handleCanvasMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (e.button !== 0) return;
+    const target = e.target as HTMLElement;
+    if (
+      target.closest(
+        'button, input, label, a, [data-org-card="true"], [data-floating-ui="true"]'
+      )
+    ) {
+      return;
+    }
+    const vp = viewportRef.current;
+    if (!vp) return;
+    panStartRef.current = {
+      x: e.clientX,
+      y: e.clientY,
+      scrollLeft: vp.scrollLeft,
+      scrollTop: vp.scrollTop,
+    };
+    setIsPanning(true);
   };
 
   const toggleTrendMetric = (key: TrendMetricKey) => {
+    userTouchedTrendsRef.current = true;
     setSelectedTrends((prev) =>
       prev.includes(key) ? prev.filter((x) => x !== key) : [...prev, key]
     );
+  };
+
+  const handleSwitchManageMode = (nextManage: boolean) => {
+    setManageMode(nextManage);
+    if (!userTouchedTrendsRef.current) {
+      if (nextManage) {
+        setSelectedTrends(
+          canViewSalaryTrend ? ["SALARY_SUM", "RETENTION"] : ["RETENTION"]
+        );
+      } else {
+        setSelectedTrends([]);
+      }
+    }
   };
 
   const handleSaveOrgSettings = async (payload: {
@@ -270,19 +560,24 @@ export default function HqOrgChartPage() {
       });
       await Promise.all([refreshCompanySettings(), refreshMembers()]);
       setOrgModalOpen(false);
-    } catch (err: any) {
-      alert(err?.message || "조직도 설정 저장 실패");
+    } catch (err: unknown) {
+      const msg =
+        err instanceof Error ? err.message : "조직도 설정 저장 실패";
+      alert(msg);
     } finally {
       setSavingOrg(false);
     }
   };
 
   const renderTrendPills = (metrics: ReturnType<typeof calcNodeMetrics>) => {
-    if (!manageMode || selectedTrends.length === 0) return null;
+    const visibleTrendKeys = selectedTrends.filter(
+      (k) => k !== "SALARY_SUM" || canViewSalaryTrend
+    );
+    if (visibleTrendKeys.length === 0) return null;
     return (
       <div className="mt-3 pt-2.5 border-t border-slate-100 flex flex-col items-start gap-1.5">
-        {selectedTrends.includes("SALARY_SUM") && (
-          <span className="px-2 py-0.5 rounded-full border border-slate-200 bg-slate-50/70 text-[10px] text-slate-500">
+        {visibleTrendKeys.includes("SALARY_SUM") && (
+          <span className="px-2.5 py-0.5 rounded-full border border-slate-200 bg-slate-50/70 text-[10px] text-slate-500">
             계약월급 총합{" "}
             <b className="text-slate-800">
               {metrics.salarySum > 0
@@ -291,26 +586,33 @@ export default function HqOrgChartPage() {
             </b>
           </span>
         )}
-        {selectedTrends.includes("RETENTION") && (
-          <span className="px-2 py-0.5 rounded-full border border-slate-200 bg-slate-50/70 text-[10px] text-slate-500">
+        {visibleTrendKeys.includes("RETENTION") && (
+          <span className="px-2.5 py-0.5 rounded-full border border-slate-200 bg-slate-50/70 text-[10px] text-slate-500">
             구성원 유지율{" "}
             <b className="text-slate-800">
-              {metrics.totalCount > 0 && metrics.retentionPct !== null
+              {metrics.activeCnt > 0 && metrics.retentionPct !== null
                 ? `${metrics.retentionPct}%`
                 : "-"}
             </b>
           </span>
         )}
-        {selectedTrends.includes("AVG_OT") && (
-          <span className="px-2 py-0.5 rounded-full border border-slate-200 bg-slate-50/70 text-[10px] text-slate-500">
-            평균 초과 근무 <b className="text-slate-800">0시간</b>
+        {visibleTrendKeys.includes("AVG_OT") && (
+          <span className="px-2.5 py-0.5 rounded-full border border-slate-200 bg-slate-50/70 text-[10px] text-slate-500">
+            평균 초과 근무{" "}
+            <b className="text-slate-800">
+              {metrics.activeCnt > 0 && metrics.avgOtHours !== null
+                ? `${metrics.avgOtHours}시간`
+                : "-"}
+            </b>
           </span>
         )}
-        {selectedTrends.includes("AVG_LEAVE") && (
-          <span className="px-2 py-0.5 rounded-full border border-slate-200 bg-slate-50/70 text-[10px] text-slate-500">
+        {visibleTrendKeys.includes("AVG_LEAVE") && (
+          <span className="px-2.5 py-0.5 rounded-full border border-slate-200 bg-slate-50/70 text-[10px] text-slate-500">
             평균 휴가 사용{" "}
             <b className="text-slate-800">
-              {metrics.avgLeaveUsed ? `${metrics.avgLeaveUsed}일` : "-"}
+              {metrics.activeCnt > 0 && metrics.avgLeaveUsed !== null
+                ? `${metrics.avgLeaveUsed}일`
+                : "-"}
             </b>
           </span>
         )}
@@ -318,12 +620,12 @@ export default function HqOrgChartPage() {
     );
   };
 
-  // 재귀 트리 노드 카드 렌더링 (1단계 부서뿐 아니라 2·3단계 하위 조직까지 모두 계층으로 표시!)
+  // 재귀 트리 노드 카드 렌더링 (1단계 부서뿐 아니라 2·3단계 하위 조직까지 사다리 연결선 포함 완벽 표시)
   const renderOrgBranch = (
     node: HqOrgChartNode,
     depth: number
   ): React.ReactNode => {
-    const kw = searchQuery.trim().toLowerCase();
+    const kw = normalizedQuery;
     if (!subtreeMatchesQuery(node, kw)) return null;
 
     const rawChildren = childrenByParent.get(node.id) || [];
@@ -344,7 +646,7 @@ export default function HqOrgChartPage() {
         className={
           direction === "DOWN"
             ? "flex flex-col items-center"
-            : "flex items-start gap-8"
+            : "flex items-center"
         }
       >
         <div
@@ -355,10 +657,11 @@ export default function HqOrgChartPage() {
           }
         >
           <div
+            data-org-card="true"
             onClick={() => setSelectedNodeId(node.id)}
             className={`${
               depth === 0 ? "w-[235px]" : "w-[215px]"
-            } rounded-2xl bg-white border transition-all p-4 cursor-pointer shadow-2xs ${
+            } relative z-10 rounded-2xl bg-white border transition-all p-4 cursor-pointer shadow-2xs select-none ${
               isSelected
                 ? "border-[#00c458] ring-2 ring-[#00c458]/20"
                 : "border-slate-200 hover:border-blue-400"
@@ -401,61 +704,118 @@ export default function HqOrgChartPage() {
 
           {hasChildren && direction === "DOWN" && (
             <div className="flex flex-col items-center">
-              <div className="w-px h-3 bg-slate-300" />
               <button
                 type="button"
-                onClick={() =>
+                onClick={(e) => {
+                  e.stopPropagation();
                   setCollapsedNodeIds((prev) =>
                     isCollapsed
                       ? prev.filter((x) => x !== node.id)
                       : [...prev, node.id]
-                  )
-                }
-                className="px-2.5 py-0.5 rounded-full bg-[#00c458] hover:bg-[#00b04f] text-white text-[10px] font-extrabold shadow-xs"
+                  );
+                }}
+                className={`-mt-2.5 relative z-20 px-2.5 py-0.5 rounded-full text-white text-[10px] font-extrabold shadow-xs transition-colors ${
+                  isCollapsed
+                    ? "bg-[#525866] hover:bg-[#3f444f]"
+                    : "bg-[#00c458] hover:bg-[#00b04f]"
+                }`}
               >
-                {visibleChildren.length} {isCollapsed ? "+" : "-"}
+                {visibleChildren.length} {isCollapsed ? "▾" : "−"}
               </button>
-              {!isCollapsed && <div className="w-px h-5 bg-slate-300" />}
+              {!isCollapsed && (
+                <div className="w-[1.5px] h-5 bg-[#64748b]" />
+              )}
             </div>
           )}
 
           {hasChildren && direction === "RIGHT" && (
             <div className="flex items-center">
-              <div className="w-3 h-px bg-slate-300" />
               <button
                 type="button"
-                onClick={() =>
+                onClick={(e) => {
+                  e.stopPropagation();
                   setCollapsedNodeIds((prev) =>
                     isCollapsed
                       ? prev.filter((x) => x !== node.id)
                       : [...prev, node.id]
-                  )
-                }
-                className="px-2 py-0.5 rounded-full bg-[#00c458] hover:bg-[#00b04f] text-white text-[10px] font-extrabold shadow-xs"
+                  );
+                }}
+                className={`-ml-2.5 relative z-20 px-2 py-0.5 rounded-full text-white text-[10px] font-extrabold shadow-xs transition-colors ${
+                  isCollapsed
+                    ? "bg-[#525866] hover:bg-[#3f444f]"
+                    : "bg-[#00c458] hover:bg-[#00b04f]"
+                }`}
               >
-                {visibleChildren.length} {isCollapsed ? "+" : "-"}
+                {visibleChildren.length} {isCollapsed ? "▸" : "−"}
               </button>
+              {!isCollapsed && (
+                <div className="w-5 h-[1.5px] bg-[#64748b]" />
+              )}
             </div>
           )}
         </div>
 
-        {hasChildren && !isCollapsed && (
-          <div
-            className={
-              direction === "DOWN"
-                ? `flex items-start gap-5 relative pt-5 ${
-                    visibleChildren.length > 1
-                      ? "border-t border-slate-300"
-                      : ""
-                  }`
-                : `flex flex-col gap-4 pl-6 ${
-                    visibleChildren.length > 1
-                      ? "border-l border-slate-300"
-                      : ""
-                  }`
-            }
-          >
-            {visibleChildren.map((ch) => renderOrgBranch(ch, depth + 1))}
+        {hasChildren && !isCollapsed && direction === "DOWN" && (
+          <div className="flex items-start">
+            {visibleChildren.map((ch, idx) => {
+              const total = visibleChildren.length;
+              return (
+                <div
+                  key={ch.id}
+                  className="relative flex flex-col items-center pt-5 px-2.5"
+                >
+                  {total > 1 && idx === 0 && (
+                    <div
+                      style={{ left: "calc(50% - 0.75px)" }}
+                      className="absolute top-0 right-0 h-[1.5px] bg-[#64748b]"
+                    />
+                  )}
+                  {total > 1 && idx > 0 && idx < total - 1 && (
+                    <div className="absolute top-0 left-0 right-0 h-[1.5px] bg-[#64748b]" />
+                  )}
+                  {total > 1 && idx === total - 1 && (
+                    <div
+                      style={{ right: "calc(50% - 0.75px)" }}
+                      className="absolute top-0 left-0 h-[1.5px] bg-[#64748b]"
+                    />
+                  )}
+                  <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[1.5px] h-5 bg-[#64748b]" />
+                  {renderOrgBranch(ch, depth + 1)}
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {hasChildren && !isCollapsed && direction === "RIGHT" && (
+          <div className="flex flex-col items-start">
+            {visibleChildren.map((ch, idx) => {
+              const total = visibleChildren.length;
+              return (
+                <div
+                  key={ch.id}
+                  className="relative flex items-center pl-5 py-2"
+                >
+                  {total > 1 && idx === 0 && (
+                    <div
+                      style={{ top: "calc(50% - 0.75px)" }}
+                      className="absolute left-0 bottom-0 w-[1.5px] bg-[#64748b]"
+                    />
+                  )}
+                  {total > 1 && idx > 0 && idx < total - 1 && (
+                    <div className="absolute left-0 top-0 bottom-0 w-[1.5px] bg-[#64748b]" />
+                  )}
+                  {total > 1 && idx === total - 1 && (
+                    <div
+                      style={{ bottom: "calc(50% - 0.75px)" }}
+                      className="absolute left-0 top-0 w-[1.5px] bg-[#64748b]"
+                    />
+                  )}
+                  <div className="absolute left-0 top-1/2 -translate-y-1/2 w-5 h-[1.5px] bg-[#64748b]" />
+                  {renderOrgBranch(ch, depth + 1)}
+                </div>
+              );
+            })}
           </div>
         )}
       </div>
@@ -500,7 +860,7 @@ export default function HqOrgChartPage() {
           <div className="flex items-center gap-4">
             <button
               type="button"
-              onClick={() => setManageMode(false)}
+              onClick={() => handleSwitchManageMode(false)}
               className={`text-[22px] font-extrabold tracking-tight transition-colors ${
                 !manageMode
                   ? "text-slate-900"
@@ -513,7 +873,7 @@ export default function HqOrgChartPage() {
             {canManageOrg && (
               <button
                 type="button"
-                onClick={() => setManageMode(true)}
+                onClick={() => handleSwitchManageMode(true)}
                 className={`text-[22px] font-extrabold tracking-tight transition-colors ${
                   manageMode
                     ? "text-slate-900"
@@ -560,16 +920,11 @@ export default function HqOrgChartPage() {
         </div>
 
         {/* 도트 그리드 인터랙티브 조직도 캔버스 */}
-        <div
-          style={{
-            backgroundImage: "radial-gradient(#d8dee6 1px, transparent 1px)",
-            backgroundSize: "18px 18px",
-          }}
-          className="flex-1 relative overflow-auto custom-scroll bg-[#fafbfc]"
-        >
+        <div className="flex-1 relative min-h-0 overflow-hidden bg-[#fafbfc]">
           {/* 좌상단 플로팅 기준일 · 필터 */}
           <div
-            className="sticky top-5 left-6 z-20 inline-flex items-center gap-2 ml-6 mt-5"
+            data-floating-ui="true"
+            className="absolute top-5 left-6 z-20 inline-flex items-center gap-2"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="relative">
@@ -640,96 +995,217 @@ export default function HqOrgChartPage() {
             </div>
           </div>
 
-          {/* 다단계 트리 본문 */}
-          <div className="min-w-max px-12 py-14 flex justify-center">
-            <div
-              style={{
-                transform: `scale(${zoomPct / 100})`,
-                transformOrigin: "top center",
-              }}
-              className={`transition-transform duration-150 ${
-                direction === "DOWN"
-                  ? "flex items-start gap-10"
-                  : "flex flex-col gap-10"
-              }`}
-            >
-              {rootNodes.map((rNode) => renderOrgBranch(rNode, 0))}
+          {/* 스크롤 & 드래그 가능한 캔버스 뷰포트 */}
+          <div
+            ref={viewportRef}
+            onMouseDown={handleCanvasMouseDown}
+            style={{
+              backgroundImage: "radial-gradient(#d8dee6 1px, transparent 1px)",
+              backgroundSize: "18px 18px",
+            }}
+            className={`w-full h-full overflow-auto custom-scroll ${
+              isPanning ? "cursor-grabbing select-none" : "cursor-grab"
+            }`}
+          >
+            {/* 다단계 트리 본문 (스케일 실제 레이아웃 반영 + 화면 중앙 정렬) */}
+            <div className="w-max min-w-full min-h-full flex items-center justify-center px-14 py-14">
+              <div
+                style={{
+                  width:
+                    treeSize.width > 0
+                      ? Math.ceil((treeSize.width * zoomPct) / 100)
+                      : undefined,
+                  height:
+                    treeSize.height > 0
+                      ? Math.ceil((treeSize.height * zoomPct) / 100)
+                      : undefined,
+                }}
+                className="relative shrink-0"
+              >
+                <div
+                  ref={treeRef}
+                  style={{
+                    transform: `scale(${zoomPct / 100})`,
+                    transformOrigin: "top left",
+                  }}
+                  className={`w-max ${
+                    direction === "DOWN"
+                      ? "flex items-start gap-10"
+                      : "flex flex-col gap-10"
+                  }`}
+                >
+                  {rootNodes.map((rNode) => renderOrgBranch(rNode, 0))}
+                </div>
+              </div>
             </div>
           </div>
 
           {/* 우측 플로팅 도구 버튼 (트렌드 · 조직뷰 · 조직설정) */}
           <div
+            data-floating-ui="true"
             onClick={(e) => e.stopPropagation()}
-            className="fixed right-6 top-36 z-20 flex flex-col gap-2"
+            className={`absolute top-5 z-20 flex flex-col gap-2 transition-[right] duration-150 ${
+              selectedNode ? "right-[350px]" : "right-6"
+            }`}
           >
-            {canManageOrg && manageMode && (
-              <div className="relative">
-                <button
-                  type="button"
-                  onClick={() =>
-                    setOpenTool(openTool === "TREND" ? null : "TREND")
-                  }
-                  className={`w-13 py-2.5 rounded-2xl border shadow-sm flex flex-col items-center gap-1 text-[10px] font-extrabold transition-colors ${
-                    openTool === "TREND" || selectedTrends.length > 0
-                      ? "bg-white border-blue-300 text-blue-600"
-                      : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"
-                  }`}
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() =>
+                  setOpenTool(openTool === "TREND" ? null : "TREND")
+                }
+                className={`w-13 py-2.5 rounded-2xl border shadow-xs flex flex-col items-center gap-1 text-[10px] font-extrabold transition-colors ${
+                  openTool === "TREND" || selectedTrends.length > 0
+                    ? "bg-white border-blue-200 text-blue-600"
+                    : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"
+                }`}
+              >
+                <svg
+                  width="16"
+                  height="16"
+                  viewBox="0 0 16 16"
+                  fill="currentColor"
                 >
-                  <span className="text-sm">📊</span>
-                  <span>트렌드</span>
-                </button>
+                  <rect x="2" y="9" width="2.4" height="5" rx="0.8" />
+                  <rect x="6.8" y="5.5" width="2.4" height="8.5" rx="0.8" />
+                  <rect x="11.6" y="2.5" width="2.4" height="11.5" rx="0.8" />
+                </svg>
+                <span>트렌드</span>
+              </button>
 
-                {openTool === "TREND" && (
-                  <div className="absolute right-full mr-2.5 top-0 w-[195px] bg-white rounded-2xl shadow-2xl border border-slate-200 p-3.5 text-xs space-y-2">
-                    <div className="text-[11px] font-bold text-slate-400">
-                      트렌드 지표
-                    </div>
-                    {(
-                      [
-                        {
-                          key: "SALARY_SUM" as const,
-                          icon: "💵",
-                          label: "계약월급 총합",
-                        },
-                        {
-                          key: "RETENTION" as const,
-                          icon: "🧩",
-                          label: "구성원 유지율",
-                        },
-                        {
-                          key: "AVG_OT" as const,
-                          icon: "🔥",
-                          label: "평균 초과 근무",
-                        },
-                        {
-                          key: "AVG_LEAVE" as const,
-                          icon: "🏖️",
-                          label: "평균 휴가 사용",
-                        },
-                      ] as const
-                    ).map((tr) => {
-                      const active = selectedTrends.includes(tr.key);
-                      return (
-                        <button
-                          key={tr.key}
-                          type="button"
-                          onClick={() => toggleTrendMetric(tr.key)}
-                          className="w-full py-1.5 px-1.5 rounded-lg hover:bg-slate-50 flex items-center justify-between text-left"
-                        >
-                          <span className="flex items-center gap-2 font-semibold text-slate-800">
-                            <span>{tr.icon}</span>
-                            <span>{tr.label}</span>
-                          </span>
-                          {active && (
-                            <span className="text-[#00c458] font-bold">✓</span>
-                          )}
-                        </button>
-                      );
-                    })}
+              {openTool === "TREND" && (
+                <div className="absolute right-full mr-2.5 top-0 w-[205px] bg-white rounded-2xl shadow-2xl border border-slate-200/90 p-3.5 text-xs space-y-1.5">
+                  <div className="px-1.5 pb-1 flex items-center gap-1 text-[11px] font-bold text-slate-400">
+                    <span>트렌드 지표</span>
+                    <span
+                      title="기준일 및 구성원 숫자 표기(하위 조직 포함/직속만) 기준에 따라 각 조직 박스에 실시간 표시됩니다."
+                      className="inline-flex items-center justify-center w-3.5 h-3.5 rounded-full border border-slate-300 text-[9px] font-bold text-slate-400 cursor-help"
+                    >
+                      i
+                    </span>
                   </div>
-                )}
-              </div>
-            )}
+                  {(
+                    [
+                      ...(canViewSalaryTrend
+                        ? [
+                            {
+                              key: "SALARY_SUM" as const,
+                              label: "계약월급 총합",
+                              icon: (
+                                <svg
+                                  width="15"
+                                  height="15"
+                                  viewBox="0 0 16 16"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  strokeWidth="1.4"
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                >
+                                  <rect
+                                    x="1.8"
+                                    y="4"
+                                    width="12.4"
+                                    height="8"
+                                    rx="1.5"
+                                  />
+                                  <circle cx="8" cy="8" r="1.8" />
+                                </svg>
+                              ),
+                            },
+                          ]
+                        : []),
+                      {
+                        key: "RETENTION" as const,
+                        label: "구성원 유지율",
+                        icon: (
+                          <svg
+                            width="15"
+                            height="15"
+                            viewBox="0 0 16 16"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="1.4"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                          >
+                            <path d="M6.5 2.8a1.5 1.5 0 0 1 3 0v.7h2a1.2 1.2 0 0 1 1.2 1.2v2a1.5 1.5 0 0 0 0 2.6v2.2a1.2 1.2 0 0 1-1.2 1.2H3.8a1.2 1.2 0 0 1-1.2-1.2V4.7a1.2 1.2 0 0 1 1.2-1.2h2.7v-.7Z" />
+                          </svg>
+                        ),
+                      },
+                      {
+                        key: "AVG_OT" as const,
+                        label: "평균 초과 근무",
+                        icon: (
+                          <svg
+                            width="15"
+                            height="15"
+                            viewBox="0 0 16 16"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="1.4"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                          >
+                            <path d="M8.3 2.2c.4 2.1 3.5 3.6 3.5 6.8a3.8 3.8 0 0 1-7.6 0c0-1.9 1.1-3.3 2.2-4.2.2 1 .8 1.5 1.4 1.5.5 0 .7-.8.5-4.1Z" />
+                          </svg>
+                        ),
+                      },
+                      {
+                        key: "AVG_LEAVE" as const,
+                        label: "평균 휴가 사용",
+                        icon: (
+                          <svg
+                            width="15"
+                            height="15"
+                            viewBox="0 0 16 16"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="1.4"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                          >
+                            <path d="M2.5 8.5a5.5 5.5 0 0 1 11 0Z" />
+                            <path d="M8 8.5v4.3a1.2 1.2 0 0 1-2.4 0M3 13.8h10" />
+                          </svg>
+                        ),
+                      },
+                    ] as const
+                  ).map((tr) => {
+                    const active = selectedTrends.includes(tr.key);
+                    return (
+                      <button
+                        key={tr.key}
+                        type="button"
+                        onClick={() => toggleTrendMetric(tr.key)}
+                        className="w-full py-2 px-2 rounded-xl hover:bg-slate-50 flex items-center justify-between text-left transition-colors"
+                      >
+                        <span className="flex items-center gap-2.5 font-bold text-slate-700">
+                          <span className="text-slate-500 shrink-0">
+                            {tr.icon}
+                          </span>
+                          <span>{tr.label}</span>
+                        </span>
+                        {active && (
+                          <svg
+                            width="14"
+                            height="14"
+                            viewBox="0 0 16 16"
+                            fill="none"
+                            stroke="#00c458"
+                            strokeWidth="2.2"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                          >
+                            <path d="M3.2 8.4l3.1 3.1 6.5-6.5" />
+                          </svg>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
 
             <div className="relative">
               <button
@@ -820,37 +1296,137 @@ export default function HqOrgChartPage() {
             )}
           </div>
 
-          {/* 우하단 줌 컨트롤 바 */}
-          <div className="fixed right-6 bottom-6 z-20 flex items-center gap-1.5">
-            <button
-              type="button"
-              onClick={() => setZoomPct(70)}
-              className="w-8 h-8 rounded-lg bg-white border border-slate-200 shadow-xs text-slate-500 hover:text-slate-800 text-xs font-bold"
-              title="한눈에 맞춤"
-            >
-              ⤡
-            </button>
-            <button
-              type="button"
-              onClick={() => setZoomPct(100)}
-              className="w-8 h-8 rounded-lg bg-white border border-slate-200 shadow-xs text-slate-500 hover:text-slate-800 text-xs font-bold"
-              title="100% 원본 크기"
-            >
-              ⛶
-            </button>
-            <div className="h-8 px-2 rounded-lg bg-white border border-slate-200 shadow-xs flex items-center gap-2 text-xs font-bold text-slate-700">
+          {/* 우하단 플렉스 스타일 컨트롤 바 (조직 접기/펼치기 · 화면에 맞추기 · 줌 배율) */}
+          <div
+            data-floating-ui="true"
+            onClick={(e) => e.stopPropagation()}
+            className={`absolute bottom-6 z-20 flex items-center gap-1.5 transition-[right] duration-150 ${
+              selectedNode ? "right-[350px]" : "right-6"
+            }`}
+          >
+            {/* 조직 접기 / 조직 펼치기 */}
+            <div className="relative group">
+              <div className="pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity duration-150 absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2.5 py-1.5 rounded-lg bg-[#333840] text-white text-[11px] font-bold whitespace-nowrap shadow-lg">
+                {hasExpandedBranches || collapsibleNodeIds.length === 0
+                  ? "조직 접기"
+                  : "조직 펼치기"}
+              </div>
               <button
                 type="button"
-                onClick={() => setZoomPct((z) => Math.max(50, z - 10))}
-                className="px-1 text-slate-400 hover:text-slate-800"
+                disabled={collapsibleNodeIds.length === 0}
+                onClick={handleToggleCollapseAll}
+                aria-label={
+                  hasExpandedBranches || collapsibleNodeIds.length === 0
+                    ? "조직 접기"
+                    : "조직 펼치기"
+                }
+                className="w-9 h-9 rounded-xl bg-white border border-slate-200/90 shadow-xs hover:bg-slate-50 active:bg-slate-100 disabled:opacity-40 text-slate-600 hover:text-slate-900 flex items-center justify-center transition-colors"
+              >
+                {hasExpandedBranches || collapsibleNodeIds.length === 0 ? (
+                  <svg
+                    width="16"
+                    height="16"
+                    viewBox="0 0 16 16"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.6"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <path d="M2.5 2.5L6.2 6.2M6.2 6.2V3.2M6.2 6.2H3.2" />
+                    <path d="M13.5 2.5L9.8 6.2M9.8 6.2V3.2M9.8 6.2H12.8" />
+                    <path d="M2.5 13.5L6.2 9.8M6.2 9.8V12.8M6.2 9.8H3.2" />
+                    <path d="M13.5 13.5L9.8 9.8M9.8 9.8V12.8M9.8 9.8H12.8" />
+                  </svg>
+                ) : (
+                  <svg
+                    width="16"
+                    height="16"
+                    viewBox="0 0 16 16"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.6"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <path d="M6.2 6.2L2.5 2.5M2.5 2.5V5.5M2.5 2.5H5.5" />
+                    <path d="M9.8 6.2L13.5 2.5M13.5 2.5V5.5M13.5 2.5H10.5" />
+                    <path d="M6.2 9.8L2.5 13.5M2.5 13.5V10.5M2.5 13.5H5.5" />
+                    <path d="M9.8 9.8L13.5 13.5M13.5 13.5V10.5M13.5 13.5H10.5" />
+                  </svg>
+                )}
+              </button>
+            </div>
+
+            {/* 화면에 맞추기 */}
+            <div className="relative group">
+              <div className="pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity duration-150 absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2.5 py-1.5 rounded-lg bg-[#333840] text-white text-[11px] font-bold whitespace-nowrap shadow-lg">
+                화면에 맞추기
+              </div>
+              <button
+                type="button"
+                onClick={() => fitToScreen(true)}
+                aria-label="화면에 맞추기"
+                className="w-9 h-9 rounded-xl bg-white border border-slate-200/90 shadow-xs hover:bg-slate-50 active:bg-slate-100 text-slate-600 hover:text-slate-900 flex items-center justify-center transition-colors"
+              >
+                <svg
+                  width="16"
+                  height="16"
+                  viewBox="0 0 16 16"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.6"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M2.5 5.5V3.5C2.5 2.95 2.95 2.5 3.5 2.5H5.5" />
+                  <path d="M10.5 2.5H12.5C13.05 2.5 13.5 2.95 13.5 3.5V5.5" />
+                  <path d="M2.5 10.5V12.5C2.5 13.05 2.95 13.5 3.5 13.5H5.5" />
+                  <path d="M10.5 13.5H12.5C13.05 13.5 13.5 13.05 13.5 12.5V10.5" />
+                </svg>
+              </button>
+            </div>
+
+            {/* 줌 배율 조절 (- / 배율% / +) */}
+            <div className="h-9 rounded-xl bg-white border border-slate-200/90 shadow-xs flex items-center divide-x divide-slate-100 text-xs font-bold text-slate-700">
+              <button
+                type="button"
+                disabled={zoomPct <= 20}
+                onClick={() => {
+                  userTouchedZoomRef.current = true;
+                  setZoomPct((z) => Math.max(20, z - 10));
+                }}
+                aria-label="축소"
+                className="w-8 h-full rounded-l-xl flex items-center justify-center text-slate-500 hover:bg-slate-50 hover:text-slate-900 disabled:opacity-35 transition-colors"
               >
                 −
               </button>
-              <span className="w-10 text-center">{zoomPct}%</span>
+              <div className="relative group h-full flex items-center">
+                <div className="pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity duration-150 absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2.5 py-1.5 rounded-lg bg-[#333840] text-white text-[11px] font-bold whitespace-nowrap shadow-lg">
+                  100% 원본 크기
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    userTouchedZoomRef.current = true;
+                    pendingCenterScrollRef.current = true;
+                    setZoomPct(100);
+                    requestAnimationFrame(() => centerCanvasScroll());
+                  }}
+                  className="min-w-[56px] h-full px-2.5 flex items-center justify-center text-[12px] font-semibold text-slate-700 hover:bg-slate-50 tabular-nums transition-colors"
+                >
+                  {zoomPct} %
+                </button>
+              </div>
               <button
                 type="button"
-                onClick={() => setZoomPct((z) => Math.min(140, z + 10))}
-                className="px-1 text-slate-400 hover:text-slate-800"
+                disabled={zoomPct >= 150}
+                onClick={() => {
+                  userTouchedZoomRef.current = true;
+                  setZoomPct((z) => Math.min(150, z + 10));
+                }}
+                aria-label="확대"
+                className="w-8 h-full rounded-r-xl flex items-center justify-center text-slate-500 hover:bg-slate-50 hover:text-slate-900 disabled:opacity-35 transition-colors"
               >
                 +
               </button>

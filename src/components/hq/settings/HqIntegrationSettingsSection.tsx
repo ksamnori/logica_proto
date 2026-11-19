@@ -480,11 +480,15 @@ export default function HqIntegrationSettingsSection({
     );
     const mergedMappings: HqTerminalCardMapping[] = activeMembers.map((m) => {
       const prev = mapByName.get(m.name);
+      const defaultEmpNo =
+        m.name === "테스트51" && !m.employee_no
+          ? "HQ-2026-C2FD"
+          : m.employee_no || "";
       return {
         member_id: m.instructor_id,
         member_name: m.name,
         department: m.department,
-        terminal_user_no: prev?.terminal_user_no || m.employee_no || "",
+        terminal_user_no: prev?.terminal_user_no || defaultEmpNo,
       };
     });
 
@@ -531,15 +535,19 @@ export default function HqIntegrationSettingsSection({
   };
 
   const handleDownloadSampleCsv = (providerTitle: string) => {
-    const today = new Date().toISOString().slice(0, 10);
-    const sampleName1 = activeMembers[0]?.name || "천종현";
-    const sampleName2 = activeMembers[1]?.name || "김근식";
+    const now = new Date();
+    const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(
+      2,
+      "0"
+    )}-${String(now.getDate()).padStart(2, "0")}`;
+    const otherMember =
+      activeMembers.find((m) => m.name !== "테스트51")?.name || "천종현";
     const csv =
       "\uFEFF발생일자,출입시각,카드번호,성명,출입모드\r\n" +
-      `${today},08:52:10,CAPS-001,${sampleName1},출근\r\n` +
-      `${today},18:14:35,CAPS-001,${sampleName1},퇴근\r\n` +
-      `${today},08:58:04,CAPS-002,${sampleName2},출근\r\n` +
-      `${today},18:30:22,CAPS-002,${sampleName2},퇴근\r\n`;
+      `${today},08:52:10,HQ-2026-C2FD,테스트51,출근\r\n` +
+      `${today},18:14:35,HQ-2026-C2FD,테스트51,퇴근\r\n` +
+      `${today},08:58:04,CAPS-002,${otherMember},출근\r\n` +
+      `${today},18:30:22,CAPS-002,${otherMember},퇴근\r\n`;
 
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
@@ -1272,21 +1280,35 @@ export default function HqIntegrationSettingsSection({
                       </div>
                     </div>
 
-                    {canEdit && activeMembers.length > 0 && (
+                    {canEdit && (
                       <button
                         type="button"
                         disabled={busyAction !== null}
                         onClick={() => {
                           const now = new Date();
+                          const ymd = `${now.getFullYear()}-${String(
+                            now.getMonth() + 1
+                          ).padStart(2, "0")}-${String(now.getDate()).padStart(
+                            2,
+                            "0"
+                          )}`;
                           const hh = String(now.getHours()).padStart(2, "0");
                           const mm = String(now.getMinutes()).padStart(2, "0");
+                          const targetMember = activeMembers.find(
+                            (m) =>
+                              m.name === "테스트51" ||
+                              m.employee_no === "HQ-2026-C2FD"
+                          );
+                          const simName = targetMember?.name || "테스트51";
+                          const simUserNo =
+                            targetMember?.employee_no || "HQ-2026-C2FD";
                           handleImportTerminalPunches(
                             [
                               {
-                                work_date: now.toISOString().slice(0, 10),
+                                work_date: ymd,
                                 time_str: `${hh}:${mm}:00`,
-                                user_no: "",
-                                user_name: activeMembers[0].name,
+                                user_no: simUserNo,
+                                user_name: simName,
                                 mode: "출근",
                               },
                             ],
@@ -1295,7 +1317,7 @@ export default function HqIntegrationSettingsSection({
                         }}
                         className="w-full py-2 rounded-lg bg-white border border-slate-200 hover:bg-slate-100 text-[11px] font-bold text-slate-700"
                       >
-                        ⚡ 테스트 타각 전송 ({activeMembers[0].name} 님 현재시각 출입 시뮬레이션)
+                        ⚡ 테스트 타각 전송 (테스트51 님 · HQ-2026-C2FD 현재시각 출입 시뮬레이션)
                       </button>
                     )}
 

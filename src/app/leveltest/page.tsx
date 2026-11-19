@@ -388,13 +388,11 @@ export default function LevelTestPage() {
           if (assignments && assignments.length > 0) {
             for (let a of assignments) {
               const pk = a.assignment_id;
-              await supabase.from("student_answer").delete().eq("assignment_id", pk);
               await supabase.from("student_answer").delete().eq("exam_assignment_id", pk);
               await supabase.from("student_exam_result").delete().eq("assignment_id", pk);
               await supabase.from("student_progress").delete().eq("assignment_id", pk);
               await supabase.from("admission_test_report").delete().eq("assignment_id", pk);
             }
-            await supabase.from("student_answer").delete().eq("session_id", exSessId).eq("student_id", studentId);
             await supabase.from("exam_assignment").delete().eq("session_id", exSessId).eq("student_id", studentId);
           }
         }

@@ -40,6 +40,40 @@ function isMissingSchemaObjectError(err: any): boolean {
   );
 }
 
+// 프로세스 내 미존재 테이블/컬럼 캐시 (동일 42703·42P01 쿼리 재전송 방지)
+const missingSchemaCache = new Set<string>();
+
+function hasKnownMissingSchema(table: string, ...cols: string[]): boolean {
+  if (missingSchemaCache.has(`table:${table}`)) return true;
+  return cols.some((col) => missingSchemaCache.has(`col:${table}.${col}`));
+}
+
+function recordMissingSchemaError(
+  err: any,
+  table: string,
+  ...cols: string[]
+): void {
+  const code = String(err?.code || "");
+  const msg = String(err?.message || err?.details || "");
+  if (
+    code === "42P01" ||
+    code === "PGRST205" ||
+    /relation .* does not exist/i.test(msg)
+  ) {
+    missingSchemaCache.add(`table:${table}`);
+    return;
+  }
+  for (const col of cols) {
+    if (msg.includes(col)) {
+      missingSchemaCache.add(`col:${table}.${col}`);
+      return;
+    }
+  }
+  if (cols.length === 1) {
+    missingSchemaCache.add(`col:${table}.${cols[0]}`);
+  }
+}
+
 function chunkArray<T>(items: T[], size: number = 200): T[][] {
   const out: T[][] = [];
   for (let i = 0; i < items.length; i += size) {
@@ -101,7 +135,12 @@ async function safeSelectColumnValues(
   filterCol: string,
   filterValues: Array<string | number>
 ): Promise<Array<string | number>> {
-  if (filterValues.length === 0) return [];
+  if (
+    filterValues.length === 0 ||
+    hasKnownMissingSchema(table, selectCol, filterCol)
+  ) {
+    return [];
+  }
   const collected: Array<string | number> = [];
 
   for (const chunk of chunkArray(filterValues, 200)) {
@@ -112,7 +151,10 @@ async function safeSelectColumnValues(
 
     const { data, error } = await query;
     if (error) {
-      if (isMissingSchemaObjectError(error)) return [];
+      if (isMissingSchemaObjectError(error)) {
+        recordMissingSchemaError(error, table, selectCol, filterCol);
+        return [];
+      }
       throw error;
     }
     for (const row of (data as any[]) || []) {
@@ -132,7 +174,9 @@ async function safeCountByFilter(
   filterCol: string,
   filterValues: Array<string | number>
 ): Promise<number> {
-  if (filterValues.length === 0) return 0;
+  if (filterValues.length === 0 || hasKnownMissingSchema(table, filterCol)) {
+    return 0;
+  }
   let total = 0;
 
   for (const chunk of chunkArray(filterValues, 200)) {
@@ -149,7 +193,10 @@ async function safeCountByFilter(
 
     const { count, error } = await query;
     if (error) {
-      if (isMissingSchemaObjectError(error)) return 0;
+      if (isMissingSchemaObjectError(error)) {
+        recordMissingSchemaError(error, table, filterCol);
+        return 0;
+      }
       throw error;
     }
     total += count || 0;
@@ -164,7 +211,9 @@ async function safeDeleteByFilter(
   filterCol: string,
   filterValues: Array<string | number>
 ): Promise<void> {
-  if (filterValues.length === 0) return;
+  if (filterValues.length === 0 || hasKnownMissingSchema(table, filterCol)) {
+    return;
+  }
 
   for (const chunk of chunkArray(filterValues, 200)) {
     const query =
@@ -173,7 +222,11 @@ async function safeDeleteByFilter(
         : supabaseAdmin.from(table).delete().in(filterCol, chunk);
 
     const { error } = await query;
-    if (error && !isMissingSchemaObjectError(error)) {
+    if (error) {
+      if (isMissingSchemaObjectError(error)) {
+        recordMissingSchemaError(error, table, filterCol);
+        return;
+      }
       throw error;
     }
   }
@@ -185,7 +238,9 @@ async function safeUnlinkColumn(
   targetCol: string,
   filterValues: Array<string | number>
 ): Promise<void> {
-  if (filterValues.length === 0) return;
+  if (filterValues.length === 0 || hasKnownMissingSchema(table, targetCol)) {
+    return;
+  }
 
   for (const chunk of chunkArray(filterValues, 200)) {
     const query =
@@ -200,7 +255,11 @@ async function safeUnlinkColumn(
             .in(targetCol, chunk);
 
     const { error } = await query;
-    if (error && !isMissingSchemaObjectError(error)) {
+    if (error) {
+      if (isMissingSchemaObjectError(error)) {
+        recordMissingSchemaError(error, table, targetCol);
+        return;
+      }
       throw error;
     }
   }
@@ -293,11 +352,10 @@ async function collectInternalImpact(
   ]);
   const clinicTaskCount = ctByRec + ctByQid + ctByTq;
 
-  // 3) exam_item, student_answer, student_homework_answer
+  // 3) exam_item, student_answer(question_id 전용), student_homework_answer(question_id + tq_id)
   const [
     examIdVals,
     ansByQidIds,
-    ansByTqIds,
     hwAnsByQidIds,
     hwAnsByTqIds,
   ] = await Promise.all([
@@ -315,15 +373,6 @@ async function collectInternalImpact(
       "question_id",
       [questionId]
     ),
-    tqIds.length > 0
-      ? safeSelectColumnValues(
-          supabaseAdmin,
-          "student_answer",
-          "answer_id",
-          "tq_id",
-          tqIds
-        )
-      : Promise.resolve([]),
     safeSelectColumnValues(
       supabaseAdmin,
       "student_homework_answer",
@@ -343,9 +392,7 @@ async function collectInternalImpact(
   ]);
 
   const examIdSet = new Set<string>(examIdVals.map((v) => String(v)));
-  const studentAnsSet = new Set<string>(
-    [...ansByQidIds, ...ansByTqIds].map((v) => String(v))
-  );
+  const studentAnsSet = new Set<string>(ansByQidIds.map((v) => String(v)));
   const hwAnsSet = new Set<string>(
     [...hwAnsByQidIds, ...hwAnsByTqIds].map((v) => String(v))
   );
@@ -541,14 +588,6 @@ export async function deleteQuestionSafely(
       await safeDeleteByFilter(supabaseAdmin, "student_answer", "question_id", [
         cleanId,
       ]);
-      if (tqIds.length > 0) {
-        await safeDeleteByFilter(
-          supabaseAdmin,
-          "student_answer",
-          "tq_id",
-          tqIds
-        );
-      }
 
       await safeDeleteByFilter(
         supabaseAdmin,

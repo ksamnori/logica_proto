@@ -77,6 +77,27 @@ function ChevronIcon({ expanded }: { expanded: boolean }) {
   );
 }
 
+function resolveAcademyMemberDept(rawInst: any): string {
+  const rawRole = String(rawInst?.role || "")
+    .trim()
+    .toUpperCase();
+  const rawPos = String(rawInst?.position || "").trim();
+  const rawChatPos = String(rawInst?.chat_position || "").trim();
+  const rawDept = String(rawInst?.department || "").trim();
+
+  if (
+    rawRole === "TA" ||
+    rawPos.includes("조교") ||
+    rawChatPos.includes("조교") ||
+    rawDept === "조교" ||
+    rawDept === "조교팀"
+  ) {
+    return "조교";
+  }
+
+  return rawDept || "부서 미지정";
+}
+
 export default function HqOrgAccordionTree({
   variant,
   instructors,
@@ -124,7 +145,16 @@ export default function HqOrgAccordionTree({
       if (myMember.rank_code === "CEO" && !myMember.department) return "대표";
       if (myMember.department?.trim()) return myMember.department.trim();
     }
-    return (meInst?.department || "부서 미지정").trim();
+    if (!meInst) return "부서 미지정";
+    const meTName = (meInst.academy_tenant?.name || "").trim();
+    const isMeHq =
+      Boolean(meInst.is_hq_tenant) ||
+      meTName.includes("천종현") ||
+      meTName === "본사" ||
+      meTName.includes("본부");
+    return isMeHq
+      ? (meInst.department || "부서 미지정").trim()
+      : resolveAcademyMemberDept(meInst);
   }, [myMember, meInst]);
 
   // 테넌트 + 다단계 상하위 조직 트리 구성
@@ -151,7 +181,7 @@ export default function HqOrgAccordionTree({
         ? hm.rank_code === "CEO" && !hm.department
           ? "대표"
           : (hm.department || rawInst.department || "부서 미지정").trim()
-        : (rawInst.department || "부서 미지정").trim();
+        : resolveAcademyMemberDept(rawInst);
 
       const item = {
         ...rawInst,
@@ -417,6 +447,8 @@ export default function HqOrgAccordionTree({
           .sort((a, b) => {
             if (isMyTenant && a === activeMyDeptName) return -1;
             if (isMyTenant && b === activeMyDeptName) return 1;
+            if (a === "부서 미지정" && b !== "부서 미지정") return 1;
+            if (b === "부서 미지정" && a !== "부서 미지정") return -1;
             return a.localeCompare(b, "ko");
           })
           .map((dName) => {

@@ -184,6 +184,7 @@ export async function GET(req: NextRequest) {
       const sanitizedItem = {
         instructor_id: id,
         name: inst.name || "구성원",
+        role: inst.role || "",
         position: inst.position || "",
         chat_position: inst.chat_position || "",
         profile_image_url: inst.profile_image_url || null,

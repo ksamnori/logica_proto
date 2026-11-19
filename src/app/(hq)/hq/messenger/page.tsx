@@ -163,6 +163,14 @@ export default function HqMessengerPage() {
       });
 
       setRooms(roomsWithData);
+      if (activeRoomIdRef.current) {
+        const matchedActive = roomsWithData.find(
+          (r) => String(r.room_id) === String(activeRoomIdRef.current)
+        );
+        if (matchedActive?.displayTitle) {
+          setActiveRoomName(matchedActive.displayTitle);
+        }
+      }
       setUnreadCount(totalUnread);
       refreshChatUnread();
     } catch {
@@ -170,10 +178,7 @@ export default function HqMessengerPage() {
     }
   };
 
-  const showNewChatView = async () => {
-    setActiveView("new");
-    setSearchKeyword("");
-    setSelectedInstIds([]);
+  const loadDirectoryInstructors = async () => {
     try {
       const safeTenantMap: Record<string, string> = {
         ...FALLBACK_TENANT_NAMES,
@@ -211,6 +216,13 @@ export default function HqMessengerPage() {
     }
   };
 
+  const showNewChatView = async () => {
+    setActiveView("new");
+    setSearchKeyword("");
+    setSelectedInstIds([]);
+    await loadDirectoryInstructors();
+  };
+
   useEffect(() => {
     const handleFocus = async () => {
       if (activeRoomIdRef.current && instId) {
@@ -229,8 +241,66 @@ export default function HqMessengerPage() {
 
   useEffect(() => {
     if (!instId) return;
-    showNewChatView();
+
+    let handoffRoomId: string | null = null;
+    let handoffRoomName = "";
+    let handoffDraft = "";
+
+    try {
+      const rawHandoff = sessionStorage.getItem("hq_messenger_open_room");
+      if (rawHandoff) {
+        sessionStorage.removeItem("hq_messenger_open_room");
+        const parsed = JSON.parse(rawHandoff);
+        if (parsed?.roomId) {
+          handoffRoomId = String(parsed.roomId);
+          handoffRoomName = String(parsed.roomName || "");
+          handoffDraft = String(parsed.draftText || "");
+        }
+      }
+    } catch {
+      // ignore storage error
+    }
+
+    if (!handoffRoomId && typeof window !== "undefined") {
+      const qRoomId = new URLSearchParams(window.location.search).get("roomId");
+      if (qRoomId) {
+        handoffRoomId = qRoomId;
+      }
+    }
+
+    loadDirectoryInstructors();
     loadRooms();
+
+    if (handoffRoomId) {
+      openRoom(handoffRoomId, handoffRoomName || "대화방");
+      if (handoffDraft) {
+        setChatInput(handoffDraft);
+      }
+    } else {
+      setActiveView("new");
+      setSearchKeyword("");
+      setSelectedInstIds([]);
+    }
+
+    const onOpenRoomEvent = (evt: Event) => {
+      const custom = evt as CustomEvent<{
+        roomId?: string;
+        roomName?: string;
+        draftText?: string;
+      }>;
+      const rId = custom.detail?.roomId;
+      if (!rId) return;
+      try {
+        sessionStorage.removeItem("hq_messenger_open_room");
+      } catch {
+        // ignore
+      }
+      openRoom(rId, custom.detail?.roomName || "대화방");
+      if (custom.detail?.draftText) {
+        setChatInput(custom.detail.draftText);
+      }
+    };
+    window.addEventListener("hq:open-messenger-room", onOpenRoomEvent);
 
     const unsubHqMsg = subscribePostgresChanges(
       { table: "internal_chat_message", events: ["INSERT"] },
@@ -283,6 +353,7 @@ export default function HqMessengerPage() {
     );
 
     return () => {
+      window.removeEventListener("hq:open-messenger-room", onOpenRoomEvent);
       unsubHqMsg();
       unsubHqMember();
       if (activeChannelRef.current) {
