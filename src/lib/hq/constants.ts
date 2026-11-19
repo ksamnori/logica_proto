@@ -73,6 +73,15 @@ export const HQ_RANKS: Record<HqRankCode, RankMeta> = {
     badgeClass: "bg-indigo-50 text-indigo-800 border-indigo-200",
     description: "최고 결재권자 · 인사/출판/예산 총괄",
   },
+  SUPER_ADMIN: {
+    code: "SUPER_ADMIN",
+    level: 6,
+    label: "개발자 수퍼어드민 (Lv.6)",
+    shortLabel: "수퍼어드민",
+    defaultTitle: "수퍼어드민",
+    badgeClass: "bg-rose-50 text-rose-700 border-rose-200",
+    description: "시스템 개발·유지보수 총괄 · 전사 데이터 강제 삭제 및 스키마 제어",
+  },
 };
 
 export const HQ_RANK_LIST: RankMeta[] = [
@@ -81,6 +90,11 @@ export const HQ_RANK_LIST: RankMeta[] = [
   HQ_RANKS.TEAM_LEAD,
   HQ_RANKS.DIRECTOR,
   HQ_RANKS.CEO,
+];
+
+export const HQ_ALL_RANK_LIST: RankMeta[] = [
+  ...HQ_RANK_LIST,
+  HQ_RANKS.SUPER_ADMIN,
 ];
 
 export const HQ_DEFAULT_DEPARTMENTS = [

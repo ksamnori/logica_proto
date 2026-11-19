@@ -8,7 +8,7 @@ import HqOrgChartSettingsModal from "@/components/hq/org-chart/HqOrgChartSetting
 import { hqFetch } from "@/lib/hq/clientApi";
 import { getRankLevel } from "@/lib/hq/constants";
 import { DEFAULT_ORG_CHART_NODES } from "@/lib/hq/defaultCompanySettings";
-import { getRegisteredOrgNames } from "@/lib/hq/orgTreeHelper";
+import { findOrgNodeLeader, getRegisteredOrgNames } from "@/lib/hq/orgTreeHelper";
 import type { HqMember, HqOrgChartNode } from "@/lib/hq/types";
 
 function shortAvatarText(name: string): string {
@@ -184,24 +184,10 @@ export default function HqOrgChartPage() {
   };
 
   const findNodeLeader = (node: HqOrgChartNode): HqMember | null => {
-    const direct = directMembersByDept.get(node.name) || [];
-    if (node.name === "대표") {
-      return (
-        direct.find((m) => m.rank_code === "CEO") ||
-        snapshotMembers.find((m) => m.rank_code === "CEO") ||
-        snapshotMembers.find((m) => getRankLevel(m.rank_code) >= 4) ||
-        null
-      );
-    }
-    // org_assignments에서 해당 조직의 조직장(is_leader)으로 체크된 구성원 우선
-    const explicitLeader = direct.find((m) =>
-      (m.profile_extra?.org_assignments || []).some(
-        (a) => a.org_name === node.name && a.is_leader
-      )
-    );
-    if (explicitLeader) return explicitLeader;
+    const isRoot = !node.parent_id;
     return (
-      direct.find((m) => m.is_dept_head && m.department === node.name) || null
+      findOrgNodeLeader(node.name, snapshotMembers, { isRootNode: isRoot }) ||
+      null
     );
   };
 

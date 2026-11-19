@@ -17,6 +17,7 @@ export default function HqSidebar() {
   const hqHref = useHqHref();
   const {
     me,
+    isDevSuperAdmin,
     companySettings,
     canAccessMenu,
     pendingApprovalCount,
@@ -85,8 +86,8 @@ export default function HqSidebar() {
 
   const showSystemSection =
     canAccessMenu("/hq/messenger") ||
-    canAccessMenu("/hq/permissions") ||
-    canAccessMenu("/hq/settings");
+    canAccessMenu("/hq/settings") ||
+    isDevSuperAdmin;
 
   if (sidebarCollapsed) {
     const allCompactLinks = [
@@ -109,7 +110,12 @@ export default function HqSidebar() {
       { href: "/hq/analytics", icon: "📊", label: "진단평가 분석" },
       { href: "/hq/contest-db", icon: "📐", label: "사고력·문장제 문제 DB" },
       { href: "/hq/messenger", icon: "💬", label: "사내 메신저" },
-      { href: "/hq/permissions", icon: "🔐", label: "포털 권한 관리" },
+      ...(isDevSuperAdmin
+        ? [
+            { href: "/hq/permissions", icon: "🔐", label: "포털 권한 관리 (Lv.6)", always: true },
+            { href: "/hq/dev-tools", icon: "🛠️", label: "개발자 데이터 관리 (Lv.6)", always: true },
+          ]
+        : []),
     ];
     const compactLinks = allCompactLinks.filter(
       (item) => item.always || canAccessMenu(item.href)
@@ -210,10 +216,18 @@ export default function HqSidebar() {
                 </span>
               </div>
               <div className="text-[11px] text-slate-400 truncate mt-0.5">
-                {me.department} · 잔여연차 {me.annual_leave_remain}일
+                {me.is_ghost
+                  ? "👻 유령 구성원 · 목록 비노출"
+                  : `${me.department} · 잔여연차 ${me.annual_leave_remain}일`}
               </div>
             </div>
-            <span className="px-2 py-0.5 rounded-md bg-slate-700 text-slate-200 text-[10px] font-bold shrink-0">
+            <span
+              className={`px-2 py-0.5 rounded-md text-[10px] font-extrabold shrink-0 ${
+                rankMeta.level >= 6
+                  ? "bg-rose-600 text-white"
+                  : "bg-slate-700 text-slate-200"
+              }`}
+            >
               Lv.{rankMeta.level}
             </span>
           </div>
@@ -552,7 +566,7 @@ export default function HqSidebar() {
                 </Link>
               )}
 
-              {canAccessMenu("/hq/permissions") && (
+              {isDevSuperAdmin && (
                 <Link
                   href={hqHref("/hq/permissions")}
                   className={navItemClass("/hq/permissions")}
@@ -560,6 +574,9 @@ export default function HqSidebar() {
                   <span className="flex items-center gap-2.5 truncate">
                     <span>🔐</span>
                     <span>포털 권한 관리</span>
+                  </span>
+                  <span className="px-1.5 py-0.5 rounded-md bg-rose-600 text-white text-[9px] font-extrabold shrink-0">
+                    Lv.6
                   </span>
                 </Link>
               )}
@@ -575,6 +592,21 @@ export default function HqSidebar() {
                     <span>설정</span>
                   </span>
                 </button>
+              )}
+
+              {isDevSuperAdmin && (
+                <Link
+                  href={hqHref("/hq/dev-tools")}
+                  className={navItemClass("/hq/dev-tools")}
+                >
+                  <span className="flex items-center gap-2.5 truncate">
+                    <span>🛠️</span>
+                    <span>개발자 데이터 관리</span>
+                  </span>
+                  <span className="px-1.5 py-0.5 rounded-md bg-rose-600 text-white text-[9px] font-extrabold shrink-0">
+                    Lv.6
+                  </span>
+                </Link>
               )}
             </div>
           </div>

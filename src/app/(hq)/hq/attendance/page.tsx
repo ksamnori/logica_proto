@@ -38,6 +38,7 @@ import {
   DEFAULT_WORK_RULES,
   formatMinutesToKoreanAmPm,
   parseHmToMinutes,
+  resolveBreakWindowsForSpan,
 } from "@/lib/hq/defaultWorkRules";
 import type {
   HqAttendanceRecord,
@@ -802,6 +803,8 @@ export default function HqAttendancePage() {
         weeklyTotalMinutes: myPeriodStats.totalEffectiveMin,
         me,
         members: activeMembers,
+        orgNodes: companySettings?.extra_settings?.org_chart_nodes,
+        workRules,
         approvalPolicies: companySettings?.extra_settings?.approval_policies,
         workConditionRules: companySettings?.extra_settings?.work_condition_rules,
         workFormPolicies,
@@ -812,6 +815,7 @@ export default function HqAttendancePage() {
       activeMembers,
       approvalReasonByKey,
       companySettings?.extra_settings?.approval_policies,
+      companySettings?.extra_settings?.org_chart_nodes,
       companySettings?.extra_settings?.substitute_approvals,
       companySettings?.extra_settings?.work_condition_rules,
       draftList,
@@ -819,6 +823,7 @@ export default function HqAttendancePage() {
       myPeriodStats.totalEffectiveMin,
       todayStr,
       workFormPolicies,
+      workRules,
     ]
   );
 
@@ -1711,20 +1716,12 @@ export default function HqAttendancePage() {
       const overtimeTailPct =
         overtimeMin > 0 ? Math.min(100, (overtimeMin / spanMin) * 100) : 0;
 
-      const hasBreakInside =
-        b1Start !== null &&
-        b1End !== null &&
-        dStart < b1Start &&
-        dEnd > b1End &&
-        draft.breakMinutes > 0;
-      const breakLeftInBar =
-        hasBreakInside && b1Start !== null
-          ? ((b1Start - dStart) / spanMin) * 100
-          : 0;
-      const breakWidthInBar =
-        hasBreakInside && b1Start !== null && b1End !== null
-          ? ((b1End - b1Start) / spanMin) * 100
-          : 0;
+      const draftBreakWindows = resolveBreakWindowsForSpan({
+        inMinutes: dStart,
+        outMinutes: dEnd,
+        breakMinutes: draft.breakMinutes,
+        rule,
+      });
 
       const modeIcon =
         draft.workMode === "REMOTE"
@@ -1758,17 +1755,32 @@ export default function HqAttendancePage() {
                 )}
               </div>
 
-              {hasBreakInside && (
-                <div
-                  style={{
-                    left: `${breakLeftInBar}%`,
-                    width: `${breakWidthInBar}%`,
-                  }}
-                  className="absolute top-1 bottom-1 rounded-[3px] bg-white/95 border border-slate-200/90 flex items-center px-1.5 text-[10px] text-slate-500 pointer-events-none z-10"
-                >
-                  ☕
-                </div>
-              )}
+              {draftBreakWindows.map((brk, bIdx) => {
+                const bLeft = Math.max(
+                  0,
+                  Math.min(100, ((brk.start_minutes - dStart) / spanMin) * 100)
+                );
+                const bWidth = Math.max(
+                  0,
+                  Math.min(
+                    100 - bLeft,
+                    ((brk.end_minutes - brk.start_minutes) / spanMin) * 100
+                  )
+                );
+                if (bWidth <= 0) return null;
+                return (
+                  <div
+                    key={bIdx}
+                    style={{
+                      left: `${bLeft}%`,
+                      width: `${bWidth}%`,
+                    }}
+                    className="absolute top-1 bottom-1 min-w-[18px] rounded-[3px] bg-white/95 border border-slate-200/90 flex items-center px-1.5 text-[10px] text-slate-500 pointer-events-none z-10 overflow-hidden"
+                  >
+                    ☕
+                  </div>
+                );
+              })}
             </div>
 
             <div className="flex items-center justify-between text-[10px] text-slate-600 font-semibold mt-0.5 px-0.5 whitespace-nowrap">

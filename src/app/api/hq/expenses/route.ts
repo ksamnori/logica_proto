@@ -279,14 +279,16 @@ export async function DELETE(req: NextRequest) {
       .maybeSingle();
 
     if (!row) return apiFail("내역을 찾을 수 없습니다.", 404);
-    if (row.source_type === "APPROVAL" && !caller.isHrManager) {
-      return apiFail("전자결재 승인 연동 내역은 임의로 삭제할 수 없습니다.", 403);
-    }
-    if (!caller.isHrManager && String(row.requester_id) !== caller.userId) {
-      return apiFail("본인이 등록한 내역만 삭제할 수 있습니다.", 403);
-    }
-    if (!caller.isHrManager && row.settlement_status === "정산완료") {
-      return apiFail("정산 완료된 내역은 삭제할 수 없습니다.", 400);
+    if (!caller.isDevSuperAdmin) {
+      if (row.source_type === "APPROVAL" && !caller.isHrManager) {
+        return apiFail("전자결재 승인 연동 내역은 임의로 삭제할 수 없습니다.", 403);
+      }
+      if (!caller.isHrManager && String(row.requester_id) !== caller.userId) {
+        return apiFail("본인이 등록한 내역만 삭제할 수 있습니다.", 403);
+      }
+      if (!caller.isHrManager && row.settlement_status === "정산완료") {
+        return apiFail("정산 완료된 내역은 삭제할 수 없습니다.", 400);
+      }
     }
 
     const { error } = await supabaseAdmin

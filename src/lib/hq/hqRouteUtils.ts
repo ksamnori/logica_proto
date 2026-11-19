@@ -55,5 +55,6 @@ export const HQ_ROUTE_TAB_TITLES: Record<string, string> = {
   "/hq/analytics": "진단평가 분석",
   "/hq/contest-db": "사고력 · 문장제 문제 DB",
   "/hq/permissions": "포털 권한 관리",
+  "/hq/dev-tools": "개발자 데이터 관리 (Lv.6)",
   "/hq/settings": "본부 환경 설정",
 };

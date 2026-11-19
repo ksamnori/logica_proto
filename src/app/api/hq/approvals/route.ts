@@ -7,6 +7,10 @@ import {
   syncApprovalDocToGoogleCalendar,
 } from "@/lib/hq/integrationServer";
 import {
+  isNonPositionSystemLabel,
+  resolveMemberDisplayPosition,
+} from "@/lib/hq/orgTreeHelper";
+import {
   apiFail,
   getSupabaseAdmin,
   isMissingHqTableError,
@@ -241,7 +245,7 @@ export async function GET(req: NextRequest) {
     }
 
     const supabaseAdmin = getSupabaseAdmin();
-    const [docRes, stepRes, metaPayload] = await Promise.all([
+    const [docRes, stepRes, profRes, metaPayload] = await Promise.all([
       supabaseAdmin
         .from("hq_approval_doc")
         .select("*")
@@ -251,6 +255,11 @@ export async function GET(req: NextRequest) {
         .from("hq_approval_step")
         .select("*")
         .order("step_order", { ascending: true }),
+      supabaseAdmin
+        .from("hq_member_profile")
+        .select(
+          "instructor_id, department, rank_code, job_title, is_dept_head, profile_extra"
+        ),
       readWorkflowMetaPayload(supabaseAdmin),
     ]);
 
@@ -272,20 +281,36 @@ export async function GET(req: NextRequest) {
     }
     if (stepRes.error) return apiFail(stepRes.error.message, 500);
 
+    const profById = new Map<string, any>();
+    (profRes.data || []).forEach((p: any) => {
+      profById.set(String(p.instructor_id), p);
+    });
+
     const stepsByDoc = new Map<string, HqApprovalStep[]>();
     (stepRes.data || []).forEach((s: any) => {
       const key = String(s.approval_id);
+      const approverId = String(s.approver_id);
+      const liveProf = profById.get(approverId);
+      const rawDept = String(
+        s.approver_dept || liveProf?.department || ""
+      ).trim();
+      const resolvedDept = rawDept === "미지정" ? "" : rawDept;
+      const resolvedTitle = liveProf
+        ? resolveMemberDisplayPosition(liveProf)
+        : !isNonPositionSystemLabel(s.approver_title)
+          ? String(s.approver_title).trim()
+          : "";
       const list = stepsByDoc.get(key) || [];
       list.push({
         step_id: s.step_id,
         approval_id: key,
         step_order: Number(s.step_order),
         step_role: s.step_role,
-        approver_id: String(s.approver_id),
+        approver_id: approverId,
         approver_name: s.approver_name,
-        approver_dept: s.approver_dept || "",
+        approver_dept: resolvedDept,
         approver_rank: s.approver_rank || "",
-        approver_title: s.approver_title || "",
+        approver_title: resolvedTitle,
         status: s.status,
         comment: s.comment || null,
         acted_at: s.acted_at || null,
@@ -398,9 +423,22 @@ export async function GET(req: NextRequest) {
         content: d.content || "",
         drafter_id: String(d.drafter_id),
         drafter_name: d.drafter_name,
-        drafter_dept: d.drafter_dept || "",
+        drafter_dept:
+          String(
+            d.drafter_dept || profById.get(String(d.drafter_id))?.department || ""
+          ).trim() === "미지정"
+            ? ""
+            : String(
+                d.drafter_dept ||
+                  profById.get(String(d.drafter_id))?.department ||
+                  ""
+              ).trim(),
         drafter_rank: d.drafter_rank || "STAFF",
-        drafter_title: d.drafter_title || "",
+        drafter_title: profById.has(String(d.drafter_id))
+          ? resolveMemberDisplayPosition(profById.get(String(d.drafter_id)))
+          : !isNonPositionSystemLabel(d.drafter_title)
+            ? String(d.drafter_title).trim()
+            : "",
         status: d.status,
         current_step_order: Number(d.current_step_order || 1),
         total_steps: Number(d.total_steps || 1),
@@ -570,7 +608,7 @@ export async function POST(req: NextRequest) {
       status: instantComplete ? "APPROVED" : "PENDING",
       current_step_order: 1,
       total_steps: instantComplete ? 1 : rawSteps.length,
-      is_auto_delegated: false,
+      is_auto_delegated: Boolean(body?.is_auto_delegated),
       amount: Math.max(0, Math.round(Number(body?.amount || 0))),
       effective_date: body?.effective_date || null,
       end_date: body?.end_date || null,
@@ -722,19 +760,35 @@ export async function PATCH(req: NextRequest) {
     const supabaseAdmin = getSupabaseAdmin();
     const nowIso = new Date().toISOString();
 
-    // 회사 문서함 관리자 문서 삭제
+    // 회사 문서함 관리자 및 Lv.6 수퍼어드민 문서 강제 삭제 (연결된 경비·출퇴근 FK 해제 포함)
     if (action === "DELETE_DOC") {
-      if (!caller.isHqAdmin && !caller.isHrManager && caller.rankLevel < 5) {
+      if (
+        !caller.isDevSuperAdmin &&
+        !caller.isHqAdmin &&
+        !caller.isHrManager &&
+        caller.rankLevel < 5
+      ) {
         return apiFail("회사 문서함 삭제 권한이 없습니다.", 403);
       }
-      await supabaseAdmin
-        .from("hq_approval_step")
-        .delete()
-        .eq("approval_id", approvalId);
-      await supabaseAdmin
+      await Promise.all([
+        supabaseAdmin
+          .from("hq_expense")
+          .update({ approval_id: null })
+          .eq("approval_id", approvalId),
+        supabaseAdmin
+          .from("hq_attendance")
+          .update({ approval_id: null })
+          .eq("approval_id", approvalId),
+        supabaseAdmin
+          .from("hq_approval_step")
+          .delete()
+          .eq("approval_id", approvalId),
+      ]);
+      const { error: delErr } = await supabaseAdmin
         .from("hq_approval_doc")
         .delete()
         .eq("approval_id", approvalId);
+      if (delErr) return apiFail(`문서 삭제 실패: ${delErr.message}`, 500);
       return NextResponse.json({ success: true, data: { deleted: true } });
     }
 

@@ -3,7 +3,7 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { getHqAuthHeaders } from "@/lib/hq/clientApi";
-import { getRankLevel, HQ_RANK_LIST } from "@/lib/hq/constants";
+import { getRankLevel, HQ_ALL_RANK_LIST } from "@/lib/hq/constants";
 import type { HqRankCode } from "@/lib/hq/types";
 import { useHqShell } from "../HqShellContext";
 
@@ -16,6 +16,8 @@ interface StaffRow {
   department: string;
   tenant_name: string;
   is_hq: boolean;
+  is_native_hq?: boolean;
+  is_ghost: boolean;
   rank_code: HqRankCode;
   is_dept_head: boolean;
   is_hr_admin: boolean;
@@ -68,15 +70,16 @@ export default function HqPermissionPanel({
       rank_code?: HqRankCode;
       is_dept_head?: boolean;
       is_hr_admin?: boolean;
+      is_ghost?: boolean;
     }
   ) => {
     if (
       row.instructor_id === me &&
       patch.rank_code &&
-      getRankLevel(patch.rank_code) < 5 &&
-      row.rank_code === "CEO" &&
+      getRankLevel(patch.rank_code) < getRankLevel(row.rank_code) &&
+      getRankLevel(row.rank_code) >= 5 &&
       !confirm(
-        "본인의 대표(Lv.5) 직급을 낮추면 최고관리자 화면 접근이 제한될 수 있습니다. 계속할까요?"
+        "본인의 최고관리자/수퍼어드민(Lv.5~6) 직급을 낮추면 관리자 화면 접근이 제한될 수 있습니다. 계속할까요?"
       )
     ) {
       return;
@@ -271,10 +274,10 @@ export default function HqPermissionPanel({
       <div className="flex flex-wrap items-end justify-between gap-4 mb-4">
         <div>
           <h2 className="text-lg font-bold text-slate-800">
-            🔐 최고관리자 직급 · 관리자 · 연구DB 배정 센터
+            🔐 Lv.6 수퍼어드민 직급 · 유령 계정 · 연구DB 배정 센터
           </h2>
           <p className="text-xs text-slate-500 mt-1">
-            최고관리자가 임직원별 <strong>결재 직급(Lv.1~5) · 부서장 · 인사/급여 관리자 위임 · 문제 DB 권한</strong>을 한 화면에서 배정합니다.
+            계정별 <strong>결재 직급(Lv.1~6) · 👻 유령 구성원(목록·근태 비노출) · 부서장 · 인사관리자 · 문제 DB 권한</strong>을 한 화면에서 제어합니다.
           </p>
         </div>
         <div className="flex gap-2 text-xs font-bold shrink-0">
@@ -297,8 +300,8 @@ export default function HqPermissionPanel({
         <div className="flex rounded-lg bg-slate-100 p-0.5">
           {(
             [
-              ["hq", `본사·출판부 직원 (${hqCount})`],
-              ["branch", `학원·지점 직원 (${branchCount})`],
+              ["hq", `본사 · HQ 접근 계정 (${hqCount})`],
+              ["branch", `학원·지점 강사 (${branchCount})`],
             ] as const
           ).map(([v, label]) => (
             <button
@@ -347,21 +350,24 @@ export default function HqPermissionPanel({
           <table className="w-full text-[13px]">
             <thead className="sticky top-0 bg-slate-50 z-10">
               <tr className="text-left text-xs font-bold text-slate-500 border-b border-slate-200">
-                <th className="px-4 py-2.5">이름 / 호칭</th>
+                <th className="px-4 py-2.5">이름 / 소속</th>
+                <th className="px-3 py-2.5 text-center w-[125px]">
+                  👻 유령 구성원
+                </th>
                 {scope === "hq" && (
                   <>
-                    <th className="px-3 py-2.5 w-[210px]">
-                      결재 직급 배정 (Lv.1~5)
+                    <th className="px-3 py-2.5 w-[215px]">
+                      결재 직급 배정 (Lv.1~6)
                     </th>
-                    <th className="px-3 py-2.5 text-center w-[110px]">
+                    <th className="px-3 py-2.5 text-center w-[105px]">
                       부서장 지정
                     </th>
-                    <th className="px-3 py-2.5 text-center w-[140px]">
+                    <th className="px-3 py-2.5 text-center w-[135px]">
                       인사·급여 관리자
                     </th>
                   </>
                 )}
-                <th className="px-3 py-2.5 text-center w-[120px]">
+                <th className="px-3 py-2.5 text-center w-[115px]">
                   진단평가 분석
                 </th>
                 <th className="px-3 py-2.5 text-center w-[130px]">
@@ -377,7 +383,7 @@ export default function HqPermissionPanel({
                 <React.Fragment key={group}>
                   <tr className="bg-slate-50/70">
                     <td
-                      colSpan={scope === "hq" ? 7 : 4}
+                      colSpan={scope === "hq" ? 8 : 5}
                       className="px-4 py-1.5 text-xs font-bold text-slate-500"
                     >
                       📁 {group} ({rows.length}명)
@@ -396,17 +402,39 @@ export default function HqPermissionPanel({
                         className="border-b border-slate-100 hover:bg-slate-50/60"
                       >
                         <td className="px-4 py-2.5">
-                          <div className="font-bold text-slate-800">
-                            {s.name}
+                          <div className="font-bold text-slate-800 flex flex-wrap items-center gap-1.5">
+                            <span>{s.name}</span>
                             {s.instructor_id === me && (
-                              <span className="ml-1.5 px-1.5 py-0.5 bg-slate-800 text-white text-[10px] rounded">
+                              <span className="px-1.5 py-0.5 bg-slate-800 text-white text-[10px] rounded">
                                 나
                               </span>
                             )}
+                            {s.is_native_hq === false && (
+                              <span className="px-1.5 py-0.5 bg-amber-50 text-amber-700 border border-amber-200 text-[10px] rounded font-extrabold">
+                                {s.tenant_name}
+                              </span>
+                            )}
+                            {s.is_ghost && (
+                              <span className="px-1.5 py-0.5 bg-slate-200 text-slate-700 text-[10px] rounded font-extrabold">
+                                👻 유령(목록숨김)
+                              </span>
+                            )}
                           </div>
-                          <div className="text-[11px] text-slate-400">
+                          <div className="text-[11px] text-slate-400 mt-0.5">
                             {s.position || "-"}
                           </div>
+                        </td>
+
+                        <td className="px-3 py-2.5 text-center">
+                          <Switch
+                            checked={Boolean(s.is_ghost)}
+                            disabled={busy}
+                            tone="slate"
+                            onChange={(on) =>
+                              updateHrRoleField(s, { is_ghost: on })
+                            }
+                            label={`${s.name} 유령 구성원 전환`}
+                          />
                         </td>
 
                         {scope === "hq" && (
@@ -422,7 +450,7 @@ export default function HqPermissionPanel({
                                 }
                                 className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white text-xs font-bold text-slate-800"
                               >
-                                {HQ_RANK_LIST.map((r) => (
+                                {HQ_ALL_RANK_LIST.map((r) => (
                                   <option key={r.code} value={r.code}>
                                     {r.label}
                                   </option>
@@ -525,7 +553,7 @@ function Switch({
   disabled?: boolean;
   onChange: (on: boolean) => void;
   label: string;
-  tone?: "emerald" | "amber" | "sky" | "indigo";
+  tone?: "emerald" | "amber" | "sky" | "indigo" | "slate";
 }) {
   const onColor =
     tone === "amber"
@@ -534,6 +562,8 @@ function Switch({
       ? "bg-sky-500"
       : tone === "indigo"
       ? "bg-indigo-600"
+      : tone === "slate"
+      ? "bg-slate-800"
       : "bg-emerald-500";
   return (
     <button

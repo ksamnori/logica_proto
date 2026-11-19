@@ -1,8 +1,16 @@
 // src/lib/hq/defaultWorkflowForms.ts
 import { DEFAULT_APPROVAL_POLICIES, PRESET_ASSIGNEES } from "./defaultApprovalPolicies";
+import {
+  findOrgNodeLeader,
+  resolveMemberDisplayPosition,
+  resolveOrgSupervisorChain,
+} from "./orgTreeHelper";
 import type {
+  HqApprovalDocType,
   HqApprovalPolicyItem,
+  HqAutoDelegationRule,
   HqMember,
+  HqOrgChartNode,
   HqPolicyAssignee,
   HqSubstituteApprovalRule,
   HqWorkflowFieldDef,
@@ -464,6 +472,7 @@ export function mergeFormsWithPolicies(
         cc_list: pol.cc_list || [],
         steps: pol.steps || [],
         requester_rules: pol.requester_rules,
+        auto_delegation: pol.auto_delegation ?? existing.auto_delegation,
       });
     } else {
       byId.set(pol.id, {
@@ -484,6 +493,7 @@ export function mergeFormsWithPolicies(
         cc_list: pol.cc_list || [],
         steps: pol.steps || [],
         requester_rules: pol.requester_rules,
+        auto_delegation: pol.auto_delegation,
       });
     }
   });
@@ -545,38 +555,90 @@ export interface ResolvedWorkflowLine {
   ccMembers: { id: string; name: string; dept: string }[];
   allowEdit: boolean;
   zeroStepConfigured: boolean;
+  autoDelegated: boolean;
+  delegationReason: string | null;
+}
+
+/**
+ * 기존 DB에 저장된 정책/양식에 auto_delegation 필드가 아직 없는 경우
+ * 지출·구매 양식은 30만 원 이하, 기본 연차는 2일 이하 전결 기본값을 안전하게 제공합니다.
+ * (관리자가 설정에서 enabled: false 로 저장하면 명시적 설정이 최우선 적용됩니다.)
+ */
+export function resolveEffectiveAutoDelegation(params: {
+  policyId?: string | null;
+  category?: string | null;
+  mappedDocType?: HqApprovalDocType | null;
+  configured?: HqAutoDelegationRule | null;
+}): HqAutoDelegationRule | undefined {
+  const { policyId, category, mappedDocType, configured } = params;
+  if (configured !== undefined && configured !== null) {
+    return configured;
+  }
+  const pid = (policyId || "").trim();
+  if (
+    mappedDocType === "EXPENSE" ||
+    mappedDocType === "PURCHASE" ||
+    pid === "wf-expense-post" ||
+    pid === "wf-expense-pre" ||
+    pid === "wf-meal" ||
+    pid === "wf-pub-outsource" ||
+    pid === "wf-pub-print"
+  ) {
+    return {
+      enabled: true,
+      amount_enabled: true,
+      max_amount: 300000,
+      convert_skipped_to_cc: true,
+    };
+  }
+  if (pid === "lv-annual" || (category === "leave" && pid.startsWith("lv-annual"))) {
+    return {
+      enabled: true,
+      leave_days_enabled: true,
+      max_leave_days: 2,
+      convert_skipped_to_cc: true,
+    };
+  }
+  return undefined;
 }
 
 function resolveAssigneeToMember(
   asg: HqPolicyAssignee,
   me: HqMember | null,
-  members: HqMember[]
+  members: HqMember[],
+  orgNodes?: HqOrgChartNode[] | null
 ): HqMember | undefined {
-  const activeMembers = members.filter((m) => m.work_status === "재직");
+  const activeMembers = members.filter(
+    (m) => m.work_status === "재직" && !m.is_ghost
+  );
   if (asg.kind === "ROLE") {
     if (asg.role_key === "ORG_HEAD_1" && me) {
-      return (
-        activeMembers.find(
-          (m) =>
-            m.department === me.department &&
-            m.is_dept_head &&
-            m.instructor_id !== me.instructor_id
-        ) ||
-        activeMembers.find(
-          (m) => m.rank_level >= 5 && m.instructor_id !== me.instructor_id
-        )
-      );
+      const chain = resolveOrgSupervisorChain({
+        member: me,
+        members: activeMembers,
+        orgNodes,
+      });
+      return chain[0];
     }
     if (asg.role_key === "ORG_HEAD_2" && me) {
-      return activeMembers.find(
-        (m) => m.rank_level >= 4 && m.instructor_id !== me.instructor_id
-      );
+      const chain = resolveOrgSupervisorChain({
+        member: me,
+        members: activeMembers,
+        orgNodes,
+      });
+      return chain[1];
     }
     if (asg.role_key === "HR_MANAGER") {
       return (
         activeMembers.find(
+          (m) =>
+            (m.department.includes("관리") || m.department.includes("경영")) &&
+            m.rank_code !== "SUPER_ADMIN"
+        ) ||
+        activeMembers.find(
           (m) => m.department.includes("관리") || m.department.includes("경영")
-        ) || activeMembers.find((m) => m.rank_level >= 5)
+        ) ||
+        findOrgNodeLeader("대표", activeMembers, { isRootNode: true })
       );
     }
     if (asg.role_key === "SELF" && me) {
@@ -608,13 +670,33 @@ function inferRankCodeFromSubLabel(subLabel?: string): string {
 export function resolvePolicyApprovalLine(params: {
   policy: Pick<
     HqApprovalPolicyItem,
-    "id" | "allow_edit" | "per_requester" | "cc_list" | "steps" | "requester_rules"
-  >;
+    | "id"
+    | "allow_edit"
+    | "per_requester"
+    | "cc_list"
+    | "steps"
+    | "requester_rules"
+  > & {
+    category?: string;
+    mapped_doc_type?: HqApprovalDocType;
+    auto_delegation?: HqAutoDelegationRule;
+  };
   me: HqMember | null;
   members: HqMember[];
+  orgNodes?: HqOrgChartNode[] | null;
   substituteRules?: HqSubstituteApprovalRule[];
+  amount?: number;
+  leaveDays?: number;
 }): ResolvedWorkflowLine {
-  const { policy, me, members, substituteRules = [] } = params;
+  const {
+    policy,
+    me,
+    members,
+    orgNodes,
+    substituteRules = [],
+    amount,
+    leaveDays,
+  } = params;
   const matchedRule =
     policy.per_requester && me
       ? (policy.requester_rules || []).find((r) =>
@@ -638,7 +720,7 @@ export function resolvePolicyApprovalLine(params: {
 
   targetSteps.forEach((st) => {
     (st.assignees || []).forEach((asg) => {
-      let member = resolveAssigneeToMember(asg, me, members);
+      let member = resolveAssigneeToMember(asg, me, members, orgNodes);
       let isSubbed = false;
       let fallbackName = (asg.name || "").trim();
       let fallbackSubLabel = (asg.sub_label || "").trim();
@@ -683,17 +765,28 @@ export function resolvePolicyApprovalLine(params: {
               : `${resolvedSteps.length + 1}단계 승인`,
             approver_id: member.instructor_id,
             approver_name: member.name,
-            approver_dept: member.department,
+            approver_dept:
+              (member.department || "").trim() === "미지정"
+                ? ""
+                : (member.department || "").trim(),
             approver_rank: member.rank_code,
-            approver_title: member.job_title,
+            approver_title: resolveMemberDisplayPosition(member),
           });
         }
         return;
       }
 
       // 프리셋(더미) 구성원 또는 아직 실제 DB 계정이 매칭되지 않은 지정 승인자도 누락 없이 단계에 유지!
+      // 단, 조직도 역할(ORG_HEAD_1 / ORG_HEAD_2 / SELF)에서 상위 상사가 없는 경우(예: 대표 본인 기안 또는 2차 상사 없음) 가짜 단계를 만들지 않고 건너뜀!
       if (!fallbackName) return;
-      if (asg.kind === "ROLE" && asg.role_key === "SELF") return;
+      if (
+        asg.kind === "ROLE" &&
+        (asg.role_key === "SELF" ||
+          asg.role_key === "ORG_HEAD_1" ||
+          asg.role_key === "ORG_HEAD_2")
+      ) {
+        return;
+      }
       if (me && asg.kind !== "ROLE" && me.name.trim() === fallbackName) {
         return;
       }
@@ -718,19 +811,10 @@ export function resolvePolicyApprovalLine(params: {
     });
   });
 
-  const normalizedSteps = resolvedSteps.map((s, idx) => ({
-    ...s,
-    step_order: idx + 1,
-    step_role:
-      idx === resolvedSteps.length - 1
-        ? ("FINAL_APPROVER" as const)
-        : ("REVIEWER" as const),
-  }));
-
   const ccMembers: { id: string; name: string; dept: string }[] = [];
   const seenCc = new Set<string>();
   targetCc.forEach((c) => {
-    const m = resolveAssigneeToMember(c, me, members);
+    const m = resolveAssigneeToMember(c, me, members, orgNodes);
     const key = m ? m.instructor_id : `name:${c.name}`;
     if (seenCc.has(key)) return;
     seenCc.add(key);
@@ -741,11 +825,116 @@ export function resolvePolicyApprovalLine(params: {
     });
   });
 
+  // =========================================================================
+  // 금액(예: 30만 원 이하) · 휴가 일수(예: 2일 이하) 기준 마지막 대표 결재 단계 자동 생략(전결)
+  // - 앞선 검토/승인 단계(팀장·본부장·실장 등)가 최소 1단계 이상 존재할 때만 마지막 대표 단계를 생략하여
+  //   실장 본인 기안(대표 단독 1단계) 등이 무승인 셀프 결재가 되는 것을 안전하게 방지합니다.
+  // =========================================================================
+  let workingSteps = [...resolvedSteps];
+  let autoDelegated = false;
+  let delegationReason: string | null = null;
+
+  const effDelegation = resolveEffectiveAutoDelegation({
+    policyId: policy.id,
+    category: policy.category,
+    mappedDocType: policy.mapped_doc_type,
+    configured: policy.auto_delegation,
+  });
+
+  if (effDelegation?.enabled && workingSteps.length >= 2) {
+    const activeMembers = members.filter(
+      (m) => m.work_status === "재직" && !m.is_ghost
+    );
+    const ceoLeader = findOrgNodeLeader("대표", activeMembers, {
+      isRootNode: true,
+    });
+    const lastStep = workingSteps[workingSteps.length - 1];
+    const isLastStepCeo = Boolean(
+      lastStep &&
+        (lastStep.approver_rank === "CEO" ||
+          lastStep.approver_dept === "대표" ||
+          /대표|소장|사장/.test(lastStep.approver_title || "") ||
+          (ceoLeader && lastStep.approver_id === ceoLeader.instructor_id))
+    );
+
+    if (isLastStepCeo) {
+      const maxAmt = Number(effDelegation.max_amount || 0);
+      const maxDays = Number(effDelegation.max_leave_days || 0);
+      const matchedReasons: string[] = [];
+
+      if (
+        effDelegation.amount_enabled &&
+        maxAmt > 0 &&
+        typeof amount === "number" &&
+        amount > 0 &&
+        amount <= maxAmt
+      ) {
+        matchedReasons.push(`${maxAmt.toLocaleString()}원 이하 지출·품의`);
+      }
+
+      if (
+        effDelegation.leave_days_enabled &&
+        maxDays > 0 &&
+        typeof leaveDays === "number" &&
+        leaveDays > 0 &&
+        leaveDays <= maxDays
+      ) {
+        matchedReasons.push(`${maxDays}일 이하 휴가`);
+      }
+
+      if (matchedReasons.length > 0) {
+        const skippedCeo = workingSteps.pop()!;
+        autoDelegated = true;
+        const prevApprover = workingSteps[workingSteps.length - 1];
+        delegationReason = `${matchedReasons.join(" · ")} 전결 기준 충족 — ${
+          prevApprover ? `${prevApprover.approver_name} 전결` : "전결 처리"
+        } (${skippedCeo.approver_name} 결재 생략)`;
+
+        if (effDelegation.convert_skipped_to_cc !== false) {
+          const isSelf = me && skippedCeo.approver_id === me.instructor_id;
+          const ccKey =
+            skippedCeo.approver_id &&
+            !skippedCeo.approver_id.startsWith("preset:")
+              ? skippedCeo.approver_id
+              : `name:${skippedCeo.approver_name}`;
+          const alreadyInCc =
+            seenCc.has(ccKey) ||
+            ccMembers.some((c) => c.name === skippedCeo.approver_name);
+          if (!isSelf && !alreadyInCc) {
+            seenCc.add(ccKey);
+            ccMembers.push({
+              id: skippedCeo.approver_id.startsWith("preset:")
+                ? ""
+                : skippedCeo.approver_id,
+              name: skippedCeo.approver_name,
+              dept: skippedCeo.approver_dept || "대표",
+            });
+          }
+        }
+      }
+    }
+  }
+
+  const normalizedSteps = workingSteps.map((s, idx) => ({
+    ...s,
+    step_order: idx + 1,
+    step_role:
+      idx === workingSteps.length - 1
+        ? ("FINAL_APPROVER" as const)
+        : ("REVIEWER" as const),
+    role_label:
+      autoDelegated && idx === workingSteps.length - 1
+        ? `${idx + 1}단계 전결승인`
+        : s.role_label,
+  }));
+
   return {
     steps: normalizedSteps,
     ccMembers,
     allowEdit: policy.allow_edit,
     // 원래 양식에 승인 단계가 없거나, 대표(결재권자 본인)가 자신의 결재 단계만 있는 양식을 직접 작성한 경우 0단계 즉시 완료 허용
     zeroStepConfigured: !hasConfiguredStepAssignees || normalizedSteps.length === 0,
+    autoDelegated,
+    delegationReason,
   };
 }

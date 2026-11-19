@@ -13,6 +13,8 @@ import HqLeaveRegisterModal from "@/components/hq/leaves/HqLeaveRegisterModal";
 import { buildRecommendedApprovalLine } from "@/lib/hq/approvalLine";
 import { hqFetch } from "@/lib/hq/clientApi";
 import { DEFAULT_APPROVAL_POLICIES } from "@/lib/hq/defaultApprovalPolicies";
+import { resolvePolicyApprovalLine } from "@/lib/hq/defaultWorkflowForms";
+import { resolveOrgSupervisorChain } from "@/lib/hq/orgTreeHelper";
 import {
   DEFAULT_ANNUAL_LEAVE_SETTINGS,
   DEFAULT_CUSTOM_LEAVES,
@@ -692,73 +694,66 @@ export default function HqLeavesPage() {
           ? "lv-annual"
           : selectedLeaveKind.item.policy_id;
 
-      // 설정된 휴가 승인 정책에서 결재자 매칭 -> 없으면 표준 자동 결재선 사용
+      // 설정된 휴가 승인 정책에서 조직도(org_chart_nodes) 기준 결재선 산출
       const matchedPolicy = approvalPolicies.find((p) => p.id === policyId);
-      const policySteps: any[] = [];
-      if (matchedPolicy && Array.isArray(matchedPolicy.steps)) {
-        matchedPolicy.steps.forEach((st, idx) => {
-          const firstAssignee = st.assignees?.[0];
-          if (!firstAssignee) return;
-          const foundMember = activeMembers.find(
-            (m) =>
-              m.name === firstAssignee.name ||
-              ((firstAssignee.name.includes("조직장") ||
-                firstAssignee.role_key === "ORG_HEAD_1") &&
-                m.department === me.department &&
-                m.is_dept_head)
-          );
-          if (foundMember && foundMember.instructor_id !== me.instructor_id) {
-            policySteps.push({
-              step_order: idx + 1,
-              step_role:
-                idx + 1 === matchedPolicy.steps.length
-                  ? "FINAL_APPROVER"
-                  : "REVIEWER",
-              approver_id: foundMember.instructor_id,
-              approver_name: foundMember.name,
-              approver_dept: foundMember.department,
-              approver_rank: foundMember.rank_code,
-              approver_title: foundMember.job_title,
+      const orgNodes = companySettings?.extra_settings?.org_chart_nodes;
+      const policyResolved = matchedPolicy
+        ? resolvePolicyApprovalLine({
+            policy: matchedPolicy,
+            me,
+            members,
+            orgNodes,
+            substituteRules:
+              companySettings?.extra_settings?.substitute_approvals || [],
+          })
+        : null;
+
+      let finalSteps: any[] = [];
+      if (policyResolved) {
+        finalSteps = policyResolved.steps.map((s) => ({
+          step_order: s.step_order,
+          step_role: s.step_role,
+          approver_id: s.approver_id,
+          approver_name: s.approver_name,
+          approver_dept: s.approver_dept,
+          approver_rank: s.approver_rank,
+          approver_title: s.approver_title,
+        }));
+      } else {
+        const fallbackLine = buildRecommendedApprovalLine({
+          drafter: me,
+          allMembers: members,
+          docType: "LEAVE",
+          leaveDays: computedModalLeaveDays,
+          orgNodes,
+        });
+        finalSteps = fallbackLine.steps.map((s) => ({
+          step_order: s.step_order,
+          step_role: s.step_role,
+          approver_id: s.approver_id,
+          approver_name: s.approver_name,
+          approver_dept: s.approver_dept,
+          approver_rank: s.approver_rank,
+          approver_title: s.approver_title,
+        }));
+        if (finalSteps.length === 0) {
+          const supChain = resolveOrgSupervisorChain({
+            member: me,
+            members: activeMembers,
+            orgNodes,
+          });
+          const topApprover = supChain[0];
+          if (topApprover) {
+            finalSteps.push({
+              step_order: 1,
+              step_role: "FINAL_APPROVER",
+              approver_id: topApprover.instructor_id,
+              approver_name: topApprover.name,
+              approver_dept: topApprover.department,
+              approver_rank: topApprover.rank_code,
+              approver_title: topApprover.job_title,
             });
           }
-        });
-      }
-
-      const fallbackLine = buildRecommendedApprovalLine({
-        drafter: me,
-        allMembers: members,
-        docType: "LEAVE",
-        leaveDays: computedModalLeaveDays,
-      });
-
-      const finalSteps =
-        policySteps.length > 0
-          ? policySteps
-          : fallbackLine.steps.map((s) => ({
-              step_order: s.step_order,
-              step_role: s.step_role,
-              approver_id: s.approver_id,
-              approver_name: s.approver_name,
-              approver_dept: s.approver_dept,
-              approver_rank: s.approver_rank,
-              approver_title: s.approver_title,
-            }));
-
-      // 만약 결재자 후보가 비어있고 대표 본인이 아니면 최고직급자를 최종결재자로 지정
-      if (finalSteps.length === 0 && me.rank_level < 5) {
-        const topApprover =
-          activeMembers.find((m) => m.rank_level >= 5) ||
-          activeMembers.find((m) => m.instructor_id !== me.instructor_id);
-        if (topApprover) {
-          finalSteps.push({
-            step_order: 1,
-            step_role: "FINAL_APPROVER",
-            approver_id: topApprover.instructor_id,
-            approver_name: topApprover.name,
-            approver_dept: topApprover.department,
-            approver_rank: topApprover.rank_code,
-            approver_title: topApprover.job_title,
-          });
         }
       }
 

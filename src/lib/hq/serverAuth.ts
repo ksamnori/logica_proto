@@ -11,6 +11,7 @@ import {
 } from "./constants";
 import { isIpMatchedByRule } from "./defaultSecuritySettings";
 import { resolveMemberPermissions } from "./hqPermissionEngine";
+import { resolveMemberDisplayPosition } from "./orgTreeHelper";
 import type { HqRankCode } from "./types";
 
 export function getSupabaseAdmin(): SupabaseClient {
@@ -67,6 +68,8 @@ export interface HqCallerInfo {
   tenantId: string | null;
   hqTenantIds: Set<string>;
   tenantNames: Record<string, string>;
+  isGhost: boolean;
+  isDevSuperAdmin: boolean;
   isSystemOwner: boolean;
   isHqAdmin: boolean;
   isHrManager: boolean;
@@ -151,23 +154,54 @@ export async function requireHqCaller(
     posStr.includes("최고관리자") ||
     posStr.includes("대장");
 
-  if (!isHqTenantMember && !isSuperRole && !rpcHqAdmin) {
-    return apiFail("본부(HQ) 소속 임직원만 접근할 수 있습니다.", 403);
-  }
-
   const schemaMissing = isMissingHqTableError(profileRes.error);
   const extSchemaMissing = isMissingHqTableError(extProbeRes.error);
   const prof = !profileRes.error ? profileRes.data : null;
 
-  const inferred = inferRankFromPosition(inst.chat_position, inst.position);
-  const rankCode: HqRankCode =
-    (prof?.rank_code as HqRankCode) || (isSuperRole ? "CEO" : inferred.rankCode);
-  const rankLevel = getRankLevel(rankCode);
-  const jobTitle = prof?.job_title || inferred.jobTitle;
-  const department = (prof?.department || inst.department || "미지정").trim();
+  const devEmails = (process.env.HQ_DEV_SUPER_ADMIN_EMAILS || "")
+    .split(",")
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean);
+  const isEnvDevSuper = Boolean(
+    user.email && devEmails.includes(user.email.toLowerCase())
+  );
 
-  // 시스템 오너(DB is_hq_admin 또는 SUPER_ADMIN 역할) — 직급만 '대표(CEO)'인 일반/테스트 계정은 권한 설정의 최고관리자 명단을 따름
-  const isSystemOwner = rpcHqAdmin || isSuperRole;
+  const inferred = inferRankFromPosition(inst.chat_position, inst.position);
+  const rankCode: HqRankCode = isEnvDevSuper
+    ? "SUPER_ADMIN"
+    : (prof?.rank_code as HqRankCode) ||
+      (inferred.rankCode === "SUPER_ADMIN"
+        ? "SUPER_ADMIN"
+        : isSuperRole
+          ? "CEO"
+          : inferred.rankCode);
+  const rankLevel = getRankLevel(rankCode);
+  const isDevSuperAdmin = rankCode === "SUPER_ADMIN" || rankLevel >= 6;
+
+  if (!isHqTenantMember && !isSuperRole && !rpcHqAdmin && !isDevSuperAdmin) {
+    return apiFail("본부(HQ) 소속 임직원만 접근할 수 있습니다.", 403);
+  }
+
+  const rawExtra =
+    prof?.profile_extra && typeof prof.profile_extra === "object"
+      ? prof.profile_extra
+      : {};
+  const isGhost =
+    typeof rawExtra.is_ghost === "boolean"
+      ? rawExtra.is_ghost
+      : !isHqTenantMember;
+
+  const department = (prof?.department || inst.department || "미지정").trim();
+  const jobTitle = resolveMemberDisplayPosition({
+    department,
+    rank_code: rankCode,
+    job_title: prof?.job_title || inferred.jobTitle,
+    is_dept_head: Boolean(prof?.is_dept_head ?? inferred.isDeptHead),
+    profile_extra: rawExtra,
+  });
+
+  // 시스템 오너(Lv.6 개발자 수퍼어드민, DB is_hq_admin 또는 SUPER_ADMIN 역할)
+  const isSystemOwner = isDevSuperAdmin || rpcHqAdmin || isSuperRole;
   let isHqAdmin = isSystemOwner;
 
   // 인사·급여 관리자 기본값 (권한 설정 확인 전 초기값)
@@ -240,7 +274,7 @@ export async function requireHqCaller(
         isHqAdmin &&
         (pathname.startsWith("/api/hq/settings") ||
           pathname.startsWith("/api/hq/audit-logs"));
-      const skipForSuperAdmin = isHqAdmin && !sec.ip_restrict_super_admin;
+      const skipForSuperAdmin = isDevSuperAdmin || (isHqAdmin && !sec.ip_restrict_super_admin);
 
       if (!isLocalhost && !isAdminRecoveryPath && !skipForSuperAdmin) {
         const matched = sec.allowed_ips.some((entry) =>
@@ -289,6 +323,8 @@ export async function requireHqCaller(
     tenantId: inst.tenant_id ? String(inst.tenant_id) : null,
     hqTenantIds,
     tenantNames,
+    isGhost,
+    isDevSuperAdmin,
     isSystemOwner,
     isHqAdmin,
     isHrManager,

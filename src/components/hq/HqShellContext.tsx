@@ -38,6 +38,7 @@ interface HqShellState {
   me: HqMember | null;
   members: HqMember[];
   companySettings: HqCompanySettings;
+  isDevSuperAdmin: boolean;
   isHrManager: boolean;
   isHqAdmin: boolean;
   canAccessAnalytics: boolean;
@@ -114,6 +115,7 @@ export function HqShellProvider({
   const [companySettings, setCompanySettings] = useState<HqCompanySettings>(
     DEFAULT_HQ_COMPANY_SETTINGS
   );
+  const [isDevSuperAdmin, setIsDevSuperAdmin] = useState(false);
   const [isHrManager, setIsHrManager] = useState(false);
   const [isHqAdmin, setIsHqAdmin] = useState(false);
   const [canAccessAnalytics, setCanAccessAnalytics] = useState(false);
@@ -181,6 +183,8 @@ export function HqShellProvider({
         extSchemaMissing?: boolean;
         data: {
           meId: string;
+          meProfile?: HqMember | null;
+          isDevSuperAdmin?: boolean;
           isHrManager: boolean;
           isHqAdmin: boolean;
           members: HqMember[];
@@ -188,11 +192,13 @@ export function HqShellProvider({
       }>("/api/hq/members");
 
       setSchemaMissing(Boolean(res.schemaMissing || res.extSchemaMissing));
+      setIsDevSuperAdmin(Boolean(res.data.isDevSuperAdmin));
       setIsHrManager(Boolean(res.data.isHrManager));
       setIsHqAdmin(Boolean(res.data.isHqAdmin));
       setMembers(res.data.members || []);
 
       const myRow =
+        res.data.meProfile ||
         (res.data.members || []).find((m) => m.instructor_id === res.data.meId) ||
         null;
       setMe(myRow);
@@ -569,7 +575,10 @@ export function HqShellProvider({
     ]
   );
 
-  const effectiveIsHqAdmin = isHqAdmin || myPermissions.isSuperAdmin;
+  const effectiveIsDevSuperAdmin =
+    isDevSuperAdmin || me?.rank_code === "SUPER_ADMIN";
+  const effectiveIsHqAdmin =
+    effectiveIsDevSuperAdmin || isHqAdmin || myPermissions.isSuperAdmin;
   const effectiveIsHrManager =
     isHrManager ||
     effectiveIsHqAdmin ||
@@ -611,14 +620,14 @@ export function HqShellProvider({
     ]
   );
 
-  // 지정 출·퇴근 시각 도래 시 자동 근무 시작·퇴근 상태가 즉시 반영되도록 1분 주기 동기화
+  // 지정 출·퇴근 시각 도래 시 자동 근무 시작·퇴근 상태가 즉시 반영되도록 1분 주기 동기화 (유령 구성원 제외)
   useEffect(() => {
-    if (!me?.instructor_id) return;
+    if (!me?.instructor_id || me?.is_ghost) return;
     const timer = setInterval(() => {
       refreshAttendanceState();
     }, 60_000);
     return () => clearInterval(timer);
-  }, [me?.instructor_id, refreshAttendanceState]);
+  }, [me?.instructor_id, me?.is_ghost, refreshAttendanceState]);
 
   const openSettingsModal = useCallback(
     (initialTab?: string) => {
@@ -642,6 +651,7 @@ export function HqShellProvider({
         me,
         members,
         companySettings,
+        isDevSuperAdmin: effectiveIsDevSuperAdmin,
         isHrManager: effectiveIsHrManager,
         isHqAdmin: effectiveIsHqAdmin,
         canAccessAnalytics:

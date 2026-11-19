@@ -1,7 +1,7 @@
 // src/components/hq/HqCalendarSidebar.tsx
 "use client";
 
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import type {
   HqCalendarCategory,
@@ -31,11 +31,25 @@ interface GoogleStatusInfo {
   error: string | null;
 }
 
-const CALENDAR_MAX_LANES = 3; // 한 날짜 칸에 표시할 최대 일정 줄 수 (초과분은 +N)
-const CALENDAR_LANE_PX = 21; // 일정 막대 한 줄 높이 (기존 14px 대비 1.5배)
-const CALENDAR_DAYNUM_PX = 33; // 날짜 숫자 영역 높이 (기존 22px 대비 1.5배)
-const CALENDAR_OVERFLOW_PX = 18; // +N 초과 표시 영역 높이 (기존 12px 대비 1.5배)
-const CALENDAR_MIN_ROW_PX = 88; // 일정이 적은 주간 행 최소 높이
+// 달력 크기 프리셋 — 기본(펼침) / 압축(하단 일정 스크롤 시 자동 축소)
+const CALENDAR_SIZE = {
+  normal: {
+    maxLanes: 6, // 한 날짜 칸에 표시할 최대 일정 줄 수 (초과분은 +N)
+    lanePx: 18, // 일정 막대 한 줄 높이
+    dayNumPx: 26, // 날짜 숫자 영역 높이
+    overflowPx: 14, // +N 초과 표시 영역 높이
+    minRowPx: 62, // 일정이 적은 주간 행 최소 높이
+  },
+  compact: {
+    maxLanes: 1,
+    lanePx: 16,
+    dayNumPx: 22,
+    overflowPx: 13,
+    minRowPx: 40,
+  },
+} as const;
+const COLLAPSE_SCROLL_THRESHOLD = 24; // 하단 일정 목록이 이만큼 스크롤되면 달력 압축
+const COLLAPSE_TOGGLE_GUARD_MS = 350; // 압축/펼침 직후 레이아웃 변화로 인한 스크롤 이벤트 무시 시간
 const AGENDA_STEP_COUNT = 8; // 스크롤 없이 기본 노출할 일정 수 (더보기 단위)
 
 const GOOGLE_SUBTYPE_META: Record<
@@ -194,6 +208,41 @@ export default function HqCalendarSidebar() {
     null
   );
   const [visibleCount, setVisibleCount] = useState<number>(AGENDA_STEP_COUNT);
+
+  // 하단 일정 목록 스크롤 시 상단 달력을 자동 압축
+  const [calendarCollapsed, setCalendarCollapsed] = useState(false);
+  const collapseToggledAtRef = useRef(0);
+  const agendaScrollRef = useRef<HTMLDivElement>(null);
+  const size = calendarCollapsed ? CALENDAR_SIZE.compact : CALENDAR_SIZE.normal;
+
+  const setCollapsedGuarded = useCallback((next: boolean) => {
+    collapseToggledAtRef.current = Date.now();
+    setCalendarCollapsed(next);
+  }, []);
+
+  const handleAgendaScroll = (e: React.UIEvent<HTMLDivElement>) => {
+    if (Date.now() - collapseToggledAtRef.current < COLLAPSE_TOGGLE_GUARD_MS) {
+      return;
+    }
+    const st = e.currentTarget.scrollTop;
+    if (!calendarCollapsed && st > COLLAPSE_SCROLL_THRESHOLD) {
+      setCollapsedGuarded(true);
+    } else if (calendarCollapsed && st <= 0) {
+      setCollapsedGuarded(false);
+    }
+  };
+
+  // 목록이 짧아 스크롤이 생기지 않는 경우에도 맨 위에서 휠을 올리면 달력 펼침
+  const handleAgendaWheel = (e: React.WheelEvent<HTMLDivElement>) => {
+    if (
+      calendarCollapsed &&
+      e.deltaY < 0 &&
+      e.currentTarget.scrollTop <= 0 &&
+      Date.now() - collapseToggledAtRef.current >= COLLAPSE_TOGGLE_GUARD_MS
+    ) {
+      setCollapsedGuarded(false);
+    }
+  };
 
   const [events, setEvents] = useState<HqCalendarEventItem[]>([]);
   const [googleStatus, setGoogleStatus] = useState<GoogleStatusInfo>({
@@ -394,56 +443,62 @@ export default function HqCalendarSidebar() {
       <aside className="mx-4 sm:mx-6 mb-6 xl:mx-0 xl:mb-0 xl:w-[516px] shrink-0 bg-white rounded-2xl xl:rounded-none border border-slate-200 xl:border-y-0 xl:border-r-0 xl:border-l shadow-xs xl:shadow-none flex flex-col xl:self-stretch overflow-hidden xl:min-h-0 print:hidden">
         {/* 상단 캘린더 영역 (타이틀~월간 달력): xl 이상에서 고정 영역 */}
         <div className="flex flex-col shrink-0 bg-white">
-        {/* 상단 타이틀 & 구글 연동 배지 */}
-        <div className="px-5 py-4 border-b border-slate-200 bg-slate-50/70 flex items-center justify-between gap-3 shrink-0">
-          <div className="min-w-0">
-            <div className="flex items-center gap-2">
-              <span className="text-base font-extrabold text-slate-900">
-                📅 본부 통합 캘린더
-              </span>
-              {googleStatus.connected ? (
-                <span
-                  title={googleStatus.calendarTitle}
-                  className="px-2 py-0.5 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-700 text-[11px] font-extrabold"
-                >
-                  Google 연동
+        {/* 상단 타이틀 & 구글 연동 배지 (달력 압축 시 숨김) */}
+        <div
+          className={`grid transition-[grid-template-rows] duration-200 ease-out ${
+            calendarCollapsed ? "grid-rows-[0fr]" : "grid-rows-[1fr]"
+          }`}
+        >
+          <div className="overflow-hidden min-h-0">
+            <div className="px-4 py-2 border-b border-slate-200 bg-slate-50/70 flex items-center justify-between gap-2">
+              <div
+                className="flex items-center gap-1.5 min-w-0"
+                title="구글 일정 · 휴가/재택 · 하판 마감 · 미팅"
+              >
+                <span className="text-sm font-extrabold text-slate-900 whitespace-nowrap">
+                  📅 본부 통합 캘린더
                 </span>
-              ) : canAccessMenu("/hq/settings") ? (
-                <button
-                  type="button"
-                  onClick={() => openSettingsModal("integration")}
-                  className="px-2 py-0.5 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-600 text-[11px] font-bold"
-                  title="Google 캘린더 연결 설정 열기"
-                >
-                  ⚙️ 연결 설정
-                </button>
-              ) : null}
-            </div>
-            <p className="text-xs text-slate-500 mt-0.5 truncate">
-              구글 일정 · 휴가/재택 · 하판 마감 · 미팅
-            </p>
-          </div>
+                {googleStatus.connected ? (
+                  <span
+                    title={googleStatus.calendarTitle}
+                    className="px-1.5 py-0.5 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-700 text-[10px] leading-3 font-extrabold whitespace-nowrap"
+                  >
+                    Google 연동
+                  </span>
+                ) : canAccessMenu("/hq/settings") ? (
+                  <button
+                    type="button"
+                    onClick={() => openSettingsModal("integration")}
+                    className="px-1.5 py-0.5 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-600 text-[10px] leading-3 font-bold whitespace-nowrap"
+                    title="Google 캘린더 연결 설정 열기"
+                  >
+                    ⚙️ 연결 설정
+                  </button>
+                ) : null}
+              </div>
 
-          <button
-            type="button"
-            onClick={openQuickAdd}
-            className="px-3.5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-extrabold shrink-0 transition-colors"
-          >
-            + 일정
-          </button>
+              <button
+                type="button"
+                onClick={openQuickAdd}
+                className="px-2.5 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-[11px] font-extrabold shrink-0 transition-colors"
+              >
+                + 일정
+              </button>
+            </div>
+          </div>
         </div>
 
-        {/* 월 이동 네비게이션 */}
-        <div className="px-5 py-3 border-b border-slate-100 flex items-center justify-between bg-white shrink-0">
-          <h3 className="text-base font-extrabold text-slate-800 tracking-tight">
+        {/* 월 이동 네비게이션 + 달력 접기/펼치기 */}
+        <div className="px-4 py-1.5 border-b border-slate-100 flex items-center justify-between gap-2 bg-white shrink-0">
+          <h3 className="text-sm font-extrabold text-slate-800 tracking-tight whitespace-nowrap">
             {viewedYear}년 {viewedMonth}월
           </h3>
-          <div className="flex items-center gap-1.5">
+          <div className="flex items-center gap-1">
             <button
               type="button"
               onClick={loadCalendar}
               title="일정 동기화 새로고침"
-              className="w-7 h-7 flex items-center justify-center rounded-lg border border-blue-200 bg-blue-50 hover:bg-blue-100 text-blue-600 text-xs font-bold transition-colors"
+              className="w-6 h-6 flex items-center justify-center rounded-md border border-blue-200 bg-blue-50 hover:bg-blue-100 text-blue-600 text-[11px] font-bold transition-colors"
             >
               <span className={loading ? "animate-spin inline-block" : ""}>
                 🔄
@@ -454,7 +509,7 @@ export default function HqCalendarSidebar() {
               onClick={() =>
                 setCalendarMonth(new Date(viewedYear, viewedMonth - 2, 1))
               }
-              className="w-7 h-7 flex items-center justify-center rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-600 text-xs font-bold"
+              className="w-6 h-6 flex items-center justify-center rounded-md border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-600 text-[10px] font-bold"
             >
               ◀
             </button>
@@ -464,7 +519,7 @@ export default function HqCalendarSidebar() {
                 setCalendarMonth(new Date());
                 setSelectedYmd(null);
               }}
-              className="px-2.5 py-1 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-xs font-bold text-slate-700"
+              className="px-2 h-6 rounded-md border border-slate-300 bg-white hover:bg-slate-50 text-[11px] font-bold text-slate-700"
             >
               오늘
             </button>
@@ -473,91 +528,113 @@ export default function HqCalendarSidebar() {
               onClick={() =>
                 setCalendarMonth(new Date(viewedYear, viewedMonth, 1))
               }
-              className="w-7 h-7 flex items-center justify-center rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-600 text-xs font-bold"
+              className="w-6 h-6 flex items-center justify-center rounded-md border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-600 text-[10px] font-bold"
             >
               ▶
+            </button>
+            {calendarCollapsed && (
+              <button
+                type="button"
+                onClick={openQuickAdd}
+                title="일정 추가"
+                className="w-6 h-6 flex items-center justify-center rounded-md bg-slate-900 hover:bg-slate-800 text-white text-xs font-extrabold transition-colors"
+              >
+                +
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => {
+                const next = !calendarCollapsed;
+                setCollapsedGuarded(next);
+                if (!next) agendaScrollRef.current?.scrollTo({ top: 0 });
+              }}
+              title={calendarCollapsed ? "달력 크게 보기" : "달력 작게 보기"}
+              className="px-1.5 h-6 rounded-md border border-slate-200 bg-white hover:bg-slate-50 text-[10px] font-bold text-slate-500 whitespace-nowrap"
+            >
+              {calendarCollapsed ? "펼치기 ▼" : "접기 ▲"}
             </button>
           </div>
         </div>
 
-        {/* 카테고리 빠른 필터 (가로 스크롤바 없이 한 줄/줄바꿈 정돈) */}
-        <div className="px-4 py-2.5 border-b border-slate-100 flex flex-col gap-2 bg-white shrink-0">
-          <div className="flex flex-wrap items-center gap-1.5">
-            {(
-              [
-                { id: "ALL", label: "전체" },
-                { id: "GOOGLE", label: "📆 구글" },
-                { id: "LEAVE_WORK", label: "🌴 휴가·유연" },
-                { id: "PUB_MEETING", label: "📚 하판·미팅" },
-                { id: "HOLIDAY_BDAY", label: "🎌 휴일·생일" },
-              ] as { id: FilterTab; label: string }[]
-            ).map((t) => (
-              <button
-                key={t.id}
-                type="button"
-                onClick={() => {
-                  setFilterTab(t.id);
-                  if (t.id !== "ALL" && t.id !== "GOOGLE") {
-                    setGoogleSubFilter(null);
-                  }
-                }}
-                className={`px-2.5 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap transition-colors ${
-                  filterTab === t.id
-                    ? "bg-slate-900 text-white shadow-2xs"
-                    : "bg-slate-100 text-slate-600 hover:bg-slate-200"
-                }`}
-              >
-                {t.label}
-              </button>
-            ))}
-          </div>
-
-          {/* 구글 일정 세부 색상 범례 (클릭 시 해당 유형만 필터링 가능) */}
-          {(filterTab === "ALL" || filterTab === "GOOGLE") && (
-            <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
+        {/* 카테고리 빠른 필터 + 구글 세부 범례 (달력 압축 시 숨김) */}
+        <div
+          className={`grid transition-[grid-template-rows] duration-200 ease-out ${
+            calendarCollapsed ? "grid-rows-[0fr]" : "grid-rows-[1fr]"
+          }`}
+        >
+          <div className="overflow-hidden min-h-0">
+            <div className="px-3 py-1.5 border-b border-slate-100 flex flex-wrap items-center gap-1 bg-white">
               {(
                 [
-                  "MEETING",
-                  "LECTURE",
-                  "LEAVE",
-                  "GROUP_BUY",
-                  "GENERAL",
-                ] as GoogleSubType[]
-              ).map((sub) => {
-                const sm = GOOGLE_SUBTYPE_META[sub];
-                const active = googleSubFilter === sub;
-                return (
-                  <button
-                    key={sub}
-                    type="button"
-                    onClick={() =>
-                      setGoogleSubFilter((prev) => (prev === sub ? null : sub))
+                  { id: "ALL", label: "전체" },
+                  { id: "GOOGLE", label: "📆 구글" },
+                ] as { id: FilterTab; label: string }[]
+              ).map((t) => (
+                <button
+                  key={t.id}
+                  type="button"
+                  onClick={() => {
+                    setFilterTab(t.id);
+                    if (t.id !== "ALL" && t.id !== "GOOGLE") {
+                      setGoogleSubFilter(null);
                     }
-                    title={`클릭하여 '${sm.shortLabel}' 일정만 보기 / 해제`}
-                    className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md border text-[11px] font-bold transition-all ${
-                      active
-                        ? `${sm.badgeClass} ring-1 ring-slate-900/20 shadow-2xs`
-                        : "bg-slate-50/80 border-slate-200/80 text-slate-600 hover:bg-slate-100"
-                    }`}
-                  >
-                    <span
-                      className={`w-2.5 h-2.5 rounded-[3px] shrink-0 ${sm.dotClass}`}
-                    />
-                    <span>{sm.shortLabel}</span>
-                  </button>
-                );
-              })}
+                  }}
+                  className={`px-2 py-0.5 rounded-md text-[11px] leading-4 font-bold whitespace-nowrap transition-colors ${
+                    filterTab === t.id
+                      ? "bg-slate-900 text-white shadow-2xs"
+                      : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                  }`}
+                >
+                  {t.label}
+                </button>
+              ))}
+
+              {/* 구글 일정 세부 색상 범례 (클릭 시 해당 유형만 필터링 가능) */}
+              {(filterTab === "ALL" || filterTab === "GOOGLE") &&
+                (
+                  [
+                    "MEETING",
+                    "LECTURE",
+                    "LEAVE",
+                    "GROUP_BUY",
+                    "GENERAL",
+                  ] as GoogleSubType[]
+                ).map((sub) => {
+                  const sm = GOOGLE_SUBTYPE_META[sub];
+                  const active = googleSubFilter === sub;
+                  return (
+                    <button
+                      key={sub}
+                      type="button"
+                      onClick={() =>
+                        setGoogleSubFilter((prev) => (prev === sub ? null : sub))
+                      }
+                      title={`클릭하여 '${sm.shortLabel}' 일정만 보기 / 해제`}
+                      className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md border text-[10px] leading-4 font-bold transition-all ${
+                        active
+                          ? `${sm.badgeClass} ring-1 ring-slate-900/20 shadow-2xs`
+                          : "bg-slate-50/80 border-slate-200/80 text-slate-600 hover:bg-slate-100"
+                      }`}
+                    >
+                      <span
+                        className={`w-2 h-2 rounded-[2px] shrink-0 ${sm.dotClass}`}
+                      />
+                      <span>{sm.shortLabel}</span>
+                    </button>
+                  );
+                })}
             </div>
-          )}
+          </div>
         </div>
 
-        {/* 월간 달력 그리드 (기존 대비 1.5배 확대 + 세로 구분선으로 가독성 강화) */}
+        {/* 월간 달력 그리드 (압축 모드: 일정 1줄 + 나머지는 +N) */}
         <div className="border-b border-slate-200 bg-white shrink-0 select-none">
           <div className="grid grid-cols-7 border-b border-slate-100 bg-slate-50/50">
             {["일", "월", "화", "수", "목", "금", "토"].map((dow, idx) => (
               <div
                 key={dow}
-                className={`py-2 text-center text-xs font-extrabold border-r border-slate-100 last:border-r-0 ${
+                className={`py-1 text-center text-[11px] font-extrabold border-r border-slate-100 last:border-r-0 ${
                   idx === 0
                     ? "text-rose-500"
                     : idx === 6
@@ -586,7 +663,7 @@ export default function HqCalendarSidebar() {
             }
 
             return (
-              <div className="divide-y divide-slate-100">
+              <div className="divide-y divide-slate-300">
                 {weeks.map((wd) => {
                   const weekStart = wd[0];
                   const weekEnd = wd[6];
@@ -594,6 +671,13 @@ export default function HqCalendarSidebar() {
                   // 1) 이 주에 걸친 일정 수집 + 정렬 (여러 날 일정 → 긴 일정 → 시작일 순)
                   const weekItems = filteredEvents
                     .filter((ev) => ev.endDate >= weekStart && ev.startDate <= weekEnd)
+                    // 압축 달력에서는 공구(공동구매) 일정 제외
+                    .filter(
+                      (ev) =>
+                        !calendarCollapsed ||
+                        ev.category !== "GOOGLE" ||
+                        classifyGoogleEvent(ev) !== "GROUP_BUY"
+                    )
                     .map((ev) => {
                       const colStart =
                         ev.startDate < weekStart ? 0 : wd.indexOf(ev.startDate);
@@ -650,7 +734,7 @@ export default function HqCalendarSidebar() {
                     for (let c = item.colStart; c <= item.colEnd; c++) {
                       lanes[laneIdx][c] = true;
                     }
-                    if (laneIdx < CALENDAR_MAX_LANES) {
+                    if (laneIdx < size.maxLanes) {
                       placed.push({ ...item, lane: laneIdx });
                     } else {
                       for (let c = item.colStart; c <= item.colEnd; c++) {
@@ -659,20 +743,20 @@ export default function HqCalendarSidebar() {
                     }
                   }
 
-                  const usedLanes = Math.min(CALENDAR_MAX_LANES, lanes.length);
+                  const usedLanes = Math.min(size.maxLanes, lanes.length);
                   const hasOverflow = overflowByCol.some((n) => n > 0);
-                  const laneAreaPx = usedLanes * CALENDAR_LANE_PX;
+                  const laneAreaPx = usedLanes * size.lanePx;
                   const rowHeightPx = Math.max(
-                    CALENDAR_MIN_ROW_PX,
-                    CALENDAR_DAYNUM_PX +
+                    size.minRowPx,
+                    size.dayNumPx +
                       laneAreaPx +
-                      (hasOverflow ? CALENDAR_OVERFLOW_PX : 6)
+                      (hasOverflow ? size.overflowPx : 4)
                   );
 
                   return (
                     <div
                       key={weekStart}
-                      className="relative"
+                      className="relative transition-[height] duration-200 ease-out"
                       style={{ height: `${rowHeightPx}px` }}
                     >
                       {/* 날짜 셀 (클릭 영역 + 세로 격자선) */}
@@ -698,17 +782,17 @@ export default function HqCalendarSidebar() {
                               onClick={() =>
                                 setSelectedYmd((prev) => (prev === ymd ? null : ymd))
                               }
-                              className={`relative flex flex-col items-center pt-1.5 border-r border-slate-100 last:border-r-0 hover:bg-slate-50/90 transition-colors ${
+                              className={`relative flex flex-col items-center pt-1 border-r border-slate-100 last:border-r-0 hover:bg-slate-50/90 transition-colors ${
                                 isSelected ? "bg-blue-50/50 ring-1 ring-inset ring-brand/25" : ""
                               } ${inMonth ? "" : "bg-slate-50/40 opacity-45"}`}
                             >
                               <span
-                                className={`text-[13px] w-6 h-6 flex items-center justify-center rounded-full ${numColor}`}
+                                className={`text-[12px] w-5 h-5 flex items-center justify-center rounded-full ${numColor}`}
                               >
                                 {Number(ymd.slice(8, 10))}
                               </span>
                               {overflowByCol[idx] > 0 && (
-                                <span className="absolute bottom-1 inset-x-0 text-center text-[11px] font-extrabold text-slate-500 leading-[14px]">
+                                <span className="absolute bottom-0 inset-x-0 text-center text-[10px] font-extrabold text-slate-500 leading-[13px]">
                                   +{overflowByCol[idx]}
                                 </span>
                               )}
@@ -722,8 +806,8 @@ export default function HqCalendarSidebar() {
                         <div
                           className="absolute inset-x-0 grid grid-cols-7 pointer-events-none"
                           style={{
-                            top: `${CALENDAR_DAYNUM_PX}px`,
-                            gridTemplateRows: `repeat(${usedLanes}, ${CALENDAR_LANE_PX}px)`,
+                            top: `${size.dayNumPx}px`,
+                            gridTemplateRows: `repeat(${usedLanes}, ${size.lanePx}px)`,
                           }}
                         >
                           {placed.map(({ ev, colStart, colEnd, lane }) => {
@@ -738,7 +822,7 @@ export default function HqCalendarSidebar() {
                                   gridColumn: `${colStart + 1} / ${colEnd + 2}`,
                                   gridRow: `${lane + 1}`,
                                 }}
-                                className={`h-[18px] self-center px-1.5 text-[11px] leading-[18px] font-bold truncate shadow-[0_1px_1px_rgba(15,23,42,0.06)] ${
+                                className={`h-[15px] self-center px-1 text-[10px] leading-[15px] font-bold truncate shadow-[0_1px_1px_rgba(15,23,42,0.06)] ${
                                   vMeta.barClass
                                 } ${ev.statusLabel ? "opacity-60" : ""} ${
                                   roundL ? "rounded-l-[4px] ml-[3px]" : ""
@@ -760,8 +844,13 @@ export default function HqCalendarSidebar() {
         </div>
 
         {/* 하단 일정 타임라인 목록 (내부 스크롤바 없이 기본 8개 전체 노출 + 더보기 지원) */}
-        <div className="flex-1 flex flex-col bg-slate-50/60 p-4 xl:min-h-0 xl:overflow-y-auto custom-scroll">
-          <div className="flex items-center justify-between mb-3 shrink-0">
+        <div
+          ref={agendaScrollRef}
+          onScroll={handleAgendaScroll}
+          onWheel={handleAgendaWheel}
+          className="flex-1 flex flex-col bg-slate-50/60 p-3 xl:min-h-0 xl:overflow-y-auto custom-scroll"
+        >
+          <div className="flex items-center justify-between mb-2 shrink-0">
             <h4 className="text-[13px] font-extrabold text-slate-800">
               {selectedYmd
                 ? `${formatKoreanDateLabel(selectedYmd)} 일정 (${agendaList.length})`
@@ -806,7 +895,7 @@ export default function HqCalendarSidebar() {
                     <div
                       key={ev.id}
                       onClick={() => clickable && handleItemClick(ev)}
-                      className={`shrink-0 rounded-xl bg-white border px-3.5 py-3 transition-all ${
+                      className={`shrink-0 rounded-xl bg-white border px-3 py-2 transition-all ${
                         isTodayItem
                           ? "border-brand/35 shadow-xs"
                           : "border-slate-200/90"

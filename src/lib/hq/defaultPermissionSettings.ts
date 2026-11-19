@@ -200,12 +200,6 @@ export const PERMISSION_CATEGORIES: HqPermissionCatalogCategory[] = [
           "좌측 사이드바에 [사내 메신저] 메뉴를 표시해요.",
       },
       {
-        key: "menu.permissions",
-        title: "🔐 포털 권한 관리 메뉴 표시",
-        description:
-          "좌측 사이드바에 [포털 권한 관리] 메뉴를 표시해요.",
-      },
-      {
         key: "menu.settings",
         title: "⚙️ 설정 메뉴 표시 · 접근",
         description:
@@ -1143,9 +1137,9 @@ export function getAllowedScopeOptionsForItem(
  */
 export function normalizePermissionScope(
   rawScope: HqPermissionScope | string | undefined,
-  item: HqPermissionCatalogItem
+  item?: HqPermissionCatalogItem | null
 ): CanonicalPermissionScope {
-  if (item.scopeMode === "LOCKED_FULL" || item.lockedFullScope) {
+  if (!item || item.scopeMode === "LOCKED_FULL" || item.lockedFullScope) {
     return "전체 구성원";
   }
 

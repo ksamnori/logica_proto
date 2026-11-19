@@ -7,7 +7,7 @@ CREATE TABLE IF NOT EXISTS public.hq_member_profile (
   employee_no text UNIQUE,
   department text NOT NULL DEFAULT '미지정',
   rank_code text NOT NULL DEFAULT 'STAFF'
-    CHECK (rank_code IN ('STAFF', 'SENIOR', 'TEAM_LEAD', 'DIRECTOR', 'CEO')),
+    CHECK (rank_code IN ('STAFF', 'SENIOR', 'TEAM_LEAD', 'DIRECTOR', 'CEO', 'SUPER_ADMIN')),
   job_title text NOT NULL DEFAULT '사원',
   is_dept_head boolean NOT NULL DEFAULT false,
   employment_type text NOT NULL DEFAULT '정규직',

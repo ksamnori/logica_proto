@@ -8,6 +8,7 @@ import {
   DEFAULT_APPROVAL_TEMPLATES,
   PRESET_ASSIGNEES,
 } from "@/lib/hq/defaultApprovalPolicies";
+import { resolveEffectiveAutoDelegation } from "@/lib/hq/defaultWorkflowForms";
 import type {
   HqApprovalDoc,
   HqApprovalPolicyCategory,
@@ -1048,6 +1049,33 @@ export default function HqApprovalPolicySection({
                             요청자별 승인
                           </span>
                         )}
+                        {(() => {
+                          const ad = resolveEffectiveAutoDelegation({
+                            policyId: pol.id,
+                            category: pol.category,
+                            mappedDocType: pol.mapped_doc_type,
+                            configured: pol.auto_delegation,
+                          });
+                          if (!ad?.enabled) return null;
+                          const tags: string[] = [];
+                          if (ad.amount_enabled && Number(ad.max_amount) > 0) {
+                            tags.push(
+                              `${Math.round(Number(ad.max_amount) / 10000)}만원 이하 전결`
+                            );
+                          }
+                          if (
+                            ad.leave_days_enabled &&
+                            Number(ad.max_leave_days) > 0
+                          ) {
+                            tags.push(`${ad.max_leave_days}일 이하 전결`);
+                          }
+                          if (tags.length === 0) return null;
+                          return (
+                            <span className="px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 text-[10px] font-bold">
+                              ⚡ {tags.join(" · ")}
+                            </span>
+                          );
+                        })()}
                       </div>
                       {pol.description && (
                         <p className="text-xs text-slate-400 mt-0.5 truncate">
@@ -1234,6 +1262,210 @@ export default function HqApprovalPolicySection({
                   변경 허용
                 </button>
               </div>
+
+              {(editingPolicy.category === "workflow" ||
+                editingPolicy.category === "leave") &&
+                (() => {
+                  const effAd = resolveEffectiveAutoDelegation({
+                    policyId: editingPolicy.id,
+                    category: editingPolicy.category,
+                    mappedDocType: editingPolicy.mapped_doc_type,
+                    configured: editingPolicy.auto_delegation,
+                  }) || {
+                    enabled: false,
+                    amount_enabled: editingPolicy.category === "workflow",
+                    max_amount: 300000,
+                    leave_days_enabled: editingPolicy.category === "leave",
+                    max_leave_days: 2,
+                    convert_skipped_to_cc: true,
+                  };
+                  const isLeavePol =
+                    editingPolicy.category === "leave" ||
+                    editingPolicy.mapped_doc_type === "LEAVE";
+                  const updateAd = (
+                    patch: Partial<typeof effAd>
+                  ) => {
+                    if (!canEdit) return;
+                    setEditingPolicy({
+                      ...editingPolicy,
+                      auto_delegation: {
+                        ...effAd,
+                        ...patch,
+                      },
+                    });
+                  };
+                  return (
+                    <div className="mt-3 p-3 rounded-xl border border-emerald-200/80 bg-emerald-50/40 space-y-2.5 text-xs">
+                      <div className="flex items-center justify-between gap-2">
+                        <div>
+                          <div className="font-extrabold text-slate-800 flex items-center gap-1.5">
+                            <span>⚡ 자동 전결 기준 (마지막 대표 결재 생략)</span>
+                          </div>
+                          <p className="text-[11px] text-slate-500 mt-0.5">
+                            기준 이하 건은 앞선 검토자(팀장·본부장·실장) 선에서 전결 완료됩니다.
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          disabled={!canEdit}
+                          onClick={() =>
+                            updateAd({
+                              enabled: !effAd.enabled,
+                              amount_enabled: !isLeavePol
+                                ? true
+                                : effAd.amount_enabled,
+                              max_amount: effAd.max_amount || 300000,
+                              leave_days_enabled: isLeavePol
+                                ? true
+                                : effAd.leave_days_enabled,
+                              max_leave_days: effAd.max_leave_days || 2,
+                              convert_skipped_to_cc:
+                                effAd.convert_skipped_to_cc !== false,
+                            })
+                          }
+                          className={`relative inline-flex h-5 w-9 shrink-0 rounded-full border-2 border-transparent transition-colors ${
+                            effAd.enabled ? "bg-[#00c458]" : "bg-slate-300"
+                          }`}
+                        >
+                          <span
+                            className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition ${
+                              effAd.enabled ? "translate-x-4" : "translate-x-0"
+                            }`}
+                          />
+                        </button>
+                      </div>
+
+                      {effAd.enabled && (
+                        <div className="pt-2 border-t border-emerald-200/60 space-y-2">
+                          {!isLeavePol ? (
+                            <div className="space-y-1.5">
+                              <div className="flex items-center justify-between gap-2">
+                                <span className="text-[11px] font-bold text-slate-700">
+                                  전결 기준 금액 (이하)
+                                </span>
+                                <div className="flex items-center gap-1">
+                                  {[100000, 300000, 500000, 1000000].map(
+                                    (preset) => (
+                                      <button
+                                        key={preset}
+                                        type="button"
+                                        disabled={!canEdit}
+                                        onClick={() =>
+                                          updateAd({
+                                            amount_enabled: true,
+                                            max_amount: preset,
+                                          })
+                                        }
+                                        className={`px-2 py-0.5 rounded text-[10px] font-bold border ${
+                                          Number(effAd.max_amount) === preset
+                                            ? "bg-emerald-600 text-white border-emerald-600"
+                                            : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"
+                                        }`}
+                                      >
+                                        {preset / 10000}만원
+                                      </button>
+                                    )
+                                  )}
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-1.5">
+                                <input
+                                  type="number"
+                                  min={0}
+                                  step={10000}
+                                  disabled={!canEdit}
+                                  value={effAd.max_amount ?? 300000}
+                                  onChange={(e) =>
+                                    updateAd({
+                                      amount_enabled: true,
+                                      max_amount: Math.max(
+                                        0,
+                                        Number(e.target.value || 0)
+                                      ),
+                                    })
+                                  }
+                                  className="w-36 px-2.5 py-1 rounded-lg border border-slate-200 bg-white text-xs font-bold text-slate-800 tabular-nums"
+                                />
+                                <span className="text-[11px] font-semibold text-slate-600">
+                                  원 이하일 때 마지막 대표 결재 단계 생략
+                                </span>
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="space-y-1.5">
+                              <div className="flex items-center justify-between gap-2">
+                                <span className="text-[11px] font-bold text-slate-700">
+                                  전결 기준 휴가 일수 (이하)
+                                </span>
+                                <div className="flex items-center gap-1">
+                                  {[0.5, 1, 2, 3].map((preset) => (
+                                    <button
+                                      key={preset}
+                                      type="button"
+                                      disabled={!canEdit}
+                                      onClick={() =>
+                                        updateAd({
+                                          leave_days_enabled: true,
+                                          max_leave_days: preset,
+                                        })
+                                      }
+                                      className={`px-2 py-0.5 rounded text-[10px] font-bold border ${
+                                        Number(effAd.max_leave_days) === preset
+                                          ? "bg-emerald-600 text-white border-emerald-600"
+                                          : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"
+                                      }`}
+                                    >
+                                      {preset === 0.5 ? "반차(0.5일)" : `${preset}일`}
+                                    </button>
+                                  ))}
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-1.5">
+                                <input
+                                  type="number"
+                                  min={0.125}
+                                  step={0.5}
+                                  disabled={!canEdit}
+                                  value={effAd.max_leave_days ?? 2}
+                                  onChange={(e) =>
+                                    updateAd({
+                                      leave_days_enabled: true,
+                                      max_leave_days: Math.max(
+                                        0,
+                                        Number(e.target.value || 0)
+                                      ),
+                                    })
+                                  }
+                                  className="w-24 px-2.5 py-1 rounded-lg border border-slate-200 bg-white text-xs font-bold text-slate-800 tabular-nums"
+                                />
+                                <span className="text-[11px] font-semibold text-slate-600">
+                                  일 이하(반차·시간차 포함)일 때 마지막 대표 결재 생략
+                                </span>
+                              </div>
+                            </div>
+                          )}
+
+                          <label className="flex items-center gap-2 pt-0.5 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              disabled={!canEdit}
+                              checked={effAd.convert_skipped_to_cc !== false}
+                              onChange={(e) =>
+                                updateAd({
+                                  convert_skipped_to_cc: e.target.checked,
+                                })
+                              }
+                              className="accent-emerald-600 rounded"
+                            />
+                            <span className="text-[11px] font-semibold text-slate-700">
+                              결재 생략된 대표를 참조(CC)에 자동 추가하여 사후 열람 유지
+                            </span>
+                          </label>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
             </div>
 
             {/* 스크롤 본문: 일반 결재선 vs 요청자별 승인 (Image 6) */}

@@ -90,6 +90,10 @@ const PAGE_TITLES: Record<string, { title: string; subtitle: string }> = {
     title: "포털 메뉴 권한 관리",
     subtitle: "임직원별 연구 DB · 진단평가 분석 열람 권한 제어",
   },
+  "/hq/dev-tools": {
+    title: "개발자 수퍼어드민 데이터 관리 콘솔 (Lv.6)",
+    subtitle: "본부 DB 테이블 · KV 원장 전수 조회 및 개발용 테스트 데이터 개별/선택 강제 삭제",
+  },
   "/hq/settings": {
     title: "본부 환경 설정",
     subtitle: "회사 기본 정보 · 쉬는 날(공휴일) · 회사 직인 · 계열사 관리",
@@ -205,8 +209,16 @@ export default function HqHeader() {
       </div>
 
       <div className="flex items-center gap-1.5 sm:gap-2 shrink-0 whitespace-nowrap">
-        {/* 실시간 출퇴근 미니 위젯 */}
-        {!myTodayAttendance ? (
+        {/* 실시간 출퇴근 미니 위젯 (유령 구성원은 출퇴근 버튼 대신 스텔스 배지 표시) */}
+        {me?.is_ghost ? (
+          <span
+            title="유령 구성원으로 설정되어 사내 구성원 목록·조직도·출퇴근 기록에 노출되지 않습니다."
+            className="hidden lg:inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-800 text-slate-100 text-xs font-extrabold"
+          >
+            <span>👻</span>
+            <span>유령 모드 (목록·근태 비노출)</span>
+          </span>
+        ) : !myTodayAttendance ? (
           <div className="hidden lg:flex items-center rounded-xl border border-emerald-200 bg-emerald-50/70 p-0.5">
             <button
               type="button"

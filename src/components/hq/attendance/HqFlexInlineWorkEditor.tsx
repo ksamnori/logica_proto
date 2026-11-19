@@ -9,10 +9,15 @@ import {
   DEFAULT_WORK_FORM_POLICIES,
 } from "@/lib/hq/defaultApprovalPolicies";
 import { resolvePolicyApprovalLine } from "@/lib/hq/defaultWorkflowForms";
-import { formatMinutesToKoreanAmPm } from "@/lib/hq/defaultWorkRules";
+import {
+  formatMinutesToKoreanAmPm,
+  resolveBreakWindowsForSpan,
+  resolveWorkRuleForMember,
+} from "@/lib/hq/defaultWorkRules";
 import type {
   HqApprovalPolicyItem,
   HqMember,
+  HqOrgChartNode,
   HqRankCode,
   HqRealtimeBreakSpan,
   HqRealtimeModeSegment,
@@ -22,6 +27,7 @@ import type {
   HqWorkEditApprovalPayload,
   HqWorkFormPolicy,
   HqWorkMode,
+  HqWorkRuleItem,
 } from "@/lib/hq/types";
 
 export interface DraftWorkEdit {
@@ -91,6 +97,7 @@ export interface EvaluatedDraftApprovalItem {
   steps: {
     approver_id: string;
     approver_name: string;
+    approver_dept: string;
     approver_rank: HqRankCode;
     approver_title: string;
   }[];
@@ -175,6 +182,8 @@ export function evaluateDraftsApprovalSummary(params: {
   weeklyTotalMinutes: number;
   me: HqMember | null;
   members: HqMember[];
+  orgNodes?: HqOrgChartNode[] | null;
+  workRules?: HqWorkRuleItem[];
   approvalPolicies?: HqApprovalPolicyItem[];
   workConditionRules?: HqWorkConditionRule[];
   workFormPolicies?: HqWorkFormPolicy[];
@@ -187,6 +196,8 @@ export function evaluateDraftsApprovalSummary(params: {
     weeklyTotalMinutes,
     me,
     members,
+    orgNodes,
+    workRules,
     approvalPolicies,
     workConditionRules,
     workFormPolicies,
@@ -301,6 +312,7 @@ export function evaluateDraftsApprovalSummary(params: {
         policy: pol,
         me: targetMember,
         members,
+        orgNodes,
         substituteRules,
       });
       line.steps.forEach((s) => {
@@ -309,6 +321,7 @@ export function evaluateDraftsApprovalSummary(params: {
           mergedSteps.push({
             approver_id: s.approver_id,
             approver_name: s.approver_name,
+            approver_dept: s.approver_dept || "",
             approver_rank: (s.approver_rank || "TEAM_LEAD") as HqRankCode,
             approver_title: s.approver_title,
           });
@@ -328,6 +341,28 @@ export function evaluateDraftsApprovalSummary(params: {
     const afterNet = calcDraftNetWorkedMinutes(d);
     const afterOt = Math.max(0, afterNet - d.ruleDailyMinutes);
     const reasonText = (reasonByKey[d.key] || d.memo || "").trim();
+    const memberRule = resolveWorkRuleForMember(
+      workRules,
+      targetMember?.name || d.memberName,
+      targetMember?.profile_extra?.work_schedule_type
+    );
+    const beforeBreaks = d.baselineSnapshot.exists
+      ? resolveBreakWindowsForSpan({
+          inMinutes: d.baselineSnapshot.inMinutes,
+          outMinutes: d.baselineSnapshot.outMinutes,
+          breakMinutes: d.baselineSnapshot.breakMinutes,
+          rule: memberRule,
+        })
+      : [];
+    const afterBreaks =
+      d.actionMode === "UPSERT"
+        ? resolveBreakWindowsForSpan({
+            inMinutes: d.inMinutes,
+            outMinutes: d.outMinutes,
+            breakMinutes: d.breakMinutes,
+            rule: memberRule,
+          })
+        : [];
 
     results.push({
       draftKey: d.key,
@@ -354,6 +389,9 @@ export function evaluateDraftsApprovalSummary(params: {
           in_minutes: d.baselineSnapshot.inMinutes,
           out_minutes: d.baselineSnapshot.outMinutes,
           break_minutes: d.baselineSnapshot.breakMinutes,
+          break_start_minutes: beforeBreaks[0]?.start_minutes ?? null,
+          break_end_minutes: beforeBreaks[0]?.end_minutes ?? null,
+          breaks: beforeBreaks,
           worked_minutes: d.baselineSnapshot.workedMinutes,
           overtime_minutes: d.baselineSnapshot.overtimeMinutes,
         },
@@ -364,6 +402,9 @@ export function evaluateDraftsApprovalSummary(params: {
           in_minutes: d.inMinutes,
           out_minutes: d.outMinutes,
           break_minutes: d.breakMinutes,
+          break_start_minutes: afterBreaks[0]?.start_minutes ?? null,
+          break_end_minutes: afterBreaks[0]?.end_minutes ?? null,
+          breaks: afterBreaks,
           worked_minutes: afterNet,
           overtime_minutes: afterOt,
           location_note: d.locationNote,

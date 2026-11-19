@@ -339,6 +339,9 @@ export default function HqLeaveRegisterModal({
   const [reason, setReason] = useState("");
   const [linePanelOpen, setLinePanelOpen] = useState(false);
   const [allowLineEdit, setAllowLineEdit] = useState(true);
+  const [autoDelegated, setAutoDelegated] = useState(false);
+  const [delegationReason, setDelegationReason] = useState<string | null>(null);
+  const [lineManuallyEdited, setLineManuallyEdited] = useState(false);
   const [ccList, setCcList] = useState<CcDraftItem[]>([]);
   const [approvalSteps, setApprovalSteps] = useState<ApprovalStepDraft[]>([]);
   const [notifyMenuTargetId, setNotifyMenuTargetId] = useState<string | null>(
@@ -436,7 +439,10 @@ export default function HqLeaveRegisterModal({
   }, [annualPolicy?.hourly_sub_unit]);
 
   // 정책 기반 기본 참조·승인선 초기화 함수
-  const syncApprovalLineFromKind = (kind: LeaveRegisterKind) => {
+  const syncApprovalLineFromKind = (
+    kind: LeaveRegisterKind,
+    daysOverride?: number
+  ) => {
     if (!me) return;
     const polId =
       kind.type === "ANNUAL"
@@ -450,6 +456,8 @@ export default function HqLeaveRegisterModal({
       setCcList([]);
       setApprovalSteps([]);
       setAllowLineEdit(true);
+      setAutoDelegated(false);
+      setDelegationReason(null);
       return;
     }
 
@@ -457,9 +465,13 @@ export default function HqLeaveRegisterModal({
       policy: matchedPol,
       me,
       members,
+      orgNodes: companySettings?.extra_settings?.org_chart_nodes,
       substituteRules:
         companySettings?.extra_settings?.substitute_approvals || [],
+      leaveDays: daysOverride,
     });
+    setAutoDelegated(resolved.autoDelegated);
+    setDelegationReason(resolved.delegationReason);
 
     setAllowLineEdit(true); // 사용자 요청: 참조는 기본 설정된 사람에게 가고, 참조와 승인을 자유롭게 추가 가능하도록 허용
     setCcList(
@@ -513,7 +525,8 @@ export default function HqLeaveRegisterModal({
     setPickerSearch("");
     setNotifyMenuTargetId(null);
     setAutoProceedMenuStepId(null);
-    syncApprovalLineFromKind(initialKind);
+    setLineManuallyEdited(false);
+    syncApprovalLineFromKind(initialKind, 0);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen, initialKindKey, me?.instructor_id]);
 
@@ -593,6 +606,19 @@ export default function HqLeaveRegisterModal({
       label: formatHoursAsFlexLabel(totalHours),
     };
   }, [workingDates, daySchedules, leaveKind]);
+
+  // 선택한 휴가 일수(반차 0.5일 / 1~2일 연차 vs 3일 이상 장기휴가)에 따라 자동 전결(대표 결재 생략) 실시간 재산출
+  useEffect(() => {
+    if (!isOpen || !me || lineManuallyEdited) return;
+    syncApprovalLineFromKind(leaveKind, usageSummary.totalDays);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    isOpen,
+    me?.instructor_id,
+    leaveKind,
+    usageSummary.totalDays,
+    lineManuallyEdited,
+  ]);
 
   // 연차 부여 내역 안내 팝오버 데이터 (Screenshots 100459 & 100505)
   const grantBreakdownItems = useMemo(() => {
@@ -873,6 +899,7 @@ export default function HqLeaveRegisterModal({
         return next;
       });
     } else {
+      setLineManuallyEdited(true);
       const targetStepId = pickerContext.stepId;
       setApprovalSteps((prev) =>
         prev.map((st) => {
@@ -921,6 +948,7 @@ export default function HqLeaveRegisterModal({
         ];
       });
     } else {
+      setLineManuallyEdited(true);
       const stepId = pickerContext.stepId;
       setApprovalSteps((prev) =>
         prev.map((st) => {
@@ -1080,6 +1108,7 @@ export default function HqLeaveRegisterModal({
           leave_type: resolvedLeaveTypeLabel,
           leave_days: usageSummary.totalDays,
           allow_zero_steps: apiSteps.length === 0,
+          is_auto_delegated: autoDelegated,
           steps: apiSteps,
           workflow_meta: {
             form_id:
@@ -1571,6 +1600,11 @@ export default function HqLeaveRegisterModal({
               </>
             ) : (
               <>
+                {autoDelegated && delegationReason && (
+                  <div className="px-3 py-2 rounded-xl bg-emerald-50 border border-emerald-200 text-[11px] font-bold text-emerald-800 text-center">
+                    ⚡ {delegationReason}
+                  </div>
+                )}
                 <div className="flex justify-center">
                   <button
                     type="button"

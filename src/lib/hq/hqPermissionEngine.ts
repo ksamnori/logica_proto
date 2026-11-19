@@ -214,16 +214,6 @@ export const HQ_SIDEBAR_MENU_PERM_ITEMS: HqSidebarMenuPermDef[] = [
     defaultForOrgHead: true,
   },
   {
-    permKey: "menu.permissions",
-    route: "/hq/permissions",
-    icon: "🔐",
-    label: "포털 권한 관리",
-    sectionLabel: "소통 · 시스템",
-    description: "직급 및 연구 문제 DB 세부 접근 등급 제어 패널 메뉴 접근을 허용합니다.",
-    defaultForMember: false,
-    defaultForOrgHead: false,
-  },
-  {
     permKey: "menu.settings",
     route: "/hq/settings",
     icon: "⚙️",
@@ -259,9 +249,6 @@ function inferLegacyGroupMenuPerms(perms: Record<string, boolean>): Record<strin
   if (perms["insight.view"] || perms["payroll.run"]) {
     next["menu.insights"] = true;
   }
-  if (perms["permission.manage"]) {
-    next["menu.permissions"] = true;
-  }
   if (
     perms["company.basic_manage"] ||
     perms["permission.manage"] ||
@@ -270,6 +257,32 @@ function inferLegacyGroupMenuPerms(perms: Record<string, boolean>): Record<strin
     next["menu.settings"] = true;
   }
   return next;
+}
+
+export function buildDefaultSuperAdminPermsAndScopes(): {
+  permissions: Record<string, boolean>;
+  scopes: Record<string, HqPermissionScope>;
+} {
+  const permissions: Record<string, boolean> = {};
+  const scopes: Record<string, HqPermissionScope> = {};
+
+  HQ_SIDEBAR_MENU_PERM_ITEMS.forEach((m) => {
+    permissions[m.permKey] = true;
+  });
+  Object.keys(PERMISSION_ITEM_BY_KEY).forEach((k) => {
+    permissions[k] = true;
+    scopes[k] = "전체 구성원";
+  });
+  permissions["company.basic_manage"] = true;
+  permissions["hr.employment_manage"] = true;
+  permissions["payroll.run"] = true;
+  permissions["payroll.year_end"] = true;
+  permissions["insight.view"] = true;
+  permissions["permission.manage"] = true;
+  permissions["audit.view"] = true;
+  permissions["security.login_manage"] = true;
+
+  return { permissions, scopes };
 }
 
 /**
@@ -288,6 +301,15 @@ export function normalizeHqPermissionSettings(
       : DEFAULT_PERMISSION_SETTINGS.super_admin_names;
 
   const superIds = Array.isArray(base.super_admin_ids) ? base.super_admin_ids : [];
+  const defaultSuper = buildDefaultSuperAdminPermsAndScopes();
+  const normalizedSuperPerms: Record<string, boolean> = {
+    ...defaultSuper.permissions,
+    ...(base.super_admin_permissions || {}),
+  };
+  const normalizedSuperScopes: Record<string, HqPermissionScope> = {
+    ...defaultSuper.scopes,
+    ...(base.super_admin_scopes || {}),
+  };
   const overrides = base.member_overrides || {};
 
   if (base.menu_linked_v2) {
@@ -297,6 +319,8 @@ export function normalizeHqPermissionSettings(
       menu_linked_v2: true,
       super_admin_names: superNames,
       super_admin_ids: superIds,
+      super_admin_permissions: normalizedSuperPerms,
+      super_admin_scopes: normalizedSuperScopes,
       org_head_permissions: base.org_head_permissions || {},
       org_head_scopes: base.org_head_scopes || {},
       default_member_permissions: base.default_member_permissions || {},
@@ -373,6 +397,8 @@ export function normalizeHqPermissionSettings(
     menu_linked_v2: true,
     super_admin_names: superNames,
     super_admin_ids: superIds,
+    super_admin_permissions: normalizedSuperPerms,
+    super_admin_scopes: normalizedSuperScopes,
     org_head_permissions: migratedOrgHead,
     org_head_scopes:
       base.org_head_scopes || DEFAULT_PERMISSION_SETTINGS.org_head_scopes,
@@ -577,14 +603,17 @@ export function resolveMemberPermissions(params: {
     (Boolean(memId) && Boolean(settings.super_admin_ids?.includes(memId))) ||
     (Boolean(cleanName) && settings.super_admin_names.includes(cleanName));
 
-  // DB 최고관리자(시스템 오너) 또는 최고 관리자 그룹 포함자
-  const isSuperAdmin = Boolean(params.isDbHqAdmin || inSuperList);
+  // Lv.6 개발자 수퍼어드민, DB 최고관리자(시스템 오너) 또는 최고 관리자 그룹 포함자
+  const isSuperAdmin = Boolean(
+    mem.rank_code === "SUPER_ADMIN" || params.isDbHqAdmin || inSuperList
+  );
 
   const isOrgHead = Boolean(
     mem.is_dept_head ||
       mem.rank_code === "TEAM_LEAD" ||
       mem.rank_code === "DIRECTOR" ||
-      mem.rank_code === "CEO"
+      mem.rank_code === "CEO" ||
+      mem.rank_code === "SUPER_ADMIN"
   );
 
   const assignedGroups = settings.groups.filter((g) => isMemberInGroup(mem, g));
@@ -601,27 +630,37 @@ export function resolveMemberPermissions(params: {
       if (!v) return;
       inherited[k] = true;
       const item = PERMISSION_ITEM_BY_KEY[k];
+      if (!item) {
+        inheritedScopes[k] = "전체 구성원";
+        return;
+      }
       const normScope = normalizePermissionScope(layerScopes?.[k], item);
-      inheritedScopes[k] = item
-        ? mergeScopeToCover(inheritedScopes[k], normScope, item)
-        : normScope;
+      inheritedScopes[k] = mergeScopeToCover(inheritedScopes[k], normScope, item);
     });
   };
 
-  if (isSuperAdmin) {
-    HQ_SIDEBAR_MENU_PERM_ITEMS.forEach((m) => {
-      inherited[m.permKey] = true;
-    });
+  if (mem.rank_code === "SUPER_ADMIN") {
+    // Lv.6 개발자 수퍼어드민은 항상 모든 권한 및 전체 범위를 보유
+    const allSuper = buildDefaultSuperAdminPermsAndScopes();
+    Object.assign(inherited, allSuper.permissions);
     Object.keys(PERMISSION_ITEM_BY_KEY).forEach((k) => {
-      inherited[k] = true;
       inheritedScopes[k] = "전체 구성원";
     });
-    inherited["company.basic_manage"] = true;
-    inherited["hr.employment_manage"] = true;
-    inherited["payroll.run"] = true;
-    inherited["payroll.year_end"] = true;
-    inherited["insight.view"] = true;
-    inherited["permission.manage"] = true;
+  } else if (isSuperAdmin) {
+    // 최고 관리자 권한 그룹: 매트릭스에서 설정된 기능별 체크박스(기본 전체 ON)를 반영
+    applyLayerPermissionsAndScopes(
+      settings.super_admin_permissions,
+      settings.super_admin_scopes
+    );
+    assignedGroups.forEach((g) => {
+      applyLayerPermissionsAndScopes(g.permissions, g.scopes);
+    });
+    if (params.canAccessAnalyticsRpc) {
+      inherited["menu.analytics"] = true;
+    }
+    if (params.hasContestAccess) {
+      inherited["menu.contest_db"] = true;
+    }
   } else {
     applyLayerPermissionsAndScopes(
       settings.default_member_permissions,
@@ -675,7 +714,7 @@ export function resolveMemberPermissions(params: {
     ...inheritedScopes,
   };
 
-  if (!isSuperAdmin) {
+  if (mem.rank_code !== "SUPER_ADMIN") {
     Object.entries(personalOverrides).forEach(([k, val]) => {
       if (typeof val === "boolean") {
         effective[k] = val;
@@ -699,6 +738,14 @@ export function resolveMemberPermissions(params: {
 
   const canAccessRoute = (canonicalPath: string): boolean => {
     if (
+      canonicalPath === "/hq/dev-tools" ||
+      canonicalPath.startsWith("/hq/dev-tools/") ||
+      canonicalPath === "/hq/permissions" ||
+      canonicalPath.startsWith("/hq/permissions/")
+    ) {
+      return mem.rank_code === "SUPER_ADMIN";
+    }
+    if (
       !canonicalPath ||
       canonicalPath === "/hq" ||
       canonicalPath === "/hq/login" ||
@@ -706,7 +753,7 @@ export function resolveMemberPermissions(params: {
     ) {
       return true;
     }
-    if (isSuperAdmin) return true;
+    if (mem.rank_code === "SUPER_ADMIN") return true;
 
     // 하위 경로 매칭 (예: /hq/approvals/123 -> /hq/approvals)
     const matchedMenu = HQ_SIDEBAR_MENU_PERM_ITEMS.find(
@@ -724,7 +771,7 @@ export function resolveMemberPermissions(params: {
     orgNodes?: HqOrgChartNode[] | null
   ): boolean => {
     if (!target) return false;
-    if (isSuperAdmin) return true;
+    if (mem.rank_code === "SUPER_ADMIN") return true;
     if (!effective[permKey]) return false;
 
     const item = PERMISSION_ITEM_BY_KEY[permKey];

@@ -150,10 +150,11 @@ export async function POST(req: NextRequest) {
 
     // 최고관리자가 이미 존재하면 셀프 가입 시 사원(Lv.1)·선임(Lv.2)으로만 가입 가능 (팀장·임원·관리자는 최고관리자가 배정)
     const rankCode: HqRankCode =
-      hasTopAdmin &&
-      (requestedRank === "TEAM_LEAD" ||
-        requestedRank === "DIRECTOR" ||
-        requestedRank === "CEO")
+      requestedRank === "SUPER_ADMIN" ||
+      (hasTopAdmin &&
+        (requestedRank === "TEAM_LEAD" ||
+          requestedRank === "DIRECTOR" ||
+          requestedRank === "CEO"))
         ? "STAFF"
         : requestedRank;
 

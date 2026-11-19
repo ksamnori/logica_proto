@@ -4,7 +4,16 @@
 import React, { useState } from "react";
 import { APPROVAL_DOC_META, getRankLevel } from "@/lib/hq/constants";
 import { hqFetch, resolveStoragePublicUrl } from "@/lib/hq/clientApi";
-import { formatMinutesToKoreanAmPm } from "@/lib/hq/defaultWorkRules";
+import { useOptionalHqShell } from "@/components/hq/HqShellContext";
+import {
+  formatMinutesToKoreanAmPm,
+  resolveBreakWindowsForSpan,
+  resolveWorkRuleForMember,
+} from "@/lib/hq/defaultWorkRules";
+import {
+  isNonPositionSystemLabel,
+  resolveMemberDisplayPosition,
+} from "@/lib/hq/orgTreeHelper";
 import type {
   HqApprovalDoc,
   HqApprovalStatus,
@@ -69,6 +78,7 @@ export default function ApprovalDetailModal({
   const [threadInput, setThreadInput] = useState("");
   const [acting, setActing] = useState(false);
   const [postingThread, setPostingThread] = useState(false);
+  const shell = useOptionalHqShell();
   const [localMeta, setLocalMeta] = useState<HqWorkflowDocMeta | null>(null);
   const [compareBeforeOpen, setCompareBeforeOpen] = useState(true);
 
@@ -206,6 +216,56 @@ export default function ApprovalDetailModal({
 
   const attachmentList = wfMeta?.attachments || [];
 
+  const findLiveMember = (memberId?: string, memberName?: string) => {
+    const pool = shell?.members || [];
+    if (memberId) {
+      const byId = pool.find((m) => m.instructor_id === memberId);
+      if (byId) return byId;
+    }
+    if (memberName) {
+      const byName = pool.find((m) => m.name === memberName);
+      if (byName) return byName;
+    }
+    if (
+      me &&
+      ((memberId && me.instructor_id === memberId) ||
+        (memberName && me.name === memberName))
+    ) {
+      return me;
+    }
+    return null;
+  };
+
+  const resolveStepDisplayMeta = (st: {
+    approver_id: string;
+    approver_name: string;
+    approver_title: string;
+    approver_dept: string;
+  }) => {
+    const live = findLiveMember(st.approver_id, st.approver_name);
+    const position = live
+      ? resolveMemberDisplayPosition(live)
+      : !isNonPositionSystemLabel(st.approver_title)
+        ? st.approver_title.trim()
+        : "";
+    const rawDept = (st.approver_dept || live?.department || "").trim();
+    const dept = rawDept === "미지정" ? "" : rawDept;
+    return { position, dept };
+  };
+
+  const drafterLive = findLiveMember(doc.drafter_id, doc.drafter_name);
+  const drafterPosition = drafterLive
+    ? resolveMemberDisplayPosition(drafterLive)
+    : !isNonPositionSystemLabel(doc.drafter_title)
+      ? (doc.drafter_title || "").trim()
+      : "";
+  const rawDrafterDept = (
+    doc.drafter_dept ||
+    drafterLive?.department ||
+    ""
+  ).trim();
+  const drafterDept = rawDrafterDept === "미지정" ? "" : rawDrafterDept;
+
   return (
     <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-[2px] z-50 flex items-center justify-center p-4 print:static print:bg-white print:p-0">
       <div className="bg-white w-full max-w-3xl rounded-3xl shadow-2xl border border-slate-200 flex flex-col max-h-[92vh] overflow-hidden print:shadow-none print:border-none print:max-h-none print:max-w-none">
@@ -312,6 +372,11 @@ export default function ApprovalDetailModal({
                     ? `진행중 ${doc.current_step_order}/${doc.total_steps}`
                     : stBadge.label}
                 </span>
+                {doc.is_auto_delegated && (
+                  <span className="px-2 py-0.5 rounded-md bg-emerald-50 border border-emerald-200 text-emerald-700 text-[11px] font-extrabold">
+                    ⚡ 전결 규정 적용
+                  </span>
+                )}
                 <span className="text-xs text-slate-400 font-mono">
                   문서번호: {doc.doc_no}
                 </span>
@@ -357,6 +422,7 @@ export default function ApprovalDetailModal({
                 const isZeroStepSelf =
                   st.approver_id === doc.drafter_id && doc.steps.length === 1;
                 if (isZeroStepSelf) return null;
+                const { position: stepPos } = resolveStepDisplayMeta(st);
 
                 return (
                   <div
@@ -388,10 +454,8 @@ export default function ApprovalDetailModal({
                     <div className="border-t border-slate-200 py-1 text-[10px] font-bold text-slate-700 truncate px-1 bg-slate-50">
                       {st.approver_name}
                     </div>
-                    <div className="text-[9px] text-slate-400 pb-1 bg-slate-50">
-                      {st.acted_at
-                        ? formatDateShort(st.acted_at)
-                        : st.approver_title}
+                    <div className="text-[9px] text-slate-400 pb-1 bg-slate-50 truncate px-1">
+                      {st.acted_at ? formatDateShort(st.acted_at) : stepPos}
                     </div>
                   </div>
                 );
@@ -428,7 +492,9 @@ export default function ApprovalDetailModal({
                 작성자 / 조직
               </div>
               <div className="font-bold text-slate-800 mt-0.5">
-                {doc.drafter_name} {doc.drafter_title} ({doc.drafter_dept})
+                {doc.drafter_name}
+                {drafterPosition ? ` ${drafterPosition}` : ""}
+                {drafterDept ? ` (${drafterDept})` : ""}
               </div>
             </div>
             <div>
@@ -472,6 +538,38 @@ export default function ApprovalDetailModal({
           {/* 플렉스식 [근무 미리보기 + 이전 기록 비교] 블록 (Screenshot 7472646d 재현) */}
           {wfMeta?.work_edit_payload && (() => {
             const wp = wfMeta.work_edit_payload;
+            const targetMember =
+              shell?.members?.find(
+                (m) =>
+                  m.instructor_id === wp.target_member_id ||
+                  m.name === wp.target_member_name
+              ) ||
+              (me &&
+              (me.instructor_id === wp.target_member_id ||
+                me.name === wp.target_member_name)
+                ? me
+                : null);
+            const memberRule = resolveWorkRuleForMember(
+              shell?.companySettings?.extra_settings?.work_rules,
+              wp.target_member_name || targetMember?.name,
+              targetMember?.profile_extra?.work_schedule_type
+            );
+            const getSnapBreaks = (snap: typeof wp.before) =>
+              snap.exists && snap.break_minutes > 0
+                ? resolveBreakWindowsForSpan({
+                    inMinutes: snap.in_minutes,
+                    outMinutes: snap.out_minutes,
+                    breakMinutes: snap.break_minutes,
+                    explicitBreaks: snap.breaks,
+                    explicitStart: snap.break_start_minutes,
+                    explicitEnd: snap.break_end_minutes,
+                    rule: memberRule,
+                  })
+                : [];
+            const beforeBreaks = getSnapBreaks(wp.before);
+            const afterBreaks =
+              wp.action_mode === "DELETE" ? [] : getSnapBreaks(wp.after);
+
             const fmtDur = (mins: number) => {
               const safe = Math.max(0, Math.round(mins || 0));
               if (safe === 0) return "없음";
@@ -481,9 +579,25 @@ export default function ApprovalDetailModal({
               if (h > 0) return `${h}시간`;
               return `${m}분`;
             };
+            const fmtBreakSummary = (
+              snap: typeof wp.before,
+              breaks: { start_minutes: number; end_minutes: number }[]
+            ) => {
+              if (!snap.exists || snap.break_minutes <= 0) return "없음";
+              const durText = fmtDur(snap.break_minutes);
+              if (breaks.length === 0) return durText;
+              const rangeText = breaks
+                .map(
+                  (b) =>
+                    `${formatMinutesToKoreanAmPm(b.start_minutes)} – ${formatMinutesToKoreanAmPm(b.end_minutes)}`
+                )
+                .join(", ");
+              return `${durText} (${rangeText})`;
+            };
             const renderMiniBar = (
               snap: typeof wp.before,
-              badgeLabel: string
+              badgeLabel: string,
+              resolvedBreaks: { start_minutes: number; end_minutes: number }[]
             ) => {
               if (!snap.exists) {
                 return (
@@ -497,49 +611,102 @@ export default function ApprovalDetailModal({
                   </div>
                 );
               }
+              const rawSpan =
+                snap.out_minutes >= snap.in_minutes
+                  ? snap.out_minutes - snap.in_minutes
+                  : 1440 - snap.in_minutes + snap.out_minutes;
+              const span = Math.max(30, rawSpan);
               const leftPct = Math.max(
                 0,
-                Math.min(92, (snap.in_minutes / 1440) * 100)
+                Math.min(96, (snap.in_minutes / 1440) * 100)
               );
-              const span = Math.max(30, snap.out_minutes - snap.in_minutes);
               const widthPct = Math.min(100 - leftPct, (span / 1440) * 100);
+              const visibleSpanMin = Math.max(1, (widthPct / 100) * 1440);
               const otPct =
                 snap.overtime_minutes > 0
-                  ? Math.min(100, (snap.overtime_minutes / span) * 100)
+                  ? Math.min(100, (snap.overtime_minutes / visibleSpanMin) * 100)
                   : 0;
+              const modeIcon =
+                snap.policy_name === "출장"
+                  ? "✈️"
+                  : snap.work_mode === "REMOTE"
+                    ? "🏠"
+                    : snap.work_mode === "OUTSIDE"
+                      ? "🚗"
+                      : "💼";
               return (
                 <div className="relative h-16 border-b border-slate-100 last:border-b-0">
-                  <span className="absolute left-2.5 top-2 z-10 px-1.5 py-0.5 rounded bg-slate-100 text-[10px] font-bold text-slate-500">
+                  <span className="absolute left-2.5 top-2 z-10 px-1.5 py-0.5 rounded bg-slate-100 text-[10px] font-bold text-slate-500 pointer-events-none">
                     {badgeLabel}
                   </span>
                   <div className="grid grid-cols-24 h-full pointer-events-none">
                     {Array.from({ length: 24 }, (_, h) => (
-                      <div key={h} className="h-full border-r border-slate-100" />
+                      <div
+                        key={h}
+                        className={`h-full border-r ${
+                          h === 11
+                            ? "border-r-slate-300 border-dashed"
+                            : "border-r-slate-100"
+                        } last:border-r-0`}
+                      />
                     ))}
                   </div>
                   <div
                     style={{ left: `${leftPct}%`, width: `${widthPct}%` }}
                     className="absolute top-3.5"
                   >
-                    <div className="relative h-6 rounded-[5px] border border-[#2dd4bf] bg-[#aef4e8]/95 px-2 flex items-center justify-between overflow-hidden text-[#0f766e]">
+                    <div className="relative h-6 rounded-[5px] border border-[#2dd4bf] bg-[#aef4e8]/95 px-2 flex items-center overflow-hidden text-[#0f766e]">
                       {otPct > 0 && (
                         <div
                           style={{ width: `${otPct}%` }}
-                          className="absolute top-0 right-0 h-[3px] bg-[#f05638]"
+                          className="pointer-events-none absolute top-0 right-0 h-[3px] bg-[#f05638] z-20"
                         />
                       )}
-                      <span className="text-[10.5px] font-extrabold">💼</span>
-                      {snap.break_minutes > 0 && (
-                        <span className="px-1.5 py-0.5 rounded bg-white/90 border border-slate-200 text-[9.5px] text-slate-500">
-                          ☕
-                        </span>
-                      )}
+                      <span className="relative z-10 text-[10.5px] font-extrabold leading-none">
+                        {modeIcon}
+                      </span>
+                      {resolvedBreaks.map((brk, bIdx) => {
+                        const bLeft = Math.max(
+                          0,
+                          Math.min(
+                            100,
+                            ((brk.start_minutes - snap.in_minutes) /
+                              visibleSpanMin) *
+                              100
+                          )
+                        );
+                        const bWidth = Math.max(
+                          0,
+                          Math.min(
+                            100 - bLeft,
+                            ((brk.end_minutes - brk.start_minutes) /
+                              visibleSpanMin) *
+                              100
+                          )
+                        );
+                        if (bWidth <= 0) return null;
+                        return (
+                          <div
+                            key={bIdx}
+                            title={`휴게: ${formatMinutesToKoreanAmPm(brk.start_minutes)} – ${formatMinutesToKoreanAmPm(brk.end_minutes)}`}
+                            style={{
+                              left: `${bLeft}%`,
+                              width: `${bWidth}%`,
+                            }}
+                            className="absolute top-1 bottom-1 min-w-[18px] rounded-[3px] bg-white/95 border border-slate-200/90 flex items-center px-1 text-[9.5px] text-slate-500 z-10 overflow-hidden"
+                          >
+                            ☕
+                          </div>
+                        );
+                      })}
                     </div>
                     <div className="flex items-center justify-between text-[9.5px] text-slate-500 font-semibold mt-0.5 whitespace-nowrap">
                       <span>
                         {formatMinutesToKoreanAmPm(snap.in_minutes)}
                         {snap.break_minutes > 0 && (
-                          <span className="text-slate-400 ml-1">휴게 1건</span>
+                          <span className="text-slate-400 ml-1">
+                            휴게 {Math.max(1, resolvedBreaks.length)}건
+                          </span>
                         )}
                       </span>
                       <span className={otPct > 0 ? "text-[#e85d3f] font-bold" : undefined}>
@@ -570,21 +737,33 @@ export default function ApprovalDetailModal({
                   </button>
                 </div>
 
-                {/* 24시간 눈금 헤더 */}
-                <div className="grid grid-cols-24 px-0 py-1.5 border-b border-slate-100 text-[9.5px] text-slate-400 tabular-nums">
+                {/* 24시간 눈금 헤더 (근무표와 동일하게 각 시간 정각 경계선 기준 정렬) */}
+                <div className="grid grid-cols-24 h-7 border-b border-slate-100 text-[9.5px] text-slate-400 tabular-nums">
                   {Array.from({ length: 24 }, (_, h) => (
-                    <div key={h} className="text-center">
-                      {h === 0 ? "" : h === 12 ? "정오" : h > 12 ? h - 12 : h}
+                    <div key={h} className="relative h-full">
+                      {h > 0 && (
+                        <span
+                          className={`absolute left-0 -translate-x-1/2 top-1/2 -translate-y-1/2 whitespace-nowrap ${
+                            h === 12
+                              ? "font-bold text-slate-500"
+                              : "font-medium text-slate-400"
+                          }`}
+                        >
+                          {h === 12 ? "정오" : h > 12 ? h - 12 : h}
+                        </span>
+                      )}
                     </div>
                   ))}
                 </div>
 
-                {compareBeforeOpen && renderMiniBar(wp.before, "기록 전")}
+                {compareBeforeOpen &&
+                  renderMiniBar(wp.before, "기록 전", beforeBreaks)}
                 {renderMiniBar(
                   wp.action_mode === "DELETE"
                     ? { ...wp.after, exists: false }
                     : wp.after,
-                  compareBeforeOpen ? "기록 후" : "변경 일정"
+                  compareBeforeOpen ? "기록 후" : "변경 일정",
+                  afterBreaks
                 )}
 
                 <div className="p-4 bg-slate-50/50 border-t border-slate-100 space-y-2 text-xs">
@@ -620,14 +799,14 @@ export default function ApprovalDetailModal({
                     <span className="col-span-3 text-slate-500 font-semibold">
                       휴게 시간
                     </span>
-                    <span className="col-span-4 text-slate-400">
-                      {fmtDur(wp.before.exists ? wp.before.break_minutes : 0)}
+                    <span className="col-span-4 text-slate-400 tabular-nums">
+                      {fmtBreakSummary(wp.before, beforeBreaks)}
                     </span>
                     <span className="col-span-1 text-slate-300">→</span>
-                    <span className="col-span-4 font-extrabold text-slate-900">
+                    <span className="col-span-4 font-extrabold text-slate-900 tabular-nums">
                       {wp.action_mode === "DELETE"
                         ? "없음"
-                        : fmtDur(wp.after.break_minutes)}
+                        : fmtBreakSummary(wp.after, afterBreaks)}
                     </span>
                   </div>
                   <div className="pt-2 border-t border-slate-200/70 grid grid-cols-12 items-center">
@@ -790,7 +969,10 @@ export default function ApprovalDetailModal({
               승인 진행 이력
             </h4>
             <div className="space-y-2">
-              {doc.steps.map((st) => (
+              {doc.steps.map((st) => {
+                const { position: stepPosition, dept: stepDept } =
+                  resolveStepDisplayMeta(st);
+                return (
                 <div
                   key={st.step_order}
                   className="p-3 rounded-xl border border-slate-200 bg-slate-50/70 flex items-center justify-between gap-2"
@@ -801,10 +983,13 @@ export default function ApprovalDetailModal({
                     </span>
                     <div>
                       <div className="font-bold text-slate-800 text-xs">
-                        {st.approver_name} {st.approver_title}{" "}
-                        <span className="text-slate-400 font-normal">
-                          ({st.approver_dept})
-                        </span>
+                        {st.approver_name}
+                        {stepPosition ? ` ${stepPosition}` : ""}
+                        {stepDept && stepDept !== stepPosition && (
+                          <span className="text-slate-400 font-normal ml-1">
+                            ({stepDept})
+                          </span>
+                        )}
                       </div>
                       {st.comment && (
                         <div className="text-xs text-slate-600 mt-0.5">
@@ -842,7 +1027,8 @@ export default function ApprovalDetailModal({
                     )}
                   </div>
                 </div>
-              ))}
+                );
+              })}
             </div>
           </div>
 

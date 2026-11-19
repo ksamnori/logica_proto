@@ -1,6 +1,7 @@
 // src/lib/hq/defaultWorkRules.ts
 import type {
   HqOvertimeCompSettings,
+  HqWorkEditBreakWindow,
   HqWorkRuleItem,
   HqWorkplaceLocationItem,
   HqWorkplaceWifiIpItem,
@@ -565,3 +566,192 @@ export const DEFAULT_WORKPLACES: HqWorkplaceLocationItem[] = [
 ];
 
 export const DEFAULT_WORKPLACE_IPS: HqWorkplaceWifiIpItem[] = [];
+
+
+export function resolveWorkRuleForMember(
+  workRules?: HqWorkRuleItem[] | null,
+  memberName?: string | null,
+  scheduleHint?: string | null
+): HqWorkRuleItem {
+  const rules =
+    Array.isArray(workRules) && workRules.length > 0
+      ? workRules
+      : DEFAULT_WORK_RULES;
+  if (memberName) {
+    const matched = rules.find((r) =>
+      (r.assigned_members || []).some(
+        (am) => am.name === memberName && am.status === "ACTIVE"
+      )
+    );
+    if (matched) return matched;
+  }
+  if (scheduleHint) {
+    const byName = rules.find((r) => r.name === scheduleHint);
+    if (byName) return byName;
+  }
+  return (
+    rules.find((r) => r.id === "wr-basic-9") ||
+    rules.find((r) => r.name.includes("기본")) ||
+    DEFAULT_WORK_RULES[3] ||
+    DEFAULT_WORK_RULES[0]
+  );
+}
+
+/**
+ * 출퇴근 구간(inMinutes ~ outMinutes)과 총 휴게시간(breakMinutes)에 대해
+ * 근무 유형 추천 휴게시간(예: 오후 1:00 ~ 오후 2:00) 또는 저장된 휴게 구간을 정확히 산출
+ */
+export function resolveBreakWindowsForSpan(params: {
+  inMinutes: number;
+  outMinutes: number;
+  breakMinutes: number;
+  explicitBreaks?: HqWorkEditBreakWindow[] | null;
+  explicitStart?: number | null;
+  explicitEnd?: number | null;
+  rule?: HqWorkRuleItem | null;
+}): HqWorkEditBreakWindow[] {
+  const {
+    inMinutes,
+    outMinutes,
+    breakMinutes,
+    explicitBreaks,
+    explicitStart,
+    explicitEnd,
+    rule,
+  } = params;
+
+  const totalBreak = Math.max(0, Math.round(breakMinutes || 0));
+  if (totalBreak <= 0) return [];
+
+  const isOvernight = outMinutes < inMinutes;
+  const endUnwrapped = isOvernight ? outMinutes + 1440 : outMinutes;
+  const span = endUnwrapped - inMinutes;
+  if (span <= 0) return [];
+
+  const unwrapMin = (m: number) =>
+    isOvernight && m < inMinutes ? m + 1440 : m;
+
+  const clampInsideShift = (
+    rawStart: number,
+    dur: number
+  ): HqWorkEditBreakWindow | null => {
+    const safeDur = Math.min(
+      dur,
+      Math.max(0, span - (span > dur + 10 ? 10 : 0))
+    );
+    if (safeDur <= 0) return null;
+    const minStart = span > safeDur + 10 ? inMinutes + 5 : inMinutes;
+    const maxStart =
+      span > safeDur + 10
+        ? endUnwrapped - safeDur - 5
+        : endUnwrapped - safeDur;
+    const s = Math.max(minStart, Math.min(maxStart, rawStart));
+    return {
+      start_minutes: Math.round(s),
+      end_minutes: Math.round(s + safeDur),
+    };
+  };
+
+  // 1) 명시적으로 저장된 휴게 구간 배열 우선
+  if (Array.isArray(explicitBreaks) && explicitBreaks.length > 0) {
+    const valid = explicitBreaks
+      .map((b) => {
+        const s = unwrapMin(Number(b.start_minutes));
+        const eRaw = Number(b.end_minutes);
+        const e = eRaw < s ? eRaw + 1440 : unwrapMin(eRaw);
+        return { start_minutes: s, end_minutes: e };
+      })
+      .filter(
+        (b) =>
+          Number.isFinite(b.start_minutes) &&
+          Number.isFinite(b.end_minutes) &&
+          b.end_minutes > b.start_minutes &&
+          b.start_minutes >= inMinutes &&
+          b.end_minutes <= endUnwrapped
+      );
+    const sumExplicit = valid.reduce(
+      (acc, b) => acc + (b.end_minutes - b.start_minutes),
+      0
+    );
+    if (valid.length > 0 && Math.abs(sumExplicit - totalBreak) <= 5) {
+      return valid;
+    }
+    if (valid.length > 0) {
+      const adjusted = clampInsideShift(valid[0].start_minutes, totalBreak);
+      if (adjusted) return [adjusted];
+    }
+  }
+
+  // 2) 단일 시작/종료 분 필드가 저장된 경우
+  if (
+    typeof explicitStart === "number" &&
+    Number.isFinite(explicitStart) &&
+    typeof explicitEnd === "number" &&
+    Number.isFinite(explicitEnd)
+  ) {
+    const s = unwrapMin(explicitStart);
+    const e = explicitEnd < s ? explicitEnd + 1440 : unwrapMin(explicitEnd);
+    if (e > s && s >= inMinutes && s < endUnwrapped) {
+      const adjusted = clampInsideShift(s, totalBreak);
+      if (adjusted) return [adjusted];
+    }
+  }
+
+  // 3) 근무 유형 추천 휴게시간 (기본 9시 등: 오후 1:00 ~ 오후 2:00 = 780 ~ 840)
+  const candidatePairs: { s: number; e: number }[] = [];
+  const pushRulePair = (sh?: string, eh?: string) => {
+    const ps = parseHmToMinutes(sh);
+    const pe = parseHmToMinutes(eh);
+    if (ps === null || pe === null) return;
+    const s = unwrapMin(ps);
+    const e = pe <= ps ? pe + 1440 : unwrapMin(pe);
+    if (e > s) candidatePairs.push({ s, e });
+  };
+
+  if (rule) {
+    pushRulePair(rule.break_start_1, rule.break_end_1);
+    pushRulePair(rule.break_start_2, rule.break_end_2);
+  }
+  if (candidatePairs.length === 0) {
+    candidatePairs.push({ s: unwrapMin(780), e: unwrapMin(840) });
+  }
+
+  const inShiftPairs = candidatePairs.filter(
+    (p) => p.s > inMinutes && p.s < endUnwrapped
+  );
+
+  if (inShiftPairs.length === 1) {
+    const p = inShiftPairs[0];
+    if (
+      p.s >= inMinutes &&
+      p.s + totalBreak <= endUnwrapped &&
+      !(p.s + totalBreak === endUnwrapped && span > totalBreak + 15)
+    ) {
+      return [{ start_minutes: p.s, end_minutes: p.s + totalBreak }];
+    }
+    const adjusted = clampInsideShift(p.s, totalBreak);
+    if (adjusted) return [adjusted];
+  } else if (inShiftPairs.length >= 2) {
+    let remaining = totalBreak;
+    const out: HqWorkEditBreakWindow[] = [];
+    inShiftPairs.forEach((p, idx) => {
+      if (remaining <= 0) return;
+      const ruleDur = p.e - p.s;
+      const alloc =
+        idx === inShiftPairs.length - 1
+          ? remaining
+          : Math.min(remaining, ruleDur);
+      const clamped = clampInsideShift(p.s, alloc);
+      if (clamped) {
+        out.push(clamped);
+        remaining -= clamped.end_minutes - clamped.start_minutes;
+      }
+    });
+    if (out.length > 0) return out;
+  }
+
+  // 4) 추천 휴게시간이 근무 구간 밖(야간/오후 교대 등)인 경우 근무 구간 중앙 배치
+  const midRaw = Math.round((inMinutes + (span - totalBreak) / 2) / 15) * 15;
+  const fallback = clampInsideShift(midRaw, totalBreak);
+  return fallback ? [fallback] : [];
+}

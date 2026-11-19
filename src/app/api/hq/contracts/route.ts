@@ -440,11 +440,13 @@ export async function DELETE(req: NextRequest) {
       .maybeSingle();
 
     if (!existing) return apiFail("계약서를 찾을 수 없습니다.", 404);
-    if (!caller.isHrManager && existing.created_by !== caller.userId) {
-      return apiFail("삭제 권한이 없습니다.", 403);
-    }
-    if (existing.status === "SIGNED" && !caller.isHrManager) {
-      return apiFail("체결 완료된 계약서는 인사관리자만 삭제할 수 있습니다.", 403);
+    if (!caller.isDevSuperAdmin) {
+      if (!caller.isHrManager && existing.created_by !== caller.userId) {
+        return apiFail("삭제 권한이 없습니다.", 403);
+      }
+      if (existing.status === "SIGNED" && !caller.isHrManager) {
+        return apiFail("체결 완료된 계약서는 인사관리자만 삭제할 수 있습니다.", 403);
+      }
     }
 
     const { error } = await supabaseAdmin

@@ -215,6 +215,9 @@ export default function ApprovalCreateModal({
   // 승인선 & 참조자 (양식 정책 기준 — 직급별 자동전결 제거)
   const [allowLineEdit, setAllowLineEdit] = useState(true);
   const [zeroStepAllowed, setZeroStepAllowed] = useState(false);
+  const [autoDelegated, setAutoDelegated] = useState(false);
+  const [delegationReason, setDelegationReason] = useState<string | null>(null);
+  const [lineManuallyEdited, setLineManuallyEdited] = useState(false);
   const [steps, setSteps] = useState<ResolvedWorkflowStep[]>([]);
   const [ccMembers, setCcMembers] = useState<
     { id: string; name: string; dept: string }[]
@@ -239,25 +242,34 @@ export default function ApprovalCreateModal({
     });
     setFieldValues(initialFieldVals);
 
+    setLineManuallyEdited(false);
     const resolved = resolvePolicyApprovalLine({
       policy: {
         id: form.id,
+        category: "workflow",
+        mapped_doc_type: form.mapped_doc_type,
         allow_edit: form.allow_edit,
         per_requester: form.per_requester,
         cc_list: form.cc_list || [],
         steps: form.steps || [],
         requester_rules: form.requester_rules,
+        auto_delegation: form.auto_delegation,
       },
       me,
       members,
+      orgNodes: shell?.companySettings?.extra_settings?.org_chart_nodes,
       substituteRules:
         shell?.companySettings?.extra_settings?.substitute_approvals || [],
+      amount: 0,
+      leaveDays: (form.mapped_doc_type || "GENERAL") === "LEAVE" ? 1 : undefined,
     });
 
     setSteps(resolved.steps);
     setCcMembers(resolved.ccMembers);
     setAllowLineEdit(resolved.allowEdit);
     setZeroStepAllowed(resolved.zeroStepConfigured);
+    setAutoDelegated(resolved.autoDelegated);
+    setDelegationReason(resolved.delegationReason);
   };
 
   const applyWorkOrLeavePolicy = (
@@ -281,6 +293,7 @@ export default function ApprovalCreateModal({
       cc_list: pol.cc_list || [],
       steps: pol.steps || [],
       requester_rules: pol.requester_rules,
+      auto_delegation: pol.auto_delegation,
     };
     applyWorkflowForm(pseudoForm);
     setTitle(`[${pol.title}] ${me?.name || ""} 신청`);
@@ -472,6 +485,47 @@ export default function ApprovalCreateModal({
     return manual > 0 ? manual : customKrwSum;
   }, [docType, purchaseTotal, amountInput, customKrwSum]);
 
+  // 금액(effectiveAmount) 또는 휴가 일수(leaveDays) 입력값 변동 시 자동 전결(대표 결재 생략) 실시간 재평가
+  useEffect(() => {
+    if (!isOpen || !me || !selectedForm || lineManuallyEdited) return;
+    const resolved = resolvePolicyApprovalLine({
+      policy: {
+        id: selectedForm.id,
+        category: docType === "LEAVE" ? "leave" : "workflow",
+        mapped_doc_type: docType,
+        allow_edit: selectedForm.allow_edit,
+        per_requester: selectedForm.per_requester,
+        cc_list: selectedForm.cc_list || [],
+        steps: selectedForm.steps || [],
+        requester_rules: selectedForm.requester_rules,
+        auto_delegation: selectedForm.auto_delegation,
+      },
+      me,
+      members,
+      orgNodes: shell?.companySettings?.extra_settings?.org_chart_nodes,
+      substituteRules:
+        shell?.companySettings?.extra_settings?.substitute_approvals || [],
+      amount: effectiveAmount,
+      leaveDays: docType === "LEAVE" ? Number(leaveDays || 0) : undefined,
+    });
+    setSteps(resolved.steps);
+    setCcMembers(resolved.ccMembers);
+    setZeroStepAllowed(resolved.zeroStepConfigured);
+    setAutoDelegated(resolved.autoDelegated);
+    setDelegationReason(resolved.delegationReason);
+  }, [
+    isOpen,
+    me,
+    members,
+    selectedForm,
+    docType,
+    effectiveAmount,
+    leaveDays,
+    lineManuallyEdited,
+    shell?.companySettings?.extra_settings?.org_chart_nodes,
+    shell?.companySettings?.extra_settings?.substitute_approvals,
+  ]);
+
   if (!isOpen || !me) return null;
 
   const eligibleApprovers = members
@@ -545,6 +599,7 @@ export default function ApprovalCreateModal({
 
   const handleAddStep = () => {
     if (!allowLineEdit || selectableApproverOptions.length === 0) return;
+    setLineManuallyEdited(true);
     const used = new Set(steps.map((s) => s.approver_id));
     const candidate =
       selectableApproverOptions.find((m) => !used.has(m.id)) ||
@@ -577,6 +632,7 @@ export default function ApprovalCreateModal({
 
   const handleStepMemberChange = (idx: number, memberId: string) => {
     if (!allowLineEdit) return;
+    setLineManuallyEdited(true);
     const found = selectableApproverOptions.find((m) => m.id === memberId);
     if (!found) return;
     setSteps((prev) =>
@@ -597,6 +653,7 @@ export default function ApprovalCreateModal({
 
   const handleRemoveStep = (idx: number) => {
     if (!allowLineEdit) return;
+    setLineManuallyEdited(true);
     setSteps((prev) => {
       const filtered = prev.filter((_, i) => i !== idx);
       return filtered.map((s, i) => ({
@@ -707,6 +764,7 @@ export default function ApprovalCreateModal({
           receipt_url: attachments[0]?.url || null,
           items_json: cleanedItems,
           allow_zero_steps: zeroStepAllowed,
+          is_auto_delegated: autoDelegated,
           steps,
           workflow_meta: {
             form_id: selectedForm?.id || null,
@@ -1576,8 +1634,13 @@ export default function ApprovalCreateModal({
           {/* 승인 단계 */}
           <div className="space-y-2.5 pt-2 border-t border-slate-200/70">
             <div className="flex items-center justify-between">
-              <span className="text-[11px] font-bold text-slate-500">
-                승인 단계 ({steps.length})
+              <span className="text-[11px] font-bold text-slate-500 flex items-center gap-1.5">
+                <span>승인 단계 ({steps.length})</span>
+                {autoDelegated && (
+                  <span className="px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 text-[10px] font-extrabold">
+                    ⚡ 전결 적용
+                  </span>
+                )}
               </span>
               {allowLineEdit && steps.length < 5 && (
                 <button
@@ -1589,6 +1652,12 @@ export default function ApprovalCreateModal({
                 </button>
               )}
             </div>
+
+            {autoDelegated && delegationReason && (
+              <div className="mb-2 p-2.5 rounded-xl bg-emerald-50 border border-emerald-200 text-[11px] font-bold text-emerald-800 leading-relaxed">
+                ⚡ {delegationReason}
+              </div>
+            )}
 
             {steps.length === 0 ? (
               <div className="p-3 rounded-xl bg-white border border-slate-200 text-xs text-slate-600 font-semibold leading-relaxed">

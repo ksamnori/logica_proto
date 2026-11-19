@@ -3,9 +3,15 @@ import {
   AUTO_DELEGATION_RULES,
   getRankLevel,
 } from "./constants";
+import {
+  findOrgNodeLeader,
+  resolveMemberDisplayPosition,
+  resolveOrgSupervisorChain,
+} from "./orgTreeHelper";
 import type {
   HqApprovalDocType,
   HqMember,
+  HqOrgChartNode,
   HqRankCode,
 } from "./types";
 
@@ -38,6 +44,7 @@ export function buildRecommendedApprovalLine(params: {
   amount?: number;
   leaveDays?: number;
   useAutoDelegation?: boolean;
+  orgNodes?: HqOrgChartNode[] | null;
 }): ApprovalLineRecommendation {
   const {
     drafter,
@@ -46,16 +53,22 @@ export function buildRecommendedApprovalLine(params: {
     amount = 0,
     leaveDays = 0,
     useAutoDelegation = true,
+    orgNodes,
   } = params;
 
-  const activeOthers = allMembers.filter(
-    (m) => m.work_status === "재직" && m.instructor_id !== drafter.instructor_id
+  const activeMembers = allMembers.filter(
+    (m) => m.work_status === "재직" && !m.is_ghost
   );
+  const ceoLeader = findOrgNodeLeader("대표", activeMembers, {
+    isRootNode: true,
+  });
+  const isDrafterCeo =
+    drafter.rank_code === "CEO" ||
+    (drafter.department || "").trim() === "대표" ||
+    (ceoLeader && ceoLeader.instructor_id === drafter.instructor_id);
 
-  const drafterLevel = getRankLevel(drafter.rank_code);
-
-  // 대표·소장(Lv.5) 본인 기안 시 즉시 전결 처리
-  if (drafterLevel >= 5) {
+  // 대표·소장 본인 기안 시 즉시 전결 처리
+  if (isDrafterCeo) {
     return {
       steps: [],
       isAutoDelegated: true,
@@ -63,6 +76,23 @@ export function buildRecommendedApprovalLine(params: {
       instantSelfApprove: true,
     };
   }
+
+  const supervisorChain = resolveOrgSupervisorChain({
+    member: drafter,
+    members: activeMembers,
+    orgNodes,
+  });
+  const supervisorIds = new Set(supervisorChain.map((s) => s.instructor_id));
+
+  // 개발자 전용 수퍼어드민(SUPER_ADMIN, Lv.6) 중 직속 조직장/대표가 아닌 계정은 자동 추천 후보에서 제외
+  const activeOthers = activeMembers.filter(
+    (m) =>
+      m.instructor_id !== drafter.instructor_id &&
+      (m.rank_code !== "SUPER_ADMIN" || supervisorIds.has(m.instructor_id))
+  );
+
+  const drafterLevel =
+    drafter.rank_code === "SUPER_ADMIN" ? 3 : getRankLevel(drafter.rank_code);
 
   // 1. 문서 성격·금액에 따른 목표 결재 직급(targetMaxLevel) 판정
   let targetMaxLevel = 5; // 기본: 대표(Lv.5) 최종 승인
@@ -163,13 +193,18 @@ export function buildRecommendedApprovalLine(params: {
     }
   }
 
-  // Step 3: 대표·소장(Lv.5) 최종 승인 (또는 상위 전결권자가 부재할 때 폴백)
+  // Step 3: 대표·소장 최종 승인 (조직도 상위 상사 및 '대표' 노드 조직장 우선)
   if (
     targetMaxLevel >= 5 ||
     chosen.length === 0 ||
     (targetMaxLevel === 4 && !chosen.some((c) => getRankLevel(c.member.rank_code) >= 4))
   ) {
-    const ceo = pickBestByRank(5, false);
+    const ceo =
+      (ceoLeader && ceoLeader.instructor_id !== drafter.instructor_id
+        ? ceoLeader
+        : undefined) ||
+      supervisorChain[supervisorChain.length - 1] ||
+      pickBestByRank(5, false);
     if (ceo) {
       pushUnique(ceo, "FINAL_APPROVER", "최종 승인 (대표)");
     }
@@ -191,9 +226,12 @@ export function buildRecommendedApprovalLine(params: {
     role_label: item.label,
     approver_id: item.member.instructor_id,
     approver_name: item.member.name,
-    approver_dept: item.member.department,
+    approver_dept:
+      (item.member.department || "").trim() === "미지정"
+        ? ""
+        : (item.member.department || "").trim(),
     approver_rank: item.member.rank_code,
-    approver_title: item.member.job_title,
+    approver_title: resolveMemberDisplayPosition(item.member),
   }));
 
   return {

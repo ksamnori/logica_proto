@@ -223,6 +223,11 @@ export async function POST(req: NextRequest) {
         requester_rules: Array.isArray(incoming?.requester_rules)
           ? incoming!.requester_rules
           : undefined,
+        auto_delegation:
+          incoming?.auto_delegation &&
+          typeof incoming.auto_delegation === "object"
+            ? incoming.auto_delegation
+            : undefined,
         updated_at: nowIso,
       };
 

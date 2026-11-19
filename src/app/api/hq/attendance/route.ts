@@ -10,6 +10,10 @@ import {
 } from "@/lib/hq/hqPermissionEngine";
 import { notifySlackIfEnabled } from "@/lib/hq/integrationServer";
 import {
+  isNonPositionSystemLabel,
+  resolveMemberDisplayPosition,
+} from "@/lib/hq/orgTreeHelper";
+import {
   readRealtimeWorkLogsServer,
   readWorkMgmtStateServer,
   writeRealtimeWorkLogsServer,
@@ -202,7 +206,7 @@ async function buildWorkPermissionGuard(
         : supabaseAdmin
             .from("hq_member_profile")
             .select(
-              "instructor_id, department, rank_code, is_dept_head, profile_extra"
+              "instructor_id, department, rank_code, job_title, is_dept_head, profile_extra"
             ),
     ]);
     settings = sRes?.settings ?? null;
@@ -311,6 +315,7 @@ async function buildWorkPermissionGuard(
   return {
     resolved,
     subjectById,
+    profById,
     canViewRecognizedWork,
     canViewPastRealtimeWork,
     canViewMemberWork,
@@ -473,10 +478,20 @@ export async function GET(req: NextRequest) {
       const activeHqMembers = (instRes.data || []).filter((inst: any) => {
         const idStr = String(inst.instructor_id);
         const tId = inst.tenant_id ? String(inst.tenant_id) : "";
-        if (!caller.hqTenantIds.has(tId) && idStr !== caller.userId) {
+        const isNativeHq = caller.hqTenantIds.has(tId);
+        if (!isNativeHq && idStr !== caller.userId) {
           return false;
         }
         const prof = profById.get(idStr);
+        const rawExtra =
+          prof?.profile_extra && typeof prof.profile_extra === "object"
+            ? prof.profile_extra
+            : {};
+        const isGhost =
+          typeof rawExtra.is_ghost === "boolean"
+            ? rawExtra.is_ghost
+            : !isNativeHq;
+        if (isGhost) return false;
         const workStatus = prof?.work_status || inst.status || "재직";
         if (workStatus === "퇴직" || workStatus === "퇴사") return false;
         return true;
@@ -748,9 +763,47 @@ export async function GET(req: NextRequest) {
       profRows: profRes.data || [],
     });
 
-    const allRows = Array.from(allRowsMap.values()).sort((a, b) =>
-      String(b.work_date || "").localeCompare(String(a.work_date || ""))
+    // 유령 구성원(is_ghost)의 출퇴근 행은 조회·집계에서 제외하고 잔여 자동기록이 있으면 백그라운드 정리
+    const ghostMemberIds = new Set<string>();
+    const profLookup = new Map<string, any>();
+    (profRes.data || []).forEach((p: any) =>
+      profLookup.set(String(p.instructor_id), p)
     );
+    (instRes.data || []).forEach((inst: any) => {
+      const idStr = String(inst.instructor_id);
+      const tId = inst.tenant_id ? String(inst.tenant_id) : "";
+      const isNativeHq = caller.hqTenantIds.has(tId);
+      const prof = profLookup.get(idStr);
+      const rawExtra =
+        prof?.profile_extra && typeof prof.profile_extra === "object"
+          ? prof.profile_extra
+          : {};
+      const isGhost =
+        typeof rawExtra.is_ghost === "boolean"
+          ? rawExtra.is_ghost
+          : !isNativeHq;
+      if (isGhost) ghostMemberIds.add(idStr);
+    });
+
+    const strayGhostAttIds = (data || [])
+      .filter((r: any) => ghostMemberIds.has(String(r.instructor_id)))
+      .map((r: any) => String(r.attendance_id));
+    if (strayGhostAttIds.length > 0) {
+      supabaseAdmin
+        .from("hq_attendance")
+        .delete()
+        .in("attendance_id", strayGhostAttIds)
+        .then(
+          () => {},
+          () => {}
+        );
+    }
+
+    const allRows = Array.from(allRowsMap.values())
+      .filter((r: any) => !ghostMemberIds.has(String(r.instructor_id)))
+      .sort((a, b) =>
+        String(b.work_date || "").localeCompare(String(a.work_date || ""))
+      );
     const nowMs = Date.now();
 
     const myToday =
@@ -901,6 +954,9 @@ export async function POST(req: NextRequest) {
     const supabaseAdmin = getSupabaseAdmin();
 
     if (action === "CHECK_IN") {
+      if (caller.isGhost) {
+        return apiFail("유령 구성원(스텔스 모드) 계정은 출퇴근 기록 대상에서 제외됩니다.", 400);
+      }
       const workMode = (body?.work_mode || "OFFICE") as HqWorkMode;
       const modeMeta = ATTENDANCE_MODES[workMode] || ATTENDANCE_MODES.OFFICE;
       const locationNote =
@@ -1404,6 +1460,7 @@ export async function POST(req: NextRequest) {
         const approvalSteps: {
           approver_id: string;
           approver_name: string;
+          approver_dept?: string;
           approver_rank: HqRankCode;
           approver_title: string;
         }[] = Array.isArray(item?.approval_steps) ? item.approval_steps : [];
@@ -1461,17 +1518,41 @@ export async function POST(req: NextRequest) {
                   (m) => m.instructor_id !== caller.userId
                 )?.instructor_id || caller.userId;
 
-              const stepRows = nonSelfSteps.map((st, idx) => ({
-                approval_id: createdDoc.approval_id,
-                step_order: idx + 1,
-                approver_id: uuidRe.test(String(st.approver_id || ""))
+              const stepRows = nonSelfSteps.map((st, idx) => {
+                const resolvedApproverId = uuidRe.test(
+                  String(st.approver_id || "")
+                )
                   ? st.approver_id
-                  : fallbackExecId,
-                approver_name: st.approver_name,
-                approver_rank: st.approver_rank || "TEAM_LEAD",
-                approver_title: st.approver_title || "승인자",
-                status: idx === 0 ? "CURRENT" : "WAITING",
-              }));
+                  : fallbackExecId;
+                const subj = permGuard.subjectById.get(resolvedApproverId);
+                const prof = permGuard.profById.get(resolvedApproverId);
+                const rawDept = (
+                  st.approver_dept ||
+                  subj?.department ||
+                  prof?.department ||
+                  ""
+                ).trim();
+                const cleanDept = rawDept === "미지정" ? "" : rawDept;
+                const cleanTitle = !isNonPositionSystemLabel(st.approver_title)
+                  ? st.approver_title.trim()
+                  : resolveMemberDisplayPosition({
+                      department: cleanDept,
+                      rank_code: subj?.rank_code || st.approver_rank,
+                      job_title: prof?.job_title || "",
+                      is_dept_head: subj?.is_dept_head,
+                      profile_extra: subj?.profile_extra || prof?.profile_extra,
+                    });
+                return {
+                  approval_id: createdDoc.approval_id,
+                  step_order: idx + 1,
+                  approver_id: resolvedApproverId,
+                  approver_name: st.approver_name,
+                  approver_dept: cleanDept,
+                  approver_rank: st.approver_rank || "TEAM_LEAD",
+                  approver_title: cleanTitle,
+                  status: idx === 0 ? "CURRENT" : "WAITING",
+                };
+              });
               await supabaseAdmin.from("hq_approval_step").insert(stepRows);
 
               try {
@@ -1809,7 +1890,10 @@ export async function POST(req: NextRequest) {
         return apiFail("이미 삭제되었거나 존재하지 않는 기록입니다.", 404);
       }
       const permGuard = await buildWorkPermissionGuard(supabaseAdmin, caller);
-      if (!permGuard.canEditRecognizedWork(String(existing.instructor_id))) {
+      if (
+        !caller.isDevSuperAdmin &&
+        !permGuard.canEditRecognizedWork(String(existing.instructor_id))
+      ) {
         return apiFail(
           existing.instructor_id === caller.userId
             ? "근무 편집 권한이 없어 근무 기록을 삭제할 수 없습니다."

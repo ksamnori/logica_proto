@@ -256,6 +256,10 @@ export async function GET(req: NextRequest) {
         prof?.profile_extra && typeof prof.profile_extra === "object"
           ? prof.profile_extra
           : {};
+      const isNativeHq = hqTenantIds.includes(tId);
+      const isGhost =
+        typeof extra.is_ghost === "boolean" ? extra.is_ghost : !isNativeHq;
+      if (isGhost) return;
 
       hqMemberMap.set(id, {
         name: inst.name || "구성원",

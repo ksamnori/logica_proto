@@ -25,6 +25,7 @@ import {
   type LeaveLedgerDocLite,
 } from "@/lib/hq/leaveBalanceEngine";
 import { readLeavesLedgerServer } from "@/lib/hq/leavesLedgerServer";
+import { resolveMemberDisplayPosition } from "@/lib/hq/orgTreeHelper";
 import type {
   HqMember,
   HqProfileExtra,
@@ -53,6 +54,7 @@ function sanitizeExtraForViewer(
 
   if (!canSeePrivate) {
     return {
+      is_ghost: src.is_ghost,
       nickname: src.nickname || "",
       bio: src.bio || "",
       gender: inferredGender,
@@ -73,6 +75,7 @@ function sanitizeExtraForViewer(
   }
 
   return {
+    is_ghost: src.is_ghost,
     nickname: src.nickname || "",
     bio: src.bio || "",
     personal_email: src.personal_email || "",
@@ -184,6 +187,9 @@ export async function GET(req: NextRequest) {
               : new Date().getFullYear();
             const workStatus: HqWorkStatus =
               inst.status === "퇴사" || inst.status === "퇴직" ? "퇴직" : "재직";
+            const isInstHqTenant = Boolean(
+              inst.tenant_id && caller.hqTenantIds.has(String(inst.tenant_id))
+            );
             return {
               instructor_id: inst.instructor_id,
               employee_no: `HQ-${year}-${seq}-${String(inst.instructor_id).slice(0, 4).toUpperCase()}`,
@@ -199,6 +205,7 @@ export async function GET(req: NextRequest) {
               hire_date: inst.created_at ? String(inst.created_at).slice(0, 10) : null,
               annual_leave_total: 15.0,
               annual_leave_used: 0.0,
+              profile_extra: isInstHqTenant ? {} : { is_ghost: true },
             };
           });
 
@@ -249,7 +256,7 @@ export async function GET(req: NextRequest) {
       leave_days: Number(r.leave_days || 0),
     }));
 
-    const members: HqMember[] = hqInstructors.map((inst: any, idx: number) => {
+    const allMembers: HqMember[] = hqInstructors.map((inst: any, idx: number) => {
       const id = String(inst.instructor_id);
       const prof = profileMap.get(id);
       const inf = inferRankFromPosition(inst.chat_position, inst.position);
@@ -296,6 +303,11 @@ export async function GET(req: NextRequest) {
         (inst.status === "퇴사" || inst.status === "퇴직" ? "퇴직" : "재직");
 
       const tId = inst.tenant_id ? String(inst.tenant_id) : null;
+      const isHqTenant = Boolean(tId && caller.hqTenantIds.has(tId));
+      const isGhost =
+        typeof rawProfileExtra.is_ghost === "boolean"
+          ? rawProfileExtra.is_ghost
+          : !isHqTenant;
 
       return {
         instructor_id: id,
@@ -307,7 +319,8 @@ export async function GET(req: NextRequest) {
         tenant_name:
           (tId && caller.tenantNames[tId]) ||
           (hqIds.includes(tId || "") ? "본사" : "본사 겸직"),
-        is_hq_tenant: Boolean(tId && caller.hqTenantIds.has(tId)),
+        is_hq_tenant: isHqTenant,
+        is_ghost: isGhost,
         auto_reply_active: Boolean(inst.auto_reply_active),
         chat_allow_start: inst.chat_allow_start || "09:00",
         chat_allow_end: inst.chat_allow_end || "18:00",
@@ -319,7 +332,14 @@ export async function GET(req: NextRequest) {
         rank_code: rankCode,
         rank_level: getRankLevel(rankCode),
         rank_label: rankMeta.shortLabel,
-        job_title: prof?.job_title || inf.jobTitle,
+        job_title: resolveMemberDisplayPosition({
+          department:
+            (prof?.department || inst.department || "미지정").trim() || "미지정",
+          rank_code: rankCode,
+          job_title: prof?.job_title || inf.jobTitle,
+          is_dept_head: Boolean(prof?.is_dept_head ?? inf.isDeptHead),
+          profile_extra: rawProfileExtra,
+        }),
         is_dept_head: Boolean(prof?.is_dept_head ?? inf.isDeptHead),
         employment_type: prof?.employment_type || "정규직",
         work_status: workStatus,
@@ -343,7 +363,7 @@ export async function GET(req: NextRequest) {
       };
     });
 
-    members.sort((a, b) => {
+    allMembers.sort((a, b) => {
       if (a.work_status !== b.work_status) {
         if (a.work_status === "재직") return -1;
         if (b.work_status === "재직") return 1;
@@ -353,15 +373,22 @@ export async function GET(req: NextRequest) {
       return a.name.localeCompare(b.name, "ko");
     });
 
+    const meProfile =
+      allMembers.find((m) => m.instructor_id === caller.userId) || null;
+    // 유령 구성원(is_ghost)은 구성원 디렉토리·조직도·대시보드·메신저 명단에서 완전 제외
+    const visibleMembers = allMembers.filter((m) => !m.is_ghost);
+
     return NextResponse.json({
       success: true,
       schemaMissing,
       extSchemaMissing: caller.extSchemaMissing,
       data: {
         meId: caller.userId,
+        meProfile,
+        isDevSuperAdmin: caller.isDevSuperAdmin,
         isHrManager: caller.isHrManager,
         isHqAdmin: caller.isHqAdmin,
-        members,
+        members: visibleMembers,
       },
     });
   } catch (e: any) {
@@ -408,6 +435,9 @@ export async function POST(req: NextRequest) {
     }
     if (!(rankCode in HQ_RANKS)) {
       return apiFail("유효하지 않은 직급 코드입니다.");
+    }
+    if (rankCode === "SUPER_ADMIN" && !caller.isDevSuperAdmin) {
+      return apiFail("개발자 수퍼어드민(Lv.6) 직급은 Lv.6 계정만 부여할 수 있습니다.", 403);
     }
 
     const formattedPhone = `${cleanPhone.slice(0, 3)}-${cleanPhone.slice(3, 7)}-${cleanPhone.slice(7, 11)}`;
@@ -663,6 +693,12 @@ export async function PATCH(req: NextRequest) {
         changedLabels.push("소속 부서");
       }
       if (body.rank_code !== undefined && body.rank_code in HQ_RANKS) {
+        const isChangingSuper =
+          (body.rank_code === "SUPER_ADMIN" && existingProf?.rank_code !== "SUPER_ADMIN") ||
+          (existingProf?.rank_code === "SUPER_ADMIN" && body.rank_code !== "SUPER_ADMIN");
+        if (isChangingSuper && !caller.isDevSuperAdmin) {
+          return apiFail("레벨 6(SUPER_ADMIN) 직급의 지정·해제는 현재 레벨 6인 구성원만 수행할 수 있습니다.", 403);
+        }
         profilePatch.rank_code = body.rank_code;
         changedLabels.push("직급");
       }

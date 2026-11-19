@@ -118,6 +118,7 @@ export async function syncWorkflowFormsToCompanySettings(
     steps: f.steps || [],
     requester_rules: f.requester_rules,
     mapped_doc_type: f.mapped_doc_type || "GENERAL",
+    auto_delegation: f.auto_delegation,
   }));
 
   const nextSettings: HqCompanySettings = {

@@ -6,11 +6,13 @@ import { hqFetch, uploadHqReceiptFile } from "@/lib/hq/clientApi";
 import { PRESET_ASSIGNEES } from "@/lib/hq/defaultApprovalPolicies";
 import {
   isAutoLinkedMemberField,
+  resolveEffectiveAutoDelegation,
   WORKFLOW_FIELD_CATALOG,
 } from "@/lib/hq/defaultWorkflowForms";
 import type {
   HqApprovalDocType,
   HqApprovalTemplate,
+  HqAutoDelegationRule,
   HqMember,
   HqPolicyAssignee,
   HqPolicyStep,
@@ -84,6 +86,9 @@ export default function WorkflowFormBuilderModal({
 
   const [allowEdit, setAllowEdit] = useState(true);
   const [perRequester, setPerRequester] = useState(false);
+  const [autoDelegation, setAutoDelegation] = useState<
+    HqAutoDelegationRule | undefined
+  >(undefined);
   const [ccList, setCcList] = useState<HqPolicyAssignee[]>([]);
   const [steps, setSteps] = useState<HqPolicyStep[]>([
     { step_order: 1, assignees: [] },
@@ -123,6 +128,14 @@ export default function WorkflowFormBuilderModal({
       setAllowDocEdit(editingForm.allow_doc_edit !== false);
       setAllowEdit(editingForm.allow_edit !== false);
       setPerRequester(Boolean(editingForm.per_requester));
+      setAutoDelegation(
+        resolveEffectiveAutoDelegation({
+          policyId: editingForm.id,
+          category: "workflow",
+          mappedDocType: editingForm.mapped_doc_type,
+          configured: editingForm.auto_delegation,
+        })
+      );
       setCcList(editingForm.cc_list || []);
       setSteps(
         editingForm.steps && editingForm.steps.length > 0
@@ -146,6 +159,7 @@ export default function WorkflowFormBuilderModal({
       setAllowDocEdit(true);
       setAllowEdit(true);
       setPerRequester(false);
+      setAutoDelegation(undefined);
       setCcList([]);
       setSteps([{ step_order: 1, assignees: [] }]);
     }
@@ -268,6 +282,7 @@ export default function WorkflowFormBuilderModal({
             cc_list: ccList,
             steps: cleanedSteps,
             requester_rules: editingForm?.requester_rules,
+            auto_delegation: autoDelegation,
           },
         },
       });
@@ -876,6 +891,117 @@ export default function WorkflowFormBuilderModal({
                   )}
                 </div>
               </div>
+
+              {/* 2-B) ⚡ 금액 · 휴가일수 기준 자동 전결 설정 */}
+              {(() => {
+                const isLeaveDoc = mappedDocType === "LEAVE";
+                const curAd: HqAutoDelegationRule = autoDelegation || {
+                  enabled: false,
+                  amount_enabled: !isLeaveDoc,
+                  max_amount: 300000,
+                  leave_days_enabled: isLeaveDoc,
+                  max_leave_days: 2,
+                  convert_skipped_to_cc: true,
+                };
+                return (
+                  <div className="p-3 rounded-xl border border-emerald-200/80 bg-emerald-50/50 space-y-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-[11px] font-extrabold text-slate-800">
+                        ⚡ 기준 이하 자동 전결 (대표 결재 생략)
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setAutoDelegation({
+                            ...curAd,
+                            enabled: !curAd.enabled,
+                            amount_enabled: !isLeaveDoc,
+                            max_amount: curAd.max_amount || 300000,
+                            leave_days_enabled: isLeaveDoc,
+                            max_leave_days: curAd.max_leave_days || 2,
+                            convert_skipped_to_cc:
+                              curAd.convert_skipped_to_cc !== false,
+                          })
+                        }
+                        className={`relative inline-flex h-5 w-9 shrink-0 rounded-full border-2 border-transparent transition-colors ${
+                          curAd.enabled ? "bg-[#00c458]" : "bg-slate-300"
+                        }`}
+                      >
+                        <span
+                          className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition ${
+                            curAd.enabled ? "translate-x-4" : "translate-x-0"
+                          }`}
+                        />
+                      </button>
+                    </div>
+                    {curAd.enabled && (
+                      <div className="pt-1.5 border-t border-emerald-200/60 space-y-2 text-[11px]">
+                        {!isLeaveDoc ? (
+                          <div className="flex items-center gap-1.5">
+                            <input
+                              type="number"
+                              min={0}
+                              step={10000}
+                              value={curAd.max_amount ?? 300000}
+                              onChange={(e) =>
+                                setAutoDelegation({
+                                  ...curAd,
+                                  amount_enabled: true,
+                                  max_amount: Math.max(
+                                    0,
+                                    Number(e.target.value || 0)
+                                  ),
+                                })
+                              }
+                              className="w-28 px-2 py-1 rounded-lg border border-slate-200 bg-white font-bold text-slate-800 tabular-nums"
+                            />
+                            <span className="font-semibold text-slate-600">
+                              원 이하 시 대표 결재 생략
+                            </span>
+                          </div>
+                        ) : (
+                          <div className="flex items-center gap-1.5">
+                            <input
+                              type="number"
+                              min={0.125}
+                              step={0.5}
+                              value={curAd.max_leave_days ?? 2}
+                              onChange={(e) =>
+                                setAutoDelegation({
+                                  ...curAd,
+                                  leave_days_enabled: true,
+                                  max_leave_days: Math.max(
+                                    0,
+                                    Number(e.target.value || 0)
+                                  ),
+                                })
+                              }
+                              className="w-20 px-2 py-1 rounded-lg border border-slate-200 bg-white font-bold text-slate-800 tabular-nums"
+                            />
+                            <span className="font-semibold text-slate-600">
+                              일 이하 시 대표 결재 생략
+                            </span>
+                          </div>
+                        )}
+                        <label className="flex items-center gap-1.5 cursor-pointer text-slate-700 font-semibold">
+                          <input
+                            type="checkbox"
+                            checked={curAd.convert_skipped_to_cc !== false}
+                            onChange={(e) =>
+                              setAutoDelegation({
+                                ...curAd,
+                                convert_skipped_to_cc: e.target.checked,
+                              })
+                            }
+                            className="accent-emerald-600 rounded"
+                          />
+                          <span>생략된 대표를 참조(CC)에 자동 추가</span>
+                        </label>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
 
               {/* 3) 참조 (CC) 설정 */}
               <div className="space-y-2">

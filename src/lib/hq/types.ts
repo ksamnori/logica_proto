@@ -1,6 +1,12 @@
 // src/lib/hq/types.ts
 
-export type HqRankCode = "STAFF" | "SENIOR" | "TEAM_LEAD" | "DIRECTOR" | "CEO";
+export type HqRankCode =
+  | "STAFF"
+  | "SENIOR"
+  | "TEAM_LEAD"
+  | "DIRECTOR"
+  | "CEO"
+  | "SUPER_ADMIN";
 
 export type HqWorkStatus = "재직" | "휴직" | "퇴직";
 
@@ -187,6 +193,7 @@ export interface HqMemberOrgAssignment {
 }
 
 export interface HqProfileExtra {
+  is_ghost?: boolean; // 유령 구성원(스텔스 계정): 로그인·권한은 유지하되 구성원 목록·조직도·근태에서 완전 비노출
   nickname?: string;
   bio?: string;
   personal_email?: string;
@@ -247,6 +254,7 @@ export interface HqMember {
   tenant_id: string | null;
   tenant_name: string;
   is_hq_tenant: boolean;
+  is_ghost?: boolean;
   auto_reply_active?: boolean;
   chat_allow_start?: string | null;
   chat_allow_end?: string | null;
@@ -615,6 +623,18 @@ export type HqApprovalPolicyCategory =
   | "member_info"
   | "retiree_doc";
 
+export interface HqAutoDelegationRule {
+  enabled: boolean;
+  /** 지출·품의 금액 기준 전결 활성화 (예: 300,000원 이하 시 마지막 대표 결재 생략) */
+  amount_enabled?: boolean;
+  max_amount?: number;
+  /** 휴가 일수 기준 전결 활성화 (예: 2일 이하 시 마지막 대표 결재 생략) */
+  leave_days_enabled?: boolean;
+  max_leave_days?: number;
+  /** 생략된 마지막 대표 결재자를 참조(CC) 명단에 자동 추가할지 여부 (기본 true) */
+  convert_skipped_to_cc?: boolean;
+}
+
 export interface HqApprovalPolicyItem {
   id: string;
   category: HqApprovalPolicyCategory;
@@ -627,6 +647,7 @@ export interface HqApprovalPolicyItem {
   steps: HqPolicyStep[];
   requester_rules?: HqPolicyRequesterRule[];
   mapped_doc_type?: HqApprovalDocType;
+  auto_delegation?: HqAutoDelegationRule;
 }
 
 export interface HqApprovalTemplate {
@@ -1278,6 +1299,8 @@ export interface HqPermissionSettings {
   menu_linked_v2?: boolean;
   super_admin_names: string[];
   super_admin_ids?: string[];
+  super_admin_permissions?: Record<string, boolean>;
+  super_admin_scopes?: Record<string, HqPermissionScope>;
   org_head_permissions: Record<string, boolean>;
   org_head_scopes: Record<string, HqPermissionScope>;
   default_member_permissions: Record<string, boolean>;
@@ -1676,6 +1699,7 @@ export interface HqWorkflowFormDef {
   cc_list: HqPolicyAssignee[];
   steps: HqPolicyStep[];
   requester_rules?: HqPolicyRequesterRule[];
+  auto_delegation?: HqAutoDelegationRule;
   updated_at?: string;
 }
 
@@ -1722,6 +1746,11 @@ export interface HqRealtimeWorkLog {
   updated_at: string;
 }
 
+export interface HqWorkEditBreakWindow {
+  start_minutes: number;
+  end_minutes: number;
+}
+
 export interface HqWorkEditComparisonSnapshot {
   exists: boolean;
   policy_name: string;
@@ -1729,6 +1758,9 @@ export interface HqWorkEditComparisonSnapshot {
   in_minutes: number;
   out_minutes: number;
   break_minutes: number;
+  break_start_minutes?: number | null;
+  break_end_minutes?: number | null;
+  breaks?: HqWorkEditBreakWindow[];
   worked_minutes: number;
   overtime_minutes: number;
   location_note?: string;

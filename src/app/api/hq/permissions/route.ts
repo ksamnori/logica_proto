@@ -9,6 +9,7 @@ import {
   HQ_RANKS,
   inferRankFromPosition,
 } from "@/lib/hq/constants";
+import { resolveMemberDisplayPosition } from "@/lib/hq/orgTreeHelper";
 import {
   apiFail,
   getSupabaseAdmin,
@@ -25,9 +26,9 @@ export async function GET(req: NextRequest) {
   try {
     const caller = await requireHqCaller(req);
     if (caller instanceof NextResponse) return caller;
-    if (!caller.isHqAdmin) {
+    if (!caller.isDevSuperAdmin) {
       return apiFail(
-        "최고관리자(대표·소장 또는 포털 권한관리자)만 접근할 수 있습니다.",
+        "개발자 수퍼어드민(Lv.6) 구성원만 포털 권한 관리에 접근할 수 있습니다.",
         403
       );
     }
@@ -38,9 +39,10 @@ export async function GET(req: NextRequest) {
         supabaseAdmin
           .from("instructor")
           .select(
-            "instructor_id, name, position, chat_position, department, tenant_id, role"
+            "instructor_id, name, position, chat_position, department, tenant_id, role, status"
           )
-          .eq("status", "재직")
+          .neq("status", "퇴사")
+          .neq("status", "퇴직")
           .order("name"),
         supabaseAdmin
           .from("contest_db_access")
@@ -100,13 +102,29 @@ export async function GET(req: NextRequest) {
         (prof?.rank_code as HqRankCode) || inferred.rankCode;
       const dept = (prof?.department || s.department || "부서 미지정").trim();
 
+      const isNativeHq = hqTenantIds.has(String(s.tenant_id));
+      const hasHqAccess =
+        isNativeHq ||
+        Boolean(prof) ||
+        String(s.role || "").toUpperCase() === "SUPER_ADMIN";
+      const rawExtra =
+        prof?.profile_extra && typeof prof.profile_extra === "object"
+          ? prof.profile_extra
+          : {};
+      const isGhost =
+        typeof rawExtra.is_ghost === "boolean"
+          ? rawExtra.is_ghost
+          : !isNativeHq;
+
       return {
         instructor_id: id,
         name: s.name,
         position: prof?.job_title || s.chat_position || s.position || "",
         department: dept,
         tenant_name: tenantNames[String(s.tenant_id)] || "소속 미지정",
-        is_hq: hqTenantIds.has(String(s.tenant_id)),
+        is_hq: hasHqAccess,
+        is_native_hq: isNativeHq,
+        is_ghost: isGhost,
         rank_code: rankCode,
         is_dept_head: Boolean(prof?.is_dept_head ?? inferred.isDeptHead),
         is_hr_admin: Boolean(prof?.is_hr_admin),
@@ -130,9 +148,9 @@ export async function POST(req: NextRequest) {
   try {
     const caller = await requireHqCaller(req);
     if (caller instanceof NextResponse) return caller;
-    if (!caller.isHqAdmin) {
+    if (!caller.isDevSuperAdmin) {
       return apiFail(
-        "최고관리자(대표·소장 또는 포털 권한관리자)만 변경할 수 있습니다.",
+        "개발자 수퍼어드민(Lv.6) 구성원만 권한 및 직급을 변경할 수 있습니다.",
         403
       );
     }
@@ -152,11 +170,12 @@ export async function POST(req: NextRequest) {
     const grantedBy = caller.name || caller.userId;
     const nowIso = new Date().toISOString();
 
-    // 1) 본부 직급(Lv.1~Lv.5) · 부서장 · 인사관리자 위임 배정
+    // 1) 본부 직급(Lv.1~Lv.6) · 부서장 · 인사관리자 위임 · 유령 구성원(is_ghost) 배정
     if (
       body?.rank_code !== undefined ||
       body?.is_dept_head !== undefined ||
-      body?.is_hr_admin !== undefined
+      body?.is_hr_admin !== undefined ||
+      body?.is_ghost !== undefined
     ) {
       const { data: existingProf } = await supabaseAdmin
         .from("hq_member_profile")
@@ -173,10 +192,46 @@ export async function POST(req: NextRequest) {
           ? (body.rank_code as HqRankCode)
           : (existingProf?.rank_code as HqRankCode) || inferred.rankCode;
 
+      // 오직 현재 Lv.6 구성원만 Lv.6(SUPER_ADMIN)을 추가로 지정하거나 변경 가능
+      if (
+        (existingProf?.rank_code === "SUPER_ADMIN" || nextRank === "SUPER_ADMIN") &&
+        !caller.isDevSuperAdmin
+      ) {
+        return apiFail(
+          "레벨 6(SUPER_ADMIN) 권한은 현재 레벨 6인 구성원만 지정·변경할 수 있습니다.",
+          403
+        );
+      }
+
+      const prevExtraObj =
+        existingProf?.profile_extra &&
+        typeof existingProf.profile_extra === "object" &&
+        !Array.isArray(existingProf.profile_extra)
+          ? existingProf.profile_extra
+          : {};
       const nextTitle =
-        body?.rank_code && (!existingProf?.job_title || existingProf.job_title === getRankMeta(existingProf.rank_code).defaultTitle)
-          ? getRankMeta(nextRank).defaultTitle
-          : existingProf?.job_title || inferred.jobTitle;
+        nextRank === "SUPER_ADMIN"
+          ? resolveMemberDisplayPosition({
+              department:
+                existingProf?.department || target.department || "미지정",
+              rank_code: nextRank,
+              job_title: existingProf?.job_title || inferred.jobTitle,
+              is_dept_head: Boolean(
+                body?.is_dept_head ??
+                  existingProf?.is_dept_head ??
+                  inferred.isDeptHead
+              ),
+              profile_extra: prevExtraObj,
+            })
+          : body?.rank_code &&
+              (!existingProf?.job_title ||
+                existingProf.job_title === "수퍼어드민" ||
+                (existingProf.rank_code &&
+                  existingProf.rank_code in HQ_RANKS &&
+                  existingProf.job_title ===
+                    getRankMeta(existingProf.rank_code).defaultTitle))
+            ? getRankMeta(nextRank).defaultTitle
+            : existingProf?.job_title || inferred.jobTitle;
 
       const nextDeptHead =
         body?.is_dept_head !== undefined
@@ -196,6 +251,19 @@ export async function POST(req: NextRequest) {
         upsertPayload.is_hr_admin = Boolean(body.is_hr_admin);
       }
 
+      if (body?.is_ghost !== undefined) {
+        const prevExtra =
+          existingProf?.profile_extra &&
+          typeof existingProf.profile_extra === "object" &&
+          !Array.isArray(existingProf.profile_extra)
+            ? existingProf.profile_extra
+            : {};
+        upsertPayload.profile_extra = {
+          ...prevExtra,
+          is_ghost: Boolean(body.is_ghost),
+        };
+      }
+
       const { error: profErr } = await supabaseAdmin
         .from("hq_member_profile")
         .upsert(upsertPayload, { onConflict: "instructor_id" });
@@ -204,6 +272,12 @@ export async function POST(req: NextRequest) {
         if (/is_hr_admin/i.test(profErr.message)) {
           return apiFail(
             "상단 노란 배너(또는 supabase/hq_schema.sql)의 최신 SQL을 먼저 1회 실행해 주세요.",
+            400
+          );
+        }
+        if (/rank_code/i.test(profErr.message) && /check/i.test(profErr.message)) {
+          return apiFail(
+            "DB rank_code 제약조건 업데이트가 필요합니다. 전달해 드린 hq_lv6_super_admin.sql을 Supabase SQL Editor에서 먼저 1회 실행해 주세요.",
             400
           );
         }
@@ -216,7 +290,9 @@ export async function POST(req: NextRequest) {
         .update({
           chat_position: nextTitle,
           role:
-            nextRank === "CEO" || nextRank === "DIRECTOR"
+            nextRank === "SUPER_ADMIN" ||
+            nextRank === "CEO" ||
+            nextRank === "DIRECTOR"
               ? "SUPER_ADMIN"
               : "ADMIN",
         })
@@ -234,6 +310,14 @@ export async function POST(req: NextRequest) {
         delegated: caller.isDelegatedHrAdmin,
       }).catch(() => {});
 
+      // 유령 구성원 활성화 시 기존에 자동 생성된 본부 출퇴근 기록을 즉시 정리
+      if (body?.is_ghost === true) {
+        await supabaseAdmin
+          .from("hq_attendance")
+          .delete()
+          .eq("instructor_id", instructorId);
+      }
+
       return NextResponse.json({
         success: true,
         data: {
@@ -244,6 +328,10 @@ export async function POST(req: NextRequest) {
             body?.is_hr_admin !== undefined
               ? Boolean(body.is_hr_admin)
               : Boolean(existingProf?.is_hr_admin),
+          is_ghost:
+            body?.is_ghost !== undefined
+              ? Boolean(body.is_ghost)
+              : Boolean(existingProf?.profile_extra?.is_ghost),
         },
       });
     }
