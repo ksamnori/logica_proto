@@ -362,6 +362,48 @@ export default function HqAttendancePage() {
     defaultEndMin: number;
   } | null>(null);
 
+  // 플렉스 휴게 블록(☕ 박스 및 '휴게 N건') 호버 다크 툴팁 상태
+  const [hoveredBreakTip, setHoveredBreakTip] = useState<{
+    key: string;
+    windows: { startMin: number; endMin: number }[];
+    rect: { top: number; bottom: number; left: number; width: number };
+  } | null>(null);
+
+  const showBreakTip = useCallback(
+    (
+      key: string,
+      windows: { startMin: number; endMin: number }[],
+      el: HTMLElement
+    ) => {
+      if (!windows || windows.length === 0) return;
+      const r = el.getBoundingClientRect();
+      setHoveredBreakTip({
+        key,
+        windows,
+        rect: { top: r.top, bottom: r.bottom, left: r.left, width: r.width },
+      });
+    },
+    []
+  );
+
+  const hideBreakTip = useCallback((key: string) => {
+    setHoveredBreakTip((prev) => (prev?.key === key ? null : prev));
+  }, []);
+
+  // 스크롤/클릭 시 휴게 툴팁 자동 닫기
+  useEffect(() => {
+    if (!hoveredBreakTip) return;
+    const clearTip = () => setHoveredBreakTip(null);
+    window.addEventListener("wheel", clearTip, { passive: true });
+    window.addEventListener("scroll", clearTip, true);
+    window.addEventListener("mousedown", clearTip);
+    return () => {
+      window.removeEventListener("wheel", clearTip);
+      window.removeEventListener("scroll", clearTip, true);
+      window.removeEventListener("mousedown", clearTip);
+    };
+  }, [hoveredBreakTip]);
+
   // 모달 상태
   const [recurringOpen, setRecurringOpen] = useState(false);
   const [uploadModalOpen, setUploadModalOpen] = useState(false);
@@ -1768,6 +1810,7 @@ export default function HqAttendancePage() {
                   )
                 );
                 if (bWidth <= 0) return null;
+                const tipKey = `${barKey}__draft_brk_${bIdx}`;
                 return (
                   <div
                     key={bIdx}
@@ -1775,7 +1818,20 @@ export default function HqAttendancePage() {
                       left: `${bLeft}%`,
                       width: `${bWidth}%`,
                     }}
-                    className="absolute top-1 bottom-1 min-w-[18px] rounded-[3px] bg-white/95 border border-slate-200/90 flex items-center px-1.5 text-[10px] text-slate-500 pointer-events-none z-10 overflow-hidden"
+                    onMouseEnter={(e) =>
+                      showBreakTip(
+                        tipKey,
+                        [
+                          {
+                            startMin: brk.start_minutes,
+                            endMin: brk.end_minutes,
+                          },
+                        ],
+                        e.currentTarget
+                      )
+                    }
+                    onMouseLeave={() => hideBreakTip(tipKey)}
+                    className="absolute top-1 bottom-1 min-w-[18px] rounded-[3px] bg-white/95 border border-slate-200/90 hover:border-slate-300 flex items-center px-1.5 text-[10px] text-slate-500 z-10 overflow-hidden transition-colors"
                   >
                     ☕
                   </div>
@@ -1787,8 +1843,23 @@ export default function HqAttendancePage() {
               <span>
                 {formatMinutesToKoreanAmPm(dStart)}
                 {draft.breakMinutes > 0 && (
-                  <span className="text-slate-400 ml-1 font-medium">
-                    휴게 1건
+                  <span
+                    onMouseEnter={(e) =>
+                      showBreakTip(
+                        `${barKey}__draft_brk_lbl`,
+                        draftBreakWindows.map((w) => ({
+                          startMin: w.start_minutes,
+                          endMin: w.end_minutes,
+                        })),
+                        e.currentTarget
+                      )
+                    }
+                    onMouseLeave={() =>
+                      hideBreakTip(`${barKey}__draft_brk_lbl`)
+                    }
+                    className="text-slate-400 hover:text-slate-600 ml-1 font-medium transition-colors"
+                  >
+                    휴게 {Math.max(1, draftBreakWindows.length)}건
                   </span>
                 )}
               </span>
@@ -1936,12 +2007,29 @@ export default function HqAttendancePage() {
           ? Math.min(100, (loggedOvertime / spanMin) * 100)
           : 0;
 
+      const recBreakWindows = resolveBreakWindowsForSpan({
+        inMinutes: actualInMin,
+        outMinutes: recognizedOutMin,
+        breakMinutes: rec.break_minutes ?? ruleBreakMin,
+        rule,
+      });
+
       const hasBreakInside =
         b1Start !== null &&
         b1End !== null &&
         actualInMin < b1Start &&
         recognizedOutMin > b1End &&
         (rec.break_minutes ?? 60) > 0;
+
+      const resolvedRecTipWindows =
+        recBreakWindows.length > 0
+          ? recBreakWindows.map((w) => ({
+              startMin: w.start_minutes,
+              endMin: w.end_minutes,
+            }))
+          : hasBreakInside && b1Start !== null && b1End !== null
+            ? [{ startMin: b1Start, endMin: b1End }]
+            : [];
 
       const breakLeftInBar =
         hasBreakInside && b1Start !== null
@@ -1996,7 +2084,15 @@ export default function HqAttendancePage() {
                     left: `${breakLeftInBar}%`,
                     width: `${breakWidthInBar}%`,
                   }}
-                  className="absolute top-1 bottom-1 rounded-[3px] bg-white/95 border border-slate-200/90 flex items-center px-1.5 text-[10px] text-slate-500 pointer-events-none z-10"
+                  onMouseEnter={(e) =>
+                    showBreakTip(
+                      `${barKey}__rec_brk`,
+                      resolvedRecTipWindows,
+                      e.currentTarget
+                    )
+                  }
+                  onMouseLeave={() => hideBreakTip(`${barKey}__rec_brk`)}
+                  className="absolute top-1 bottom-1 rounded-[3px] bg-white/95 border border-slate-200/90 hover:border-slate-300 flex items-center px-1.5 text-[10px] text-slate-500 z-10 transition-colors"
                 >
                   ☕
                 </div>
@@ -2011,8 +2107,18 @@ export default function HqAttendancePage() {
               >
                 {formatMinutesToKoreanAmPm(actualInMin)}
                 {(rec.break_minutes || 0) > 0 && (
-                  <span className="text-slate-400 ml-1 font-normal">
-                    휴게 1건
+                  <span
+                    onMouseEnter={(e) =>
+                      showBreakTip(
+                        `${barKey}__rec_brk_lbl`,
+                        resolvedRecTipWindows,
+                        e.currentTarget
+                      )
+                    }
+                    onMouseLeave={() => hideBreakTip(`${barKey}__rec_brk_lbl`)}
+                    className="text-slate-400 hover:text-slate-600 ml-1 font-normal transition-colors"
+                  >
+                    휴게 {Math.max(1, resolvedRecTipWindows.length)}건
                   </span>
                 )}
               </span>
@@ -2057,6 +2163,11 @@ export default function HqAttendancePage() {
           ? ((b1End - b1Start) / (workBarEnd - workBarStart)) * 100
           : 11;
 
+      const plannedTipWindows =
+        hasBreak && b1Start !== null && b1End !== null
+          ? [{ startMin: b1Start, endMin: b1End }]
+          : [];
+
       return (
         <>
           {thinRealtimeOverlay}
@@ -2090,7 +2201,15 @@ export default function HqAttendancePage() {
                     left: `${breakLeftPct}%`,
                     width: `${breakWidthPct}%`,
                   }}
-                  className="absolute top-1 bottom-1 rounded-[3px] border border-slate-200 bg-slate-50/90 flex items-center px-1.5 text-[10px] text-slate-500"
+                  onMouseEnter={(e) =>
+                    showBreakTip(
+                      `${barKey}__plan_brk`,
+                      plannedTipWindows,
+                      e.currentTarget
+                    )
+                  }
+                  onMouseLeave={() => hideBreakTip(`${barKey}__plan_brk`)}
+                  className="absolute top-1 bottom-1 rounded-[3px] border border-slate-200 hover:border-slate-300 bg-slate-50/90 flex items-center px-1.5 text-[10px] text-slate-500 z-10 transition-colors"
                 >
                   ☕
                 </div>
@@ -2104,7 +2223,17 @@ export default function HqAttendancePage() {
               >
                 {formatMinutesToKoreanAmPm(workBarStart)}{" "}
                 {hasBreak && (
-                  <span className="text-slate-400 ml-0.5 font-normal">
+                  <span
+                    onMouseEnter={(e) =>
+                      showBreakTip(
+                        `${barKey}__plan_brk_lbl`,
+                        plannedTipWindows,
+                        e.currentTarget
+                      )
+                    }
+                    onMouseLeave={() => hideBreakTip(`${barKey}__plan_brk_lbl`)}
+                    className="text-slate-400 hover:text-slate-600 ml-0.5 font-normal transition-colors"
+                  >
                     휴게 1건
                   </span>
                 )}
@@ -3022,6 +3151,12 @@ export default function HqAttendancePage() {
                       Number(myRule.daily_work_minutes || 0);
                     const ruleBreakMin = calcBreakMinutes(myRule);
                     const ruleEndMin = ruleStartMin + ruleWorkMin + ruleBreakMin;
+                    const monthB1Start = parseHmToMinutes(myRule.break_start_1);
+                    const monthB1End = parseHmToMinutes(myRule.break_end_1);
+                    const monthBreakTipWindows =
+                      monthB1Start !== null && monthB1End !== null
+                        ? [{ startMin: monthB1Start, endMin: monthB1End }]
+                        : [];
 
                     const dayMin = cellDraft
                       ? calcDraftNetWorkedMinutes(cellDraft)
@@ -3166,8 +3301,24 @@ export default function HqAttendancePage() {
                                 {(cellDraft
                                   ? cellDraft.breakMinutes
                                   : ruleBreakMin) > 0 && (
-                                  <div className="text-right text-[10px] text-slate-400">
-                                    휴게 1건
+                                  <div className="text-right">
+                                    <span
+                                      onMouseEnter={(e) =>
+                                        showBreakTip(
+                                          `${cellKey || ymd}__mo_brk_1`,
+                                          monthBreakTipWindows,
+                                          e.currentTarget
+                                        )
+                                      }
+                                      onMouseLeave={() =>
+                                        hideBreakTip(
+                                          `${cellKey || ymd}__mo_brk_1`
+                                        )
+                                      }
+                                      className="text-[10px] text-slate-400 hover:text-slate-600 transition-colors"
+                                    >
+                                      휴게 1건
+                                    </span>
                                   </div>
                                 )}
                               </div>
@@ -3183,8 +3334,24 @@ export default function HqAttendancePage() {
                                   </span>
                                 </div>
                                 {ruleBreakMin > 0 && (
-                                  <div className="text-right text-[10px] text-slate-400">
-                                    휴게 1건
+                                  <div className="text-right">
+                                    <span
+                                      onMouseEnter={(e) =>
+                                        showBreakTip(
+                                          `${cellKey || ymd}__mo_brk_2`,
+                                          monthBreakTipWindows,
+                                          e.currentTarget
+                                        )
+                                      }
+                                      onMouseLeave={() =>
+                                        hideBreakTip(
+                                          `${cellKey || ymd}__mo_brk_2`
+                                        )
+                                      }
+                                      className="text-[10px] text-slate-400 hover:text-slate-600 transition-colors"
+                                    >
+                                      휴게 1건
+                                    </span>
                                   </div>
                                 )}
                               </div>
@@ -3632,22 +3799,48 @@ export default function HqAttendancePage() {
                                       </div>
                                     </div>
 
-                                    {hasBreakBox && (
+                                    {hasBreakBox && b1Start !== null && b1End !== null && (
                                       <div
                                         style={{
                                           top: `${breakTopPct}%`,
                                           height: `${breakHeightPct}%`,
                                         }}
-                                        className="absolute left-1.5 right-1.5 rounded-md bg-slate-50/95 border border-slate-200 px-2 flex items-center text-[11px] text-slate-500 z-10"
+                                        onMouseEnter={(e) =>
+                                          showBreakTip(
+                                            `${colKey || ymd}__wk_brk`,
+                                            [{ startMin: b1Start, endMin: b1End }],
+                                            e.currentTarget
+                                          )
+                                        }
+                                        onMouseLeave={() =>
+                                          hideBreakTip(`${colKey || ymd}__wk_brk`)
+                                        }
+                                        className="absolute left-1.5 right-1.5 rounded-md bg-slate-50/95 border border-slate-200 hover:border-slate-300 px-2 flex items-center text-[11px] text-slate-500 z-10 transition-colors"
                                       >
                                         ☕
                                       </div>
                                     )}
                                   </div>
 
-                                  {hasBreakBox && (
-                                    <div className="mt-1 pl-1 text-[10.5px] font-medium text-slate-400">
-                                      휴게 1건
+                                  {hasBreakBox && b1Start !== null && b1End !== null && (
+                                    <div className="mt-1 pl-1">
+                                      <span
+                                        onMouseEnter={(e) =>
+                                          showBreakTip(
+                                            `${colKey || ymd}__wk_brk_lbl`,
+                                            [{ startMin: b1Start, endMin: b1End }],
+                                            e.currentTarget
+                                          )
+                                        }
+                                        onMouseLeave={() =>
+                                          hideBreakTip(
+                                            `${colKey || ymd}__wk_brk_lbl`
+                                          )
+                                        }
+                                        className="text-[10.5px] font-medium text-slate-400 hover:text-slate-600 transition-colors"
+                                      >
+                                        휴게 1건
+                                      </span>
                                     </div>
                                   )}
                                 </div>
@@ -5172,6 +5365,58 @@ export default function HqAttendancePage() {
             setLeaveModalOpen(true);
           }}
         />
+      )}
+
+      {hoveredBreakTip && !inlineTarget && !realtimeEditModal && (
+        <div
+          style={{
+            position: "fixed",
+            left: `${Math.max(
+              16,
+              Math.min(
+                (typeof window !== "undefined" ? window.innerWidth : 1200) -
+                  188,
+                hoveredBreakTip.rect.left
+              )
+            )}px`,
+            top: `${
+              hoveredBreakTip.rect.bottom + 72 >
+              (typeof window !== "undefined" ? window.innerHeight : 900)
+                ? Math.max(12, hoveredBreakTip.rect.top - 62)
+                : hoveredBreakTip.rect.bottom + 7
+            }px`,
+          }}
+          className="pointer-events-none z-[185] rounded-[8px] bg-[#2f343d] text-white px-3.5 py-2.5 shadow-[0_10px_28px_rgba(15,23,42,0.28)] select-none"
+        >
+          <div className="flex items-center gap-1.5 text-[12px] font-bold leading-tight text-white">
+            <svg
+              viewBox="0 0 24 24"
+              fill="currentColor"
+              stroke="currentColor"
+              strokeWidth={1.8}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              className="w-3.5 h-3.5 text-white/95 shrink-0"
+              aria-hidden="true"
+            >
+              <path d="M3 8h13v6a4 4 0 0 1-4 4H7a4 4 0 0 1-4-4V8z" />
+              <path
+                d="M16 9h1.5a2.5 2.5 0 0 1 0 5H16"
+                fill="none"
+                strokeWidth={2.2}
+              />
+            </svg>
+            <span>휴게</span>
+          </div>
+          <div className="mt-1 space-y-0.5 text-[12px] font-medium leading-tight text-white/95 tabular-nums whitespace-nowrap">
+            {hoveredBreakTip.windows.map((w, idx) => (
+              <div key={idx}>
+                {formatMinutesToKoreanAmPm(w.startMin)} -{" "}
+                {formatMinutesToKoreanAmPm(w.endMin)}
+              </div>
+            ))}
+          </div>
+        </div>
       )}
 
       {hoveredRealtimeTip && !realtimeEditModal && (

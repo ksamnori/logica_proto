@@ -171,9 +171,9 @@ export default function MinutesPage() {
       
       const res = await fetch('/api/calendar', { 
         cache: 'no-store',
-        headers: {
-          'Authorization': `Bearer ${session?.access_token}`
-        }
+        headers: session?.access_token
+          ? { Authorization: `Bearer ${session.access_token}` }
+          : undefined,
       });
       const data = await res.json();
       if (data.success && data.events) {

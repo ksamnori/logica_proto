@@ -1,15 +1,26 @@
 // src/app/hq/messenger/page.tsx
 "use client";
 
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { subscribePostgresChanges } from "@/lib/postgresRealtimeHub";
 import { useHqShell } from "@/components/hq/HqShellContext";
+import HqMessengerLeftHub from "@/components/hq/messenger/HqMessengerLeftHub";
+import HqOrgAccordionTree from "@/components/hq/messenger/HqOrgAccordionTree";
 import { FALLBACK_TENANT_NAMES } from "@/lib/hq/constants";
 import { resolveStoragePublicUrl } from "@/lib/hq/clientApi";
 
+const ROOM_PINS_STORAGE_KEY = "hq_chat_room_pins_v1";
+
 export default function HqMessengerPage() {
-  const { instId, me, refreshChatUnread } = useHqShell();
+  const {
+    instId,
+    me,
+    members: hqMembers,
+    companySettings,
+    canAccessMenu,
+    refreshChatUnread,
+  } = useHqShell();
   const instName = me?.name || "본부 구성원";
 
   const [activeView, setActiveView] = useState<"list" | "room" | "new">("new");
@@ -26,8 +37,38 @@ export default function HqMessengerPage() {
   const [roomMembers, setRoomMembers] = useState<any[]>([]);
 
   const [typingStaffName, setTypingStaffName] = useState<string | null>(null);
-  const [expandedTenants, setExpandedTenants] = useState<string[]>([]);
-  const [expandedDepts, setExpandedDepts] = useState<string[]>([]);
+  const [leftHubOpen, setLeftHubOpen] = useState(true);
+  const [pinnedByRoom, setPinnedByRoom] = useState<Record<string, string>>({});
+  const [msgSearchOpen, setMsgSearchOpen] = useState(false);
+  const [msgSearchQuery, setMsgSearchQuery] = useState("");
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(ROOM_PINS_STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === "object") {
+          setPinnedByRoom(parsed);
+        }
+      }
+    } catch {
+      // ignore storage error
+    }
+  }, []);
+
+  const handleSaveRoomPin = (roomId: string, text: string) => {
+    setPinnedByRoom((prev) => {
+      const next = { ...prev };
+      if (text) next[roomId] = text;
+      else delete next[roomId];
+      try {
+        localStorage.setItem(ROOM_PINS_STORAGE_KEY, JSON.stringify(next));
+      } catch {
+        // ignore storage error
+      }
+      return next;
+    });
+  };
 
   const activeRoomIdRef = useRef<string | null>(null);
   useEffect(() => {
@@ -164,24 +205,6 @@ export default function HqMessengerPage() {
           },
         }));
         setAllInstructors(enrichedData);
-
-        // 내가 속한 지점(테넌트)만 아코디언을 펼치고, 다른 지점은 모두 접은 상태로 시작
-        const myInst = enrichedData.find(
-          (inst: any) => String(inst.instructor_id) === String(instId)
-        );
-        const myTenantName = (
-          myInst?.academy_tenant?.name || "본사"
-        ).trim();
-        const dSet = new Set<string>();
-        enrichedData.forEach((inst: any) => {
-          const tName = (inst.academy_tenant.name || "소속 미지정").trim();
-          const dName = (inst.department || "부서 미지정").trim();
-          if (tName === myTenantName) {
-            dSet.add(`${tName}_${dName}`);
-          }
-        });
-        setExpandedTenants([myTenantName]);
-        setExpandedDepts(Array.from(dSet));
       }
     } catch {
       // ignore
@@ -278,6 +301,8 @@ export default function HqMessengerPage() {
     setActiveRoomId(roomId);
     setActiveRoomName(roomName);
     setActiveView("room");
+    setMsgSearchOpen(false);
+    setMsgSearchQuery("");
     setMessages([]);
     setUnreadCount((prev) =>
       Math.max(
@@ -342,99 +367,105 @@ export default function HqMessengerPage() {
     }
   };
 
+  const startDirectWith = async (target: any) => {
+    if (!target || !instId) return;
+    const targetInstId = target.instructor_id;
+    const targetName = target.name;
+    const targetPos = target.chat_position || target.position;
+
+    try {
+      if (targetInstId === instId) {
+        const { data: myRooms } = await supabase
+          .from("internal_chat_member")
+          .select("room_id")
+          .eq("instructor_id", instId);
+        const myRoomIds = myRooms?.map((r: any) => r.room_id) || [];
+        if (myRoomIds.length > 0) {
+          const { data: selfRoom } = await supabase
+            .from("internal_chat_room")
+            .select("room_id")
+            .in("room_id", myRoomIds)
+            .ilike("title", "%(나)%")
+            .limit(1)
+            .maybeSingle();
+          if (selfRoom) {
+            openRoom(selfRoom.room_id, `${targetName} (나)`);
+            return;
+          }
+        }
+        const titleWithPos = `${targetName} (나)`;
+        const { data: newRoom } = await supabase
+          .from("internal_chat_room")
+          .insert({
+            room_type: "DIRECT",
+            title: titleWithPos,
+            created_by: instId,
+          })
+          .select()
+          .single();
+        if (newRoom) {
+          await supabase
+            .from("internal_chat_member")
+            .insert([{ room_id: newRoom.room_id, instructor_id: instId }]);
+          openRoom(newRoom.room_id, titleWithPos);
+        }
+        return;
+      }
+
+      const { data: targetRooms } = await supabase
+        .from("internal_chat_member")
+        .select("room_id")
+        .eq("instructor_id", targetInstId);
+      let rId = null;
+      if (targetRooms && targetRooms.length > 0) {
+        const { data: commonMembers } = await supabase
+          .from("internal_chat_member")
+          .select("room_id, internal_chat_room!inner(room_type)")
+          .eq("instructor_id", instId)
+          .in(
+            "room_id",
+            targetRooms.map((r) => r.room_id)
+          )
+          .eq("internal_chat_room.room_type", "DIRECT");
+        if (commonMembers && commonMembers.length > 0) {
+          rId = commonMembers[0].room_id;
+        }
+      }
+      if (!rId) {
+        const titleWithPos = `${targetName} ${targetPos || "님"}`;
+        const { data: newRoom } = await supabase
+          .from("internal_chat_room")
+          .insert({
+            room_type: "DIRECT",
+            title: titleWithPos,
+            created_by: instId,
+          })
+          .select()
+          .single();
+        if (newRoom) {
+          rId = newRoom.room_id;
+          await supabase.from("internal_chat_member").insert([
+            { room_id: rId, instructor_id: instId },
+            { room_id: rId, instructor_id: targetInstId },
+          ]);
+        }
+      }
+      if (rId) {
+        setSelectedInstIds([]);
+        openRoom(rId, `${targetName} ${targetPos || "님"}`);
+      }
+    } catch {
+      alert("대화방 생성 중 오류가 발생했습니다.");
+    }
+  };
+
   const handleStartGroupChat = async () => {
     if (selectedInstIds.length === 0) return;
     if (selectedInstIds.length === 1) {
       const target = allInstructors.find(
         (i: any) => i.instructor_id === selectedInstIds[0]
       );
-      if (target) {
-        const targetInstId = target.instructor_id;
-        const targetName = target.name;
-        const targetPos = target.chat_position || target.position;
-
-        try {
-          if (targetInstId === instId) {
-            const { data: myRooms } = await supabase
-              .from("internal_chat_member")
-              .select("room_id")
-              .eq("instructor_id", instId);
-            const myRoomIds = myRooms?.map((r: any) => r.room_id) || [];
-            if (myRoomIds.length > 0) {
-              const { data: selfRoom } = await supabase
-                .from("internal_chat_room")
-                .select("room_id")
-                .in("room_id", myRoomIds)
-                .ilike("title", "%(나)%")
-                .limit(1)
-                .maybeSingle();
-              if (selfRoom) {
-                openRoom(selfRoom.room_id, `${targetName} (나)`);
-                return;
-              }
-            }
-            const titleWithPos = `${targetName} (나)`;
-            const { data: newRoom } = await supabase
-              .from("internal_chat_room")
-              .insert({
-                room_type: "DIRECT",
-                title: titleWithPos,
-                created_by: instId,
-              })
-              .select()
-              .single();
-            if (newRoom) {
-              await supabase
-                .from("internal_chat_member")
-                .insert([{ room_id: newRoom.room_id, instructor_id: instId }]);
-              openRoom(newRoom.room_id, titleWithPos);
-            }
-            return;
-          }
-
-          const { data: targetRooms } = await supabase
-            .from("internal_chat_member")
-            .select("room_id")
-            .eq("instructor_id", targetInstId);
-          let rId = null;
-          if (targetRooms && targetRooms.length > 0) {
-            const { data: commonMembers } = await supabase
-              .from("internal_chat_member")
-              .select("room_id, internal_chat_room!inner(room_type)")
-              .eq("instructor_id", instId)
-              .in(
-                "room_id",
-                targetRooms.map((r) => r.room_id)
-              )
-              .eq("internal_chat_room.room_type", "DIRECT");
-            if (commonMembers && commonMembers.length > 0) {
-              rId = commonMembers[0].room_id;
-            }
-          }
-          if (!rId) {
-            const titleWithPos = `${targetName} ${targetPos || "님"}`;
-            const { data: newRoom } = await supabase
-              .from("internal_chat_room")
-              .insert({
-                room_type: "DIRECT",
-                title: titleWithPos,
-                created_by: instId,
-              })
-              .select()
-              .single();
-            if (newRoom) {
-              rId = newRoom.room_id;
-              await supabase.from("internal_chat_member").insert([
-                { room_id: rId, instructor_id: instId },
-                { room_id: rId, instructor_id: targetInstId },
-              ]);
-            }
-          }
-          if (rId) openRoom(rId, `${targetName} ${targetPos || "님"}`);
-        } catch {
-          alert("대화방 생성 중 오류가 발생했습니다.");
-        }
-      }
+      if (target) await startDirectWith(target);
       return;
     }
 
@@ -530,47 +561,54 @@ export default function HqMessengerPage() {
     }
   };
 
-  const meInst = allInstructors.find((i) => i.instructor_id === instId);
-  const activeMyTenantName = (
-    meInst?.academy_tenant?.name || "본사"
-  ).trim();
-  const activeMyDeptName = (
-    me?.department ||
-    meInst?.department ||
-    "부서 미지정"
-  ).trim();
+  const activeRoomObj = rooms.find((r) => r.room_id === activeRoomId);
+  const currentRoomPin = activeRoomId ? pinnedByRoom[activeRoomId] || "" : "";
 
-  const filteredInstructors = allInstructors.filter((inst: any) => {
-    const q = searchKeyword.trim();
-    if (!q) return true;
-    return (
-      (inst?.name || "").includes(q) ||
-      (inst?.department || "").includes(q) ||
-      (inst?.academy_tenant?.name || "").includes(q)
+  const displayedMessages = useMemo(() => {
+    const q = msgSearchQuery.trim().toLowerCase();
+    if (!msgSearchOpen || !q) return messages;
+    return messages.filter((m) =>
+      String(m.content || "")
+        .toLowerCase()
+        .includes(q)
     );
-  });
-
-  const orgTree: Record<string, Record<string, any[]>> = {};
-  filteredInstructors.forEach((inst: any) => {
-    const tenantName = (inst.academy_tenant?.name || "소속 미지정").trim();
-    const deptName = (inst.department || "부서 미지정").trim();
-    if (!orgTree[tenantName]) orgTree[tenantName] = {};
-    if (!orgTree[tenantName][deptName]) orgTree[tenantName][deptName] = [];
-    orgTree[tenantName][deptName].push(inst);
-  });
-
-  const toggleTenant = (t: string) =>
-    setExpandedTenants((p) =>
-      p.includes(t) ? p.filter((x) => x !== t) : [...p, t]
-    );
-  const toggleDept = (d: string) =>
-    setExpandedDepts((p) =>
-      p.includes(d) ? p.filter((x) => x !== d) : [...p, d]
-    );
+  }, [messages, msgSearchOpen, msgSearchQuery]);
 
   return (
     <div className="flex-1 flex min-h-0 h-full overflow-hidden">
-      {/* 좌측: 대화방 메인 영역 */}
+      {/* 좌측 3단 컨텍스트 허브 (1순위: 상대 근무상태 / 3순위: 핀·공유링크 / 2순위: 전사공지·이슈) */}
+      {leftHubOpen && (
+        <HqMessengerLeftHub
+          activeRoomId={activeRoomId}
+          activeRoomName={activeRoomName}
+          roomType={activeRoomObj?.internal_chat_room?.room_type}
+          roomMembers={roomMembers}
+          messages={messages}
+          allInstructors={allInstructors}
+          myInstId={instId}
+          myMember={me}
+          hqMembers={hqMembers}
+          orgNodes={companySettings?.extra_settings?.org_chart_nodes}
+          canAccessMenu={canAccessMenu}
+          pinnedText={currentRoomPin}
+          onSavePinnedText={(txt) => {
+            if (activeRoomId) handleSaveRoomPin(activeRoomId, txt);
+          }}
+          msgSearchOpen={msgSearchOpen}
+          msgSearchQuery={msgSearchQuery}
+          msgMatchCount={displayedMessages.length}
+          onToggleMsgSearch={() => {
+            setMsgSearchOpen((v) => {
+              if (v) setMsgSearchQuery("");
+              return !v;
+            });
+          }}
+          onChangeMsgSearch={setMsgSearchQuery}
+          onQuickStartDirect={startDirectWith}
+        />
+      )}
+
+      {/* 중앙: 대화방 메인 영역 */}
       <div
         className={`${
           !activeRoomId ? "hidden md:flex" : "flex"
@@ -590,15 +628,19 @@ export default function HqMessengerPage() {
               >
                 ←
               </button>
+              <button
+                type="button"
+                onClick={() => setLeftHubOpen((v) => !v)}
+                className="hidden lg:inline-flex px-2.5 py-1.5 rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 text-[11px] font-bold text-slate-600 shrink-0 transition-colors"
+                title={leftHubOpen ? "좌측 허브 패널 접기" : "좌측 허브 패널 펼치기"}
+              >
+                {leftHubOpen ? "◧ 허브 접기" : "◨ 허브 열기"}
+              </button>
               <div className="w-10 h-10 bg-slate-100 border border-slate-200 rounded-full flex justify-center items-center text-slate-500 font-bold shrink-0 overflow-hidden relative">
                 <span className="absolute z-0">💬</span>
-                {rooms.find((r) => r.room_id === activeRoomId)
-                  ?.displayAvatar && (
+                {activeRoomObj?.displayAvatar && (
                   <img
-                    src={
-                      rooms.find((r) => r.room_id === activeRoomId)
-                        ?.displayAvatar
-                    }
+                    src={activeRoomObj.displayAvatar}
                     className="absolute w-full h-full object-cover z-10"
                     alt="profile"
                   />
@@ -608,16 +650,61 @@ export default function HqMessengerPage() {
                 <span className="font-bold text-slate-800 text-[15px] truncate">
                   {activeRoomName}
                 </span>
+                {roomMembers.length > 0 && (
+                  <span className="text-[11px] text-slate-400 font-semibold">
+                    참여 {roomMembers.length}명
+                  </span>
+                )}
               </div>
+
+              <button
+                type="button"
+                onClick={() =>
+                  setMsgSearchOpen((v) => {
+                    if (v) setMsgSearchQuery("");
+                    return !v;
+                  })
+                }
+                className={`px-3 py-1.5 rounded-lg border text-xs font-bold transition-colors shrink-0 ${
+                  msgSearchOpen
+                    ? "bg-brand text-white border-brand"
+                    : "bg-slate-50 hover:bg-slate-100 border-slate-200 text-slate-600"
+                }`}
+              >
+                🔍 검색
+              </button>
             </div>
 
+            {currentRoomPin && (
+              <div className="bg-amber-50/95 border-b border-amber-200/80 px-5 py-2 flex items-center justify-between gap-3 text-xs shrink-0">
+                <div className="flex items-center gap-2 min-w-0">
+                  <span className="font-extrabold text-amber-800 shrink-0">
+                    📌 공지
+                  </span>
+                  <span className="text-slate-700 font-semibold truncate">
+                    {currentRoomPin}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => handleSaveRoomPin(activeRoomId, "")}
+                  className="text-[11px] font-bold text-amber-700/80 hover:text-rose-600 shrink-0"
+                  title="고정 해제"
+                >
+                  해제
+                </button>
+              </div>
+            )}
+
             <div className="flex-1 overflow-y-auto p-4 sm:p-5 flex flex-col gap-3 custom-scroll">
-              {messages.length === 0 ? (
+              {displayedMessages.length === 0 ? (
                 <div className="text-center text-slate-400 font-bold text-sm mt-20">
-                  대화를 시작해보세요.
+                  {msgSearchOpen && msgSearchQuery.trim()
+                    ? `'${msgSearchQuery}' 검색 결과가 없습니다.`
+                    : "대화를 시작해보세요."}
                 </div>
               ) : (
-                messages.map((msg) => {
+                displayedMessages.map((msg) => {
                   const isMe = msg.sender_id === instId;
                   const unreadBy = roomMembers.filter(
                     (m) =>
@@ -637,7 +724,7 @@ export default function HqMessengerPage() {
                   return (
                     <div
                       key={msg.message_id}
-                      className={`flex w-full mb-1 ${
+                      className={`group/msg flex w-full mb-1 ${
                         isMe ? "justify-end" : "justify-start"
                       }`}
                     >
@@ -659,7 +746,7 @@ export default function HqMessengerPage() {
                         </div>
                       )}
                       <div
-                        className={`flex flex-col max-w-[75%] ${
+                        className={`flex flex-col max-w-[78%] ${
                           isMe ? "items-end" : "items-start"
                         }`}
                       >
@@ -699,6 +786,19 @@ export default function HqMessengerPage() {
                               isMe ? "items-end" : "items-start"
                             }`}
                           >
+                            <button
+                              type="button"
+                              onClick={() =>
+                                handleSaveRoomPin(
+                                  activeRoomId,
+                                  String(msg.content || "").trim()
+                                )
+                              }
+                              title="이 메시지를 대화방 공지로 고정"
+                              className="opacity-0 group-hover/msg:opacity-100 text-[11px] text-slate-400 hover:text-amber-600 mb-0.5 transition-opacity"
+                            >
+                              📌
+                            </button>
                             {isMe && unreadBy > 0 && (
                               <span className="text-brand mb-0.5">
                                 {unreadBy}
@@ -760,16 +860,36 @@ export default function HqMessengerPage() {
             </div>
           </>
         ) : (
-          <div className="flex-1 flex flex-col items-center justify-center text-slate-400 p-6 text-center">
-            <div className="w-16 h-16 bg-white rounded-2xl border border-slate-200 flex items-center justify-center mb-3 text-3xl shadow-xs">
-              💬
+          <div className="flex-1 flex flex-col items-center justify-center text-slate-400 p-6 text-center relative">
+            {!leftHubOpen && (
+              <button
+                type="button"
+                onClick={() => setLeftHubOpen(true)}
+                className="hidden lg:inline-flex absolute left-4 top-4 px-3 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-xs font-bold text-slate-600 shadow-2xs"
+              >
+                ◨ 소통 허브 열기
+              </button>
+            )}
+            <div className="max-w-sm bg-white/90 backdrop-blur-xs rounded-3xl border border-slate-200/80 p-8 shadow-xs">
+              <div className="w-14 h-14 mx-auto bg-blue-50 text-brand rounded-2xl border border-blue-100 flex items-center justify-center mb-3.5 text-2xl">
+                💬
+              </div>
+              <p className="font-extrabold text-sm text-slate-800">
+                전사 소통 메신저 워크스페이스
+              </p>
+              <p className="text-xs text-slate-500 mt-1.5 leading-relaxed break-keep">
+                좌측에서 본부 근무 현황과 최근 공지를 확인하고, 우측 다단계 조직도에서 상대를 선택해 1:1 또는 그룹 대화를 시작하세요.
+              </p>
+              {rooms.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setActiveView("list")}
+                  className="mt-4 px-4 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-extrabold transition-colors"
+                >
+                  진행 중인 대화방 보기 ({rooms.length})
+                </button>
+              )}
             </div>
-            <p className="font-bold text-sm text-slate-600">
-              우측 전사 조직도에서 대화 상대를 선택하거나 기존 채팅방을 열어주세요.
-            </p>
-            <p className="text-xs text-slate-400 mt-1">
-              본사 부서 및 전국 가맹점 구성원과 1:1 또는 그룹 대화를 나눌 수 있습니다.
-            </p>
           </div>
         )}
       </div>
@@ -829,194 +949,18 @@ export default function HqMessengerPage() {
               />
             </div>
 
-            <div className="flex-1 overflow-y-auto custom-scroll p-3.5 space-y-2.5 pb-20">
-              {Object.keys(orgTree).length === 0 ? (
-                <div className="text-center py-12 text-slate-400 font-bold text-xs">
-                  검색 결과가 없습니다.
-                </div>
-              ) : (
-                Object.keys(orgTree)
-                  .sort((a, b) => {
-                    const aTrim = a.trim();
-                    const bTrim = b.trim();
-                    if (aTrim === activeMyTenantName) return -1;
-                    if (bTrim === activeMyTenantName) return 1;
-                    if (aTrim === "본사") return -1;
-                    if (bTrim === "본사") return 1;
-                    return a.localeCompare(b, "ko");
-                  })
-                  .map((tenantName) => {
-                    const isTenantExpanded =
-                      expandedTenants.includes(tenantName) ||
-                      searchKeyword.length > 0;
-                    const tenantMembersCount = Object.values(
-                      orgTree[tenantName]
-                    ).reduce((acc, curr) => acc + curr.length, 0);
-                    const isMyTenant = tenantName.trim() === activeMyTenantName;
-
-                    return (
-                      <div key={tenantName} className="mb-1.5">
-                        <button
-                          type="button"
-                          onClick={() => toggleTenant(tenantName)}
-                          className="w-full bg-slate-200/80 hover:bg-slate-300/70 text-slate-800 px-3.5 py-2.5 rounded-xl font-extrabold text-xs flex justify-between items-center transition-colors"
-                        >
-                          <span className="flex items-center gap-1.5">
-                            <span>🏢 {tenantName}</span>
-                            {isMyTenant && (
-                              <span className="px-1.5 py-0.5 bg-blue-100 text-brand text-[10px] rounded font-bold">
-                                내 소속
-                              </span>
-                            )}
-                            <span className="text-[11px] font-normal text-slate-500">
-                              ({tenantMembersCount}명)
-                            </span>
-                          </span>
-                          <span className="text-[10px]">
-                            {isTenantExpanded ? "▲" : "▼"}
-                          </span>
-                        </button>
-
-                        {isTenantExpanded && (
-                          <div className="mt-2 ml-2 border-l-2 border-slate-200 pl-2.5 space-y-2">
-                            {Object.keys(orgTree[tenantName])
-                              .sort((a, b) => {
-                                if (isMyTenant && a.trim() === activeMyDeptName)
-                                  return -1;
-                                if (isMyTenant && b.trim() === activeMyDeptName)
-                                  return 1;
-                                return a.localeCompare(b, "ko");
-                              })
-                              .map((deptName) => {
-                                const deptId = `${tenantName}_${deptName}`;
-                                const isDeptExpanded =
-                                  expandedDepts.includes(deptId) ||
-                                  searchKeyword.length > 0;
-                                const deptMembers =
-                                  orgTree[tenantName][deptName];
-                                const isMyDept =
-                                  isMyTenant &&
-                                  deptName.trim() === activeMyDeptName;
-
-                                return (
-                                  <div key={deptId}>
-                                    <button
-                                      type="button"
-                                      onClick={() => toggleDept(deptId)}
-                                      className="w-full bg-white hover:bg-slate-50 text-slate-700 px-3 py-2 rounded-lg font-bold text-xs flex justify-between items-center border border-slate-200"
-                                    >
-                                      <span className="flex items-center gap-1">
-                                        <span>📁 {deptName}</span>
-                                        {isMyDept && (
-                                          <span className="px-1.5 py-0.5 bg-emerald-100 text-emerald-700 text-[10px] rounded font-bold">
-                                            내 부서
-                                          </span>
-                                        )}
-                                        <span className="text-[11px] font-normal text-slate-400">
-                                          ({deptMembers.length})
-                                        </span>
-                                      </span>
-                                      <span className="text-[10px] text-slate-400">
-                                        {isDeptExpanded ? "▲" : "▼"}
-                                      </span>
-                                    </button>
-
-                                    {isDeptExpanded && (
-                                      <div className="mt-1.5 space-y-1.5">
-                                        {[...deptMembers]
-                                          .sort((a: any, b: any) => {
-                                            if (a.instructor_id === instId)
-                                              return -1;
-                                            if (b.instructor_id === instId)
-                                              return 1;
-                                            return a.name.localeCompare(
-                                              b.name,
-                                              "ko"
-                                            );
-                                          })
-                                          .map((inst: any) => {
-                                            const isSelected =
-                                              selectedInstIds.includes(
-                                                inst.instructor_id
-                                              );
-                                            const avatarUrl =
-                                              resolveStoragePublicUrl(
-                                                inst.profile_image_url
-                                              );
-                                            const isMe =
-                                              inst.instructor_id === instId;
-
-                                            return (
-                                              <div
-                                                key={inst.instructor_id}
-                                                onClick={() =>
-                                                  toggleInstSelection(
-                                                    inst.instructor_id
-                                                  )
-                                                }
-                                                className={`bg-white p-2.5 rounded-xl border cursor-pointer transition-all flex items-center gap-2.5 ${
-                                                  isSelected
-                                                    ? "border-brand bg-blue-50/40"
-                                                    : "border-slate-200 hover:border-slate-400"
-                                                }`}
-                                              >
-                                                <div
-                                                  className={`w-4 h-4 rounded flex items-center justify-center shrink-0 border text-[10px] ${
-                                                    isSelected
-                                                      ? "bg-brand border-brand text-white"
-                                                      : "border-slate-300"
-                                                  }`}
-                                                >
-                                                  {isSelected ? "✓" : ""}
-                                                </div>
-                                                <div className="relative w-8 h-8 bg-slate-200 rounded-full flex items-center justify-center text-slate-600 font-bold text-xs shrink-0 overflow-hidden">
-                                                  <span>
-                                                    {inst.name?.slice(0, 1) ||
-                                                      "T"}
-                                                  </span>
-                                                  {avatarUrl && (
-                                                    <img
-                                                      src={avatarUrl}
-                                                      alt="profile"
-                                                      className="absolute inset-0 w-full h-full object-cover"
-                                                      onError={(e) => {
-                                                        e.currentTarget.style.display =
-                                                          "none";
-                                                      }}
-                                                    />
-                                                  )}
-                                                </div>
-                                                <div className="min-w-0 flex-1">
-                                                  <div className="font-bold text-slate-800 text-xs flex items-center gap-1">
-                                                    <span className="truncate">
-                                                      {inst.name}
-                                                    </span>
-                                                    {isMe && (
-                                                      <span className="px-1 py-0.2 bg-brand text-white text-[10px] rounded font-bold">
-                                                        나
-                                                      </span>
-                                                    )}
-                                                  </div>
-                                                  <div className="text-[11px] text-slate-500 truncate">
-                                                    {inst.chat_position ||
-                                                      inst.position ||
-                                                      "구성원"}
-                                                  </div>
-                                                </div>
-                                              </div>
-                                            );
-                                          })}
-                                      </div>
-                                    )}
-                                  </div>
-                                );
-                              })}
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })
-              )}
+            <div className="flex-1 overflow-y-auto custom-scroll p-3.5 pb-20">
+              <HqOrgAccordionTree
+                variant="page"
+                instructors={allInstructors}
+                hqMembers={hqMembers}
+                orgNodes={companySettings?.extra_settings?.org_chart_nodes}
+                myInstId={instId}
+                myMember={me}
+                searchKeyword={searchKeyword}
+                selectedInstIds={selectedInstIds}
+                onToggleSelect={toggleInstSelection}
+              />
             </div>
 
             <div className="absolute bottom-0 left-0 right-0 p-3.5 bg-white border-t border-slate-200 z-20">

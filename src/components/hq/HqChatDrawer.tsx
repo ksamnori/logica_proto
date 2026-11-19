@@ -6,6 +6,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { subscribePostgresChanges } from "@/lib/postgresRealtimeHub";
 import { useHqShell } from "./HqShellContext";
+import HqOrgAccordionTree from "./messenger/HqOrgAccordionTree";
 import { FALLBACK_TENANT_NAMES } from "@/lib/hq/constants";
 import { resolveStoragePublicUrl } from "@/lib/hq/clientApi";
 import { useHqHref } from "@/lib/hq/hqRoutes";
@@ -49,6 +50,8 @@ export default function HqChatDrawer() {
   const {
     instId,
     me,
+    members: hqMembers,
+    companySettings,
     unreadChatCount,
     chatDrawerOpen,
     closeChatDrawer,
@@ -71,8 +74,6 @@ export default function HqChatDrawer() {
   const [allInstructors, setAllInstructors] = useState<any[]>([]);
   const [searchKeyword, setSearchKeyword] = useState("");
   const [selectedInstIds, setSelectedInstIds] = useState<string[]>([]);
-  const [expandedTenants, setExpandedTenants] = useState<string[]>([]);
-  const [expandedDepts, setExpandedDepts] = useState<string[]>([]);
 
   const activeRoomIdRef = useRef<string | null>(null);
   const drawerOpenRef = useRef<boolean>(false);
@@ -239,24 +240,6 @@ export default function HqChatDrawer() {
           },
         }));
         setAllInstructors(enriched);
-
-        // 내가 속한 지점(테넌트)만 아코디언을 펼치고, 다른 지점은 모두 접은 상태로 시작
-        const myInst = enriched.find(
-          (inst: any) => String(inst.instructor_id) === String(instId)
-        );
-        const myTenantName = (
-          myInst?.academy_tenant?.name || "본사"
-        ).trim();
-        const dSet = new Set<string>();
-        enriched.forEach((inst: any) => {
-          const tName = (inst.academy_tenant.name || "소속 미지정").trim();
-          const dName = (inst.department || "부서 미지정").trim();
-          if (tName === myTenantName) {
-            dSet.add(`${tName}_${dName}`);
-          }
-        });
-        setExpandedTenants([myTenantName]);
-        setExpandedDepts(Array.from(dSet));
       }
     } catch {
       // ignore
@@ -582,33 +565,6 @@ export default function HqChatDrawer() {
   };
 
   if (!chatDrawerOpen) return null;
-
-  const meInst = allInstructors.find((i) => i.instructor_id === instId);
-  const activeMyTenantName = (meInst?.academy_tenant?.name || "본사").trim();
-  const activeMyDeptName = (
-    me?.department ||
-    meInst?.department ||
-    "부서 미지정"
-  ).trim();
-
-  const filteredInstructors = allInstructors.filter((inst: any) => {
-    const q = searchKeyword.trim();
-    if (!q) return true;
-    return (
-      (inst?.name || "").includes(q) ||
-      (inst?.department || "").includes(q) ||
-      (inst?.academy_tenant?.name || "").includes(q)
-    );
-  });
-
-  const orgTree: Record<string, Record<string, any[]>> = {};
-  filteredInstructors.forEach((inst: any) => {
-    const tName = (inst.academy_tenant?.name || "소속 미지정").trim();
-    const dName = (inst.department || "부서 미지정").trim();
-    if (!orgTree[tName]) orgTree[tName] = {};
-    if (!orgTree[tName][dName]) orgTree[tName][dName] = [];
-    orgTree[tName][dName].push(inst);
-  });
 
   const currentRoomObj = rooms.find((r) => r.room_id === activeRoomId);
 
@@ -994,189 +950,25 @@ export default function HqChatDrawer() {
                 />
               </div>
 
-              <div className="flex-1 overflow-y-auto custom-scroll p-3 space-y-2 pb-16">
-                {Object.keys(orgTree).length === 0 ? (
-                  <div className="py-12 text-center text-xs font-bold text-slate-400">
-                    검색 결과가 없습니다.
-                  </div>
-                ) : (
-                  Object.keys(orgTree)
-                    .sort((a, b) => {
-                      const aTrim = a.trim();
-                      const bTrim = b.trim();
-                      if (aTrim === activeMyTenantName) return -1;
-                      if (bTrim === activeMyTenantName) return 1;
-                      if (aTrim === "본사") return -1;
-                      if (bTrim === "본사") return 1;
-                      return a.localeCompare(b, "ko");
-                    })
-                    .map((tenantName) => {
-                      const isTenantExpanded =
-                        expandedTenants.includes(tenantName) ||
-                        searchKeyword.trim().length > 0;
-                      const count = Object.values(orgTree[tenantName]).reduce(
-                        (acc, curr) => acc + curr.length,
-                        0
-                      );
-
-                      return (
-                        <div key={tenantName}>
-                          <button
-                            type="button"
-                            onClick={() =>
-                              setExpandedTenants((prev) =>
-                                prev.includes(tenantName)
-                                  ? prev.filter((x) => x !== tenantName)
-                                  : [...prev, tenantName]
-                              )
-                            }
-                            className="w-full px-3 py-2 rounded-xl bg-slate-200/80 hover:bg-slate-300/70 text-slate-800 text-xs font-extrabold flex items-center justify-between"
-                          >
-                            <span>
-                              🏢 {tenantName}{" "}
-                              <span className="font-normal text-slate-500">
-                                ({count}명)
-                              </span>
-                            </span>
-                            <span className="text-[10px]">
-                              {isTenantExpanded ? "▲" : "▼"}
-                            </span>
-                          </button>
-
-                          {isTenantExpanded && (
-                            <div className="mt-1.5 ml-2 pl-2 border-l-2 border-slate-200 space-y-1.5">
-                              {Object.keys(orgTree[tenantName])
-                                .sort((a, b) => {
-                                  if (a.trim() === activeMyDeptName) return -1;
-                                  if (b.trim() === activeMyDeptName) return 1;
-                                  return a.localeCompare(b, "ko");
-                                })
-                                .map((deptName) => {
-                                  const deptKey = `${tenantName}_${deptName}`;
-                                  const isDeptExpanded =
-                                    expandedDepts.includes(deptKey) ||
-                                    searchKeyword.trim().length > 0;
-                                  const members = orgTree[tenantName][deptName];
-
-                                  return (
-                                    <div key={deptKey}>
-                                      <button
-                                        type="button"
-                                        onClick={() =>
-                                          setExpandedDepts((prev) =>
-                                            prev.includes(deptKey)
-                                              ? prev.filter((x) => x !== deptKey)
-                                              : [...prev, deptKey]
-                                          )
-                                        }
-                                        className="w-full px-2.5 py-1.5 rounded-lg bg-white border border-slate-200 text-xs font-bold text-slate-700 flex items-center justify-between"
-                                      >
-                                        <span>
-                                          {deptName} ({members.length})
-                                        </span>
-                                        <span className="text-[10px] text-slate-400">
-                                          {isDeptExpanded ? "−" : "+"}
-                                        </span>
-                                      </button>
-
-                                      {isDeptExpanded && (
-                                        <div className="mt-1 space-y-1">
-                                          {members.map((inst: any) => {
-                                            const checked =
-                                              selectedInstIds.includes(
-                                                inst.instructor_id
-                                              );
-                                            const avatar =
-                                              resolveStoragePublicUrl(
-                                                inst.profile_image_url
-                                              );
-                                            return (
-                                              <div
-                                                key={inst.instructor_id}
-                                                className={`px-2.5 py-2 rounded-xl border flex items-center justify-between gap-2 bg-white ${
-                                                  checked
-                                                    ? "border-brand bg-blue-50/40"
-                                                    : "border-slate-200/80"
-                                                }`}
-                                              >
-                                                <label className="flex items-center gap-2 min-w-0 flex-1 cursor-pointer">
-                                                  <input
-                                                    type="checkbox"
-                                                    checked={checked}
-                                                    onChange={() =>
-                                                      setSelectedInstIds((p) =>
-                                                        p.includes(
-                                                          inst.instructor_id
-                                                        )
-                                                          ? p.filter(
-                                                              (x) =>
-                                                                x !==
-                                                                inst.instructor_id
-                                                            )
-                                                          : [
-                                                              ...p,
-                                                              inst.instructor_id,
-                                                            ]
-                                                      )
-                                                    }
-                                                    className="w-3.5 h-3.5 rounded accent-brand shrink-0"
-                                                  />
-                                                  <div className="relative w-7 h-7 rounded-full bg-slate-200 flex items-center justify-center text-[11px] font-bold text-slate-700 overflow-hidden shrink-0">
-                                                    <span>
-                                                      {(inst.name || "?").slice(
-                                                        0,
-                                                        1
-                                                      )}
-                                                    </span>
-                                                    {avatar && (
-                                                      <img
-                                                        src={avatar}
-                                                        alt=""
-                                                        className="absolute inset-0 w-full h-full object-cover"
-                                                      />
-                                                    )}
-                                                  </div>
-                                                  <div className="min-w-0">
-                                                    <div className="text-xs font-bold text-slate-800 truncate">
-                                                      {inst.name}
-                                                      {inst.instructor_id ===
-                                                        instId && (
-                                                        <span className="ml-1 text-[10px] text-brand font-extrabold">
-                                                          (나)
-                                                        </span>
-                                                      )}
-                                                    </div>
-                                                    <div className="text-[10px] text-slate-400 truncate">
-                                                      {inst.chat_position ||
-                                                        inst.position ||
-                                                        "구성원"}
-                                                    </div>
-                                                  </div>
-                                                </label>
-
-                                                <button
-                                                  type="button"
-                                                  onClick={() =>
-                                                    startDirectWith(inst)
-                                                  }
-                                                  className="px-2 py-1 rounded-lg bg-slate-100 hover:bg-brand hover:text-white text-[11px] font-bold text-slate-700 shrink-0 transition-colors"
-                                                >
-                                                  대화
-                                                </button>
-                                              </div>
-                                            );
-                                          })}
-                                        </div>
-                                      )}
-                                    </div>
-                                  );
-                                })}
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })
-                )}
+              <div className="flex-1 overflow-y-auto custom-scroll p-3 pb-16">
+                <HqOrgAccordionTree
+                  variant="drawer"
+                  instructors={allInstructors}
+                  hqMembers={hqMembers}
+                  orgNodes={companySettings?.extra_settings?.org_chart_nodes}
+                  myInstId={instId}
+                  myMember={me}
+                  searchKeyword={searchKeyword}
+                  selectedInstIds={selectedInstIds}
+                  onToggleSelect={(id) =>
+                    setSelectedInstIds((p) =>
+                      p.includes(id)
+                        ? p.filter((x) => x !== id)
+                        : [...p, id]
+                    )
+                  }
+                  onDirectChat={(inst) => startDirectWith(inst)}
+                />
               </div>
 
               {selectedInstIds.length > 0 && (

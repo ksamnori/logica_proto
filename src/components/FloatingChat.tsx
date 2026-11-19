@@ -5,6 +5,8 @@ import React, { useState, useEffect, useRef, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
 import { subscribePostgresChanges } from "@/lib/postgresRealtimeHub";
 import { RealtimeChannel } from "@supabase/supabase-js";
+import HqOrgAccordionTree from "@/components/hq/messenger/HqOrgAccordionTree";
+import type { HqMember, HqOrgChartNode } from "@/lib/hq/types";
 
 export interface ChatMessage {
   message_id: string;
@@ -51,6 +53,10 @@ export interface InstructorRecord {
   academy_tenant?: { name: string } | { name: string }[];
   department?: string;
   tenant_id?: string;
+  role?: string;
+  is_hq_tenant?: boolean;
+  is_explicit_ghost?: boolean;
+  is_dev_super_admin?: boolean;
 }
 
 export interface StaffRoomMember {
@@ -168,8 +174,9 @@ export default function FloatingChat({ instId: propInstId, onMicClick }: { instI
 
   const [typingStaffName, setTypingStaffName] = useState<string | null>(null);
 
-  const [expandedTenants, setExpandedTenants] = useState<string[]>([]);
-  const [expandedDepts, setExpandedDepts] = useState<string[]>([]);
+  const [hqMembersForTree, setHqMembersForTree] = useState<HqMember[]>([]);
+  const [orgNodesForTree, setOrgNodesForTree] = useState<HqOrgChartNode[] | null>(null);
+  const [isStaffDirLoading, setIsStaffDirLoading] = useState(false);
 
   const [canUseChat, setCanUseChat] = useState(false);
 
@@ -388,23 +395,30 @@ export default function FloatingChat({ instId: propInstId, onMicClick }: { instI
     if (!instId) return;
 
     const checkHQStatus = async () => {
-      const { data: meData } = await supabase.from('instructor').select('tenant_id, department').eq('instructor_id', instId).maybeSingle();
-      const me = meData as unknown as { tenant_id: string, department: string } | null;
+      const localTenantId = localStorage.getItem("logica_tenant_id") || "";
+      const localRole = (localStorage.getItem("logica_instructor_role") || "").toUpperCase();
+
+      const { data: meData } = await supabase.from('instructor').select('tenant_id, department, role').eq('instructor_id', instId).maybeSingle();
+      const me = meData as unknown as { tenant_id: string; department: string; role?: string } | null;
       
       if (me) {
         setMyDeptName(me.department || ""); 
-        setMyDbTenantId(me.tenant_id || null); 
+        const effectiveTenantId = (localTenantId && localTenantId !== "hq") ? localTenantId : (me.tenant_id || null);
+        setMyDbTenantId(effectiveTenantId); 
 
-        if (me.tenant_id) {
-          const { data: tenantData } = await supabase.from('academy_tenant').select('tenant_type, name').eq('tenant_id', me.tenant_id).maybeSingle();
+        if (effectiveTenantId) {
+          const { data: tenantData } = await supabase.from('academy_tenant').select('tenant_type, name').eq('tenant_id', effectiveTenantId).maybeSingle();
           const myTenant = tenantData as unknown as { tenant_type: string, name: string } | null;
           
           if (myTenant) {
-            setMyTenantName(myTenant.name || ""); 
-            if (myTenant.tenant_type === 'HQ') {
+            const isHqTenant = String(myTenant.tenant_type || "").toUpperCase() === 'HQ' || String(myTenant.name || "").includes('본사');
+            const isSuper = localRole === 'SUPER_ADMIN' || String(me.role || "").toUpperCase() === 'SUPER_ADMIN';
+            if (isHqTenant && !isSuper) {
+              setMyTenantName(myTenant.name || "");
               setIsHQ(true);
               setActiveTab('staff'); 
             } else {
+              if (!isHqTenant) setMyTenantName(myTenant.name || "");
               loadChatRooms(); 
             }
           } else {
@@ -716,62 +730,166 @@ export default function FloatingChat({ instId: propInstId, onMicClick }: { instI
     }
   };
 
+  const isHiddenInAcademyFloatingChat = (inst: any): boolean => {
+    if (!inst) return false;
+    if (inst.is_dev_super_admin || inst.is_explicit_ghost || inst.is_ghost) {
+      return true;
+    }
+    const posCombined = `${inst.position || ""} ${inst.chat_position || ""}`;
+    if (/최고관리자|수퍼어드민|개발자|대장/.test(posCombined)) return true;
+    const roleUpper = String(inst.role || "").toUpperCase();
+    const tName = (unwrap(inst.academy_tenant)?.name || "").trim();
+    const isHqT =
+      Boolean(inst.is_hq_tenant) ||
+      tName === "본사" ||
+      tName.includes("천종현") ||
+      tName.includes("본부");
+    if (
+      !isHqT &&
+      roleUpper === "SUPER_ADMIN" &&
+      !String(inst.position || "").includes("원장")
+    ) {
+      return true;
+    }
+    return false;
+  };
+
   const showNewStaffChatView = async () => {
-    setStaffChatView("new"); setStaffSearchKeyword(""); setSelectedInstIds([]);
+    setStaffChatView("new");
+    setStaffSearchKeyword("");
+    setSelectedInstIds([]);
+    setIsStaffDirLoading(true);
     try {
+      const localTenantId = (localStorage.getItem("logica_tenant_id") || "").trim();
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
+      const res = await fetch("/api/chat/org-directory", {
+        cache: "no-store",
+        headers: session?.access_token
+          ? { Authorization: `Bearer ${session.access_token}` }
+          : undefined,
+      });
+
+      if (res.ok) {
+        const json = await res.json();
+        if (json?.success && json.data) {
+          const tenantsList: {
+            tenant_id: string;
+            name: string;
+            is_hq: boolean;
+          }[] = json.data.tenants || [];
+          const rawInstructors: InstructorRecord[] = json.data.instructors || [];
+          const rawHqMembers: HqMember[] = json.data.hqMembers || [];
+          const rawOrgNodes: HqOrgChartNode[] | null =
+            json.data.orgNodes || null;
+
+          // 학원 플로팅 챗에서는 개발자 수퍼어드민 및 유령 계정 미노출
+          const visibleInstructors = rawInstructors.filter(
+            (inst) => !isHiddenInAcademyFloatingChat(inst)
+          );
+          const visibleHqMembers = rawHqMembers.filter(
+            (m) => m.rank_code !== "SUPER_ADMIN" && !m.is_ghost
+          );
+
+          // 현재 학원 지점명 판별 (내 학원은 자동 펼침, 타 지점·본사는 접힘)
+          const rawMe = rawInstructors.find(
+            (i) => String(i.instructor_id) === String(instId)
+          );
+          const localTenantObj = tenantsList.find(
+            (t) => String(t.tenant_id) === localTenantId
+          );
+          const meTenantObj = rawMe?.tenant_id
+            ? tenantsList.find(
+                (t) => String(t.tenant_id) === String(rawMe.tenant_id)
+              )
+            : undefined;
+
+          let resolvedAcademyTenant = "";
+          if (localTenantObj && !localTenantObj.is_hq) {
+            resolvedAcademyTenant = localTenantObj.name.trim();
+          } else if (meTenantObj && !meTenantObj.is_hq) {
+            resolvedAcademyTenant = meTenantObj.name.trim();
+          } else {
+            const firstAcademyTenant =
+              tenantsList.find((t) => !t.is_hq && t.name.includes("대치")) ||
+              tenantsList.find((t) => !t.is_hq);
+            resolvedAcademyTenant =
+              firstAcademyTenant?.name?.trim() || "대치 본원";
+          }
+
+          setMyTenantName(resolvedAcademyTenant);
+          if (rawMe?.department) {
+            setMyDeptName(rawMe.department.trim());
+          }
+          setHqMembersForTree(visibleHqMembers);
+          setOrgNodesForTree(rawOrgNodes);
+          setAllInstructors(visibleInstructors);
+          return;
+        }
+      }
+
+      // 폴백: 네트워크/세션 예외 시 클라이언트 직접 조회
       const safeTenantMap: Record<string, string> = {
-        '1ff4299c-d72b-4d99-97b0-45fee08e3b73': '대치 본원',
-        'd59395b0-8c9c-4dd3-9e25-ff569da98abc': '본사',
-        'e24e540f-ebdd-40eb-b20b-696c113def6d': '서초 가맹점'
+        "1ff4299c-d72b-4d99-97b0-45fee08e3b73": "대치 본원",
+        "d59395b0-8c9c-4dd3-9e25-ff569da98abc": "본사",
+        "e24e540f-ebdd-40eb-b20b-696c113def6d": "서초 가맹점",
       };
 
       try {
-        const { data: tenantData } = await supabase.from("academy_tenant").select("*");
+        const { data: tenantData } = await supabase
+          .from("academy_tenant")
+          .select("*");
         if (tenantData) {
-          tenantData.forEach((t: { tenant_id: string, name: string }) => { 
-            safeTenantMap[String(t.tenant_id)] = t.name; 
+          tenantData.forEach((t: { tenant_id: string; name: string }) => {
+            safeTenantMap[String(t.tenant_id)] = t.name;
           });
         }
-      } catch (e) {}
+      } catch {}
 
-      const { data: instData } = await supabase.from("instructor")
+      const { data: instData } = await supabase
+        .from("instructor")
         .select("*")
         .eq("status", "재직")
         .order("name");
-      
+
       const rawInsts = (instData as unknown as InstructorRecord[]) || [];
-      
       if (rawInsts.length > 0) {
-        const enrichedData: InstructorRecord[] = rawInsts.map((inst: InstructorRecord) => ({
-           ...inst,
-           academy_tenant: { name: safeTenantMap[String(inst.tenant_id)] || '소속 미지정' }
-        }));
+        const enrichedData: InstructorRecord[] = rawInsts.map(
+          (inst: InstructorRecord) => {
+            const tName =
+              safeTenantMap[String(inst.tenant_id)] || "소속 미지정";
+            return {
+              ...inst,
+              academy_tenant: { name: tName },
+              is_hq_tenant: tName === "본사" || tName.includes("천종현"),
+            };
+          }
+        );
 
-        setAllInstructors(enrichedData);
+        const me = enrichedData.find(
+          (i: InstructorRecord) => String(i.instructor_id) === String(instId)
+        );
+        const localTName = localTenantId ? safeTenantMap[localTenantId] : "";
+        const meTName = unwrap(me?.academy_tenant)?.name?.trim() || "";
+        const fallbackAcademyName =
+          localTName && localTName !== "본사"
+            ? localTName
+            : meTName && meTName !== "본사"
+              ? meTName
+              : "대치 본원";
 
-        const me = enrichedData.find((i: InstructorRecord) => String(i.instructor_id) === String(instId));
-        let exactMyTenant = '소속 미지정';
-        let exactMyDept = '부서 미지정';
-        if (me) {
-          exactMyTenant = unwrap(me.academy_tenant)?.name?.trim() || '소속 미지정';
-          exactMyDept = (me.department || '부서 미지정').trim();
-          setMyTenantName(exactMyTenant);
-          setMyDeptName(exactMyDept);
-        }
-
-        const tSet = new Set<string>();
-        const dSet = new Set<string>();
-        enrichedData.forEach((inst: InstructorRecord) => {
-          const tName = (unwrap(inst.academy_tenant)?.name || '소속 미지정').trim();
-          const dName = (inst.department || '부서 미지정').trim();
-          tSet.add(tName);
-          dSet.add(`${tName}_${dName}`);
-        });
-        setExpandedTenants(Array.from(tSet));
-        setExpandedDepts(Array.from(dSet));
+        setMyTenantName(fallbackAcademyName);
+        if (me?.department) setMyDeptName(me.department.trim());
+        setAllInstructors(
+          enrichedData.filter((inst) => !isHiddenInAcademyFloatingChat(inst))
+        );
       }
-    } catch(e) {
+    } catch (e) {
       console.error(e);
+    } finally {
+      setIsStaffDirLoading(false);
     }
   };
 
@@ -863,7 +981,11 @@ export default function FloatingChat({ instId: propInstId, onMicClick }: { instI
     
     if (selectedInstIds.length === 1) {
       const target = allInstructors.find((i: InstructorRecord) => i.instructor_id === selectedInstIds[0]);
-      if (target) await handleCreateOrOpenStaffRoom(target.instructor_id, target.name, target.chat_position || target.position);
+      if (target) {
+        const hm = hqMembersForTree.find((m) => String(m.instructor_id) === String(target.instructor_id));
+        const resolvedPos = hm?.job_title || target.chat_position || target.position;
+        await handleCreateOrOpenStaffRoom(target.instructor_id, target.name, resolvedPos);
+      }
       return;
     }
     const roomName = prompt("새 그룹 채팅방 이름을 입력하세요.", "새 그룹 채팅방");
@@ -1055,22 +1177,6 @@ export default function FloatingChat({ instId: propInstId, onMicClick }: { instI
       if (!groupedParents[cName].find((x: StudentRecord) => x.student_id === s.student_id)) groupedParents[cName].push(s);
     });
   });
-
-  const filteredInstructors = allInstructors.filter((inst: InstructorRecord) => (inst?.name || "").includes(staffSearchKeyword));
-  const orgTree: Record<string, Record<string, InstructorRecord[]>> = {};
-  
-  filteredInstructors.forEach((inst: InstructorRecord) => {
-    const tenantName = (unwrap(inst.academy_tenant)?.name || '소속 미지정').trim();
-    const deptName = (inst.department || '부서 미지정').trim();
-    
-    if (!orgTree[tenantName]) orgTree[tenantName] = {};
-    if (!orgTree[tenantName][deptName]) orgTree[tenantName][deptName] = [];
-    
-    orgTree[tenantName][deptName].push(inst);
-  });
-
-  const toggleTenant = (t: string) => setExpandedTenants((p: string[]) => p.includes(t) ? p.filter((x: string) => x !== t) : [...p, t]);
-  const toggleDept = (d: string) => setExpandedDepts((p: string[]) => p.includes(d) ? p.filter((x: string) => x !== d) : [...p, d]);
 
   return (
     <>
@@ -1300,129 +1406,33 @@ export default function FloatingChat({ instId: propInstId, onMicClick }: { instI
               <div className="flex-1 flex flex-col min-h-0 bg-slate-50 relative">
                 <div className="p-3 border-b border-slate-200 bg-white flex items-center gap-2 shrink-0">
                   <button onClick={() => { setStaffChatView("list"); loadStaffRooms(); }} className="p-1 text-slate-500 hover:bg-slate-100 rounded transition-colors"><svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 19l-7-7 7-7"></path></svg></button>
-                  <input type="text" value={staffSearchKeyword} onChange={e => setStaffSearchKeyword(e.target.value)} placeholder="이름 또는 부서 검색" className="flex-1 bg-slate-100 rounded px-3 py-1.5 text-sm font-bold text-slate-700 focus:outline-none focus:ring-1 focus:ring-slate-400" />
+                  <input type="text" value={staffSearchKeyword} onChange={e => setStaffSearchKeyword(e.target.value)} placeholder="이름·부서·직급 검색" className="flex-1 bg-slate-100 rounded px-3 py-1.5 text-sm font-bold text-slate-700 focus:outline-none focus:ring-1 focus:ring-slate-400" />
                 </div>
-                <div className="flex-1 overflow-y-auto custom-scroll p-3 space-y-3 pb-16">
-                  {filteredInstructors.length === 0 ? (
-                    <div className="text-center py-10 text-slate-400 font-bold text-sm">검색 결과가 없습니다.</div>
+                <div className="flex-1 overflow-y-auto custom-scroll p-3 pb-20">
+                  {isStaffDirLoading && allInstructors.length === 0 ? (
+                    <div className="text-center py-10 text-slate-400 font-bold text-xs">조직도를 불러오는 중...</div>
                   ) : (
-                    Object.keys(orgTree).sort((a: string, b: string) => {
-                      const aTrim = a.trim();
-                      const bTrim = b.trim();
-                      const myT = (myTenantName || '소속 미지정').trim();
-
-                      if (aTrim === bTrim) return 0;
-                      
-                      if (aTrim === myT) return -1;
-                      if (bTrim === myT) return 1;
-                      
-                      if (aTrim === '본사') return -1;
-                      if (bTrim === '본사') return 1;
-                      
-                      return aTrim.localeCompare(bTrim);
-                    }).map((tenantName: string) => {
-                      const isTenantExpanded = expandedTenants.includes(tenantName) || staffSearchKeyword.length > 0;
-                      const tenantMembersCount = Object.values(orgTree[tenantName]).reduce((acc: number, curr: InstructorRecord[]) => acc + curr.length, 0);
-                      
-                      const myT = (myTenantName || '소속 미지정').trim();
-                      const isMyTenant = tenantName.trim() === myT;
-                      
-                      return (
-                        <div key={tenantName} className="mb-2">
-                          <button onClick={() => toggleTenant(tenantName)} className="w-full bg-slate-200 hover:bg-slate-300 text-slate-700 px-4 py-2.5 rounded-lg font-bold text-[13px] flex justify-between items-center transition-colors shadow-sm">
-                            <span className="flex items-center">
-                              🏢 {tenantName} 
-                              {isMyTenant && <span className="ml-1.5 px-1.5 py-0.5 bg-blue-100 text-blue-600 text-xs rounded font-bold">내 지점</span>}
-                              <span className="text-xs font-normal ml-1">({tenantMembersCount}명)</span>
-                            </span>
-                            <svg className={`w-4 h-4 transform transition-transform ${isTenantExpanded ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"></path></svg>
-                          </button>
-                          {isTenantExpanded && (
-                            <div className="mt-1.5 ml-2 border-l-2 border-slate-200 pl-2 space-y-2">
-                              {Object.keys(orgTree[tenantName]).sort((a: string, b: string) => {
-                                const aTrim = a.trim();
-                                const bTrim = b.trim();
-                                const myD = (myDeptName || '부서 미지정').trim();
-
-                                if (aTrim === bTrim) return 0;
-                                
-                                if (isMyTenant) {
-                                  if (aTrim === myD) return -1;
-                                  if (bTrim === myD) return 1;
-                                }
-                                
-                                return aTrim.localeCompare(bTrim);
-                              }).map((deptName: string) => {
-                                const deptId = `${tenantName}_${deptName}`;
-                                const isDeptExpanded = expandedDepts.includes(deptId) || staffSearchKeyword.length > 0;
-                                const deptMembers = orgTree[tenantName][deptName];
-                                
-                                const myD = (myDeptName || '부서 미지정').trim();
-                                const isMyDept = isMyTenant && deptName.trim() === myD;
-                                
-                                return (
-                                  <div key={deptId} className="mb-1">
-                                    <button onClick={() => toggleDept(deptId)} className="w-full bg-slate-100 hover:bg-slate-200 text-slate-600 px-3 py-2 rounded-lg font-bold text-[12px] flex justify-between items-center transition-colors">
-                                      <span className="flex items-center">
-                                        📁 {deptName} 
-                                        {isMyDept && <span className="ml-1.5 px-1.5 py-0.5 bg-emerald-100 text-emerald-600 text-xs rounded font-bold">내 부서</span>}
-                                        <span className="text-xs font-normal ml-1">({deptMembers.length}명)</span>
-                                      </span>
-                                      <svg className={`w-3.5 h-3.5 transform transition-transform ${isDeptExpanded ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"></path></svg>
-                                    </button>
-                                    {isDeptExpanded && (
-                                      <div className="mt-1.5 ml-2 space-y-1.5">
-                                        {[...deptMembers].sort((a: InstructorRecord, b: InstructorRecord) => {
-                                          if (a.instructor_id === instId) return -1;
-                                          if (b.instructor_id === instId) return 1;
-                                          
-                                          const posOrder: Record<string, number> = { '최고관리자': 1, '원장': 2, '부원장': 3, '실장': 4, '전임강사': 5, '파트강사': 6, '조교': 7 };
-                                          const orderA = posOrder[a.position] || 99;
-                                          const orderB = posOrder[b.position] || 99;
-                                          if (orderA !== orderB) return orderA - orderB;
-                                          
-                                          return a.name.localeCompare(b.name);
-                                        }).map((inst: InstructorRecord) => {
-                                          const isSelected = selectedInstIds.includes(inst.instructor_id);
-                                          const avatarUrl = getProfileImageUrl(inst.profile_image_url);
-                                          const isMe = inst.instructor_id === instId;
-
-                                          return (
-                                            <div key={inst.instructor_id} onClick={() => toggleInstSelection(inst.instructor_id)} className={`bg-white p-2.5 rounded-lg border shadow-sm cursor-pointer transition-all flex items-center gap-3 ${isSelected ? 'border-slate-500 bg-slate-100' : 'border-slate-200 hover:border-slate-400'}`}>
-                                              <div className={`w-5 h-5 rounded flex items-center justify-center shrink-0 border ${isSelected ? 'bg-slate-700 border-slate-700 text-white' : 'border-slate-300'}`}>
-                                                {isSelected && <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7"></path></svg>}
-                                              </div>
-                                              <div className="relative w-9 h-9 bg-slate-200 rounded-full flex items-center justify-center text-slate-600 font-bold text-xs shrink-0 overflow-hidden">
-                                                <span className="absolute z-0">T</span>
-                                                {avatarUrl && (
-                                                  <img 
-                                                    src={avatarUrl || undefined} 
-                                                    alt="profile" 
-                                                    className="absolute w-full h-full object-cover z-10" 
-                                                    onError={(e) => { e.currentTarget.style.display = 'none'; }} 
-                                                  />
-                                                )}
-                                              </div>
-                                              <div className="flex-1 flex flex-col">
-                                                <div className="font-bold text-slate-700 text-sm flex items-center">
-                                                  {inst.name}
-                                                  {isMe && <span className="ml-1 px-1.5 py-0.5 bg-brand text-white text-xs rounded font-bold">나</span>}
-                                                </div>
-                                                <div className="text-xs text-slate-400 font-bold mt-0.5">{inst.chat_position || inst.position || '강사'}</div>
-                                              </div>
-                                            </div>
-                                          )
-                                        })}
-                                      </div>
-                                    )}
-                                  </div>
-                                )
-                              })}
-                            </div>
-                          )}
-                        </div>
-                      )
-                    })
+                    <HqOrgAccordionTree
+                      key={myTenantName || "academy"}
+                      variant="drawer"
+                      instructors={allInstructors}
+                      hqMembers={hqMembersForTree}
+                      orgNodes={orgNodesForTree}
+                      myInstId={instId}
+                      myMember={null}
+                      searchKeyword={staffSearchKeyword}
+                      selectedInstIds={selectedInstIds}
+                      onToggleSelect={toggleInstSelection}
+                      onDirectChat={(inst) =>
+                        handleCreateOrOpenStaffRoom(
+                          inst.instructor_id,
+                          inst.name,
+                          inst._displayPos || inst.chat_position || inst.position
+                        )
+                      }
+                      preferredTenantName={myTenantName}
+                      expandAllMyTenantBranches={true}
+                    />
                   )}
                 </div>
                 <div className="absolute bottom-0 left-0 right-0 p-3 bg-white border-t border-slate-200 shadow-[0_-5px_15px_rgba(0,0,0,0.05)] z-20">
