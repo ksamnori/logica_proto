@@ -44,10 +44,19 @@ function inferGenderFromRrnDigit(digit?: unknown): "" | "남" | "여" {
 
 function sanitizeExtraForViewer(
   raw: any,
-  canSeePrivate: boolean
+  canSeePrivate: boolean,
+  isHrManager = false
 ): HqProfileExtra {
   const src: HqProfileExtra =
     raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
+
+  const stripHrMemo = <T extends { memo?: string }>(obj?: T): T | undefined => {
+    if (!obj || typeof obj !== "object") return obj;
+    if (isHrManager) return obj;
+    const copy = { ...obj };
+    delete copy.memo;
+    return copy;
+  };
 
   // 성별은 오직 주민등록번호 뒷 첫자리(1~8)로만 자동 판별
   const inferredGender = inferGenderFromRrnDigit(src.rrn_gender_digit);
@@ -113,6 +122,12 @@ function sanitizeExtraForViewer(
     work_schedule_type: src.work_schedule_type || "기본 9시",
     work_schedule_mode: src.work_schedule_mode || "고정",
     weekly_work_hours: Number(src.weekly_work_hours ?? 40),
+    work_effective_date: src.work_effective_date || "",
+    overtime_comp_policy_name:
+      src.overtime_comp_policy_name || "기본 초과 근무 보상 정책",
+    overtime_comp_cycle_label:
+      src.overtime_comp_cycle_label || "매달 1일 - 매달 31일 (말일)",
+    overtime_comp_effective_date: src.overtime_comp_effective_date || "",
     leave_policy_name: src.leave_policy_name || "기본 연차 정책",
     leave_policy_tags: Array.isArray(src.leave_policy_tags)
       ? src.leave_policy_tags
@@ -122,9 +137,25 @@ function sanitizeExtraForViewer(
       src.holiday_summary ||
       "1월 1일, 설날, 3·1절, 부처님 오신 날, 노동절, 어린이날, 현충일, 제헌절, 광복절, 추석, 개천절, 한글날, 성탄절...",
     special_notes: src.special_notes || "",
-    labor_contract: src.labor_contract || {},
-    wage_contract: src.wage_contract || {},
-    leave_histories: Array.isArray(src.leave_histories) ? src.leave_histories : [],
+    special_notes_detail:
+      src.special_notes_detail && typeof src.special_notes_detail === "object"
+        ? src.special_notes_detail
+        : {},
+    labor_contract: stripHrMemo(src.labor_contract) || {},
+    labor_contracts: Array.isArray(src.labor_contracts)
+      ? src.labor_contracts.map((item) => stripHrMemo(item)!)
+      : [],
+    wage_contract: stripHrMemo(src.wage_contract) || {},
+    wage_contracts: Array.isArray(src.wage_contracts)
+      ? src.wage_contracts.map((item) => stripHrMemo(item)!)
+      : [],
+    pay_payment_info: stripHrMemo(src.pay_payment_info),
+    pay_payment_infos: Array.isArray(src.pay_payment_infos)
+      ? src.pay_payment_infos.map((item) => stripHrMemo(item)!)
+      : [],
+    leave_histories: Array.isArray(src.leave_histories)
+      ? src.leave_histories.map((item) => stripHrMemo(item)!)
+      : [],
     awards: Array.isArray(src.awards) ? src.awards : [],
     disciplines: Array.isArray(src.disciplines) ? src.disciplines : [],
     careers: Array.isArray(src.careers) ? src.careers : [],
@@ -357,7 +388,11 @@ export async function GET(req: NextRequest) {
         address: canSeePrivate ? prof?.address || "" : "",
         job_description: prof?.job_description || "",
         hr_memo: caller.isHrManager ? prof?.hr_memo || "" : "",
-        profile_extra: sanitizeExtraForViewer(prof?.profile_extra, canSeePrivate),
+        profile_extra: sanitizeExtraForViewer(
+          prof?.profile_extra,
+          canSeePrivate,
+          caller.isHrManager
+        ),
         can_view_private: canSeePrivate,
         has_profile_row: Boolean(prof),
       };
@@ -772,6 +807,7 @@ export async function PATCH(req: NextRequest) {
         "veteran_disability_type",
         "veteran_disability_detail",
         "special_notes",
+        "special_notes_detail",
         "careers",
         "educations",
         "families",
@@ -832,12 +868,20 @@ export async function PATCH(req: NextRequest) {
           "work_schedule_type",
           "work_schedule_mode",
           "weekly_work_hours",
+          "work_effective_date",
+          "overtime_comp_policy_name",
+          "overtime_comp_cycle_label",
+          "overtime_comp_effective_date",
           "leave_policy_name",
           "leave_policy_tags",
           "holiday_policy_name",
           "holiday_summary",
           "labor_contract",
+          "labor_contracts",
           "wage_contract",
+          "wage_contracts",
+          "pay_payment_info",
+          "pay_payment_infos",
           "leave_histories",
           "disciplines",
         ];

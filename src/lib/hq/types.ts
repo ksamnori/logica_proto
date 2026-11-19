@@ -95,8 +95,9 @@ export interface HqCareerItem {
   start_ym: string;
   end_ym: string;
   contract_type: string;
-  department?: string;
-  job_title?: string;
+  job_role?: string; // 직무
+  department?: string; // 조직
+  job_title?: string; // 직위
 }
 
 export interface HqEducationItem {
@@ -113,9 +114,24 @@ export interface HqFamilyItem {
   id: string;
   relation: string;
   name: string;
+  phone?: string;
+  rrn_masked?: string;
   birth_date?: string;
+  deduction_relation?: string; // 소득 공제 관계
+  disability_veteran_type?: string; // 장애인 · 국가유공자
+  is_cohabiting?: boolean;
   basic_deduction: boolean;
   health_dependent: boolean;
+}
+
+export interface HqSpecialNotesDetail {
+  childcare_short_work_start?: string; // 육아기 단축 근무 시작일
+  childcare_short_work_end?: string; // 육아기 단축 근무 종료일
+  foreigner_flat_tax_start?: string; // 외국인 단일 세율 시작일
+  foreigner_flat_tax_end?: string; // 외국인 단일 세율 종료일
+  income_tax_reduction_code?: "" | "T11" | "T12" | "T13"; // 소득세 감면 코드
+  income_tax_reduction_start?: string; // 소득세 감면 시작일
+  income_tax_reduction_end?: string; // 소득세 감면 종료일
 }
 
 export interface HqLeaveHistoryItem {
@@ -123,6 +139,9 @@ export interface HqLeaveHistoryItem {
   leave_kind: string;
   start_date: string;
   end_date: string;
+  include_in_tenure?: boolean; // 근속기간 포함 여부 (포함: true, 미포함: false)
+  salary_pay_rate?: number | null; // 급여지급률 (% 기본급 기준)
+  memo?: string; // 인사 권한자 전용 비공개 메모
   reason?: string;
 }
 
@@ -130,6 +149,7 @@ export interface HqAwardItem {
   id: string;
   title: string;
   awarded_date: string;
+  issuer_type?: "사내 수상" | "사외 수상";
   issuer?: string;
   note?: string;
 }
@@ -138,7 +158,36 @@ export interface HqDisciplineItem {
   id: string;
   kind: string;
   action_date: string;
+  end_date?: string;
   reason?: string;
+}
+
+export interface HqPayPaymentLineItem {
+  pay_item_id: string;
+  code?: string;
+  name: string;
+  icon: string;
+  is_monthly_every: boolean; // 월고정(true) vs 선택월(false)
+  selected_months?: number[]; // 선택월일 때 지급 월 (1~12)
+  include_in_annual_salary: boolean; // 연봉포함(true) vs 연봉외(false)
+  include_in_ordinary_wage: boolean; // 통상임금 포함 여부
+  is_tax_free: boolean; // 비과세 여부
+  tax_free_monthly_limit?: number; // 비과세 월 한도 (예: 200000)
+  amount: number;
+}
+
+export interface HqPayPaymentInfoItem {
+  id: string;
+  effective_date: string; // "" = 적용일 없음, 또는 "YYYY-MM-DD"
+  auto_input: boolean; // 자동 입력 토글 상태
+  matched_wage_contract_id?: string;
+  items: HqPayPaymentLineItem[];
+  ordinary_hourly_wage: number; // 통상시급 (원)
+  ordinary_hourly_manual?: boolean;
+  annual_total: number; // 연간 지급액
+  monthly_total: number; // 월 지급액
+  monthly_taxable: number; // 월 과세액
+  memo?: string;
 }
 
 export interface HqGrowthItem {
@@ -159,23 +208,65 @@ export interface HqTrainingItem {
   status: string;
 }
 
+export type HqIncomeType = "근로소득" | "사업소득" | "기타소득" | "무보수";
+
+export type HqWageAmountUnit = "연봉" | "월급" | "일급" | "시급" | "일시지급";
+
+export interface HqFixedOvertimeConfig {
+  enabled: boolean;
+  include_night_in_regular: boolean; // 소정근로시간에 야간시간 포함
+  is_weekly_input: boolean; // 포괄계약 근로시간을 주단위로 입력
+  overtime_hours: number; // 연장 (150%)
+  holiday_hours: number; // 휴일 (150%)
+  overtime_night_hours: number; // 연장 · 야간 (200%)
+  holiday_overtime_hours: number; // 휴일 · 연장 (200%)
+  holiday_night_hours: number; // 휴일 · 야간 (200%)
+  holiday_overtime_night_hours: number; // 휴일 · 연장 · 야간 (250%)
+  regular_night_hours?: number; // 소정 야간 (50%, include_night_in_regular 체크 시)
+  total_contract_hours: number; // 합계 계약 근로시간
+  total_weighted_hours: number; // 합계 가산시간
+}
+
 export interface HqLaborContractInfo {
+  id?: string;
+  employment_type?: string;
   contract_type?: string;
   start_date?: string;
   end_date?: string;
+  probation_start_date?: string;
   probation_end_date?: string;
+  salary_pay_rate?: number | null; // 급여지급률 (%)
   work_place?: string;
+  memo?: string; // 권한자 전용 메모
   note?: string;
 }
 
+export interface HqLaborContractItem extends HqLaborContractInfo {
+  id: string;
+}
+
 export interface HqWageContractInfo {
+  id?: string;
+  income_type?: HqIncomeType;
+  amount_unit?: HqWageAmountUnit;
+  contract_amount?: number;
   wage_type?: string;
   annual_salary?: number;
   monthly_base?: number;
+  fixed_overtime_allowance?: number;
+  fixed_overtime?: HqFixedOvertimeConfig;
   pay_day?: string;
   effective_date?: string;
+  start_date?: string;
+  end_date?: string;
   meal_allowance?: number;
+  other_terms?: string;
+  memo?: string; // 권한자 전용 메모
   note?: string;
+}
+
+export interface HqWageContractItem extends HqWageContractInfo {
+  id: string;
 }
 
 export interface HqProfileChangeLog {
@@ -223,13 +314,22 @@ export interface HqProfileExtra {
   work_schedule_type?: string;
   work_schedule_mode?: string;
   weekly_work_hours?: number;
+  work_effective_date?: string;
+  overtime_comp_policy_name?: string;
+  overtime_comp_cycle_label?: string;
+  overtime_comp_effective_date?: string;
   leave_policy_name?: string;
   leave_policy_tags?: string[];
   holiday_policy_name?: string;
   holiday_summary?: string;
   special_notes?: string;
+  special_notes_detail?: HqSpecialNotesDetail;
   labor_contract?: HqLaborContractInfo;
+  labor_contracts?: HqLaborContractItem[];
   wage_contract?: HqWageContractInfo;
+  wage_contracts?: HqWageContractItem[];
+  pay_payment_info?: HqPayPaymentInfoItem;
+  pay_payment_infos?: HqPayPaymentInfoItem[];
   leave_histories?: HqLeaveHistoryItem[];
   awards?: HqAwardItem[];
   disciplines?: HqDisciplineItem[];

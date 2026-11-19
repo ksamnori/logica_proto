@@ -9,7 +9,6 @@ import { useHqHref } from "@/lib/hq/hqRoutes";
 import DaumPostcodeModal from "./DaumPostcodeModal";
 import {
   HQ_DEFAULT_DEPARTMENTS,
-  HQ_EMPLOYMENT_TYPES,
   HQ_RANK_LIST,
   getRankMeta,
 } from "@/lib/hq/constants";
@@ -19,12 +18,6 @@ import {
   uploadHqReceiptFile,
 } from "@/lib/hq/clientApi";
 import { DEFAULT_DOC_FOLDERS } from "@/lib/hq/defaultApprovalPolicies";
-import {
-  calcWeeklyWorkHours,
-  DEFAULT_WORK_RULES,
-  formatHmToKoreanAmPm,
-  patternShortBadge,
-} from "@/lib/hq/defaultWorkRules";
 import type {
   HqAwardItem,
   HqCareerItem,
@@ -32,15 +25,44 @@ import type {
   HqEducationItem,
   HqFamilyItem,
   HqGrowthItem,
+  HqLaborContractItem,
   HqLeaveHistoryItem,
   HqMember,
+  HqPayPaymentInfoItem,
   HqRankCode,
   HqTrainingItem,
+  HqWageContractItem,
   HqWorkStatus,
 } from "@/lib/hq/types";
 import { getRegisteredOrgNames } from "@/lib/hq/orgTreeHelper";
 import CertificatePrintModal from "./CertificatePrintModal";
+import {
+  HqLaborContractModal,
+  HqMemberProfilePdfDownloadModal,
+  HqWageContractModal,
+  formatDotDateShort,
+  formatFixedOvertimeSummary,
+  resolveLaborContractsList,
+  resolveWageContractsList,
+} from "./HqContractModals";
 import HqMemberHrChangeModal from "./HqMemberHrChangeModal";
+import {
+  HqAwardModal,
+  HqDisciplineModal,
+  HqLeaveHistoryModal,
+  HqPayPaymentInfoModal,
+  resolvePayPaymentInfosList,
+} from "./HqMemberHrRecordModals";
+import {
+  HqCareerModal,
+  HqEducationModal,
+  HqFamilyModal,
+  HqLeavePolicyChangeModal,
+  HqOvertimeCompChangeModal,
+  HqSpecialNotesModal,
+  HqWorkInfoChangeModal,
+  formatTaxReductionLabel,
+} from "./HqMemberLowerSectionModals";
 
 interface Props {
   isOpen: boolean;
@@ -68,14 +90,9 @@ type ActiveEditModal =
   | "labor"
   | "wage"
   | "work"
+  | "overtime_comp"
   | "leave_policy"
   | "special"
-  | "add_career"
-  | "add_edu"
-  | "add_family"
-  | "add_leave_hist"
-  | "add_award"
-  | "add_discipline"
   | "messenger"
   | "password"
   | "changelog";
@@ -174,7 +191,9 @@ const SECTION_ANCHORS = [
   { id: "sec-basic", label: "기본" },
   { id: "sec-labor", label: "근로 계약" },
   { id: "sec-wage", label: "임금 계약" },
+  { id: "sec-pay-info", label: "급여 지급" },
   { id: "sec-work", label: "근무" },
+  { id: "sec-overtime-comp", label: "초과 근무 보상" },
   { id: "sec-leave", label: "휴가" },
   { id: "sec-holiday", label: "쉬는 날" },
   { id: "sec-leave-hist", label: "휴직 이력" },
@@ -257,92 +276,52 @@ export default function HqMemberProfileModal({
     veteran_disability_detail: "",
   });
 
-  // 3) 근로계약 폼
-  const [laborForm, setLaborForm] = useState({
-    employment_type: "정규직",
-    contract_type: "무기계약 (정규직)",
-    start_date: "",
-    end_date: "",
-    probation_end_date: "",
-    work_place: "천종현수학연구소 본사",
-    note: "",
-  });
+  // 3) 플렉스형 근로계약 / 임금계약 / 프로필 PDF 다운로드 모달 상태
+  const [pdfDownloadOpen, setPdfDownloadOpen] = useState(false);
+  const [laborModalState, setLaborModalState] = useState<{
+    mode: "create" | "edit";
+    item?: HqLaborContractItem;
+  } | null>(null);
+  const [wageModalState, setWageModalState] = useState<{
+    mode: "create" | "edit";
+    item?: HqWageContractItem;
+  } | null>(null);
 
-  // 4) 임금계약 폼
-  const [wageForm, setWageForm] = useState({
-    wage_type: "연봉제",
-    annual_salary: "",
-    monthly_base: "",
-    meal_allowance: "200000",
-    pay_day: "매월 25일",
-    effective_date: "",
-    note: "",
-  });
+  // 5) 플렉스형 경력 / 학력 / 가족 추가·수정 모달 상태
+  const [careerModalState, setCareerModalState] = useState<{
+    mode: "create" | "edit";
+    item?: HqCareerItem;
+  } | null>(null);
 
-  // 5) 근무 / 휴가정책 / 특이사항 폼
-  const [workForm, setWorkForm] = useState({
-    work_schedule_type: "기본 9시",
-    work_schedule_mode: "고정",
-    weekly_work_hours: "40",
-  });
+  const [eduModalState, setEduModalState] = useState<{
+    mode: "create" | "edit";
+    item?: HqEducationItem;
+  } | null>(null);
 
-  const [leavePolicyForm, setLeavePolicyForm] = useState({
-    leave_policy_name: "기본 연차 정책",
-    annual_leave_total: "15",
-    annual_leave_used: "0",
-  });
+  const [familyModalState, setFamilyModalState] = useState<{
+    mode: "create" | "edit";
+    item?: HqFamilyItem;
+  } | null>(null);
 
-  const [specialForm, setSpecialForm] = useState({
-    special_notes: "",
-    hr_memo: "",
-  });
+  const [payInfoModalState, setPayInfoModalState] = useState<{
+    mode: "create" | "edit";
+    item?: HqPayPaymentInfoItem;
+  } | null>(null);
 
-  // 동적 리스트 추가용 폼들
-  const [careerDraft, setCareerDraft] = useState({
-    company_name: "",
-    start_ym: "",
-    end_ym: "",
-    contract_type: "정규직",
-    department: "",
-    job_title: "",
-  });
+  const [leaveHistModalState, setLeaveHistModalState] = useState<{
+    mode: "create" | "edit";
+    item?: HqLeaveHistoryItem;
+  } | null>(null);
 
-  const [eduDraft, setEduDraft] = useState({
-    school_name: "",
-    degree_type: "대학교(일반대학)",
-    graduation_status: "졸업",
-    major: "",
-    start_ym: "",
-    end_ym: "",
-  });
+  const [awardModalState, setAwardModalState] = useState<{
+    mode: "create" | "edit";
+    item?: HqAwardItem;
+  } | null>(null);
 
-  const [familyDraft, setFamilyDraft] = useState({
-    relation: "배우자",
-    name: "",
-    birth_date: "",
-    basic_deduction: true,
-    health_dependent: false,
-  });
-
-  const [leaveHistDraft, setLeaveHistDraft] = useState({
-    leave_kind: "육아휴직",
-    start_date: "",
-    end_date: "",
-    reason: "",
-  });
-
-  const [awardDraft, setAwardDraft] = useState({
-    title: "",
-    awarded_date: "",
-    issuer: "천종현수학연구소",
-    note: "",
-  });
-
-  const [disciplineDraft, setDisciplineDraft] = useState({
-    kind: "주의",
-    action_date: "",
-    reason: "",
-  });
+  const [disciplineModalState, setDisciplineModalState] = useState<{
+    mode: "create" | "edit";
+    item?: HqDisciplineItem;
+  } | null>(null);
 
   // 성장 / 교육 탭 추가 폼
   const [growthDraft, setGrowthDraft] = useState({
@@ -574,61 +553,297 @@ export default function HqMemberProfileModal({
     setEditModal("basic");
   };
 
-  const openLaborEdit = () => {
-    const lc = ex.labor_contract || {};
-    setLaborForm({
-      employment_type: member.employment_type || "정규직",
-      contract_type:
-        lc.contract_type ||
-        (member.employment_type === "정규직" ? "무기계약(정규직)" : "기간제"),
-      start_date: lc.start_date || member.hire_date || "",
-      end_date: lc.end_date || "",
-      probation_end_date: lc.probation_end_date || "",
-      work_place: lc.work_place || "천종현수학연구소 본부",
-      note: lc.note || "",
-    });
-    setEditModal("labor");
+  const laborContractsList = resolveLaborContractsList(member);
+  const wageContractsList = resolveWageContractsList(ex);
+
+  const openAddLaborContract = () => {
+    setLaborModalState({ mode: "create" });
   };
 
-  const openWageEdit = () => {
-    const wc = ex.wage_contract || {};
-    setWageForm({
-      wage_type: wc.wage_type || "연봉제",
-      annual_salary: wc.annual_salary ? String(wc.annual_salary) : "",
-      monthly_base: wc.monthly_base ? String(wc.monthly_base) : "",
-      meal_allowance:
-        wc.meal_allowance !== undefined ? String(wc.meal_allowance) : "200000",
-      pay_day: wc.pay_day || "매월 25일",
-      effective_date: wc.effective_date || member.hire_date || "",
-      note: wc.note || "",
-    });
-    setEditModal("wage");
+  const openEditLaborContract = (item: HqLaborContractItem) => {
+    setLaborModalState({ mode: "edit", item });
+  };
+
+  const handleSaveLaborContract = async (saved: HqLaborContractItem) => {
+    const baseList = [...laborContractsList];
+    const idx = baseList.findIndex((x) => x.id === saved.id);
+    if (idx >= 0) {
+      baseList[idx] = saved;
+    } else {
+      baseList.unshift(saved);
+    }
+    baseList.sort((a, b) =>
+      String(b.start_date || "").localeCompare(String(a.start_date || ""))
+    );
+    const primary = baseList[0] || saved;
+
+    await patchMember(
+      {
+        employment_type: primary.employment_type || member.employment_type,
+        profile_extra: {
+          labor_contract: primary,
+          labor_contracts: baseList,
+        },
+      },
+      laborModalState?.mode === "edit"
+        ? "근로 계약 정보 수정"
+        : "근로 계약 정보 추가"
+    );
+    setLaborModalState(null);
+  };
+
+  const handleDeleteLaborContract = async (targetId: string) => {
+    if (!confirm("이 근로 계약 정보를 삭제하시겠습니까?")) return;
+    const nextList = laborContractsList.filter((x) => x.id !== targetId);
+    const primary = nextList[0] || {};
+    await patchMember(
+      {
+        ...(primary.employment_type
+          ? { employment_type: primary.employment_type }
+          : {}),
+        profile_extra: {
+          labor_contract: primary,
+          labor_contracts: nextList,
+        },
+      },
+      "근로 계약 정보 삭제"
+    );
+    setLaborModalState(null);
+  };
+
+  const openAddWageContract = () => {
+    setWageModalState({ mode: "create" });
+  };
+
+  const openEditWageContract = (item: HqWageContractItem) => {
+    setWageModalState({ mode: "edit", item });
+  };
+
+  const handleSaveWageContract = async (saved: HqWageContractItem) => {
+    const baseList = [...wageContractsList];
+    const idx = baseList.findIndex((x) => x.id === saved.id);
+    if (idx >= 0) {
+      baseList[idx] = saved;
+    } else {
+      baseList.unshift(saved);
+    }
+    baseList.sort((a, b) =>
+      String(b.start_date || b.effective_date || "").localeCompare(
+        String(a.start_date || a.effective_date || "")
+      )
+    );
+    const primary = baseList[0] || saved;
+
+    await patchMember(
+      {
+        profile_extra: {
+          wage_contract: primary,
+          wage_contracts: baseList,
+        },
+      },
+      wageModalState?.mode === "edit"
+        ? "임금 계약 정보 수정"
+        : "임금 계약 정보 추가"
+    );
+    setWageModalState(null);
+  };
+
+  const handleDeleteWageContract = async (targetId: string) => {
+    if (!confirm("이 임금 계약 정보를 삭제하시겠습니까?")) return;
+    const nextList = wageContractsList.filter((x) => x.id !== targetId);
+    const primary = nextList[0] || {};
+    await patchMember(
+      {
+        profile_extra: {
+          wage_contract: primary,
+          wage_contracts: nextList,
+        },
+      },
+      "임금 계약 정보 삭제"
+    );
+    setWageModalState(null);
+  };
+
+  const payPaymentInfosList = resolvePayPaymentInfosList(ex);
+
+  const openAddPayPaymentInfo = () => {
+    setPayInfoModalState({ mode: "create" });
+  };
+
+  const openEditPayPaymentInfo = (item: HqPayPaymentInfoItem) => {
+    setPayInfoModalState({ mode: "edit", item });
+  };
+
+  const handleSavePayPaymentInfo = async (saved: HqPayPaymentInfoItem) => {
+    const baseList = [...payPaymentInfosList];
+    const idx = baseList.findIndex((x) => x.id === saved.id);
+    if (idx >= 0) {
+      baseList[idx] = saved;
+    } else {
+      baseList.unshift(saved);
+    }
+    baseList.sort((a, b) =>
+      String(b.effective_date || "").localeCompare(String(a.effective_date || ""))
+    );
+    const primary = baseList[0];
+    await patchMember(
+      {
+        profile_extra: {
+          pay_payment_info: primary,
+          pay_payment_infos: baseList,
+        },
+      },
+      payInfoModalState?.mode === "edit"
+        ? "급여 지급 정보 수정"
+        : "급여 지급 정보 추가"
+    );
+    setPayInfoModalState(null);
+  };
+
+  const handleDeletePayPaymentInfo = async (targetId: string) => {
+    if (!confirm("이 급여 지급 정보를 삭제하시겠습니까?")) return;
+    const nextList = payPaymentInfosList.filter((x) => x.id !== targetId);
+    await patchMember(
+      {
+        profile_extra: {
+          pay_payment_info: nextList[0] || undefined,
+          pay_payment_infos: nextList,
+        },
+      },
+      "급여 지급 정보 삭제"
+    );
+    setPayInfoModalState(null);
+  };
+
+  const handleSaveLeaveHistory = async (saved: HqLeaveHistoryItem) => {
+    const baseList = [...(ex.leave_histories || [])];
+    const idx = baseList.findIndex((x) => x.id === saved.id);
+    if (idx >= 0) {
+      baseList[idx] = saved;
+    } else {
+      baseList.unshift(saved);
+    }
+    baseList.sort((a, b) =>
+      String(b.start_date || "").localeCompare(String(a.start_date || ""))
+    );
+    await patchMember(
+      { profile_extra: { leave_histories: baseList } },
+      leaveHistModalState?.mode === "edit" ? "휴직 이력 수정" : "휴직 이력 등록"
+    );
+    setLeaveHistModalState(null);
+  };
+
+  const handleSaveAward = async (saved: HqAwardItem) => {
+    const baseList = [...(ex.awards || [])];
+    const idx = baseList.findIndex((x) => x.id === saved.id);
+    if (idx >= 0) {
+      baseList[idx] = saved;
+    } else {
+      baseList.unshift(saved);
+    }
+    baseList.sort((a, b) =>
+      String(b.awarded_date || "").localeCompare(String(a.awarded_date || ""))
+    );
+    await patchMember(
+      { profile_extra: { awards: baseList } },
+      awardModalState?.mode === "edit"
+        ? `수상 내역 수정 (${saved.title})`
+        : `수상 내역 등록 (${saved.title})`
+    );
+    setAwardModalState(null);
+  };
+
+  const handleSaveDiscipline = async (saved: HqDisciplineItem) => {
+    const baseList = [...(ex.disciplines || [])];
+    const idx = baseList.findIndex((x) => x.id === saved.id);
+    if (idx >= 0) {
+      baseList[idx] = saved;
+    } else {
+      baseList.unshift(saved);
+    }
+    baseList.sort((a, b) =>
+      String(b.action_date || "").localeCompare(String(a.action_date || ""))
+    );
+    await patchMember(
+      { profile_extra: { disciplines: baseList } },
+      disciplineModalState?.mode === "edit"
+        ? `징계 기록 수정 (${saved.kind})`
+        : `징계 기록 등록 (${saved.kind})`
+    );
+    setDisciplineModalState(null);
   };
 
   const openWorkEdit = () => {
-    setWorkForm({
-      work_schedule_type: ex.work_schedule_type || "기본 9시",
-      work_schedule_mode: ex.work_schedule_mode || "고정",
-      weekly_work_hours: String(ex.weekly_work_hours ?? 40),
-    });
     setEditModal("work");
   };
 
+  const openOvertimeCompEdit = () => {
+    setEditModal("overtime_comp");
+  };
+
   const openLeavePolicyEdit = () => {
-    setLeavePolicyForm({
-      leave_policy_name: ex.leave_policy_name || "기본 연차 정책",
-      annual_leave_total: String(member.annual_leave_total ?? 15),
-      annual_leave_used: String(member.annual_leave_used ?? 0),
-    });
     setEditModal("leave_policy");
   };
 
   const openSpecialEdit = () => {
-    setSpecialForm({
-      special_notes: ex.special_notes || "",
-      hr_memo: member.hr_memo || "",
-    });
     setEditModal("special");
+  };
+
+  const handleSaveCareer = async (saved: HqCareerItem) => {
+    const baseList = [...(ex.careers || [])];
+    const idx = baseList.findIndex((x) => x.id === saved.id);
+    if (idx >= 0) {
+      baseList[idx] = saved;
+    } else {
+      baseList.unshift(saved);
+    }
+    baseList.sort((a, b) =>
+      String(b.start_ym || "").localeCompare(String(a.start_ym || ""))
+    );
+    await patchMember(
+      { profile_extra: { careers: baseList } },
+      careerModalState?.mode === "edit"
+        ? `경력 수정 (${saved.company_name})`
+        : `경력 추가 (${saved.company_name})`
+    );
+    setCareerModalState(null);
+  };
+
+  const handleSaveEducation = async (saved: HqEducationItem) => {
+    const baseList = [...(ex.educations || [])];
+    const idx = baseList.findIndex((x) => x.id === saved.id);
+    if (idx >= 0) {
+      baseList[idx] = saved;
+    } else {
+      baseList.unshift(saved);
+    }
+    baseList.sort((a, b) =>
+      String(b.start_ym || "").localeCompare(String(a.start_ym || ""))
+    );
+    await patchMember(
+      { profile_extra: { educations: baseList } },
+      eduModalState?.mode === "edit"
+        ? `학력 수정 (${saved.school_name})`
+        : `학력 추가 (${saved.school_name})`
+    );
+    setEduModalState(null);
+  };
+
+  const handleSaveFamily = async (saved: HqFamilyItem) => {
+    const baseList = [...(ex.families || [])];
+    const idx = baseList.findIndex((x) => x.id === saved.id);
+    if (idx >= 0) {
+      baseList[idx] = saved;
+    } else {
+      baseList.push(saved);
+    }
+    await patchMember(
+      { profile_extra: { families: baseList } },
+      familyModalState?.mode === "edit"
+        ? `가족 정보 수정 (${saved.relation} ${saved.name})`
+        : `가족 구성원 추가 (${saved.relation} ${saved.name})`
+    );
+    setFamilyModalState(null);
   };
 
   const openMessengerEdit = () => {
@@ -724,6 +939,28 @@ export default function HqMemberProfileModal({
               }}
             />
             <div className="absolute top-3.5 right-4 flex items-center gap-1.5 z-10">
+              {canSeePrivate && (
+                <button
+                  type="button"
+                  onClick={() => setPdfDownloadOpen(true)}
+                  className="w-8 h-8 rounded-lg bg-black/25 hover:bg-black/45 text-white flex items-center justify-center transition-colors"
+                  title="프로필 PDF 다운로드"
+                >
+                  <svg
+                    className="w-4 h-4"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth="2"
+                      d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
+                    />
+                  </svg>
+                </button>
+              )}
               <button
                 type="button"
                 onClick={() => setIsMaximized((p) => !p)}
@@ -1304,125 +1541,564 @@ export default function HqMemberProfileModal({
                   {/* 이하 민감 인사 섹션 (본인 또는 HR 관리자 열람) */}
                   {canSeePrivate ? (
                     <>
-                      {/* (3) 근로 계약 정보 */}
+                      {/* (3) 근로 계약 정보 (플렉스형 + 추가 & 마우스 호버 + 버튼 & 급여지급률 표시) */}
                       <section id="sec-labor" className="scroll-mt-4">
                         <SectionHeader
                           title="근로 계약 정보"
-                          actionLabel={isHrManager ? "✏️ 변경" : undefined}
-                          onAction={isHrManager ? openLaborEdit : undefined}
+                          actionLabel={isHrManager ? "+ 추가" : undefined}
+                          onAction={isHrManager ? openAddLaborContract : undefined}
                         />
-                        <div className="border-t border-slate-100">
-                          <InfoRow icon="✍️" label="근로 계약 정보">
-                            {ex.labor_contract?.contract_type ||
-                            member.employment_type ? (
-                              <div className="flex flex-wrap items-center gap-2">
-                                <span className="font-semibold text-slate-800">
-                                  {ex.labor_contract?.contract_type ||
-                                    member.employment_type}
+                        <div className="divide-y divide-slate-100 border-t border-slate-100">
+                          {laborContractsList.length === 0 ? (
+                            <div className="group py-3.5 px-2 -mx-2 rounded-lg hover:bg-slate-50/70 transition-colors flex flex-col sm:flex-row sm:items-center gap-1.5 sm:gap-4">
+                              <div className="w-44 shrink-0 flex items-center gap-2.5 text-slate-500 font-medium">
+                                <span className="w-5 text-center text-slate-400 text-xs select-none">
+                                  ✍️
                                 </span>
-                                <span className="px-2 py-0.5 rounded bg-slate-100 text-slate-600 text-[11px] font-bold">
-                                  {member.employment_type}
-                                </span>
-                                {(ex.labor_contract?.start_date ||
-                                  member.hire_date) && (
-                                  <span className="text-xs text-slate-500">
-                                    계약기간:{" "}
-                                    {ex.labor_contract?.start_date ||
-                                      member.hire_date}{" "}
-                                    ~{" "}
-                                    {ex.labor_contract?.end_date ||
-                                      "기간의 정함 없음"}
+                                <span className="truncate">근로 계약 정보</span>
+                              </div>
+                              <div className="flex-1 min-w-0 flex items-center justify-between gap-2">
+                                {isHrManager ? (
+                                  <PlaceholderBtn
+                                    text="입력하기"
+                                    canClick={isHrManager}
+                                    onClick={openAddLaborContract}
+                                  />
+                                ) : member.employment_type ? (
+                                  <span className="font-semibold text-slate-800">
+                                    {member.employment_type}
                                   </span>
+                                ) : (
+                                  <EmptyText />
                                 )}
-                                {ex.labor_contract?.probation_end_date && (
-                                  <span className="text-xs text-amber-700">
-                                    (수습종료:{" "}
-                                    {ex.labor_contract.probation_end_date})
-                                  </span>
+                                {isHrManager && (
+                                  <button
+                                    type="button"
+                                    onClick={openAddLaborContract}
+                                    title="근로 계약 추가하기"
+                                    className="w-7 h-7 rounded-lg border border-slate-200 bg-white hover:bg-slate-100 text-slate-600 shadow-2xs flex items-center justify-center text-sm font-bold opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
+                                  >
+                                    +
+                                  </button>
                                 )}
                               </div>
-                            ) : (
-                              <EmptyText />
-                            )}
-                          </InfoRow>
+                            </div>
+                          ) : (
+                            laborContractsList.map((lc, idx) => {
+                              const periodText = lc.start_date
+                                ? `${formatDotDateShort(lc.start_date)} ~ ${
+                                    lc.end_date
+                                      ? formatDotDateShort(lc.end_date)
+                                      : "기간의 정함 없음"
+                                  }`
+                                : "계약시작일 없음";
+                              const probText =
+                                lc.probation_start_date || lc.probation_end_date
+                                  ? `수습 ${
+                                      lc.probation_start_date
+                                        ? formatDotDateShort(lc.probation_start_date)
+                                        : ""
+                                    } ~ ${
+                                      lc.probation_end_date
+                                        ? formatDotDateShort(lc.probation_end_date)
+                                        : ""
+                                    }`
+                                  : "";
+                              return (
+                                <div
+                                  key={lc.id}
+                                  onClick={() => {
+                                    if (isHrManager) openEditLaborContract(lc);
+                                  }}
+                                  className={`group py-3.5 px-2 -mx-2 rounded-lg transition-colors flex flex-col sm:flex-row sm:items-center gap-1.5 sm:gap-4 ${
+                                    isHrManager
+                                      ? "hover:bg-slate-50/80 cursor-pointer"
+                                      : ""
+                                  }`}
+                                >
+                                  <div className="w-44 shrink-0 flex items-center gap-2.5 text-slate-500 font-medium">
+                                    <span className="w-5 text-center text-slate-400 text-xs select-none">
+                                      ✍️
+                                    </span>
+                                    <span className="truncate">
+                                      {idx === 0 ? "근로 계약 정보" : "이전 근로 계약"}
+                                    </span>
+                                  </div>
+                                  <div className="flex-1 min-w-0 flex items-center justify-between gap-2">
+                                    <div className="flex flex-wrap items-center gap-2">
+                                      <span className="font-bold text-slate-800">
+                                        {lc.employment_type || member.employment_type}
+                                      </span>
+                                      <span className="text-xs text-slate-500">
+                                        {periodText}
+                                      </span>
+                                      {probText && (
+                                        <span className="px-2 py-0.5 rounded bg-amber-50 text-amber-700 text-[11px] font-bold">
+                                          {probText}
+                                        </span>
+                                      )}
+                                      {lc.salary_pay_rate !== undefined &&
+                                        lc.salary_pay_rate !== null && (
+                                          <span className="px-2 py-0.5 rounded bg-emerald-50 text-[#00a84b] text-[11px] font-bold">
+                                            급여지급률 {lc.salary_pay_rate}%
+                                          </span>
+                                        )}
+                                      {lc.memo && isHrManager && (
+                                        <span
+                                          className="px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 text-[10px] font-semibold"
+                                          title={lc.memo}
+                                        >
+                                          🔒 메모
+                                        </span>
+                                      )}
+                                    </div>
+
+                                    {isHrManager && (
+                                      <div className="flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                                        <span className="text-[11px] text-slate-400 font-semibold mr-0.5">
+                                          수정
+                                        </span>
+                                        <button
+                                          type="button"
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            openAddLaborContract();
+                                          }}
+                                          title="근로 계약 추가하기"
+                                          className="w-7 h-7 rounded-lg border border-slate-200 bg-white hover:bg-slate-100 text-slate-600 shadow-2xs flex items-center justify-center text-sm font-bold"
+                                        >
+                                          +
+                                        </button>
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                              );
+                            })
+                          )}
                         </div>
                       </section>
 
-                      {/* (4) 임금 계약 정보 */}
+                      {/* (4) 임금 계약 정보 (플렉스형 마우스 호버 + 버튼 & 포괄임금제 상세 표시) */}
                       <section id="sec-wage" className="scroll-mt-4">
                         <SectionHeader
                           title="임금 계약 정보"
-                          actionLabel={isHrManager ? "✏️ 변경" : undefined}
-                          onAction={isHrManager ? openWageEdit : undefined}
+                          actionLabel={isHrManager ? "+ 추가" : undefined}
+                          onAction={isHrManager ? openAddWageContract : undefined}
                         />
-                        <div className="border-t border-slate-100">
-                          <InfoRow icon="₩" label="임금 계약 정보">
-                            {ex.wage_contract?.annual_salary ||
-                            ex.wage_contract?.monthly_base ? (
-                              <div className="flex flex-wrap items-center gap-2.5">
-                                <span className="px-2 py-0.5 rounded bg-blue-50 text-blue-700 text-[11px] font-bold">
-                                  {ex.wage_contract.wage_type || "연봉제"}
+                        <div className="divide-y divide-slate-100 border-t border-slate-100">
+                          {wageContractsList.length === 0 ? (
+                            <div className="group py-3.5 px-2 -mx-2 rounded-lg hover:bg-slate-50/70 transition-colors flex flex-col sm:flex-row sm:items-center gap-1.5 sm:gap-4">
+                              <div className="w-44 shrink-0 flex items-center gap-2.5 text-slate-500 font-medium">
+                                <span className="w-5 h-5 rounded-full border border-slate-300 text-slate-400 text-[10px] font-bold flex items-center justify-center select-none">
+                                  ₩
                                 </span>
-                                {ex.wage_contract.annual_salary ? (
-                                  <span className="font-bold text-slate-800">
-                                    계약 연봉{" "}
-                                    {Number(
-                                      ex.wage_contract.annual_salary
-                                    ).toLocaleString()}
-                                    원
-                                  </span>
-                                ) : null}
-                                {ex.wage_contract.monthly_base ? (
-                                  <span className="text-slate-600">
-                                    (월 기본급{" "}
-                                    {Number(
-                                      ex.wage_contract.monthly_base
-                                    ).toLocaleString()}
-                                    원)
-                                  </span>
-                                ) : null}
-                                <span className="text-xs text-slate-400">
-                                  지급일:{" "}
-                                  {ex.wage_contract.pay_day || "매월 25일"}
-                                </span>
+                                <span className="truncate">임금 계약 정보</span>
                               </div>
-                            ) : (
-                              <EmptyText />
-                            )}
-                          </InfoRow>
+                              <div className="flex-1 min-w-0 flex items-center justify-between gap-2">
+                                <PlaceholderBtn
+                                  text="입력하기"
+                                  canClick={isHrManager}
+                                  onClick={openAddWageContract}
+                                />
+                                {isHrManager && (
+                                  <button
+                                    type="button"
+                                    onClick={openAddWageContract}
+                                    title="임금 계약 추가하기"
+                                    className="w-7 h-7 rounded-lg border border-slate-200 bg-white hover:bg-slate-100 text-slate-600 shadow-2xs flex items-center justify-center text-sm font-bold opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
+                                  >
+                                    +
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                          ) : (
+                            wageContractsList.map((wc, idx) => {
+                              const incomeLabel = wc.income_type || "근로소득";
+                              const unitLabel = wc.amount_unit || "연봉";
+                              const displayAmt =
+                                wc.contract_amount ??
+                                wc.annual_salary ??
+                                wc.monthly_base ??
+                                0;
+                              const otSummary = formatFixedOvertimeSummary(
+                                wc.fixed_overtime
+                              );
+                              const startStr =
+                                wc.start_date || wc.effective_date || "";
+                              const dateBadge = startStr
+                                ? `${formatDotDateShort(startStr)}${
+                                    wc.end_date
+                                      ? ` ~ ${formatDotDateShort(wc.end_date)}`
+                                      : " ~"
+                                  }`
+                                : "계약시작일 없음";
+
+                              return (
+                                <div
+                                  key={wc.id}
+                                  onClick={() => {
+                                    if (isHrManager) openEditWageContract(wc);
+                                  }}
+                                  className={`group py-3.5 px-2 -mx-2 rounded-lg transition-colors flex flex-col sm:flex-row sm:items-center gap-1.5 sm:gap-4 ${
+                                    isHrManager
+                                      ? "hover:bg-slate-50/80 cursor-pointer"
+                                      : ""
+                                  }`}
+                                >
+                                  <div className="w-44 shrink-0 flex items-center gap-2.5 text-slate-500 font-medium">
+                                    <span className="w-5 h-5 rounded-full border border-slate-300 text-slate-400 text-[10px] font-bold flex items-center justify-center select-none">
+                                      ₩
+                                    </span>
+                                    <span className="truncate">
+                                      {idx === 0 ? "임금 계약 정보" : "이전 임금 계약"}
+                                    </span>
+                                  </div>
+                                  <div className="flex-1 min-w-0 flex items-center justify-between gap-2">
+                                    <div className="flex flex-wrap items-center gap-2">
+                                      <span className="px-2 py-0.5 rounded bg-slate-100 text-slate-600 text-[11px] font-bold">
+                                        {incomeLabel}
+                                      </span>
+                                      {incomeLabel === "무보수" ? (
+                                        <span className="font-bold text-slate-700">
+                                          무보수
+                                        </span>
+                                      ) : (
+                                        <span className="font-extrabold text-slate-900">
+                                          {unitLabel}{" "}
+                                          {Number(displayAmt).toLocaleString()}원
+                                        </span>
+                                      )}
+                                      {otSummary && (
+                                        <span className="px-2 py-0.5 rounded bg-emerald-50 text-[#00a84b] border border-emerald-200/70 text-[11px] font-bold">
+                                          포괄 {otSummary}
+                                        </span>
+                                      )}
+                                      <span className="text-xs text-slate-400">
+                                        {dateBadge}
+                                      </span>
+                                      {wc.memo && isHrManager && (
+                                        <span
+                                          className="px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 text-[10px] font-semibold"
+                                          title={wc.memo}
+                                        >
+                                          🔒 메모
+                                        </span>
+                                      )}
+                                    </div>
+
+                                    {isHrManager && (
+                                      <div className="flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                                        <span className="text-[11px] text-slate-400 font-semibold mr-0.5">
+                                          수정
+                                        </span>
+                                        <button
+                                          type="button"
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            openAddWageContract();
+                                          }}
+                                          title="임금 계약 추가하기"
+                                          className="w-7 h-7 rounded-lg border border-slate-200 bg-white hover:bg-slate-100 text-slate-600 shadow-2xs flex items-center justify-center text-sm font-bold"
+                                        >
+                                          +
+                                        </button>
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                              );
+                            })
+                          )}
                         </div>
                       </section>
 
-                      {/* (5) 근무 정보 */}
+                      {/* (4-2) 급여 지급 정보 🔒 (플렉스형 + 추가 & 마우스 호버 + 버튼) */}
+                      <section id="sec-pay-info" className="scroll-mt-4">
+                        <div className="flex items-center justify-between pb-2.5">
+                          <h3 className="text-[13px] font-bold text-slate-500 inline-flex items-center gap-1.5">
+                            <span>급여 지급 정보</span>
+                            <svg
+                              className="w-3.5 h-3.5 text-slate-300"
+                              fill="currentColor"
+                              viewBox="0 0 20 20"
+                            >
+                              <path
+                                fillRule="evenodd"
+                                d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z"
+                                clipRule="evenodd"
+                              />
+                            </svg>
+                          </h3>
+                          {isHrManager && (
+                            <button
+                              type="button"
+                              onClick={openAddPayPaymentInfo}
+                              className="text-xs font-semibold text-slate-400 hover:text-slate-800 transition-colors"
+                            >
+                              + 추가
+                            </button>
+                          )}
+                        </div>
+
+                        <div className="divide-y divide-slate-100 border-t border-slate-100">
+                          {payPaymentInfosList.length === 0 ? (
+                            <div className="group py-3.5 px-2 -mx-2 rounded-lg hover:bg-slate-50/70 transition-colors flex flex-col sm:flex-row sm:items-center gap-1.5 sm:gap-4">
+                              <div className="w-44 shrink-0 flex items-center gap-2.5 text-slate-500 font-medium">
+                                <span className="w-5 text-center text-slate-400 text-xs select-none">
+                                  💰
+                                </span>
+                                <span className="truncate">급여 지급 정보</span>
+                              </div>
+                              <div className="flex-1 min-w-0 flex items-center justify-between gap-2">
+                                <PlaceholderBtn
+                                  text="입력하기"
+                                  canClick={isHrManager}
+                                  onClick={openAddPayPaymentInfo}
+                                />
+                                {isHrManager && (
+                                  <button
+                                    type="button"
+                                    onClick={openAddPayPaymentInfo}
+                                    title="급여 지급 정보 추가하기"
+                                    className="w-7 h-7 rounded-lg border border-slate-200 bg-white hover:bg-slate-100 text-slate-600 shadow-2xs flex items-center justify-center text-sm font-bold opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
+                                  >
+                                    +
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                          ) : (
+                            payPaymentInfosList.map((pi, idx) => {
+                              const effText = pi.effective_date
+                                ? `${formatDotDateShort(pi.effective_date)} ~`
+                                : "적용일 없음";
+                              const nonZeroItems = (pi.items || []).filter(
+                                (it) => it.amount > 0
+                              );
+                              return (
+                                <div
+                                  key={pi.id}
+                                  onClick={() => {
+                                    if (isHrManager) openEditPayPaymentInfo(pi);
+                                  }}
+                                  className={`group py-3.5 px-2 -mx-2 rounded-lg transition-colors flex flex-col sm:flex-row sm:items-center gap-1.5 sm:gap-4 ${
+                                    isHrManager
+                                      ? "hover:bg-slate-50/80 cursor-pointer"
+                                      : ""
+                                  }`}
+                                >
+                                  <div className="w-44 shrink-0 flex items-center gap-2.5 text-slate-500 font-medium">
+                                    <span className="w-5 text-center text-slate-400 text-xs select-none">
+                                      💰
+                                    </span>
+                                    <span className="truncate">
+                                      {idx === 0
+                                        ? "급여 지급 정보"
+                                        : "이전 급여 지급 정보"}
+                                    </span>
+                                  </div>
+                                  <div className="flex-1 min-w-0 flex items-center justify-between gap-2">
+                                    <div className="flex flex-wrap items-center gap-2">
+                                      <span className="font-extrabold text-slate-900">
+                                        월 지급액{" "}
+                                        {Number(
+                                          pi.monthly_total || 0
+                                        ).toLocaleString()}
+                                        원
+                                      </span>
+                                      <span className="text-xs text-slate-500">
+                                        (연간{" "}
+                                        {Number(
+                                          pi.annual_total || 0
+                                        ).toLocaleString()}
+                                        원)
+                                      </span>
+                                      {nonZeroItems.slice(0, 3).map((it) => (
+                                        <span
+                                          key={it.pay_item_id}
+                                          className="px-2 py-0.5 rounded bg-slate-100 text-slate-600 text-[11px] font-semibold"
+                                        >
+                                          {it.name}{" "}
+                                          {it.amount.toLocaleString()}원
+                                        </span>
+                                      ))}
+                                      {pi.ordinary_hourly_wage > 0 && (
+                                        <span className="px-2 py-0.5 rounded bg-blue-50 text-blue-600 text-[11px] font-bold">
+                                          통상시급{" "}
+                                          {pi.ordinary_hourly_wage.toLocaleString()}
+                                          원
+                                        </span>
+                                      )}
+                                      <span className="text-xs text-slate-400">
+                                        {effText}
+                                      </span>
+                                    </div>
+
+                                    {isHrManager && (
+                                      <div className="flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                                        <span className="text-[11px] text-slate-400 font-semibold mr-0.5">
+                                          수정
+                                        </span>
+                                        <button
+                                          type="button"
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            openAddPayPaymentInfo();
+                                          }}
+                                          title="급여 지급 정보 추가하기"
+                                          className="w-7 h-7 rounded-lg border border-slate-200 bg-white hover:bg-slate-100 text-slate-600 shadow-2xs flex items-center justify-center text-sm font-bold"
+                                        >
+                                          +
+                                        </button>
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                              );
+                            })
+                          )}
+                        </div>
+                      </section>
+
+                      {/* (5) 근무 정보 (플렉스 스타일) */}
                       <section id="sec-work" className="scroll-mt-4">
                         <SectionHeader
                           title="근무 정보"
                           rightSubText={
-                            member.hire_date
-                              ? `🕒 ${member.hire_date.replace(/-/g, ". ")} - 현재`
+                            ex.work_effective_date || member.hire_date
+                              ? `🕒 ${formatDotDateShort(
+                                  ex.work_effective_date || member.hire_date
+                                )} - 현재`
                               : undefined
                           }
                           actionLabel={isHrManager ? "✏️ 변경" : undefined}
                           onAction={isHrManager ? openWorkEdit : undefined}
                         />
                         <div className="border-t border-slate-100">
-                          <InfoRow icon="🧳" label="근무 유형">
-                            <div className="flex flex-wrap items-center gap-2">
-                              <span className="font-semibold text-slate-800">
-                                {ex.work_schedule_type || "기본 9시"}
+                          <div
+                            onClick={() => {
+                              if (isHrManager) openWorkEdit();
+                            }}
+                            className={`group py-3.5 px-2 -mx-2 rounded-lg transition-colors flex flex-col sm:flex-row sm:items-center gap-1.5 sm:gap-4 ${
+                              isHrManager
+                                ? "hover:bg-slate-50/80 cursor-pointer"
+                                : ""
+                            }`}
+                          >
+                            <div className="w-44 shrink-0 flex items-center gap-2.5 text-slate-500 font-medium">
+                              <span className="w-5 text-center text-slate-400 text-xs select-none">
+                                🧳
                               </span>
-                              <span className="px-2 py-0.5 rounded bg-amber-100 text-amber-800 text-[11px] font-bold">
-                                {ex.work_schedule_mode || "고정"}
-                              </span>
-                              <span className="px-2 py-0.5 rounded bg-slate-100 text-slate-600 text-[11px] font-bold">
-                                주 {weeklyHours}시간
-                              </span>
+                              <span className="truncate">근무 유형</span>
                             </div>
-                          </InfoRow>
+                            <div className="flex-1 min-w-0 flex items-center justify-between gap-2">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <span className="font-semibold text-slate-800">
+                                  {ex.work_schedule_type || "기본 9시"}
+                                </span>
+                                <span className="px-2 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200/70 text-[11px] font-bold">
+                                  {ex.work_schedule_mode || "고정"}
+                                </span>
+                                <span className="px-2 py-0.5 rounded bg-slate-100 text-slate-600 text-[11px] font-bold">
+                                  주 {weeklyHours}시간
+                                </span>
+                              </div>
+                              {isHrManager && (
+                                <span className="text-slate-300 group-hover:text-slate-500 text-base leading-none shrink-0 pr-1">
+                                  ›
+                                </span>
+                              )}
+                            </div>
+                          </div>
                         </div>
                       </section>
 
-                      {/* (6) 휴가 정보 */}
+                      {/* (5-2) 초과 근무 보상 정보 🔒 (플렉스 스타일) */}
+                      <section id="sec-overtime-comp" className="scroll-mt-4">
+                        <div className="flex items-center justify-between pb-2.5">
+                          <h3 className="text-[13px] font-bold text-slate-500 inline-flex items-center gap-1.5">
+                            <span>초과 근무 보상 정보</span>
+                            <svg
+                              className="w-3.5 h-3.5 text-slate-300"
+                              fill="currentColor"
+                              viewBox="0 0 20 20"
+                            >
+                              <path
+                                fillRule="evenodd"
+                                d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z"
+                                clipRule="evenodd"
+                              />
+                            </svg>
+                          </h3>
+                          <div className="flex items-center gap-3">
+                            {(ex.overtime_comp_effective_date ||
+                              member.hire_date) && (
+                              <span className="text-xs text-slate-400">
+                                🕒{" "}
+                                {formatDotDateShort(
+                                  ex.overtime_comp_effective_date ||
+                                    member.hire_date
+                                )}{" "}
+                                - 현재
+                              </span>
+                            )}
+                            {isHrManager && (
+                              <button
+                                type="button"
+                                onClick={openOvertimeCompEdit}
+                                className="text-xs font-semibold text-slate-400 hover:text-slate-800 transition-colors"
+                              >
+                                ✏️ 변경
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                        <div className="border-t border-slate-100">
+                          <div
+                            onClick={() => {
+                              if (isHrManager) openOvertimeCompEdit();
+                            }}
+                            className={`group py-3.5 px-2 -mx-2 rounded-lg transition-colors flex flex-col sm:flex-row sm:items-center gap-1.5 sm:gap-4 ${
+                              isHrManager
+                                ? "hover:bg-slate-50/80 cursor-pointer"
+                                : ""
+                            }`}
+                          >
+                            <div className="w-44 shrink-0 flex items-center gap-2.5 text-slate-500 font-medium">
+                              <span className="w-5 text-center text-slate-400 text-xs select-none">
+                                🔥
+                              </span>
+                              <span className="truncate">초과 근무 보상 정책</span>
+                            </div>
+                            <div className="flex-1 min-w-0 flex items-center justify-between gap-2">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <span className="font-semibold text-slate-800 mr-2">
+                                  {ex.overtime_comp_policy_name ||
+                                    "기본 초과 근무 보상 정책"}
+                                </span>
+                                <span className="text-slate-400 text-xs">
+                                  포괄 계약 공제 주기
+                                </span>
+                                <span className="font-semibold text-slate-800">
+                                  {(
+                                    ex.overtime_comp_cycle_label ||
+                                    "매달 1일 - 매달 31일 (말일)"
+                                  ).replace(/\s*~\s*/g, " - ")}
+                                </span>
+                              </div>
+                              {isHrManager && (
+                                <span className="text-slate-300 group-hover:text-slate-500 text-base leading-none shrink-0 pr-1">
+                                  ›
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      </section>
+
+                      {/* (6) 휴가 정보 (플렉스 스타일) */}
                       <section id="sec-leave" className="scroll-mt-4">
                         <SectionHeader
                           title="휴가 정보"
@@ -1430,271 +2106,537 @@ export default function HqMemberProfileModal({
                           onAction={isHrManager ? openLeavePolicyEdit : undefined}
                         />
                         <div className="border-t border-slate-100">
-                          <InfoRow icon="🏖️" label="연차 정책">
-                            <div className="flex flex-wrap items-center gap-1.5">
-                              <span className="font-semibold text-slate-800 mr-1">
-                                {ex.leave_policy_name || "기본 연차 정책"}
+                          <div
+                            onClick={() => {
+                              if (isHrManager) openLeavePolicyEdit();
+                            }}
+                            className={`group py-3.5 px-2 -mx-2 rounded-lg transition-colors flex flex-col sm:flex-row sm:items-center gap-1.5 sm:gap-4 ${
+                              isHrManager
+                                ? "hover:bg-slate-50/80 cursor-pointer"
+                                : ""
+                            }`}
+                          >
+                            <div className="w-44 shrink-0 flex items-center gap-2.5 text-slate-500 font-medium">
+                              <span className="w-5 text-center text-slate-400 text-xs select-none">
+                                🏖️
                               </span>
-                              {(
-                                ex.leave_policy_tags || [
-                                  "회계일 기준 부여",
-                                  "시간 단위 사용",
-                                  "연차 촉진 사용",
-                                ]
-                              ).map((tag) => (
-                                <span
-                                  key={tag}
-                                  className="px-2 py-0.5 rounded bg-slate-100 text-slate-600 text-[11px] font-semibold"
-                                >
-                                  {tag}
-                                </span>
-                              ))}
-                              <span className="ml-2 text-xs font-bold text-emerald-700">
-                                · 잔여 {member.annual_leave_remain}일 (부여{" "}
-                                {member.annual_leave_total}일 / 사용{" "}
-                                {member.annual_leave_used}일)
-                              </span>
+                              <span className="truncate">연차 정책</span>
                             </div>
-                          </InfoRow>
+                            <div className="flex-1 min-w-0 flex items-center justify-between gap-2">
+                              <div className="flex flex-wrap items-center gap-1.5">
+                                <span className="font-semibold text-slate-800 mr-1">
+                                  {ex.leave_policy_name || "기본 연차 정책"}
+                                </span>
+                                {(
+                                  ex.leave_policy_tags || [
+                                    "회계일 기준 부여",
+                                    "시간 단위 사용",
+                                    "연차 촉진 사용",
+                                  ]
+                                ).map((tag) => (
+                                  <span
+                                    key={tag}
+                                    className="px-2 py-0.5 rounded bg-slate-100 text-slate-600 text-[11px] font-semibold"
+                                  >
+                                    {tag}
+                                  </span>
+                                ))}
+                              </div>
+                              {isHrManager && (
+                                <span className="text-slate-300 group-hover:text-slate-500 text-base leading-none shrink-0 pr-1">
+                                  ›
+                                </span>
+                              )}
+                            </div>
+                          </div>
                         </div>
                       </section>
 
-                      {/* (7) 쉬는 날 정보 */}
+                      {/* (7) 쉬는 날 정보 (플렉스 스타일) */}
                       <section id="sec-holiday" className="scroll-mt-4">
                         <SectionHeader
                           title="쉬는 날 정보"
-                          actionLabel="쉬는 날 보기 ›"
+                          actionLabel={isHrManager ? "✏️ 변경" : "쉬는 날 보기 ›"}
                           onAction={() => {
-                            onClose();
                             shell?.openSettingsModal("holidays");
                           }}
                         />
                         <div className="border-t border-slate-100">
-                          <InfoRow icon="📅" label="쉬는 날">
-                            {(() => {
-                              const curYear = String(new Date().getFullYear());
-                              const yrList =
-                                shell?.companySettings?.holidays_by_year?.[
-                                  curYear
-                                ] ||
-                                shell?.companySettings?.holidays_by_year?.[
-                                  "2026"
-                                ];
-                              const totalDays = yrList
-                                ? yrList.reduce(
-                                    (s, h) => s + Number(h.days_count ?? 1),
-                                    0
-                                  )
-                                : 14;
-                              const names = yrList
-                                ? yrList.map((h) => h.name).join(", ")
-                                : ex.holiday_summary ||
-                                  "1월 1일, 설날, 3·1절, 부처님 오신 날, 노동절, 어린이날, 현충일, 제헌절, 광복절, 추석, 개천절, 한글날, 성탄절...";
-                              return (
-                                <>
-                                  <span className="font-semibold text-slate-800 mr-2 shrink-0">
-                                    기본 ({totalDays}일)
-                                  </span>
-                                  <span className="text-slate-400 text-xs truncate max-w-md">
-                                    {names}
-                                  </span>
-                                </>
-                              );
-                            })()}
-                          </InfoRow>
+                          <div
+                            onClick={() => {
+                              shell?.openSettingsModal("holidays");
+                            }}
+                            className="group py-3.5 px-2 -mx-2 rounded-lg hover:bg-slate-50/80 cursor-pointer transition-colors flex flex-col sm:flex-row sm:items-center gap-1.5 sm:gap-4"
+                          >
+                            <div className="w-44 shrink-0 flex items-center gap-2.5 text-slate-500 font-medium">
+                              <span className="w-5 text-center text-slate-400 text-xs select-none">
+                                📅
+                              </span>
+                              <span className="truncate">쉬는 날</span>
+                            </div>
+                            <div className="flex-1 min-w-0 flex items-center justify-between gap-2">
+                              <div className="flex items-center min-w-0">
+                                {(() => {
+                                  const curYear = String(
+                                    new Date().getFullYear()
+                                  );
+                                  const yrList =
+                                    shell?.companySettings?.holidays_by_year?.[
+                                      curYear
+                                    ] ||
+                                    shell?.companySettings?.holidays_by_year?.[
+                                      "2026"
+                                    ];
+                                  const totalDays = yrList
+                                    ? yrList.reduce(
+                                        (s, h) => s + Number(h.days_count ?? 1),
+                                        0
+                                      )
+                                    : 14;
+                                  const names = yrList
+                                    ? yrList.map((h) => h.name).join(", ")
+                                    : ex.holiday_summary ||
+                                      "1월 1일, 설날, 3 · 1절, 부처님 오신 날, 노동절, 어린이날, 현충일, 제헌절, 광복절, 추석, 개천절, 한글날, 성탄절...";
+                                  return (
+                                    <>
+                                      <span className="font-semibold text-slate-800 mr-2.5 shrink-0">
+                                        기본 ({totalDays}일)
+                                      </span>
+                                      <span className="text-slate-400 text-xs truncate max-w-md">
+                                        {names}
+                                      </span>
+                                    </>
+                                  );
+                                })()}
+                              </div>
+                              <span className="text-slate-300 group-hover:text-slate-500 text-base leading-none shrink-0 pr-1">
+                                ›
+                              </span>
+                            </div>
+                          </div>
                         </div>
                       </section>
 
-                      {/* (8) 휴직 이력 */}
+                      {/* (8) 휴직 이력 (플렉스형 + 추가 & 호버 + 버튼) */}
                       <section id="sec-leave-hist" className="scroll-mt-4">
                         <SectionHeader
                           title="휴직 이력"
                           actionLabel={isHrManager ? "+ 추가" : undefined}
                           onAction={
                             isHrManager
-                              ? () => setEditModal("add_leave_hist")
+                              ? () => setLeaveHistModalState({ mode: "create" })
                               : undefined
                           }
                         />
-                        <div className="border-t border-slate-100">
+                        <div className="divide-y divide-slate-100 border-t border-slate-100">
                           {(ex.leave_histories || []).length === 0 ? (
-                            <InfoRow icon="🌿" label="휴직 이력">
-                              <EmptyText />
-                            </InfoRow>
+                            <div className="group py-3.5 px-2 -mx-2 rounded-lg hover:bg-slate-50/70 transition-colors flex flex-col sm:flex-row sm:items-center gap-1.5 sm:gap-4">
+                              <div className="w-44 shrink-0 flex items-center gap-2.5 text-slate-500 font-medium">
+                                <span className="w-5 text-center text-slate-400 text-xs select-none">
+                                  🌿
+                                </span>
+                                <span className="truncate">휴직 이력</span>
+                              </div>
+                              <div className="flex-1 min-w-0 flex items-center justify-between gap-2">
+                                <PlaceholderBtn
+                                  text="입력하기"
+                                  canClick={isHrManager}
+                                  onClick={() =>
+                                    setLeaveHistModalState({ mode: "create" })
+                                  }
+                                />
+                                {isHrManager && (
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      setLeaveHistModalState({ mode: "create" })
+                                    }
+                                    title="휴직 등록하기"
+                                    className="w-7 h-7 rounded-lg border border-slate-200 bg-white hover:bg-slate-100 text-slate-600 shadow-2xs flex items-center justify-center text-sm font-bold opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
+                                  >
+                                    +
+                                  </button>
+                                )}
+                              </div>
+                            </div>
                           ) : (
                             (ex.leave_histories || []).map((lh) => (
-                              <InfoRow
+                              <div
                                 key={lh.id}
-                                icon="🌿"
-                                label={lh.leave_kind}
+                                onClick={() => {
+                                  if (isHrManager)
+                                    setLeaveHistModalState({
+                                      mode: "edit",
+                                      item: lh,
+                                    });
+                                }}
+                                className={`group py-3.5 px-2 -mx-2 rounded-lg transition-colors flex flex-col sm:flex-row sm:items-center gap-1.5 sm:gap-4 ${
+                                  isHrManager
+                                    ? "hover:bg-slate-50/80 cursor-pointer"
+                                    : ""
+                                }`}
                               >
-                                <div className="flex items-center justify-between w-full">
-                                  <div>
-                                    <span className="font-medium text-slate-800">
-                                      {lh.start_date} ~ {lh.end_date || "진행중"}
+                                <div className="w-44 shrink-0 flex items-center gap-2.5 text-slate-500 font-medium">
+                                  <span className="w-5 text-center text-slate-400 text-xs select-none">
+                                    🌿
+                                  </span>
+                                  <span className="truncate font-semibold text-slate-700">
+                                    {lh.leave_kind}
+                                  </span>
+                                </div>
+                                <div className="flex-1 min-w-0 flex items-center justify-between gap-2">
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    <span className="font-semibold text-slate-800">
+                                      {formatDotDateShort(lh.start_date)} ~{" "}
+                                      {lh.end_date
+                                        ? formatDotDateShort(lh.end_date)
+                                        : "진행중"}
                                     </span>
-                                    {lh.reason && (
-                                      <span className="ml-3 text-slate-500">
-                                        사유: {lh.reason}
+                                    <span className="px-2 py-0.5 rounded bg-slate-100 text-slate-600 text-[11px] font-bold">
+                                      근속{" "}
+                                      {lh.include_in_tenure !== false
+                                        ? "포함"
+                                        : "미포함"}
+                                    </span>
+                                    {lh.salary_pay_rate !== undefined &&
+                                      lh.salary_pay_rate !== null && (
+                                        <span className="px-2 py-0.5 rounded bg-emerald-50 text-[#00a84b] text-[11px] font-bold">
+                                          급여지급률 {lh.salary_pay_rate}%
+                                        </span>
+                                      )}
+                                    {lh.memo && isHrManager && (
+                                      <span
+                                        className="px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 text-[10px] font-semibold"
+                                        title={lh.memo}
+                                      >
+                                        🔒 메모
                                       </span>
                                     )}
                                   </div>
                                   {isHrManager && (
-                                    <button
-                                      type="button"
-                                      onClick={() =>
-                                        removeArrayItem(
-                                          "leave_histories",
-                                          lh.id,
-                                          "휴직 이력"
-                                        )
-                                      }
-                                      className="text-xs text-slate-300 hover:text-rose-500"
-                                    >
-                                      삭제
-                                    </button>
+                                    <div className="flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                                      <span className="text-[11px] text-slate-400 font-semibold mr-0.5">
+                                        수정
+                                      </span>
+                                      <button
+                                        type="button"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          setLeaveHistModalState({
+                                            mode: "create",
+                                          });
+                                        }}
+                                        title="휴직 등록하기"
+                                        className="w-7 h-7 rounded-lg border border-slate-200 bg-white hover:bg-slate-100 text-slate-600 shadow-2xs flex items-center justify-center text-sm font-bold"
+                                      >
+                                        +
+                                      </button>
+                                    </div>
                                   )}
                                 </div>
-                              </InfoRow>
+                              </div>
                             ))
                           )}
                         </div>
                       </section>
 
-                      {/* (9) 수상 */}
+                      {/* (9) 수상 (플렉스형 + 추가 & 호버 + 버튼) */}
                       <section id="sec-award" className="scroll-mt-4">
                         <SectionHeader
                           title="수상"
                           actionLabel={canEditSelfOrHr ? "+ 추가" : undefined}
                           onAction={
                             canEditSelfOrHr
-                              ? () => setEditModal("add_award")
+                              ? () => setAwardModalState({ mode: "create" })
                               : undefined
                           }
                         />
-                        <div className="border-t border-slate-100">
+                        <div className="divide-y divide-slate-100 border-t border-slate-100">
                           {(ex.awards || []).length === 0 ? (
-                            <InfoRow icon="🏅" label="수상">
-                              <EmptyText />
-                            </InfoRow>
+                            <div className="group py-3.5 px-2 -mx-2 rounded-lg hover:bg-slate-50/70 transition-colors flex flex-col sm:flex-row sm:items-center gap-1.5 sm:gap-4">
+                              <div className="w-44 shrink-0 flex items-center gap-2.5 text-slate-500 font-medium">
+                                <span className="w-5 text-center text-slate-400 text-xs select-none">
+                                  🏅
+                                </span>
+                                <span className="truncate">수상</span>
+                              </div>
+                              <div className="flex-1 min-w-0 flex items-center justify-between gap-2">
+                                <PlaceholderBtn
+                                  text="입력하기"
+                                  canClick={canEditSelfOrHr}
+                                  onClick={() =>
+                                    setAwardModalState({ mode: "create" })
+                                  }
+                                />
+                                {canEditSelfOrHr && (
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      setAwardModalState({ mode: "create" })
+                                    }
+                                    title="수상 추가하기"
+                                    className="w-7 h-7 rounded-lg border border-slate-200 bg-white hover:bg-slate-100 text-slate-600 shadow-2xs flex items-center justify-center text-sm font-bold opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
+                                  >
+                                    +
+                                  </button>
+                                )}
+                              </div>
+                            </div>
                           ) : (
                             (ex.awards || []).map((aw) => (
-                              <InfoRow key={aw.id} icon="🏅" label={aw.title}>
-                                <div className="flex items-center justify-between w-full">
-                                  <div>
-                                    <span className="text-slate-700">
+                              <div
+                                key={aw.id}
+                                onClick={() => {
+                                  if (canEditSelfOrHr)
+                                    setAwardModalState({
+                                      mode: "edit",
+                                      item: aw,
+                                    });
+                                }}
+                                className={`group py-3.5 px-2 -mx-2 rounded-lg transition-colors flex flex-col sm:flex-row sm:items-center gap-1.5 sm:gap-4 ${
+                                  canEditSelfOrHr
+                                    ? "hover:bg-slate-50/80 cursor-pointer"
+                                    : ""
+                                }`}
+                              >
+                                <div className="w-44 shrink-0 flex items-center gap-2.5 text-slate-500 font-medium">
+                                  <span className="w-5 text-center text-slate-400 text-xs select-none">
+                                    🏅
+                                  </span>
+                                  <span className="truncate font-semibold text-slate-800">
+                                    {aw.title}
+                                  </span>
+                                </div>
+                                <div className="flex-1 min-w-0 flex items-center justify-between gap-2">
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    <span className="text-slate-700 font-medium">
                                       {formatKoreanDate(aw.awarded_date)}
                                     </span>
+                                    {aw.issuer_type && (
+                                      <span className="px-2 py-0.5 rounded bg-slate-100 text-slate-600 text-[11px] font-bold">
+                                        {aw.issuer_type}
+                                      </span>
+                                    )}
                                     {aw.issuer && (
-                                      <span className="ml-3 text-slate-500">
-                                        수여: {aw.issuer}
+                                      <span className="text-slate-500">
+                                        {aw.issuer}
+                                      </span>
+                                    )}
+                                    {aw.note && (
+                                      <span className="text-xs text-slate-400 truncate max-w-[240px]">
+                                        · {aw.note}
                                       </span>
                                     )}
                                   </div>
                                   {canEditSelfOrHr && (
-                                    <button
-                                      type="button"
-                                      onClick={() =>
-                                        removeArrayItem("awards", aw.id, "수상")
-                                      }
-                                      className="text-xs text-slate-300 hover:text-rose-500"
-                                    >
-                                      삭제
-                                    </button>
+                                    <div className="flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                                      <span className="text-[11px] text-slate-400 font-semibold mr-0.5">
+                                        수정
+                                      </span>
+                                      <button
+                                        type="button"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          setAwardModalState({
+                                            mode: "create",
+                                          });
+                                        }}
+                                        title="수상 추가하기"
+                                        className="w-7 h-7 rounded-lg border border-slate-200 bg-white hover:bg-slate-100 text-slate-600 shadow-2xs flex items-center justify-center text-sm font-bold"
+                                      >
+                                        +
+                                      </button>
+                                    </div>
                                   )}
                                 </div>
-                              </InfoRow>
+                              </div>
                             ))
                           )}
                         </div>
                       </section>
 
-                      {/* (10) 징계 */}
+                      {/* (10) 징계 (플렉스형 + 추가 & 호버 + 버튼) */}
                       <section id="sec-discipline" className="scroll-mt-4">
                         <SectionHeader
                           title="징계"
                           actionLabel={isHrManager ? "+ 추가" : undefined}
                           onAction={
                             isHrManager
-                              ? () => setEditModal("add_discipline")
+                              ? () =>
+                                  setDisciplineModalState({ mode: "create" })
                               : undefined
                           }
                         />
-                        <div className="border-t border-slate-100">
+                        <div className="divide-y divide-slate-100 border-t border-slate-100">
                           {(ex.disciplines || []).length === 0 ? (
-                            <InfoRow icon="⚖️" label="징계">
-                              <EmptyText />
-                            </InfoRow>
+                            <div className="group py-3.5 px-2 -mx-2 rounded-lg hover:bg-slate-50/70 transition-colors flex flex-col sm:flex-row sm:items-center gap-1.5 sm:gap-4">
+                              <div className="w-44 shrink-0 flex items-center gap-2.5 text-slate-500 font-medium">
+                                <span className="w-5 text-center text-slate-400 text-xs select-none">
+                                  ⚖️
+                                </span>
+                                <span className="truncate">징계</span>
+                              </div>
+                              <div className="flex-1 min-w-0 flex items-center justify-between gap-2">
+                                <PlaceholderBtn
+                                  text="입력하기"
+                                  canClick={isHrManager}
+                                  onClick={() =>
+                                    setDisciplineModalState({ mode: "create" })
+                                  }
+                                />
+                                {isHrManager && (
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      setDisciplineModalState({ mode: "create" })
+                                    }
+                                    title="징계 추가하기"
+                                    className="w-7 h-7 rounded-lg border border-slate-200 bg-white hover:bg-slate-100 text-slate-600 shadow-2xs flex items-center justify-center text-sm font-bold opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
+                                  >
+                                    +
+                                  </button>
+                                )}
+                              </div>
+                            </div>
                           ) : (
                             (ex.disciplines || []).map((ds) => (
-                              <InfoRow key={ds.id} icon="⚖️" label={ds.kind}>
-                                <div className="flex items-center justify-between w-full">
-                                  <div>
-                                    <span className="text-slate-700">
-                                      {formatKoreanDate(ds.action_date)}
+                              <div
+                                key={ds.id}
+                                onClick={() => {
+                                  if (isHrManager)
+                                    setDisciplineModalState({
+                                      mode: "edit",
+                                      item: ds,
+                                    });
+                                }}
+                                className={`group py-3.5 px-2 -mx-2 rounded-lg transition-colors flex flex-col sm:flex-row sm:items-center gap-1.5 sm:gap-4 ${
+                                  isHrManager
+                                    ? "hover:bg-slate-50/80 cursor-pointer"
+                                    : ""
+                                }`}
+                              >
+                                <div className="w-44 shrink-0 flex items-center gap-2.5 text-slate-500 font-medium">
+                                  <span className="w-5 text-center text-slate-400 text-xs select-none">
+                                    ⚖️
+                                  </span>
+                                  <span className="truncate font-semibold text-slate-800">
+                                    {ds.kind}
+                                  </span>
+                                </div>
+                                <div className="flex-1 min-w-0 flex items-center justify-between gap-2">
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    <span className="text-slate-700 font-medium">
+                                      {ds.end_date && ds.end_date !== ds.action_date
+                                        ? `${formatDotDateShort(ds.action_date)} ~ ${formatDotDateShort(ds.end_date)}`
+                                        : formatKoreanDate(ds.action_date)}
                                     </span>
                                     {ds.reason && (
-                                      <span className="ml-3 text-slate-500">
+                                      <span className="text-slate-500">
                                         {ds.reason}
                                       </span>
                                     )}
                                   </div>
                                   {isHrManager && (
-                                    <button
-                                      type="button"
-                                      onClick={() =>
-                                        removeArrayItem(
-                                          "disciplines",
-                                          ds.id,
-                                          "징계"
-                                        )
-                                      }
-                                      className="text-xs text-slate-300 hover:text-rose-500"
-                                    >
-                                      삭제
-                                    </button>
+                                    <div className="flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                                      <span className="text-[11px] text-slate-400 font-semibold mr-0.5">
+                                        수정
+                                      </span>
+                                      <button
+                                        type="button"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          setDisciplineModalState({
+                                            mode: "create",
+                                          });
+                                        }}
+                                        title="징계 추가하기"
+                                        className="w-7 h-7 rounded-lg border border-slate-200 bg-white hover:bg-slate-100 text-slate-600 shadow-2xs flex items-center justify-center text-sm font-bold"
+                                      >
+                                        +
+                                      </button>
+                                    </div>
                                   )}
                                 </div>
-                              </InfoRow>
+                              </div>
                             ))
                           )}
                         </div>
                       </section>
 
-                      {/* (11) 경력 정보 */}
+                      {/* (11) 경력 정보 (플렉스 스타일) */}
                       <section id="sec-career" className="scroll-mt-4">
                         <SectionHeader
                           title="경력 정보"
                           actionLabel={canEditSelfOrHr ? "+ 추가" : undefined}
                           onAction={
                             canEditSelfOrHr
-                              ? () => setEditModal("add_career")
+                              ? () => setCareerModalState({ mode: "create" })
                               : undefined
                           }
                         />
                         <div className="divide-y divide-slate-100 border-t border-slate-100">
                           {(ex.careers || []).length === 0 ? (
-                            <InfoRow icon="🏢" label="경력 사항">
-                              <PlaceholderBtn
-                                text="이전 직장·경력 추가하기"
-                                canClick={canEditSelfOrHr}
-                                onClick={() => setEditModal("add_career")}
-                              />
-                            </InfoRow>
+                            <div className="group py-3.5 px-2 -mx-2 rounded-lg hover:bg-slate-50/70 transition-colors flex flex-col sm:flex-row sm:items-center gap-1.5 sm:gap-4">
+                              <div className="w-44 shrink-0 flex items-center gap-2.5 text-slate-500 font-medium">
+                                <span className="w-5 text-center text-slate-400 text-xs select-none">
+                                  🏢
+                                </span>
+                                <span className="truncate">경력 정보</span>
+                              </div>
+                              <div className="flex-1 min-w-0 flex items-center justify-between gap-2">
+                                <PlaceholderBtn
+                                  text="입력하기"
+                                  canClick={canEditSelfOrHr}
+                                  onClick={() =>
+                                    setCareerModalState({ mode: "create" })
+                                  }
+                                />
+                                {canEditSelfOrHr && (
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      setCareerModalState({ mode: "create" })
+                                    }
+                                    title="경력 추가하기"
+                                    className="w-7 h-7 rounded-lg border border-slate-200 bg-white hover:bg-slate-100 text-slate-600 shadow-2xs flex items-center justify-center text-sm font-bold opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
+                                  >
+                                    +
+                                  </button>
+                                )}
+                              </div>
+                            </div>
                           ) : (
                             (ex.careers || []).map((c) => {
                               const dur = calcYmDuration(c.start_ym, c.end_ym);
                               return (
-                                <InfoRow
+                                <div
                                   key={c.id}
-                                  icon="🏢"
-                                  label={c.company_name}
+                                  onClick={() => {
+                                    if (canEditSelfOrHr)
+                                      setCareerModalState({
+                                        mode: "edit",
+                                        item: c,
+                                      });
+                                  }}
+                                  className={`group py-3.5 px-2 -mx-2 rounded-lg transition-colors flex flex-col sm:flex-row sm:items-center gap-1.5 sm:gap-4 ${
+                                    canEditSelfOrHr
+                                      ? "hover:bg-slate-50/80 cursor-pointer"
+                                      : ""
+                                  }`}
                                 >
-                                  <div className="flex flex-wrap items-center justify-between gap-2 w-full">
+                                  <div className="w-44 shrink-0 flex items-center gap-2.5 text-slate-500 font-medium">
+                                    <span className="w-5 text-center text-slate-400 text-xs select-none">
+                                      🏢
+                                    </span>
+                                    <span className="truncate font-semibold text-slate-800">
+                                      {c.company_name}
+                                    </span>
+                                  </div>
+                                  <div className="flex-1 min-w-0 flex items-center justify-between gap-2">
                                     <div className="flex flex-wrap items-center gap-2">
                                       <span className="text-slate-400">기간</span>
                                       <span className="font-semibold text-slate-800">
-                                        {formatKoreanYm(c.start_ym)} -{" "}
+                                        {formatKoreanYm(c.start_ym)} –{" "}
                                         {formatKoreanYm(c.end_ym)}
                                       </span>
                                       {dur && (
@@ -1702,77 +2644,135 @@ export default function HqMemberProfileModal({
                                           {dur}
                                         </span>
                                       )}
-                                      <span className="text-slate-400 ml-2">
+                                      <span className="text-slate-400 ml-1">
                                         계약유형
                                       </span>
-                                      <span className="font-medium text-slate-800">
+                                      <span className="font-semibold text-slate-800">
                                         {c.contract_type}
                                       </span>
-                                      {(c.department || c.job_title) && (
+                                      {(c.job_role ||
+                                        c.department ||
+                                        c.job_title) && (
                                         <span className="text-xs text-slate-500">
-                                          · {[c.department, c.job_title]
+                                          ·{" "}
+                                          {[
+                                            c.job_role,
+                                            c.department,
+                                            c.job_title,
+                                          ]
                                             .filter(Boolean)
                                             .join(" / ")}
                                         </span>
                                       )}
                                     </div>
                                     {canEditSelfOrHr && (
-                                      <button
-                                        type="button"
-                                        onClick={() =>
-                                          removeArrayItem(
-                                            "careers",
-                                            c.id,
-                                            "경력"
-                                          )
-                                        }
-                                        className="text-xs text-slate-300 hover:text-rose-500"
-                                      >
-                                        삭제
-                                      </button>
+                                      <div className="flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                                        <span className="text-[11px] text-slate-400 font-semibold mr-0.5">
+                                          수정
+                                        </span>
+                                        <button
+                                          type="button"
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            setCareerModalState({
+                                              mode: "create",
+                                            });
+                                          }}
+                                          title="경력 추가하기"
+                                          className="w-7 h-7 rounded-lg border border-slate-200 bg-white hover:bg-slate-100 text-slate-600 shadow-2xs flex items-center justify-center text-sm font-bold"
+                                        >
+                                          +
+                                        </button>
+                                      </div>
                                     )}
                                   </div>
-                                </InfoRow>
+                                </div>
                               );
                             })
                           )}
                         </div>
                       </section>
 
-                      {/* (12) 학력 정보 */}
+                      {/* (12) 학력 정보 (플렉스 스타일) */}
                       <section id="sec-edu" className="scroll-mt-4">
                         <SectionHeader
                           title="학력 정보"
                           actionLabel={canEditSelfOrHr ? "+ 추가" : undefined}
                           onAction={
                             canEditSelfOrHr
-                              ? () => setEditModal("add_edu")
+                              ? () => setEduModalState({ mode: "create" })
                               : undefined
                           }
                         />
                         <div className="divide-y divide-slate-100 border-t border-slate-100">
                           {(ex.educations || []).length === 0 ? (
-                            <InfoRow icon="🎓" label="학력 사항">
-                              <PlaceholderBtn
-                                text="학력 추가하기"
-                                canClick={canEditSelfOrHr}
-                                onClick={() => setEditModal("add_edu")}
-                              />
-                            </InfoRow>
+                            <div className="group py-3.5 px-2 -mx-2 rounded-lg hover:bg-slate-50/70 transition-colors flex flex-col sm:flex-row sm:items-center gap-1.5 sm:gap-4">
+                              <div className="w-44 shrink-0 flex items-center gap-2.5 text-slate-500 font-medium">
+                                <span className="w-5 text-center text-slate-400 text-xs select-none">
+                                  🎓
+                                </span>
+                                <span className="truncate">학력 정보</span>
+                              </div>
+                              <div className="flex-1 min-w-0 flex items-center justify-between gap-2">
+                                <PlaceholderBtn
+                                  text="입력하기"
+                                  canClick={canEditSelfOrHr}
+                                  onClick={() =>
+                                    setEduModalState({ mode: "create" })
+                                  }
+                                />
+                                {canEditSelfOrHr && (
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      setEduModalState({ mode: "create" })
+                                    }
+                                    title="학력 추가하기"
+                                    className="w-7 h-7 rounded-lg border border-slate-200 bg-white hover:bg-slate-100 text-slate-600 shadow-2xs flex items-center justify-center text-sm font-bold opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
+                                  >
+                                    +
+                                  </button>
+                                )}
+                              </div>
+                            </div>
                           ) : (
                             (ex.educations || []).map((ed) => (
-                              <InfoRow
+                              <div
                                 key={ed.id}
-                                icon="🎓"
-                                label={ed.school_name}
+                                onClick={() => {
+                                  if (canEditSelfOrHr)
+                                    setEduModalState({
+                                      mode: "edit",
+                                      item: ed,
+                                    });
+                                }}
+                                className={`group py-3.5 px-2 -mx-2 rounded-lg transition-colors flex flex-col sm:flex-row sm:items-center gap-1.5 sm:gap-4 ${
+                                  canEditSelfOrHr
+                                    ? "hover:bg-slate-50/80 cursor-pointer"
+                                    : ""
+                                }`}
                               >
-                                <div className="flex flex-wrap items-center justify-between gap-2 w-full">
+                                <div className="w-44 shrink-0 flex items-center gap-2.5 text-slate-500 font-medium">
+                                  <span className="w-5 text-center text-slate-400 text-xs select-none">
+                                    🎓
+                                  </span>
+                                  <span className="truncate font-semibold text-slate-800">
+                                    {ed.school_name}
+                                  </span>
+                                </div>
+                                <div className="flex-1 min-w-0 flex items-center justify-between gap-2">
                                   <div className="flex flex-wrap items-center gap-1.5">
-                                    <span className="text-slate-400">기간</span>
-                                    <span className="font-semibold text-slate-800 mr-1">
-                                      {formatKoreanYm(ed.start_ym)} -{" "}
-                                      {formatKoreanYm(ed.end_ym)}
-                                    </span>
+                                    {(ed.start_ym || ed.end_ym) && (
+                                      <>
+                                        <span className="text-slate-400">
+                                          기간
+                                        </span>
+                                        <span className="font-semibold text-slate-800 mr-1">
+                                          {formatKoreanYm(ed.start_ym)} –{" "}
+                                          {formatKoreanYm(ed.end_ym)}
+                                        </span>
+                                      </>
+                                    )}
                                     <span className="px-2 py-0.5 rounded bg-slate-100 text-slate-600 text-[11px] font-bold">
                                       {ed.graduation_status}
                                     </span>
@@ -1781,33 +2781,36 @@ export default function HqMemberProfileModal({
                                     </span>
                                     {ed.major && (
                                       <span className="text-xs text-slate-500 ml-1">
-                                        ({ed.major})
+                                        {ed.major}
                                       </span>
                                     )}
                                   </div>
                                   {canEditSelfOrHr && (
-                                    <button
-                                      type="button"
-                                      onClick={() =>
-                                        removeArrayItem(
-                                          "educations",
-                                          ed.id,
-                                          "학력"
-                                        )
-                                      }
-                                      className="text-xs text-slate-300 hover:text-rose-500"
-                                    >
-                                      삭제
-                                    </button>
+                                    <div className="flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                                      <span className="text-[11px] text-slate-400 font-semibold mr-0.5">
+                                        수정
+                                      </span>
+                                      <button
+                                        type="button"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          setEduModalState({ mode: "create" });
+                                        }}
+                                        title="학력 추가하기"
+                                        className="w-7 h-7 rounded-lg border border-slate-200 bg-white hover:bg-slate-100 text-slate-600 shadow-2xs flex items-center justify-center text-sm font-bold"
+                                      >
+                                        +
+                                      </button>
+                                    </div>
                                   )}
                                 </div>
-                              </InfoRow>
+                              </div>
                             ))
                           )}
                         </div>
                       </section>
 
-                      {/* (13) 특이사항 */}
+                      {/* (13) 특이사항 (플렉스 스타일) */}
                       <section id="sec-special" className="scroll-mt-4">
                         <SectionHeader
                           title="특이사항"
@@ -1815,55 +2818,191 @@ export default function HqMemberProfileModal({
                           onAction={canEditSelfOrHr ? openSpecialEdit : undefined}
                         />
                         <div className="divide-y divide-slate-100 border-t border-slate-100">
-                          <InfoRow icon="👁️" label="특이사항">
-                            {ex.special_notes ? (
-                              <span className="text-slate-800">
-                                {ex.special_notes}
-                              </span>
-                            ) : (
-                              <EmptyText />
-                            )}
-                          </InfoRow>
-                          {isHrManager && (
+                          {(() => {
+                            const sp = ex.special_notes_detail || {};
+                            const hasCc = Boolean(
+                              sp.childcare_short_work_start ||
+                                sp.childcare_short_work_end
+                            );
+                            const hasFg = Boolean(
+                              sp.foreigner_flat_tax_start ||
+                                sp.foreigner_flat_tax_end
+                            );
+                            const hasTx = Boolean(
+                              sp.income_tax_reduction_code ||
+                                sp.income_tax_reduction_start
+                            );
+                            const hasNotes = Boolean(ex.special_notes);
+                            const hasAny = hasCc || hasFg || hasTx || hasNotes;
+
+                            return (
+                              <div
+                                onClick={() => {
+                                  if (canEditSelfOrHr && hasAny) openSpecialEdit();
+                                }}
+                                className={`group py-3.5 px-2 -mx-2 rounded-lg transition-colors flex flex-col sm:flex-row sm:items-center gap-1.5 sm:gap-4 ${
+                                  canEditSelfOrHr && hasAny
+                                    ? "hover:bg-slate-50/80 cursor-pointer"
+                                    : ""
+                                }`}
+                              >
+                                <div className="w-44 shrink-0 flex items-center gap-2 text-slate-500 font-medium">
+                                  <span className="w-5 text-center text-slate-400 text-xs select-none">
+                                    🙂
+                                  </span>
+                                  <span className="truncate font-semibold text-slate-700">
+                                    특이사항
+                                  </span>
+                                  <span
+                                    title="육아기 단축 근무, 외국인 단일 세율, 중소기업 취업자 소득세 감면 등 인사·급여 특이사항을 관리합니다."
+                                    className="w-3.5 h-3.5 rounded-full border border-slate-300 text-slate-400 text-[9px] font-bold inline-flex items-center justify-center cursor-help shrink-0"
+                                  >
+                                    ?
+                                  </span>
+                                </div>
+                                <div className="flex-1 min-w-0 flex flex-wrap items-center gap-2">
+                                  {!hasAny ? (
+                                    <PlaceholderBtn
+                                      text="입력하기"
+                                      canClick={canEditSelfOrHr}
+                                      onClick={openSpecialEdit}
+                                    />
+                                  ) : (
+                                    <>
+                                      {hasCc && (
+                                        <span className="px-2.5 py-1 rounded-lg bg-emerald-50 text-[#00a84b] text-[11px] font-bold">
+                                          육아기 단축 근무{" "}
+                                          {formatDotDateShort(
+                                            sp.childcare_short_work_start
+                                          )}{" "}
+                                          –{" "}
+                                          {formatDotDateShort(
+                                            sp.childcare_short_work_end
+                                          )}
+                                        </span>
+                                      )}
+                                      {hasFg && (
+                                        <span className="px-2.5 py-1 rounded-lg bg-blue-50 text-blue-700 text-[11px] font-bold">
+                                          외국인 단일 세율{" "}
+                                          {formatDotDateShort(
+                                            sp.foreigner_flat_tax_start
+                                          )}{" "}
+                                          –{" "}
+                                          {formatDotDateShort(
+                                            sp.foreigner_flat_tax_end
+                                          )}
+                                        </span>
+                                      )}
+                                      {hasTx && (
+                                        <span className="px-2.5 py-1 rounded-lg bg-violet-50 text-violet-700 text-[11px] font-bold">
+                                          {formatTaxReductionLabel(
+                                            sp.income_tax_reduction_code
+                                          ) || "소득세 감면"}
+                                          {sp.income_tax_reduction_start && (
+                                            <span className="ml-1.5 font-semibold text-violet-600">
+                                              (
+                                              {formatDotDateShort(
+                                                sp.income_tax_reduction_start
+                                              )}{" "}
+                                              –{" "}
+                                              {formatDotDateShort(
+                                                sp.income_tax_reduction_end
+                                              )}
+                                              )
+                                            </span>
+                                          )}
+                                        </span>
+                                      )}
+                                      {hasNotes && (
+                                        <span className="text-slate-700 font-medium">
+                                          {ex.special_notes}
+                                        </span>
+                                      )}
+                                    </>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })()}
+                          {isHrManager && member.hr_memo && (
                             <InfoRow icon="🔒" label="인사 비공개 메모">
-                              {member.hr_memo ? (
-                                <span className="text-amber-800 font-medium">
-                                  {member.hr_memo}
-                                </span>
-                              ) : (
-                                <EmptyText text="인사팀 전용 메모 없음" />
-                              )}
+                              <span className="text-amber-800 font-medium">
+                                {member.hr_memo}
+                              </span>
                             </InfoRow>
                           )}
                         </div>
                       </section>
 
-                      {/* (14) 가족 정보 */}
+                      {/* (14) 가족 정보 (플렉스 스타일) */}
                       <section id="sec-family" className="scroll-mt-4 pb-6">
                         <SectionHeader
                           title="가족 정보"
                           actionLabel={canEditSelfOrHr ? "+ 추가" : undefined}
                           onAction={
                             canEditSelfOrHr
-                              ? () => setEditModal("add_family")
+                              ? () => setFamilyModalState({ mode: "create" })
                               : undefined
                           }
                         />
                         <div className="divide-y divide-slate-100 border-t border-slate-100">
-                          <InfoRow icon="👪" label="가족 구성원">
-                            {families.length === 0 ? (
-                              <PlaceholderBtn
-                                text="입력하기"
-                                canClick={canEditSelfOrHr}
-                                onClick={() => setEditModal("add_family")}
-                              />
-                            ) : (
-                              <div className="space-y-1.5 w-full">
-                                {families.map((fm) => (
-                                  <div
-                                    key={fm.id}
-                                    className="flex flex-wrap items-center justify-between gap-2"
+                          {families.length === 0 ? (
+                            <div className="group py-3.5 px-2 -mx-2 rounded-lg hover:bg-slate-50/70 transition-colors flex flex-col sm:flex-row sm:items-center gap-1.5 sm:gap-4">
+                              <div className="w-44 shrink-0 flex items-center gap-2.5 text-slate-500 font-medium">
+                                <span className="w-5 text-center text-slate-400 text-xs select-none">
+                                  👤
+                                </span>
+                                <span className="truncate">가족 구성원</span>
+                              </div>
+                              <div className="flex-1 min-w-0 flex items-center justify-between gap-2">
+                                <PlaceholderBtn
+                                  text="입력하기"
+                                  canClick={canEditSelfOrHr}
+                                  onClick={() =>
+                                    setFamilyModalState({ mode: "create" })
+                                  }
+                                />
+                                {canEditSelfOrHr && (
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      setFamilyModalState({ mode: "create" })
+                                    }
+                                    title="가족 정보 추가하기"
+                                    className="w-7 h-7 rounded-lg border border-slate-200 bg-white hover:bg-slate-100 text-slate-600 shadow-2xs flex items-center justify-center text-sm font-bold opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
                                   >
+                                    +
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="py-2 divide-y divide-slate-50">
+                              {families.map((fm, idx) => (
+                                <div
+                                  key={fm.id}
+                                  onClick={() => {
+                                    if (canEditSelfOrHr)
+                                      setFamilyModalState({
+                                        mode: "edit",
+                                        item: fm,
+                                      });
+                                  }}
+                                  className={`group py-2.5 px-2 -mx-2 rounded-lg transition-colors flex flex-col sm:flex-row sm:items-center gap-1.5 sm:gap-4 ${
+                                    canEditSelfOrHr
+                                      ? "hover:bg-slate-50/80 cursor-pointer"
+                                      : ""
+                                  }`}
+                                >
+                                  <div className="w-44 shrink-0 flex items-center gap-2.5 text-slate-500 font-medium">
+                                    <span className="w-5 text-center text-slate-400 text-xs select-none">
+                                      {idx === 0 ? "👤" : ""}
+                                    </span>
+                                    <span className="truncate">
+                                      {idx === 0 ? "가족 구성원" : ""}
+                                    </span>
+                                  </div>
+                                  <div className="flex-1 min-w-0 flex items-center justify-between gap-2">
                                     <div className="flex flex-wrap items-center gap-2">
                                       <span className="px-2 py-0.5 rounded bg-slate-100 text-slate-700 text-[11px] font-bold">
                                         {fm.relation}
@@ -1871,9 +3010,14 @@ export default function HqMemberProfileModal({
                                       <span className="font-semibold text-slate-800">
                                         {fm.name}
                                       </span>
-                                      {fm.birth_date && (
+                                      {(fm.rrn_masked || fm.birth_date) && (
+                                        <span className="text-xs text-slate-400 font-mono">
+                                          {fm.rrn_masked || fm.birth_date}
+                                        </span>
+                                      )}
+                                      {fm.phone && (
                                         <span className="text-xs text-slate-400">
-                                          ({fm.birth_date})
+                                          · {fm.phone}
                                         </span>
                                       )}
                                       {fm.basic_deduction && (
@@ -1882,46 +3026,79 @@ export default function HqMemberProfileModal({
                                         </span>
                                       )}
                                       {fm.health_dependent && (
-                                        <span className="px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 text-[10px] font-bold">
+                                        <span className="px-1.5 py-0.5 rounded bg-emerald-50 text-[#00a84b] text-[10px] font-bold">
                                           건보피부양자
                                         </span>
                                       )}
+                                      {fm.is_cohabiting && (
+                                        <span className="px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 text-[10px] font-semibold">
+                                          동거
+                                        </span>
+                                      )}
+                                      {fm.disability_veteran_type &&
+                                        fm.disability_veteran_type !==
+                                          "비대상" && (
+                                          <span className="px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 text-[10px] font-bold">
+                                            {fm.disability_veteran_type}
+                                          </span>
+                                        )}
                                     </div>
                                     {canEditSelfOrHr && (
-                                      <button
-                                        type="button"
-                                        onClick={() =>
-                                          removeArrayItem(
-                                            "families",
-                                            fm.id,
-                                            "가족"
-                                          )
-                                        }
-                                        className="text-xs text-slate-300 hover:text-rose-500"
-                                      >
-                                        삭제
-                                      </button>
+                                      <div className="flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                                        <span className="text-[11px] text-slate-400 font-semibold mr-0.5">
+                                          수정
+                                        </span>
+                                        <button
+                                          type="button"
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            setFamilyModalState({
+                                              mode: "create",
+                                            });
+                                          }}
+                                          title="가족 정보 추가하기"
+                                          className="w-7 h-7 rounded-lg border border-slate-200 bg-white hover:bg-slate-100 text-slate-600 shadow-2xs flex items-center justify-center text-sm font-bold"
+                                        >
+                                          +
+                                        </button>
+                                      </div>
                                     )}
                                   </div>
-                                ))}
-                              </div>
-                            )}
-                          </InfoRow>
+                                </div>
+                              ))}
+                            </div>
+                          )}
 
-                          <InfoRow icon="🧮" label="총 공제 대상">
-                            <span className="text-slate-400 mr-1.5">
-                              기본 공제
-                            </span>
-                            <span className="font-bold text-slate-800 mr-5">
-                              {basicDeductionCount}명
-                            </span>
-                            <span className="text-slate-400 mr-1.5">
-                              건강보험 피부양자
-                            </span>
-                            <span className="font-bold text-slate-800">
-                              {healthDependentCount}명
-                            </span>
-                          </InfoRow>
+                          <div className="py-3.5 flex flex-col sm:flex-row sm:items-center gap-1.5 sm:gap-4">
+                            <div className="w-44 shrink-0 flex items-center gap-2 text-slate-500 font-medium">
+                              <span className="w-5 text-center text-slate-400 text-xs select-none">
+                                🧮
+                              </span>
+                              <span className="truncate font-semibold text-slate-700">
+                                총 공제 대상
+                              </span>
+                              <span
+                                title="본인 1명을 포함한 연말정산 기본 공제 인원 및 건강보험 피부양자 수입니다."
+                                className="w-3.5 h-3.5 rounded-full border border-slate-300 text-slate-400 text-[9px] font-bold inline-flex items-center justify-center cursor-help shrink-0"
+                              >
+                                ?
+                              </span>
+                            </div>
+                            <div className="flex-1 min-w-0 flex flex-wrap items-center text-slate-800">
+                              <span className="text-slate-400 mr-1.5">
+                                기본 공제
+                              </span>
+                              <span className="font-bold text-slate-800 mr-5">
+                                {basicDeductionCount}명
+                              </span>
+                              <span className="text-slate-400 mr-1.5">
+                                건강보험 피부양자
+                              </span>
+                              <span className="font-bold text-slate-800">
+                                {healthDependentCount}명
+                              </span>
+                            </div>
+                          </div>
                         </div>
                       </section>
                     </>
@@ -2257,16 +3434,30 @@ export default function HqMemberProfileModal({
                           현행 임금 계약 기준
                         </div>
                         <div className="text-base font-extrabold text-slate-900">
-                          {ex.wage_contract?.annual_salary
-                            ? `연봉 ${Number(
-                                ex.wage_contract.annual_salary
-                              ).toLocaleString()}원`
-                            : ex.wage_contract?.monthly_base
-                              ? `월 기본급 ${Number(
-                                  ex.wage_contract.monthly_base
+                          {ex.wage_contract?.income_type === "무보수"
+                            ? "무보수"
+                            : ex.wage_contract?.contract_amount
+                              ? `${ex.wage_contract.amount_unit || "연봉"} ${Number(
+                                  ex.wage_contract.contract_amount
                                 ).toLocaleString()}원`
-                              : "임금 계약 미입력"}
+                              : ex.wage_contract?.annual_salary
+                                ? `연봉 ${Number(
+                                    ex.wage_contract.annual_salary
+                                  ).toLocaleString()}원`
+                                : ex.wage_contract?.monthly_base
+                                  ? `월 기본급 ${Number(
+                                      ex.wage_contract.monthly_base
+                                    ).toLocaleString()}원`
+                                  : "임금 계약 미입력"}
                         </div>
+                        {ex.wage_contract?.fixed_overtime?.enabled && (
+                          <div className="text-xs font-bold text-[#00a84b]">
+                            포괄계약:{" "}
+                            {formatFixedOvertimeSummary(
+                              ex.wage_contract.fixed_overtime
+                            )}
+                          </div>
+                        )}
                         <div className="text-xs text-slate-500">
                           급여일: {ex.wage_contract?.pay_day || "매월 25일"} ·
                           공제대상 {basicDeductionCount}명
@@ -2503,17 +3694,17 @@ export default function HqMemberProfileModal({
                       <div className="flex gap-2">
                         <button
                           type="button"
-                          onClick={openLaborEdit}
+                          onClick={openAddLaborContract}
                           className="px-3 py-1.5 rounded-lg border border-slate-300 text-xs font-bold text-slate-700 hover:bg-slate-50"
                         >
-                          근로계약 편집
+                          + 근로계약 추가
                         </button>
                         <button
                           type="button"
-                          onClick={openWageEdit}
+                          onClick={openAddWageContract}
                           className="px-3 py-1.5 rounded-lg bg-brand text-white text-xs font-bold"
                         >
-                          임금계약 편집
+                          + 임금계약 추가
                         </button>
                       </div>
                     )}
@@ -2528,7 +3719,10 @@ export default function HqMemberProfileModal({
                       <div className="p-5 rounded-2xl border border-slate-200 space-y-2">
                         <div className="flex items-center justify-between">
                           <span className="font-bold text-slate-900 text-sm">
-                            표준 근로계약서 ({member.employment_type})
+                            표준 근로계약서 (
+                            {ex.labor_contract?.employment_type ||
+                              member.employment_type}
+                            )
                           </span>
                           <span className="px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 text-xs font-bold">
                             적용중
@@ -2536,8 +3730,9 @@ export default function HqMemberProfileModal({
                         </div>
                         <div className="text-xs text-slate-600 space-y-1">
                           <div>
-                            계약 구분:{" "}
-                            {ex.labor_contract?.contract_type ||
+                            근로 유형:{" "}
+                            {ex.labor_contract?.employment_type ||
+                              ex.labor_contract?.contract_type ||
                               member.employment_type}
                           </div>
                           <div>
@@ -2545,8 +3740,25 @@ export default function HqMemberProfileModal({
                             {ex.labor_contract?.start_date ||
                               member.hire_date ||
                               "-"}{" "}
-                            ~ {ex.labor_contract?.end_date || "무기한"}
+                            ~ {ex.labor_contract?.end_date || "기간의 정함 없음"}
                           </div>
+                          {(ex.labor_contract?.probation_start_date ||
+                            ex.labor_contract?.probation_end_date ||
+                            (ex.labor_contract?.salary_pay_rate !== undefined &&
+                              ex.labor_contract?.salary_pay_rate !== null)) && (
+                            <div>
+                              수습 정보:{" "}
+                              {ex.labor_contract?.probation_start_date ||
+                              ex.labor_contract?.probation_end_date
+                                ? `${ex.labor_contract?.probation_start_date || ""} ~ ${ex.labor_contract?.probation_end_date || ""}`
+                                : "기간 미지정"}
+                              {ex.labor_contract?.salary_pay_rate !==
+                                undefined &&
+                              ex.labor_contract?.salary_pay_rate !== null
+                                ? ` · 급여지급률 ${ex.labor_contract.salary_pay_rate}%`
+                                : ""}
+                            </div>
+                          )}
                           <div>
                             근무 장소:{" "}
                             {ex.labor_contract?.work_place ||
@@ -2563,35 +3775,48 @@ export default function HqMemberProfileModal({
                       <div className="p-5 rounded-2xl border border-slate-200 space-y-2">
                         <div className="flex items-center justify-between">
                           <span className="font-bold text-slate-900 text-sm">
-                            임금(연봉) 계약서
+                            임금(포괄임금) 계약서
                           </span>
                           <span className="text-xs text-slate-400">
                             적용일:{" "}
-                            {ex.wage_contract?.effective_date ||
-                              member.hire_date ||
-                              "-"}
+                            {ex.wage_contract?.start_date ||
+                              ex.wage_contract?.effective_date ||
+                              "계약시작일 없음"}
                           </span>
                         </div>
                         <div className="text-xs text-slate-600 space-y-1">
                           <div>
-                            임금 형태: {ex.wage_contract?.wage_type || "연봉제"}
+                            소득 유형 · 임금 형태:{" "}
+                            {ex.wage_contract?.income_type || "근로소득"} ·{" "}
+                            {ex.wage_contract?.wage_type || "연봉제"}
                           </div>
                           <div>
                             계약 금액:{" "}
-                            {ex.wage_contract?.annual_salary
-                              ? `${Number(
-                                  ex.wage_contract.annual_salary
-                                ).toLocaleString()}원`
-                              : "미등록"}
+                            {ex.wage_contract?.income_type === "무보수"
+                              ? "무보수"
+                              : ex.wage_contract?.contract_amount
+                                ? `${ex.wage_contract.amount_unit || "연봉"} ${Number(
+                                    ex.wage_contract.contract_amount
+                                  ).toLocaleString()}원`
+                                : ex.wage_contract?.annual_salary
+                                  ? `${Number(
+                                      ex.wage_contract.annual_salary
+                                    ).toLocaleString()}원`
+                                  : "미등록"}
                           </div>
-                          <div>
-                            식대 비과세:{" "}
-                            {ex.wage_contract?.meal_allowance !== undefined
-                              ? `${Number(
-                                  ex.wage_contract.meal_allowance
-                                ).toLocaleString()}원`
-                              : "200,000원"}
-                          </div>
+                          {ex.wage_contract?.fixed_overtime?.enabled && (
+                            <div className="text-[#00a84b] font-semibold">
+                              포괄계약 근로시간:{" "}
+                              {formatFixedOvertimeSummary(
+                                ex.wage_contract.fixed_overtime
+                              )}
+                            </div>
+                          )}
+                          {ex.wage_contract?.other_terms && (
+                            <div className="text-slate-500">
+                              기타 계약 내용: {ex.wage_contract.other_terms}
+                            </div>
+                          )}
                         </div>
                       </div>
                     </div>
@@ -3390,974 +4615,305 @@ export default function HqMemberProfileModal({
         }}
       />
 
-      {/* 3. 근로계약 편집 */}
-      {editModal === "labor" && (
-        <SubDialog
-          title="근로 계약 정보 설정"
+      {/* 3. 플렉스형 근로 계약 추가하기 / 수정하기 (수습 기간 + 급여지급률 %) */}
+      {laborModalState && (
+        <HqLaborContractModal
+          key={`${laborModalState.mode}_${laborModalState.item?.id || "new"}`}
+          mode={laborModalState.mode}
+          initialItem={laborModalState.item || null}
+          defaultEmploymentType={member.employment_type || "정규직"}
           saving={saving}
-          onClose={() => setEditModal(null)}
-          onSubmit={() =>
-            patchMember(
-              {
-                employment_type: laborForm.employment_type,
-                profile_extra: {
-                  labor_contract: {
-                    contract_type: laborForm.contract_type,
-                    start_date: laborForm.start_date,
-                    end_date: laborForm.end_date,
-                    probation_end_date: laborForm.probation_end_date,
-                    work_place: laborForm.work_place,
-                    note: laborForm.note,
-                  },
-                },
-              },
-              "근로 계약 정보 업데이트"
-            )
+          onClose={() => setLaborModalState(null)}
+          onSave={handleSaveLaborContract}
+          onDelete={
+            laborModalState.mode === "edit" && laborModalState.item?.id
+              ? () => handleDeleteLaborContract(laborModalState.item!.id)
+              : undefined
           }
-        >
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <Field label="고용 형태">
-              <select
-                value={laborForm.employment_type}
-                onChange={(e) =>
-                  setLaborForm({
-                    ...laborForm,
-                    employment_type: e.target.value,
-                  })
-                }
-                className="w-full px-3 py-2 rounded-xl border border-slate-300 font-bold"
-              >
-                {HQ_EMPLOYMENT_TYPES.map((t) => (
-                  <option key={t} value={t}>
-                    {t}
-                  </option>
-                ))}
-              </select>
-            </Field>
-            <Field label="계약 세부 유형">
-              <input
-                value={laborForm.contract_type}
-                onChange={(e) =>
-                  setLaborForm({ ...laborForm, contract_type: e.target.value })
-                }
-                placeholder="예: 무기계약(정규직), 기간제 1년"
-                className="w-full px-3 py-2 rounded-xl border border-slate-300"
-              />
-            </Field>
-            <Field label="계약 시작일">
-              <input
-                type="date"
-                value={laborForm.start_date}
-                onChange={(e) =>
-                  setLaborForm({ ...laborForm, start_date: e.target.value })
-                }
-                className="w-full px-3 py-2 rounded-xl border border-slate-300"
-              />
-            </Field>
-            <Field label="계약 종료일 (무기계약은 비움)">
-              <input
-                type="date"
-                value={laborForm.end_date}
-                onChange={(e) =>
-                  setLaborForm({ ...laborForm, end_date: e.target.value })
-                }
-                className="w-full px-3 py-2 rounded-xl border border-slate-300"
-              />
-            </Field>
-            <Field label="수습 종료일 (선택)">
-              <input
-                type="date"
-                value={laborForm.probation_end_date}
-                onChange={(e) =>
-                  setLaborForm({
-                    ...laborForm,
-                    probation_end_date: e.target.value,
-                  })
-                }
-                className="w-full px-3 py-2 rounded-xl border border-slate-300"
-              />
-            </Field>
-            <Field label="근무 장소">
-              <input
-                value={laborForm.work_place}
-                onChange={(e) =>
-                  setLaborForm({ ...laborForm, work_place: e.target.value })
-                }
-                className="w-full px-3 py-2 rounded-xl border border-slate-300"
-              />
-            </Field>
-          </div>
-        </SubDialog>
+        />
       )}
 
-      {/* 4. 임금계약 편집 */}
-      {editModal === "wage" && (
-        <SubDialog
-          title="임금 계약 정보 설정"
+      {/* 4. 플렉스형 임금 계약 추가하기 / 수정하기 (포괄계약 근로시간 설정 서브모달 포함) */}
+      {wageModalState && (
+        <HqWageContractModal
+          key={`${wageModalState.mode}_${wageModalState.item?.id || "new"}`}
+          mode={wageModalState.mode}
+          initialItem={wageModalState.item || null}
+          weeklyWorkHours={weeklyHours}
           saving={saving}
-          onClose={() => setEditModal(null)}
-          onSubmit={() =>
-            patchMember(
-              {
-                profile_extra: {
-                  wage_contract: {
-                    wage_type: wageForm.wage_type,
-                    annual_salary: Number(
-                      wageForm.annual_salary.replace(/[^0-9]/g, "") || 0
-                    ),
-                    monthly_base: Number(
-                      wageForm.monthly_base.replace(/[^0-9]/g, "") || 0
-                    ),
-                    meal_allowance: Number(
-                      wageForm.meal_allowance.replace(/[^0-9]/g, "") || 0
-                    ),
-                    pay_day: wageForm.pay_day,
-                    effective_date: wageForm.effective_date,
-                    note: wageForm.note,
-                  },
-                },
-              },
-              "임금 계약 정보 업데이트"
-            )
+          onClose={() => setWageModalState(null)}
+          onSave={handleSaveWageContract}
+          onDelete={
+            wageModalState.mode === "edit" && wageModalState.item?.id
+              ? () => handleDeleteWageContract(wageModalState.item!.id)
+              : undefined
           }
-        >
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <Field label="임금 형태">
-              <select
-                value={wageForm.wage_type}
-                onChange={(e) =>
-                  setWageForm({ ...wageForm, wage_type: e.target.value })
-                }
-                className="w-full px-3 py-2 rounded-xl border border-slate-300 font-bold"
-              >
-                <option value="연봉제">연봉제</option>
-                <option value="월급제">월급제</option>
-                <option value="시급제">시급제</option>
-              </select>
-            </Field>
-            <Field label="적용 시작일">
-              <input
-                type="date"
-                value={wageForm.effective_date}
-                onChange={(e) =>
-                  setWageForm({ ...wageForm, effective_date: e.target.value })
-                }
-                className="w-full px-3 py-2 rounded-xl border border-slate-300"
-              />
-            </Field>
-            <Field label="계약 연봉 (원)">
-              <input
-                value={
-                  wageForm.annual_salary
-                    ? Number(
-                        wageForm.annual_salary.replace(/[^0-9]/g, "")
-                      ).toLocaleString()
-                    : ""
-                }
-                onChange={(e) =>
-                  setWageForm({
-                    ...wageForm,
-                    annual_salary: e.target.value.replace(/[^0-9]/g, ""),
-                  })
-                }
-                placeholder="예: 50,000,000"
-                className="w-full px-3 py-2 rounded-xl border border-slate-300 font-bold text-right"
-              />
-            </Field>
-            <Field label="월 기본급 (원 · 선택)">
-              <input
-                value={
-                  wageForm.monthly_base
-                    ? Number(
-                        wageForm.monthly_base.replace(/[^0-9]/g, "")
-                      ).toLocaleString()
-                    : ""
-                }
-                onChange={(e) =>
-                  setWageForm({
-                    ...wageForm,
-                    monthly_base: e.target.value.replace(/[^0-9]/g, ""),
-                  })
-                }
-                placeholder="예: 3,966,660"
-                className="w-full px-3 py-2 rounded-xl border border-slate-300 text-right"
-              />
-            </Field>
-            <Field label="급여 지급일">
-              <input
-                value={wageForm.pay_day}
-                onChange={(e) =>
-                  setWageForm({ ...wageForm, pay_day: e.target.value })
-                }
-                className="w-full px-3 py-2 rounded-xl border border-slate-300"
-              />
-            </Field>
-            <Field label="식대 비과세 한도 (원)">
-              <input
-                value={wageForm.meal_allowance}
-                onChange={(e) =>
-                  setWageForm({
-                    ...wageForm,
-                    meal_allowance: e.target.value.replace(/[^0-9]/g, ""),
-                  })
-                }
-                className="w-full px-3 py-2 rounded-xl border border-slate-300 text-right"
-              />
-            </Field>
-          </div>
-        </SubDialog>
+        />
       )}
 
-      {/* 5. 근무 유형 설정 */}
+      {/* 구성원 프로필 PDF 다운로드 모달 */}
+      {pdfDownloadOpen && (
+        <HqMemberProfilePdfDownloadModal
+          isOpen={pdfDownloadOpen}
+          members={[member]}
+          companyName={
+            shell?.companySettings?.company_name || "(주)천종현수학연구소"
+          }
+          appointments={
+            shell?.companySettings?.extra_settings?.hr_lifecycle_state
+              ?.appointments || []
+          }
+          onClose={() => setPdfDownloadOpen(false)}
+        />
+      )}
+
+      {/* 5. 플렉스형 근무 정보 변경하기 */}
       {editModal === "work" && (
-        <SubDialog
-          title="근무 유형 설정"
+        <HqWorkInfoChangeModal
+          currentScheduleName={ex.work_schedule_type || "기본 9시"}
+          currentEffectiveDate={ex.work_effective_date}
+          workRules={companyExtra?.work_rules}
           saving={saving}
+          onOpenSettings={
+            isHrManager && shell?.openSettingsModal
+              ? () => shell.openSettingsModal("work-type")
+              : undefined
+          }
           onClose={() => setEditModal(null)}
-          onSubmit={() =>
+          onSave={(payload) =>
             patchMember(
-              {
-                profile_extra: {
-                  work_schedule_type: workForm.work_schedule_type,
-                  work_schedule_mode: workForm.work_schedule_mode,
-                  weekly_work_hours: Number(workForm.weekly_work_hours || 40),
-                },
-              },
-              "근무 유형 변경"
+              { profile_extra: payload },
+              `근무 정보 변경 (${payload.work_schedule_type})`
             )
           }
-        >
-          <div className="space-y-3">
-            <Field label="근무 스케줄 명칭">
-              <select
-                value={workForm.work_schedule_type}
-                onChange={(e) => {
-                  const nextName = e.target.value;
-                  const activeRules = (
-                    companyExtra?.work_rules &&
-                    companyExtra.work_rules.length > 0
-                      ? companyExtra.work_rules
-                      : DEFAULT_WORK_RULES
-                  ).filter((r) => !r.is_hidden);
-                  const matched = activeRules.find((r) => r.name === nextName);
-                  setWorkForm({
-                    ...workForm,
-                    work_schedule_type: nextName,
-                    work_schedule_mode: matched
-                      ? patternShortBadge(matched.pattern_type)
-                      : workForm.work_schedule_mode,
-                    weekly_work_hours: matched
-                      ? String(calcWeeklyWorkHours(matched))
-                      : workForm.weekly_work_hours,
-                  });
-                }}
-                className="w-full px-3 py-2 rounded-xl border border-slate-300 font-bold"
-              >
-                {(companyExtra?.work_rules && companyExtra.work_rules.length > 0
-                  ? companyExtra.work_rules
-                  : DEFAULT_WORK_RULES
-                )
-                  .filter((r) => !r.is_hidden)
-                  .map((r) => (
-                    <option key={r.id} value={r.name}>
-                      {r.name} (출근 {formatHmToKoreanAmPm(r.start_time)} · 주{" "}
-                      {calcWeeklyWorkHours(r)}시간)
-                    </option>
-                  ))}
-              </select>
-            </Field>
-            <div className="grid grid-cols-2 gap-3">
-              <Field label="근무 방식">
-                <select
-                  value={workForm.work_schedule_mode}
-                  onChange={(e) =>
-                    setWorkForm({
-                      ...workForm,
-                      work_schedule_mode: e.target.value,
-                    })
-                  }
-                  className="w-full px-3 py-2 rounded-xl border border-slate-300 font-bold"
-                >
-                  <option value="고정">고정</option>
-                  <option value="시차출퇴근">시차출퇴근</option>
-                  <option value="선택적 근로">선택적 근로</option>
-                  <option value="재택근무">재택근무</option>
-                </select>
-              </Field>
-              <Field label="주 소정근로시간 (시간)">
-                <input
-                  type="number"
-                  value={workForm.weekly_work_hours}
-                  onChange={(e) =>
-                    setWorkForm({
-                      ...workForm,
-                      weekly_work_hours: e.target.value,
-                    })
-                  }
-                  className="w-full px-3 py-2 rounded-xl border border-slate-300 font-bold"
-                />
-              </Field>
-            </div>
-          </div>
-        </SubDialog>
+        />
       )}
 
-      {/* 6. 휴가/연차 설정 */}
+      {/* 5-2. 플렉스형 초과 근무 보상 정보 변경하기 */}
+      {editModal === "overtime_comp" && (
+        <HqOvertimeCompChangeModal
+          currentPolicyName={
+            ex.overtime_comp_policy_name || "기본 초과 근무 보상 정책"
+          }
+          currentEffectiveDate={ex.overtime_comp_effective_date}
+          policies={companyExtra?.overtime_comp_settings?.policies}
+          saving={saving}
+          onOpenSettings={
+            isHrManager && shell?.openSettingsModal
+              ? () => shell.openSettingsModal("overtime-comp")
+              : undefined
+          }
+          onClose={() => setEditModal(null)}
+          onSave={(payload) =>
+            patchMember(
+              { profile_extra: payload },
+              `초과 근무 보상 정책 변경 (${payload.overtime_comp_policy_name})`
+            )
+          }
+        />
+      )}
+
+      {/* 6. 플렉스형 연차 정책 변경하기 */}
       {editModal === "leave_policy" && (
-        <SubDialog
-          title="휴가 정책 · 연차 일수 조정"
+        <HqLeavePolicyChangeModal
+          currentPolicyName={ex.leave_policy_name || "기본 연차 정책"}
+          policies={companyExtra?.annual_leave_settings?.policies}
           saving={saving}
+          onOpenSettings={
+            isHrManager && shell?.openSettingsModal
+              ? () => shell.openSettingsModal("leave-setting")
+              : undefined
+          }
           onClose={() => setEditModal(null)}
-          onSubmit={() =>
+          onSave={(payload) =>
             patchMember(
-              {
-                annual_leave_total: Number(
-                  leavePolicyForm.annual_leave_total || 15
-                ),
-                annual_leave_used: Number(
-                  leavePolicyForm.annual_leave_used || 0
-                ),
-                profile_extra: {
-                  leave_policy_name: leavePolicyForm.leave_policy_name,
-                },
-              },
-              "연차 부여/사용 일수 조정"
+              { profile_extra: payload },
+              `연차 정책 변경 (${payload.leave_policy_name})`
             )
           }
-        >
-          <div className="space-y-3">
-            <Field label="적용 연차 정책명">
-              <input
-                value={leavePolicyForm.leave_policy_name}
-                onChange={(e) =>
-                  setLeavePolicyForm({
-                    ...leavePolicyForm,
-                    leave_policy_name: e.target.value,
-                  })
-                }
-                className="w-full px-3 py-2 rounded-xl border border-slate-300 font-bold"
-              />
-            </Field>
-            <div className="grid grid-cols-2 gap-3">
-              <Field label="총 부여 연차 (일)">
-                <input
-                  type="number"
-                  step="0.5"
-                  value={leavePolicyForm.annual_leave_total}
-                  onChange={(e) =>
-                    setLeavePolicyForm({
-                      ...leavePolicyForm,
-                      annual_leave_total: e.target.value,
-                    })
-                  }
-                  className="w-full px-3 py-2 rounded-xl border border-slate-300 font-bold"
-                />
-              </Field>
-              <Field label="기 사용 연차 (일)">
-                <input
-                  type="number"
-                  step="0.5"
-                  value={leavePolicyForm.annual_leave_used}
-                  onChange={(e) =>
-                    setLeavePolicyForm({
-                      ...leavePolicyForm,
-                      annual_leave_used: e.target.value,
-                    })
-                  }
-                  className="w-full px-3 py-2 rounded-xl border border-slate-300 font-bold"
-                />
-              </Field>
-            </div>
-          </div>
-        </SubDialog>
+        />
       )}
 
-      {/* 7. 특이사항 & HR 메모 */}
+      {/* 7. 플렉스형 특이사항 수정하기 */}
       {editModal === "special" && (
-        <SubDialog
-          title="특이사항 편집"
+        <HqSpecialNotesModal
+          initialDetail={ex.special_notes_detail}
+          initialSpecialNotes={ex.special_notes}
+          initialHrMemo={member.hr_memo || ""}
+          isHrManager={isHrManager}
           saving={saving}
           onClose={() => setEditModal(null)}
-          onSubmit={() =>
+          onSave={(payload) =>
             patchMember(
               {
-                ...(isHrManager ? { hr_memo: specialForm.hr_memo } : {}),
+                ...(isHrManager && payload.hr_memo !== undefined
+                  ? { hr_memo: payload.hr_memo }
+                  : {}),
                 profile_extra: {
-                  special_notes: specialForm.special_notes,
+                  special_notes: payload.special_notes,
+                  special_notes_detail: payload.special_notes_detail,
                 },
               },
               "특이사항 수정"
             )
           }
-        >
-          <div className="space-y-3">
-            <Field label="특이사항 (보훈·장애 대상 여부, 건강 참고사항 등)">
-              <textarea
-                rows={2}
-                value={specialForm.special_notes}
-                onChange={(e) =>
-                  setSpecialForm({
-                    ...specialForm,
-                    special_notes: e.target.value,
-                  })
-                }
-                className="w-full px-3 py-2 rounded-xl border border-slate-300 resize-none"
-              />
-            </Field>
-            {isHrManager && (
-              <Field label="🔒 인사팀 비공개 메모 (본인에게 표시되지 않음)">
-                <textarea
-                  rows={3}
-                  value={specialForm.hr_memo}
-                  onChange={(e) =>
-                    setSpecialForm({ ...specialForm, hr_memo: e.target.value })
-                  }
-                  className="w-full px-3 py-2 rounded-xl border border-amber-300 bg-amber-50/40 resize-none"
-                />
-              </Field>
-            )}
-          </div>
-        </SubDialog>
+        />
       )}
 
-      {/* 8. 경력 추가 */}
-      {editModal === "add_career" && (
-        <SubDialog
-          title="경력 정보 추가"
+      {/* 8. 플렉스형 경력 추가하기 / 수정하기 */}
+      {careerModalState && (
+        <HqCareerModal
+          key={`car_${careerModalState.mode}_${careerModalState.item?.id || "new"}`}
+          mode={careerModalState.mode}
+          initialItem={careerModalState.item || null}
           saving={saving}
-          onClose={() => setEditModal(null)}
-          onSubmit={() => {
-            if (!careerDraft.company_name.trim() || !careerDraft.start_ym) {
-              alert("회사명과 시작 년월을 입력해주세요.");
-              return;
-            }
-            const nextItem: HqCareerItem = {
-              id: makeUid(),
-              company_name: careerDraft.company_name.trim(),
-              start_ym: careerDraft.start_ym,
-              end_ym: careerDraft.end_ym,
-              contract_type: careerDraft.contract_type,
-              department: careerDraft.department.trim(),
-              job_title: careerDraft.job_title.trim(),
-            };
-            patchMember(
-              {
-                profile_extra: {
-                  careers: [nextItem, ...(ex.careers || [])],
-                },
-              },
-              `경력 추가 (${nextItem.company_name})`
-            );
-            setCareerDraft({
-              company_name: "",
-              start_ym: "",
-              end_ym: "",
-              contract_type: "정규직",
-              department: "",
-              job_title: "",
-            });
-          }}
-        >
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <Field label="회사 · 기관명">
-              <input
-                required
-                value={careerDraft.company_name}
-                onChange={(e) =>
-                  setCareerDraft({
-                    ...careerDraft,
-                    company_name: e.target.value,
-                  })
+          onClose={() => setCareerModalState(null)}
+          onSave={handleSaveCareer}
+          onDelete={
+            careerModalState.mode === "edit" && careerModalState.item?.id
+              ? () => {
+                  const id = careerModalState.item!.id;
+                  setCareerModalState(null);
+                  removeArrayItem("careers", id, "경력");
                 }
-                placeholder="예: 천종현사고력수학학원"
-                className="w-full px-3 py-2 rounded-xl border border-slate-300 font-bold"
-              />
-            </Field>
-            <Field label="계약 유형">
-              <select
-                value={careerDraft.contract_type}
-                onChange={(e) =>
-                  setCareerDraft({
-                    ...careerDraft,
-                    contract_type: e.target.value,
-                  })
-                }
-                className="w-full px-3 py-2 rounded-xl border border-slate-300 font-bold"
-              >
-                <option value="정규직">정규직</option>
-                <option value="계약직">계약직</option>
-                <option value="프리랜서">프리랜서</option>
-                <option value="인턴">인턴</option>
-              </select>
-            </Field>
-            <Field label="시작 년월">
-              <input
-                type="month"
-                value={careerDraft.start_ym}
-                onChange={(e) =>
-                  setCareerDraft({ ...careerDraft, start_ym: e.target.value })
-                }
-                className="w-full px-3 py-2 rounded-xl border border-slate-300"
-              />
-            </Field>
-            <Field label="종료 년월">
-              <input
-                type="month"
-                value={careerDraft.end_ym}
-                onChange={(e) =>
-                  setCareerDraft({ ...careerDraft, end_ym: e.target.value })
-                }
-                className="w-full px-3 py-2 rounded-xl border border-slate-300"
-              />
-            </Field>
-            <Field label="담당 부서 (선택)">
-              <input
-                value={careerDraft.department}
-                onChange={(e) =>
-                  setCareerDraft({ ...careerDraft, department: e.target.value })
-                }
-                className="w-full px-3 py-2 rounded-xl border border-slate-300"
-              />
-            </Field>
-            <Field label="직위 · 직책 (선택)">
-              <input
-                value={careerDraft.job_title}
-                onChange={(e) =>
-                  setCareerDraft({ ...careerDraft, job_title: e.target.value })
-                }
-                className="w-full px-3 py-2 rounded-xl border border-slate-300"
-              />
-            </Field>
-          </div>
-        </SubDialog>
+              : undefined
+          }
+        />
       )}
 
-      {/* 9. 학력 추가 */}
-      {editModal === "add_edu" && (
-        <SubDialog
-          title="학력 정보 추가"
+      {/* 9. 플렉스형 학력 추가하기 / 수정하기 */}
+      {eduModalState && (
+        <HqEducationModal
+          key={`edu_${eduModalState.mode}_${eduModalState.item?.id || "new"}`}
+          mode={eduModalState.mode}
+          initialItem={eduModalState.item || null}
           saving={saving}
-          onClose={() => setEditModal(null)}
-          onSubmit={() => {
-            if (!eduDraft.school_name.trim()) {
-              alert("학교명을 입력해주세요.");
-              return;
-            }
-            const nextItem: HqEducationItem = {
-              id: makeUid(),
-              school_name: eduDraft.school_name.trim(),
-              degree_type: eduDraft.degree_type,
-              graduation_status: eduDraft.graduation_status,
-              major: eduDraft.major.trim(),
-              start_ym: eduDraft.start_ym,
-              end_ym: eduDraft.end_ym,
-            };
-            patchMember(
-              {
-                profile_extra: {
-                  educations: [nextItem, ...(ex.educations || [])],
-                },
-              },
-              `학력 추가 (${nextItem.school_name})`
-            );
-            setEduDraft({
-              school_name: "",
-              degree_type: "대학교(일반대학)",
-              graduation_status: "졸업",
-              major: "",
-              start_ym: "",
-              end_ym: "",
-            });
-          }}
-        >
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <Field label="학교명">
-              <input
-                value={eduDraft.school_name}
-                onChange={(e) =>
-                  setEduDraft({ ...eduDraft, school_name: e.target.value })
+          onClose={() => setEduModalState(null)}
+          onSave={handleSaveEducation}
+          onDelete={
+            eduModalState.mode === "edit" && eduModalState.item?.id
+              ? () => {
+                  const id = eduModalState.item!.id;
+                  setEduModalState(null);
+                  removeArrayItem("educations", id, "학력");
                 }
-                placeholder="예: 서울대학교"
-                className="w-full px-3 py-2 rounded-xl border border-slate-300 font-bold"
-              />
-            </Field>
-            <Field label="전공 / 학과">
-              <input
-                value={eduDraft.major}
-                onChange={(e) =>
-                  setEduDraft({ ...eduDraft, major: e.target.value })
-                }
-                placeholder="예: 수학교육과"
-                className="w-full px-3 py-2 rounded-xl border border-slate-300"
-              />
-            </Field>
-            <Field label="학력 구분">
-              <select
-                value={eduDraft.degree_type}
-                onChange={(e) =>
-                  setEduDraft({ ...eduDraft, degree_type: e.target.value })
-                }
-                className="w-full px-3 py-2 rounded-xl border border-slate-300 font-bold"
-              >
-                <option value="대학교(일반대학)">대학교(일반대학)</option>
-                <option value="대학원(석사)">대학원(석사)</option>
-                <option value="대학원(박사)">대학원(박사)</option>
-                <option value="전문대학">전문대학</option>
-                <option value="고등학교">고등학교</option>
-              </select>
-            </Field>
-            <Field label="졸업 상태">
-              <select
-                value={eduDraft.graduation_status}
-                onChange={(e) =>
-                  setEduDraft({
-                    ...eduDraft,
-                    graduation_status: e.target.value,
-                  })
-                }
-                className="w-full px-3 py-2 rounded-xl border border-slate-300 font-bold"
-              >
-                <option value="졸업">졸업</option>
-                <option value="재학">재학</option>
-                <option value="수료">수료</option>
-                <option value="휴학">휴학</option>
-                <option value="중퇴">중퇴</option>
-              </select>
-            </Field>
-            <Field label="입학 년월">
-              <input
-                type="month"
-                value={eduDraft.start_ym}
-                onChange={(e) =>
-                  setEduDraft({ ...eduDraft, start_ym: e.target.value })
-                }
-                className="w-full px-3 py-2 rounded-xl border border-slate-300"
-              />
-            </Field>
-            <Field label="졸업 년월">
-              <input
-                type="month"
-                value={eduDraft.end_ym}
-                onChange={(e) =>
-                  setEduDraft({ ...eduDraft, end_ym: e.target.value })
-                }
-                className="w-full px-3 py-2 rounded-xl border border-slate-300"
-              />
-            </Field>
-          </div>
-        </SubDialog>
+              : undefined
+          }
+        />
       )}
 
-      {/* 10. 가족 추가 */}
-      {editModal === "add_family" && (
-        <SubDialog
-          title="가족 구성원 추가"
+      {/* 10. 플렉스형 가족 정보 추가하기 / 수정하기 */}
+      {familyModalState && (
+        <HqFamilyModal
+          key={`fam_${familyModalState.mode}_${familyModalState.item?.id || "new"}`}
+          mode={familyModalState.mode}
+          initialItem={familyModalState.item || null}
           saving={saving}
-          onClose={() => setEditModal(null)}
-          onSubmit={() => {
-            if (!familyDraft.name.trim()) {
-              alert("가족 성명을 입력해주세요.");
-              return;
-            }
-            const nextItem: HqFamilyItem = {
-              id: makeUid(),
-              relation: familyDraft.relation,
-              name: familyDraft.name.trim(),
-              birth_date: familyDraft.birth_date,
-              basic_deduction: familyDraft.basic_deduction,
-              health_dependent: familyDraft.health_dependent,
-            };
-            patchMember(
-              {
-                profile_extra: {
-                  families: [...families, nextItem],
-                },
-              },
-              `가족 구성원 추가 (${nextItem.relation} ${nextItem.name})`
-            );
-            setFamilyDraft({
-              relation: "배우자",
-              name: "",
-              birth_date: "",
-              basic_deduction: true,
-              health_dependent: false,
-            });
-          }}
-        >
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            <Field label="관계">
-              <select
-                value={familyDraft.relation}
-                onChange={(e) =>
-                  setFamilyDraft({ ...familyDraft, relation: e.target.value })
+          onClose={() => setFamilyModalState(null)}
+          onSave={handleSaveFamily}
+          onDelete={
+            familyModalState.mode === "edit" && familyModalState.item?.id
+              ? () => {
+                  const id = familyModalState.item!.id;
+                  setFamilyModalState(null);
+                  removeArrayItem("families", id, "가족");
                 }
-                className="w-full px-3 py-2 rounded-xl border border-slate-300 font-bold"
-              >
-                <option value="배우자">배우자</option>
-                <option value="자녀">자녀</option>
-                <option value="부">부</option>
-                <option value="모">모</option>
-                <option value="형제자매">형제자매</option>
-                <option value="조부모">조부모</option>
-              </select>
-            </Field>
-            <Field label="성명">
-              <input
-                value={familyDraft.name}
-                onChange={(e) =>
-                  setFamilyDraft({ ...familyDraft, name: e.target.value })
-                }
-                className="w-full px-3 py-2 rounded-xl border border-slate-300 font-bold"
-              />
-            </Field>
-            <Field label="생년월일">
-              <input
-                type="date"
-                value={familyDraft.birth_date}
-                onChange={(e) =>
-                  setFamilyDraft({ ...familyDraft, birth_date: e.target.value })
-                }
-                className="w-full px-3 py-2 rounded-xl border border-slate-300"
-              />
-            </Field>
-          </div>
-          <div className="flex flex-wrap gap-5 pt-2">
-            <label className="flex items-center gap-2 cursor-pointer text-xs font-bold text-slate-700">
-              <input
-                type="checkbox"
-                checked={familyDraft.basic_deduction}
-                onChange={(e) =>
-                  setFamilyDraft({
-                    ...familyDraft,
-                    basic_deduction: e.target.checked,
-                  })
-                }
-                className="w-4 h-4 accent-brand rounded"
-              />
-              <span>연말정산 기본 공제 대상</span>
-            </label>
-            <label className="flex items-center gap-2 cursor-pointer text-xs font-bold text-slate-700">
-              <input
-                type="checkbox"
-                checked={familyDraft.health_dependent}
-                onChange={(e) =>
-                  setFamilyDraft({
-                    ...familyDraft,
-                    health_dependent: e.target.checked,
-                  })
-                }
-                className="w-4 h-4 accent-brand rounded"
-              />
-              <span>건강보험 피부양자 등록</span>
-            </label>
-          </div>
-        </SubDialog>
+              : undefined
+          }
+        />
       )}
 
-      {/* 11. 휴직 / 수상 / 징계 추가 */}
-      {editModal === "add_leave_hist" && (
-        <SubDialog
-          title="휴직 이력 추가"
+      {/* 11-1. 플렉스형 급여 지급 정보 추가하기 / 수정하기 */}
+      {payInfoModalState && (
+        <HqPayPaymentInfoModal
+          key={`pay_${payInfoModalState.mode}_${payInfoModalState.item?.id || "new"}`}
+          mode={payInfoModalState.mode}
+          initialItem={payInfoModalState.item || null}
+          wageContracts={wageContractsList}
+          companyPayItems={companyExtra?.payroll_settings?.pay_items}
+          weeklyWorkHours={weeklyHours}
           saving={saving}
-          onClose={() => setEditModal(null)}
-          onSubmit={() => {
-            if (!leaveHistDraft.start_date) return alert("시작일을 입력하세요.");
-            const nextItem: HqLeaveHistoryItem = {
-              id: makeUid(),
-              ...leaveHistDraft,
-            };
-            patchMember(
-              {
-                profile_extra: {
-                  leave_histories: [nextItem, ...(ex.leave_histories || [])],
-                },
-              },
-              "휴직 이력 등록"
-            );
-          }}
-        >
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            <Field label="휴직 구분">
-              <select
-                value={leaveHistDraft.leave_kind}
-                onChange={(e) =>
-                  setLeaveHistDraft({
-                    ...leaveHistDraft,
-                    leave_kind: e.target.value,
-                  })
-                }
-                className="w-full px-3 py-2 rounded-xl border border-slate-300 font-bold"
-              >
-                <option value="육아휴직">육아휴직</option>
-                <option value="병가휴직">병가휴직</option>
-                <option value="가족돌봄휴직">가족돌봄휴직</option>
-                <option value="일반휴직">일반휴직</option>
-              </select>
-            </Field>
-            <Field label="시작일">
-              <input
-                type="date"
-                value={leaveHistDraft.start_date}
-                onChange={(e) =>
-                  setLeaveHistDraft({
-                    ...leaveHistDraft,
-                    start_date: e.target.value,
-                  })
-                }
-                className="w-full px-3 py-2 rounded-xl border border-slate-300"
-              />
-            </Field>
-            <Field label="복직(예정)일">
-              <input
-                type="date"
-                value={leaveHistDraft.end_date}
-                onChange={(e) =>
-                  setLeaveHistDraft({
-                    ...leaveHistDraft,
-                    end_date: e.target.value,
-                  })
-                }
-                className="w-full px-3 py-2 rounded-xl border border-slate-300"
-              />
-            </Field>
-          </div>
-          <Field label="사유 메모">
-            <input
-              value={leaveHistDraft.reason}
-              onChange={(e) =>
-                setLeaveHistDraft({ ...leaveHistDraft, reason: e.target.value })
-              }
-              className="w-full px-3 py-2 rounded-xl border border-slate-300"
-            />
-          </Field>
-        </SubDialog>
+          onOpenPayrollSettings={
+            isHrManager && shell?.openSettingsModal
+              ? () => shell.openSettingsModal("payroll-payment")
+              : undefined
+          }
+          onClose={() => setPayInfoModalState(null)}
+          onSave={handleSavePayPaymentInfo}
+          onDelete={
+            payInfoModalState.mode === "edit" && payInfoModalState.item?.id
+              ? () => handleDeletePayPaymentInfo(payInfoModalState.item!.id)
+              : undefined
+          }
+        />
       )}
 
-      {editModal === "add_award" && (
-        <SubDialog
-          title="수상 내역 추가"
+      {/* 11-2. 플렉스형 휴직 등록하기 / 수정하기 */}
+      {leaveHistModalState && (
+        <HqLeaveHistoryModal
+          key={`lvh_${leaveHistModalState.mode}_${leaveHistModalState.item?.id || "new"}`}
+          mode={leaveHistModalState.mode}
+          initialItem={leaveHistModalState.item || null}
           saving={saving}
-          onClose={() => setEditModal(null)}
-          onSubmit={() => {
-            if (!awardDraft.title.trim()) return alert("수상명을 입력하세요.");
-            const nextItem: HqAwardItem = {
-              id: makeUid(),
-              ...awardDraft,
-              title: awardDraft.title.trim(),
-            };
-            patchMember(
-              {
-                profile_extra: {
-                  awards: [nextItem, ...(ex.awards || [])],
-                },
-              },
-              `수상 내역 등록 (${nextItem.title})`
-            );
-            setAwardDraft({ ...awardDraft, title: "", note: "" });
-          }}
-        >
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <Field label="수상명 / 표창명">
-              <input
-                value={awardDraft.title}
-                onChange={(e) =>
-                  setAwardDraft({ ...awardDraft, title: e.target.value })
+          onClose={() => setLeaveHistModalState(null)}
+          onSave={handleSaveLeaveHistory}
+          onDelete={
+            leaveHistModalState.mode === "edit" && leaveHistModalState.item?.id
+              ? () => {
+                  const id = leaveHistModalState.item!.id;
+                  setLeaveHistModalState(null);
+                  removeArrayItem("leave_histories", id, "휴직 이력");
                 }
-                placeholder="예: 올해의 우수 연구원상"
-                className="w-full px-3 py-2 rounded-xl border border-slate-300 font-bold"
-              />
-            </Field>
-            <Field label="수상일">
-              <input
-                type="date"
-                value={awardDraft.awarded_date}
-                onChange={(e) =>
-                  setAwardDraft({ ...awardDraft, awarded_date: e.target.value })
-                }
-                className="w-full px-3 py-2 rounded-xl border border-slate-300"
-              />
-            </Field>
-            <div className="sm:col-span-2">
-              <Field label="수여 기관">
-                <input
-                  value={awardDraft.issuer}
-                  onChange={(e) =>
-                    setAwardDraft({ ...awardDraft, issuer: e.target.value })
-                  }
-                  className="w-full px-3 py-2 rounded-xl border border-slate-300"
-                />
-              </Field>
-            </div>
-          </div>
-        </SubDialog>
+              : undefined
+          }
+        />
       )}
 
-      {editModal === "add_discipline" && (
-        <SubDialog
-          title="징계 내역 등록 (HR 전용)"
+      {/* 11-3. 플렉스형 수상 추가하기 / 수정하기 */}
+      {awardModalState && (
+        <HqAwardModal
+          key={`awd_${awardModalState.mode}_${awardModalState.item?.id || "new"}`}
+          mode={awardModalState.mode}
+          initialItem={awardModalState.item || null}
+          companyName={
+            shell?.companySettings?.company_name || "(주)천종현수학연구소"
+          }
           saving={saving}
-          onClose={() => setEditModal(null)}
-          onSubmit={() => {
-            if (!disciplineDraft.action_date) return alert("처분일을 입력하세요.");
-            const nextItem: HqDisciplineItem = {
-              id: makeUid(),
-              ...disciplineDraft,
-            };
-            patchMember(
-              {
-                profile_extra: {
-                  disciplines: [nextItem, ...(ex.disciplines || [])],
-                },
-              },
-              "징계 기록 등록"
-            );
-          }}
-        >
-          <div className="grid grid-cols-2 gap-3">
-            <Field label="징계 구분">
-              <select
-                value={disciplineDraft.kind}
-                onChange={(e) =>
-                  setDisciplineDraft({
-                    ...disciplineDraft,
-                    kind: e.target.value,
-                  })
+          onClose={() => setAwardModalState(null)}
+          onSave={handleSaveAward}
+          onDelete={
+            awardModalState.mode === "edit" && awardModalState.item?.id
+              ? () => {
+                  const id = awardModalState.item!.id;
+                  setAwardModalState(null);
+                  removeArrayItem("awards", id, "수상");
                 }
-                className="w-full px-3 py-2 rounded-xl border border-slate-300 font-bold"
-              >
-                <option value="주의">주의</option>
-                <option value="경고">경고</option>
-                <option value="감봉">감봉</option>
-                <option value="정직">정직</option>
-              </select>
-            </Field>
-            <Field label="처분 일자">
-              <input
-                type="date"
-                value={disciplineDraft.action_date}
-                onChange={(e) =>
-                  setDisciplineDraft({
-                    ...disciplineDraft,
-                    action_date: e.target.value,
-                  })
+              : undefined
+          }
+        />
+      )}
+
+      {/* 11-4. 플렉스형 징계 추가하기 / 수정하기 */}
+      {disciplineModalState && (
+        <HqDisciplineModal
+          key={`dsc_${disciplineModalState.mode}_${disciplineModalState.item?.id || "new"}`}
+          mode={disciplineModalState.mode}
+          initialItem={disciplineModalState.item || null}
+          customKinds={(ex.disciplines || []).map((d) => d.kind)}
+          saving={saving}
+          onClose={() => setDisciplineModalState(null)}
+          onSave={handleSaveDiscipline}
+          onDelete={
+            disciplineModalState.mode === "edit" &&
+            disciplineModalState.item?.id
+              ? () => {
+                  const id = disciplineModalState.item!.id;
+                  setDisciplineModalState(null);
+                  removeArrayItem("disciplines", id, "징계");
                 }
-                className="w-full px-3 py-2 rounded-xl border border-slate-300"
-              />
-            </Field>
-          </div>
-          <Field label="처분 사유">
-            <input
-              value={disciplineDraft.reason}
-              onChange={(e) =>
-                setDisciplineDraft({
-                  ...disciplineDraft,
-                  reason: e.target.value,
-                })
-              }
-              className="w-full px-3 py-2 rounded-xl border border-slate-300"
-            />
-          </Field>
-        </SubDialog>
+              : undefined
+          }
+        />
       )}
 
       {/* 12. 메신저 근무시간 · 자동응답 설정 */}

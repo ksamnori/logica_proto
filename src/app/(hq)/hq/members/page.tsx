@@ -5,6 +5,7 @@ import React, { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useHqShell } from "@/components/hq/HqShellContext";
 import CertificatePrintModal from "@/components/hq/members/CertificatePrintModal";
+import { HqMemberProfilePdfDownloadModal } from "@/components/hq/members/HqContractModals";
 import HqMemberProfileModal from "@/components/hq/members/HqMemberProfileModal";
 import MemberFormModal from "@/components/hq/members/MemberFormModal";
 import { hqFetch, resolveStoragePublicUrl } from "@/lib/hq/clientApi";
@@ -219,6 +220,7 @@ export default function HqMembersPage() {
   const [editingMember, setEditingMember] = useState<HqMember | null>(null);
   const [profileTargetId, setProfileTargetId] = useState<string | null>(null);
   const [certMember, setCertMember] = useState<HqMember | null>(null);
+  const [pdfDownloadOpen, setPdfDownloadOpen] = useState(false);
 
   const lifecycle: HqHrLifecycleState = useMemo(() => {
     const raw = companySettings?.extra_settings?.hr_lifecycle_state;
@@ -694,6 +696,29 @@ export default function HqMembersPage() {
             className="flex items-center gap-2 relative"
             onClick={(e) => e.stopPropagation()}
           >
+            {canManage && (
+              <button
+                type="button"
+                onClick={() => setPdfDownloadOpen(true)}
+                className="px-3.5 py-2.5 rounded-xl border border-slate-200 hover:bg-slate-50 text-xs font-bold text-slate-700 flex items-center gap-1.5"
+                title="구성원 프로필 PDF 다운로드"
+              >
+                <svg
+                  className="w-3.5 h-3.5 text-slate-500"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth="2"
+                    d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
+                  />
+                </svg>
+                <span>프로필 다운로드</span>
+              </button>
+            )}
             {topTab === "MANAGE" &&
               (manageSubTab === "ONBOARDING" ||
                 manageSubTab === "OFFBOARDING") &&
@@ -756,6 +781,16 @@ export default function HqMembersPage() {
                       className="w-full px-3.5 py-2 text-left hover:bg-slate-50 font-semibold text-slate-600"
                     >
                       ⬇️ 구성원 명부 CSV 다운로드
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAddDropdownOpen(false);
+                        setPdfDownloadOpen(true);
+                      }}
+                      className="w-full px-3.5 py-2 text-left hover:bg-slate-50 font-semibold text-slate-600"
+                    >
+                      📄 구성원 프로필 PDF 다운로드
                     </button>
                   </div>
                 )}
@@ -833,6 +868,28 @@ export default function HqMembersPage() {
                 >
                   🔍
                 </button>
+                {canManage && (
+                  <button
+                    type="button"
+                    onClick={() => setPdfDownloadOpen(true)}
+                    className="hover:text-slate-800 flex items-center"
+                    title="구성원 프로필 PDF 다운로드"
+                  >
+                    <svg
+                      className="w-3.5 h-3.5"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth="2"
+                        d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
+                      />
+                    </svg>
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={() => router.push("/hq/org-chart")}
@@ -2446,6 +2503,23 @@ export default function HqMembersPage() {
         member={certMember}
         onClose={() => setCertMember(null)}
       />
+
+      {/* 구성원 프로필 PDF 다운로드 모달 */}
+      {pdfDownloadOpen && (
+        <HqMemberProfilePdfDownloadModal
+          isOpen={pdfDownloadOpen}
+          members={
+            topTab === "MANAGE" && selectedRowIds.length > 0
+              ? members.filter((m) => selectedRowIds.includes(m.instructor_id))
+              : topTab === "MANAGE"
+                ? managedMembers
+                : directoryList
+          }
+          companyName={companyName}
+          appointments={mergedAppointments}
+          onClose={() => setPdfDownloadOpen(false)}
+        />
+      )}
     </>
   );
 }

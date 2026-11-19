@@ -449,21 +449,62 @@ export async function POST(req: NextRequest) {
 
         const prev = prevMap.get(String(mem.instructor_id));
         const wc = mem.profile_extra?.wage_contract;
+        const lc = mem.profile_extra?.labor_contract;
+        const pi = mem.profile_extra?.pay_payment_info;
+        const piItems = Array.isArray(pi?.items) ? pi!.items : [];
+        const piBaseItem = piItems.find(
+          (x: any) => x.pay_item_id === "pay-fixed-base" || x.name === "기본급"
+        );
+        const piOtItem = piItems.find(
+          (x: any) => x.pay_item_id === "pay-fixed-ot" || String(x.name || "").includes("고정초과")
+        );
+        const piMealItem = piItems.find(
+          (x: any) => x.pay_item_id === "pay-fixed-meal" || String(x.name || "").includes("식")
+        );
+
         const contractMeal =
-          wc?.meal_allowance !== undefined ? Number(wc.meal_allowance) : 200_000;
-        const contractBase = wc?.monthly_base
-          ? Number(wc.monthly_base)
-          : wc?.annual_salary
-          ? Math.max(0, Math.round(Number(wc.annual_salary) / 12) - contractMeal)
-          : 2_800_000;
+          piMealItem && Number(piMealItem.amount) > 0
+            ? Number(piMealItem.amount)
+            : wc?.meal_allowance !== undefined
+              ? Number(wc.meal_allowance)
+              : 200_000;
+        const rawContractBase =
+          piBaseItem && Number(piBaseItem.amount) > 0
+            ? Number(piBaseItem.amount)
+            : wc?.monthly_base
+              ? Number(wc.monthly_base)
+              : wc?.annual_salary
+                ? Math.max(0, Math.round(Number(wc.annual_salary) / 12) - contractMeal)
+                : 2_800_000;
+        const rawFixedOt =
+          piOtItem && Number(piOtItem.amount) > 0
+            ? Number(piOtItem.amount)
+            : Number(wc?.fixed_overtime_allowance || 0);
+
+        // 수습 기간 중 급여지급률(%) 반영
+        const inProbation =
+          Boolean(lc?.probation_end_date && lc.probation_end_date >= `${payMonth}-01`) &&
+          (!lc?.probation_start_date || lc.probation_start_date <= `${payMonth}-31`);
+        const payRateRatio =
+          inProbation &&
+          lc?.salary_pay_rate !== undefined &&
+          lc?.salary_pay_rate !== null &&
+          Number(lc.salary_pay_rate) > 0 &&
+          Number(lc.salary_pay_rate) < 100
+            ? Number(lc.salary_pay_rate) / 100
+            : 1;
+
+        const contractBase = Math.round(rawContractBase * payRateRatio);
+        const contractOvertime = Math.round(rawFixedOt * payRateRatio);
 
         const basePay = prev ? Number(prev.base_pay) : contractBase;
         const meal = prev ? Number(prev.meal_allowance) : contractMeal;
+        const overtimePay = prev ? Number(prev.overtime_pay || 0) : contractOvertime;
         const calc = calculatePayrollAmounts({
           payType: "EMPLOYEE",
           basePay,
           mealAllowance: meal,
-          overtimePay: 0,
+          overtimePay,
           bonusPay: 0,
         });
 
@@ -481,7 +522,7 @@ export async function POST(req: NextRequest) {
           bank_info: bankText || prev?.bank_info || null,
           base_pay: basePay,
           meal_allowance: meal,
-          overtime_pay: 0,
+          overtime_pay: overtimePay,
           bonus_pay: 0,
           gross_amount: calc.grossAmount,
           national_pension: calc.nationalPension,

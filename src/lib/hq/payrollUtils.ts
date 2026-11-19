@@ -888,18 +888,36 @@ export function buildTaxLedgerUploadTemplateCsv(
   const rows: (string | number)[][] = [header];
   active.forEach((m) => {
     const wc = m.profile_extra?.wage_contract;
+    const lc = m.profile_extra?.labor_contract;
     const defaultMeal =
       wc?.meal_allowance !== undefined ? Number(wc.meal_allowance) : 200_000;
-    const defaultBase = wc?.monthly_base
+    const rawBase = wc?.monthly_base
       ? Number(wc.monthly_base)
       : wc?.annual_salary
       ? Math.max(0, Math.round(Number(wc.annual_salary) / 12) - defaultMeal)
       : 2_800_000;
+    const rawFixedOt = Number(wc?.fixed_overtime_allowance || 0);
+
+    const inProbation =
+      Boolean(lc?.probation_end_date && lc.probation_end_date >= `${payMonth}-01`) &&
+      (!lc?.probation_start_date || lc.probation_start_date <= `${payMonth}-31`);
+    const rateRatio =
+      inProbation &&
+      lc?.salary_pay_rate !== undefined &&
+      lc?.salary_pay_rate !== null &&
+      Number(lc.salary_pay_rate) > 0 &&
+      Number(lc.salary_pay_rate) < 100
+        ? Number(lc.salary_pay_rate) / 100
+        : 1;
+
+    const defaultBase = Math.round(rawBase * rateRatio);
+    const defaultOvertime = Math.round(rawFixedOt * rateRatio);
+
     const auto = calculatePayrollAmounts({
       payType: "EMPLOYEE",
       basePay: defaultBase,
       mealAllowance: defaultMeal,
-      overtimePay: 0,
+      overtimePay: defaultOvertime,
       bonusPay: 0,
     });
     const bank = [m.bank_name, m.bank_account, m.account_holder]
@@ -913,7 +931,7 @@ export function buildTaxLedgerUploadTemplateCsv(
       m.job_title || "",
       defaultBase,
       defaultMeal,
-      0,
+      defaultOvertime,
       0,
       auto.nationalPension,
       auto.healthInsurance,

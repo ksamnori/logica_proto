@@ -549,33 +549,53 @@ export function resolveContractTemplatePlaceholders(params: {
   const todayYmd = new Date().toISOString().slice(0, 10);
   const rule = workRule || DEFAULT_WORK_RULES[3] || DEFAULT_WORK_RULES[0];
 
+  const wc = member?.profile_extra?.wage_contract;
+  const lc = member?.profile_extra?.labor_contract;
+
   const annualSalary =
     contractAmount && contractAmount > 0
       ? contractAmount
-      : member?.profile_extra?.wage_contract?.annual_salary ||
-        (member?.profile_extra?.wage_contract?.monthly_base
-          ? member.profile_extra.wage_contract.monthly_base * 12
-          : 42000000);
+      : wc?.annual_salary ||
+        (wc?.amount_unit === "월급" && wc?.contract_amount
+          ? wc.contract_amount * 12
+          : wc?.monthly_base
+            ? wc.monthly_base * 12
+            : 42000000);
 
   const monthlyGross = Math.round(annualSalary / 12);
-  const mealAllowance =
-    member?.profile_extra?.wage_contract?.meal_allowance ?? 200000;
-  // 포괄 연장근로 월 약 22시간 기준 분리 예시 (월 지급액 - 식대 중 약 82% 기본급, 18% 고정연장수당)
+  const mealAllowance = wc?.meal_allowance ?? 200000;
   const taxableMonthly = Math.max(0, monthlyGross - mealAllowance);
-  const monthlyBase = Math.round((taxableMonthly * 0.82) / 100) * 100;
-  const fixedOvertimePay = Math.max(0, taxableMonthly - monthlyBase);
+
+  const savedFixedOt = wc?.fixed_overtime;
+  const hasSavedFixedOt = Boolean(
+    savedFixedOt?.enabled && savedFixedOt.total_contract_hours > 0
+  );
+  const monthlyBase =
+    hasSavedFixedOt && wc?.monthly_base
+      ? wc.monthly_base
+      : Math.round((taxableMonthly * 0.82) / 100) * 100;
+  const fixedOvertimePay =
+    hasSavedFixedOt && wc?.fixed_overtime_allowance !== undefined
+      ? wc.fixed_overtime_allowance
+      : Math.max(0, taxableMonthly - monthlyBase);
+
+  const fixedOtHoursText = hasSavedFixedOt
+    ? `${savedFixedOt!.is_weekly_input ? "주" : "월"} ${savedFixedOt!.total_contract_hours}시간 (가산 ${savedFixedOt!.total_weighted_hours}시간)`
+    : "월 22시간 (주 약 5시간)";
 
   const breakMins = calcBreakMinutes(rule);
   const fmtMoney = (n: number) => Math.max(0, Math.round(n)).toLocaleString("ko-KR");
 
-  const startStr = startDate || member?.hire_date || todayYmd;
+  const startStr = startDate || lc?.start_date || member?.hire_date || todayYmd;
   const endStr =
     endDate ||
-    member?.profile_extra?.labor_contract?.end_date ||
+    lc?.end_date ||
+    wc?.end_date ||
     `${new Date(startStr).getFullYear() || new Date().getFullYear()}-12-31`;
 
+  const probationStart = lc?.probation_start_date || startStr;
   // 수습 종료일 (시작일 + 3개월 - 1일)
-  let probationEnd = member?.profile_extra?.labor_contract?.probation_end_date || "";
+  let probationEnd = lc?.probation_end_date || "";
   if (!probationEnd && startStr) {
     const dt = new Date(`${startStr}T00:00:00`);
     if (!Number.isNaN(dt.getTime())) {
@@ -584,6 +604,10 @@ export function resolveContractTemplatePlaceholders(params: {
       probationEnd = dt.toISOString().slice(0, 10);
     }
   }
+  const probationPayRateText =
+    lc?.salary_pay_rate !== undefined && lc?.salary_pay_rate !== null
+      ? `${lc.salary_pay_rate}%`
+      : "100%";
 
   const dict: Record<string, string> = {
     "{{회사명}}": companySettings?.company_name || "(주)천종현수학연구소",
@@ -611,25 +635,26 @@ export function resolveContractTemplatePlaceholders(params: {
     "{{직무}}": member?.job_description || counterpartyRole || "교재 기획·편집",
     "{{직위}}": member?.job_title || counterpartyRole || "사원",
 
-    "{{임금계약 시작일}}": startStr,
-    "{{임금계약 종료일}}": endStr,
-    "{{급여 지급기준}}": "연봉제 (포괄임금)",
+    "{{임금계약 시작일}}": wc?.start_date || wc?.effective_date || startStr,
+    "{{임금계약 종료일}}": wc?.end_date || endStr,
+    "{{급여 지급기준}}": wc?.wage_type || "연봉제 (포괄임금)",
     "{{계약금액}}": fmtMoney(annualSalary),
     "{{월 지급액}}": fmtMoney(monthlyGross),
     "{{기본급}}": fmtMoney(monthlyBase),
-    "{{급여일}}":
-      member?.profile_extra?.wage_contract?.pay_day || "매월 25일",
-    "{{포괄임금 계약기준}}": "월 소정근로 209시간 + 고정연장근로 포괄 산정",
-    "{{포괄임금 고정초과근무 계약시간}}": "월 22시간 (주 약 5시간)",
+    "{{급여일}}": wc?.pay_day || "매월 25일",
+    "{{포괄임금 계약기준}}": hasSavedFixedOt
+      ? "월 소정근로 209시간 + 포괄 약정 초과근로시간 산정"
+      : "월 소정근로 209시간 + 고정연장근로 포괄 산정",
+    "{{포괄임금 고정초과근무 계약시간}}": fixedOtHoursText,
     "{{포괄임금 고정초과근무 수당}}": fmtMoney(fixedOvertimePay),
     "{{식대 비과세}}": fmtMoney(mealAllowance),
 
-    "{{계약유형}}": member?.employment_type || "정규직",
+    "{{계약유형}}": lc?.employment_type || member?.employment_type || "정규직",
     "{{근로계약 시작일}}": startStr,
-    "{{근로계약 종료일}}": endDate || "기간의 정함이 없음",
-    "{{수습기간 시작일}}": startStr,
+    "{{근로계약 종료일}}": endDate || lc?.end_date || "기간의 정함이 없음",
+    "{{수습기간 시작일}}": probationStart,
     "{{수습기간 종료일}}": probationEnd || "-",
-    "{{수습기간 급여지급률}}": "100%",
+    "{{수습기간 급여지급률}}": probationPayRateText,
 
     "{{근로일}}": (rule?.work_days || ["월", "화", "수", "목", "금"]).join(", "),
     "{{주휴일}}": (rule?.paid_rest_days || ["일"]).join(", ") + "요일",
