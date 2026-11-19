@@ -11,7 +11,6 @@ import {
 import { resolvePolicyApprovalLine } from "@/lib/hq/defaultWorkflowForms";
 import {
   formatMinutesToKoreanAmPm,
-  resolveBreakWindowsForSpan,
   resolveWorkRuleForMember,
 } from "@/lib/hq/defaultWorkRules";
 import type {
@@ -22,6 +21,8 @@ import type {
   HqRealtimeBreakSpan,
   HqRealtimeModeSegment,
   HqRealtimeWorkLog,
+  HqRecognizedBreakBlock,
+  HqRecognizedWorkSegment,
   HqSubstituteApprovalRule,
   HqWorkConditionRule,
   HqWorkEditApprovalPayload,
@@ -40,11 +41,13 @@ export interface DraftWorkEdit {
   actionMode: "UPSERT" | "DELETE";
   workMode: HqWorkMode;
   policyName: string;
-  inMinutes: number; // 0 ~ 1425
-  outMinutes: number; // 15 ~ 1440
+  inMinutes: number; // 0 ~ 1425 (earliest segment start)
+  outMinutes: number; // 15 ~ 1440 (latest segment end)
   breakMinutes: number;
   locationNote: string;
   memo: string;
+  segments: HqRecognizedWorkSegment[];
+  breaks: HqRecognizedBreakBlock[];
   wasScheduledWorkday: boolean;
   ruleDailyMinutes: number;
   baselineSnapshot: {
@@ -56,11 +59,16 @@ export interface DraftWorkEdit {
     breakMinutes: number;
     workedMinutes: number;
     overtimeMinutes: number;
+    segments: HqRecognizedWorkSegment[];
+    breaks: HqRecognizedBreakBlock[];
   };
 }
 
 export interface InlineWorkPopoverTarget {
-  key: string;
+  key: string; // `${memberId}__${workDate}`
+  targetKind: "SEGMENT" | "BREAK";
+  itemId: string; // segment.id or break.id
+  initialTimeFocus?: "START" | "END" | null;
   memberId: string;
   memberName: string;
   department: string;
@@ -68,6 +76,7 @@ export interface InlineWorkPopoverTarget {
   attendanceId?: string;
   hadExistingRecord: boolean;
   wasScheduledWorkday: boolean;
+  isHolidayOrOff: boolean;
   ruleDailyMinutes: number;
   anchorRect: {
     top: number;
@@ -76,15 +85,8 @@ export interface InlineWorkPopoverTarget {
     right: number;
     width: number;
   };
-  baseline: {
-    workMode: HqWorkMode;
-    policyName: string;
-    inMinutes: number;
-    outMinutes: number;
-    breakMinutes: number;
-    locationNote: string;
-    memo: string;
-  };
+  baselineSegments: HqRecognizedWorkSegment[];
+  baselineBreaks: HqRecognizedBreakBlock[];
 }
 
 export interface EvaluatedDraftApprovalItem {
@@ -112,6 +114,15 @@ export function minutesToHm24(mins: number): string {
   return `${hh}:${mm}`;
 }
 
+export function formatDurationKoreanCompact(totalMinutes: number): string {
+  const safe = Math.max(0, Math.round(totalMinutes || 0));
+  const h = Math.floor(safe / 60);
+  const m = safe % 60;
+  if (h > 0 && m > 0) return `${h}시간 ${m}분`;
+  if (h > 0) return `${h}시간`;
+  return `${m}분`;
+}
+
 export function formatGrossSpanKorean(
   inMinutes: number,
   outMinutes: number
@@ -120,16 +131,495 @@ export function formatGrossSpanKorean(
     outMinutes >= inMinutes
       ? outMinutes - inMinutes
       : 1440 - inMinutes + outMinutes;
-  const safe = Math.max(0, Math.round(diff));
-  const h = Math.floor(safe / 60);
-  const m = safe % 60;
-  if (h > 0 && m > 0) return `총 ${h}시간 ${m}분`;
-  if (h > 0) return `총 ${h}시간`;
-  return `총 ${m}분`;
+  return `총 ${formatDurationKoreanCompact(diff)}`;
+}
+
+// ============================================================================
+// 다중 근무 블록(Segments) + 다중 휴게 블록(Breaks) 정밀 시간·연장 계산 유틸
+// ============================================================================
+
+export function getBreaksOverlappingSegment(
+  seg: Pick<HqRecognizedWorkSegment, "in_minutes" | "out_minutes">,
+  breaks: HqRecognizedBreakBlock[]
+): HqRecognizedBreakBlock[] {
+  return [...(breaks || [])]
+    .filter(
+      (b) =>
+        Math.min(seg.out_minutes, b.end_minutes) >
+        Math.max(seg.in_minutes, b.start_minutes)
+    )
+    .sort((a, b) => a.start_minutes - b.start_minutes);
+}
+
+export function calcSegmentOverlappingBreaks(
+  seg: Pick<HqRecognizedWorkSegment, "in_minutes" | "out_minutes">,
+  breaks: HqRecognizedBreakBlock[]
+): {
+  mergedWindows: { start_minutes: number; end_minutes: number }[];
+  overlapMinutes: number;
+} {
+  const clipped = (breaks || [])
+    .map((b) => ({
+      start_minutes: Math.max(seg.in_minutes, b.start_minutes),
+      end_minutes: Math.min(seg.out_minutes, b.end_minutes),
+    }))
+    .filter((w) => w.end_minutes > w.start_minutes)
+    .sort((a, b) => a.start_minutes - b.start_minutes);
+
+  const mergedWindows: { start_minutes: number; end_minutes: number }[] = [];
+  for (const c of clipped) {
+    const last = mergedWindows[mergedWindows.length - 1];
+    if (last && c.start_minutes <= last.end_minutes) {
+      last.end_minutes = Math.max(last.end_minutes, c.end_minutes);
+    } else {
+      mergedWindows.push({ ...c });
+    }
+  }
+  const overlapMinutes = mergedWindows.reduce(
+    (acc, w) => acc + (w.end_minutes - w.start_minutes),
+    0
+  );
+  return { mergedWindows, overlapMinutes };
+}
+
+export function calcSegmentNetWorkedMinutes(
+  seg: Pick<HqRecognizedWorkSegment, "in_minutes" | "out_minutes">,
+  breaks: HqRecognizedBreakBlock[]
+): number {
+  const gross = Math.max(0, seg.out_minutes - seg.in_minutes);
+  const { overlapMinutes } = calcSegmentOverlappingBreaks(seg, breaks);
+  return Math.max(0, gross - overlapMinutes);
+}
+
+export function calcDayScheduleSummary(
+  segments: HqRecognizedWorkSegment[],
+  breaks: HqRecognizedBreakBlock[],
+  ruleDailyMinutes = 480
+): {
+  sortedSegments: HqRecognizedWorkSegment[];
+  sortedBreaks: HqRecognizedBreakBlock[];
+  workedMinutes: number;
+  breakMinutes: number;
+  overtimeMinutes: number;
+  inMinutes: number;
+  outMinutes: number;
+  workMode: HqWorkMode;
+  policyName: string;
+  locationNote: string;
+  memo: string;
+} {
+  const sortedSegments = [...(segments || [])].sort(
+    (a, b) => a.in_minutes - b.in_minutes
+  );
+  const sortedBreaks = [...(breaks || [])]
+    .filter((b) => b.end_minutes > b.start_minutes)
+    .sort((a, b) => a.start_minutes - b.start_minutes);
+
+  let workedMinutes = 0;
+  let overlapBreakSum = 0;
+  for (const seg of sortedSegments) {
+    const gross = Math.max(0, seg.out_minutes - seg.in_minutes);
+    const { overlapMinutes } = calcSegmentOverlappingBreaks(seg, sortedBreaks);
+    overlapBreakSum += overlapMinutes;
+    workedMinutes += Math.max(0, gross - overlapMinutes);
+  }
+
+  const standaloneBreakSum = sortedBreaks.reduce(
+    (acc, b) => acc + (b.end_minutes - b.start_minutes),
+    0
+  );
+  const breakMinutes =
+    sortedSegments.length > 0 ? overlapBreakSum : standaloneBreakSum;
+  const overtimeMinutes = Math.max(
+    0,
+    workedMinutes - Math.max(0, ruleDailyMinutes)
+  );
+
+  const inMinutes =
+    sortedSegments[0]?.in_minutes ?? sortedBreaks[0]?.start_minutes ?? 540;
+  const outMinutes =
+    sortedSegments[sortedSegments.length - 1]?.out_minutes ??
+    sortedBreaks[sortedBreaks.length - 1]?.end_minutes ??
+    600;
+
+  // 대표 근무 형태: 외근/원격/출장 등 커스텀 정책이 포함되어 있으면 우선 표기, 아니면 첫 블록 기준
+  const customSeg = sortedSegments.find(
+    (s) => s.policy_name && s.policy_name !== "근무"
+  );
+  const repSeg = customSeg || sortedSegments[0];
+  const workMode: HqWorkMode = repSeg?.work_mode || "OFFICE";
+  const policyName =
+    repSeg?.policy_name ||
+    (sortedSegments.length === 0 && sortedBreaks.length > 0 ? "휴게" : "근무");
+  const locationNote =
+    repSeg?.location_note ||
+    ATTENDANCE_MODES[workMode]?.defaultLocation ||
+    "본사 편집·연구실";
+  const memos = sortedSegments
+    .map((s) => (s.memo || "").trim())
+    .filter(Boolean);
+  const memo = Array.from(new Set(memos)).join(" / ");
+
+  return {
+    sortedSegments,
+    sortedBreaks,
+    workedMinutes,
+    breakMinutes,
+    overtimeMinutes,
+    inMinutes,
+    outMinutes,
+    workMode,
+    policyName,
+    locationNote,
+    memo,
+  };
+}
+
+/**
+ * 하루에 여러 근무 블록이 있을 때 시간순으로 소정근로(예: 8시간)를 차감하여
+ * 각 근무 블록에서 초과 근무(빨간 상단 바)가 정확히 어느 시각부터 시작되는지 산출
+ */
+export function computeSegmentsOvertimeMeta(
+  segments: HqRecognizedWorkSegment[],
+  breaks: HqRecognizedBreakBlock[],
+  ruleDailyMinutes: number
+): Record<
+  string,
+  {
+    netWorkedMin: number;
+    overtimeMin: number;
+    overtimeStartMin: number | null;
+    overtimeLeftPct: number;
+    overtimeWidthPct: number;
+  }
+> {
+  const sorted = [...(segments || [])].sort(
+    (a, b) => a.in_minutes - b.in_minutes
+  );
+  let remainingReg = Math.max(0, ruleDailyMinutes);
+  const out: Record<
+    string,
+    {
+      netWorkedMin: number;
+      overtimeMin: number;
+      overtimeStartMin: number | null;
+      overtimeLeftPct: number;
+      overtimeWidthPct: number;
+    }
+  > = {};
+
+  for (const seg of sorted) {
+    const span = Math.max(1, seg.out_minutes - seg.in_minutes);
+    const { mergedWindows } = calcSegmentOverlappingBreaks(seg, breaks);
+
+    // 비휴게 실근무 서브 구간 구축
+    const workSubs: { s: number; e: number }[] = [];
+    let cursor = seg.in_minutes;
+    for (const brk of mergedWindows) {
+      if (brk.start_minutes > cursor) {
+        workSubs.push({ s: cursor, e: brk.start_minutes });
+      }
+      cursor = Math.max(cursor, brk.end_minutes);
+    }
+    if (cursor < seg.out_minutes) {
+      workSubs.push({ s: cursor, e: seg.out_minutes });
+    }
+
+    let netWorkedMin = 0;
+    let overtimeMin = 0;
+    let overtimeStartMin: number | null = null;
+
+    for (const sub of workSubs) {
+      const dur = sub.e - sub.s;
+      netWorkedMin += dur;
+      if (remainingReg >= dur) {
+        remainingReg -= dur;
+      } else {
+        const regPart = remainingReg;
+        remainingReg = 0;
+        const otPart = dur - regPart;
+        overtimeMin += otPart;
+        if (overtimeStartMin === null) {
+          overtimeStartMin = sub.s + regPart;
+        }
+      }
+    }
+
+    if (overtimeStartMin !== null && overtimeMin > 0) {
+      const leftPct = Math.max(
+        0,
+        Math.min(100, ((overtimeStartMin - seg.in_minutes) / span) * 100)
+      );
+      out[seg.id] = {
+        netWorkedMin,
+        overtimeMin,
+        overtimeStartMin,
+        overtimeLeftPct: leftPct,
+        overtimeWidthPct: Math.max(0, 100 - leftPct),
+      };
+    } else {
+      out[seg.id] = {
+        netWorkedMin,
+        overtimeMin: 0,
+        overtimeStartMin: null,
+        overtimeLeftPct: 100,
+        overtimeWidthPct: 0,
+      };
+    }
+  }
+
+  return out;
+}
+
+/**
+ * 기존 근무 블록을 유지한 채 새로운 근무 블록을 배치할 빈 슬롯 탐색
+ * - 기존 블록이 없으면 ruleStartMin ~ ruleEndMin (기본 소정근무 구간)
+ * - 기존 블록이 있으면 마지막 블록 직후 1시간 (예: 오후 6:00 ~ 오후 7:00), 공간이 없으면 앞/사이 빈 구간 탐색
+ */
+export function findNextFreeSegmentSlot(params: {
+  existingSegments: HqRecognizedWorkSegment[];
+  preferredDuration?: number;
+  ruleStartMin?: number;
+  ruleEndMin?: number;
+}): { in_minutes: number; out_minutes: number; isInitialFullSpan: boolean } {
+  const {
+    existingSegments,
+    preferredDuration = 60,
+    ruleStartMin = 540,
+    ruleEndMin = 1080,
+  } = params;
+
+  if (!existingSegments || existingSegments.length === 0) {
+    const s = Math.max(0, Math.min(1380, ruleStartMin));
+    const e = Math.max(s + 60, Math.min(1440, ruleEndMin));
+    return { in_minutes: s, out_minutes: e, isInitialFullSpan: true };
+  }
+
+  const sorted = [...existingSegments].sort(
+    (a, b) => a.in_minutes - b.in_minutes
+  );
+  const lastEnd = sorted[sorted.length - 1].out_minutes;
+
+  // 1순위: 마지막 근무 블록 바로 뒤 (예: 18:00 -> 18:00 ~ 19:00)
+  if (lastEnd + preferredDuration <= 1440) {
+    return {
+      in_minutes: lastEnd,
+      out_minutes: lastEnd + preferredDuration,
+      isInitialFullSpan: false,
+    };
+  }
+  if (1440 - lastEnd >= 15) {
+    return {
+      in_minutes: lastEnd,
+      out_minutes: 1440,
+      isInitialFullSpan: false,
+    };
+  }
+
+  // 2순위: 블록 사이 빈 구간(뒤쪽부터)
+  for (let i = sorted.length - 1; i >= 1; i -= 1) {
+    const gapStart = sorted[i - 1].out_minutes;
+    const gapEnd = sorted[i].in_minutes;
+    if (gapEnd - gapStart >= preferredDuration) {
+      return {
+        in_minutes: gapStart,
+        out_minutes: gapStart + preferredDuration,
+        isInitialFullSpan: false,
+      };
+    }
+  }
+
+  // 3순위: 첫 번째 근무 블록 앞 (예: 09:00 앞 -> 08:00 ~ 09:00)
+  const firstStart = sorted[0].in_minutes;
+  if (firstStart >= preferredDuration) {
+    return {
+      in_minutes: firstStart - preferredDuration,
+      out_minutes: firstStart,
+      isInitialFullSpan: false,
+    };
+  }
+  if (firstStart >= 15) {
+    return {
+      in_minutes: 0,
+      out_minutes: firstStart,
+      isInitialFullSpan: false,
+    };
+  }
+
+  // 모든 구간이 꽉 찬 예외 상황에서는 15분 최소 슬롯 배치
+  return {
+    in_minutes: Math.max(0, 1440 - 30),
+    out_minutes: 1440,
+    isInitialFullSpan: false,
+  };
+}
+
+/**
+ * 기존 휴게 블록을 유지한 채 새 휴게 블록을 배치할 비충돌 슬롯 탐색
+ */
+export function findNextFreeBreakSlot(params: {
+  existingBreaks: HqRecognizedBreakBlock[];
+  targetSegment?: HqRecognizedWorkSegment | null;
+  allSegments?: HqRecognizedWorkSegment[];
+  ruleBreakStart?: number | null;
+  ruleBreakEnd?: number | null;
+}): { start_minutes: number; end_minutes: number } {
+  const {
+    existingBreaks,
+    targetSegment,
+    allSegments = [],
+    ruleBreakStart,
+    ruleBreakEnd,
+  } = params;
+
+  const sortedBreaks = [...(existingBreaks || [])].sort(
+    (a, b) => a.start_minutes - b.start_minutes
+  );
+
+  const isFree = (s: number, e: number) =>
+    s >= 0 &&
+    e <= 1440 &&
+    e > s &&
+    !sortedBreaks.some((b) => Math.min(e, b.end_minutes) > Math.max(s, b.start_minutes));
+
+  const seg =
+    targetSegment ||
+    [...allSegments].sort(
+      (a, b) => b.out_minutes - b.in_minutes - (a.out_minutes - a.in_minutes)
+    )[0] ||
+    null;
+
+  if (seg) {
+    const segStart = seg.in_minutes;
+    const segEnd = seg.out_minutes;
+    const segSpan = segEnd - segStart;
+
+    // 1) 근무 유형 기본 휴게(예: 13:00~14:00)가 비어있고 블록 내부에 들어오면 우선 사용
+    const rStart = ruleBreakStart ?? 780;
+    const rEnd = ruleBreakEnd ?? 840;
+    if (
+      rEnd > rStart &&
+      rStart >= segStart &&
+      rEnd <= segEnd &&
+      isFree(rStart, rEnd)
+    ) {
+      return { start_minutes: rStart, end_minutes: rEnd };
+    }
+
+    // 2) 블록 내 기존 휴게 바로 뒤 빈 슬롯 탐색 (60분 -> 30분 -> 15분 순)
+    const inSegBreaks = getBreaksOverlappingSegment(seg, sortedBreaks);
+    for (const dur of [60, 30, 15]) {
+      if (segSpan < dur) continue;
+      if (inSegBreaks.length > 0) {
+        const afterLast = inSegBreaks[inSegBreaks.length - 1].end_minutes;
+        if (afterLast + dur <= segEnd && isFree(afterLast, afterLast + dur)) {
+          return { start_minutes: afterLast, end_minutes: afterLast + dur };
+        }
+      }
+      // 블록 중간부터 15분 단위로 빈 구간 스캔
+      const midPref =
+        Math.round((segStart + Math.max(0, segSpan - dur) / 2) / 15) * 15;
+      if (
+        midPref >= segStart &&
+        midPref + dur <= segEnd &&
+        isFree(midPref, midPref + dur)
+      ) {
+        return { start_minutes: midPref, end_minutes: midPref + dur };
+      }
+      for (let cand = segStart; cand + dur <= segEnd; cand += 15) {
+        if (isFree(cand, cand + dur)) {
+          return { start_minutes: cand, end_minutes: cand + dur };
+        }
+      }
+    }
+  }
+
+  // 단독 휴게 또는 근무 블록 내부가 가득 찬 경우 전체 24시간 중 빈 1시간 탐색
+  if (isFree(780, 840)) {
+    return { start_minutes: 780, end_minutes: 840 };
+  }
+  if (sortedBreaks.length > 0) {
+    const lastB = sortedBreaks[sortedBreaks.length - 1].end_minutes;
+    if (lastB + 60 <= 1440 && isFree(lastB, lastB + 60)) {
+      return { start_minutes: lastB, end_minutes: lastB + 60 };
+    }
+  }
+  for (let cand = 540; cand + 30 <= 1440; cand += 15) {
+    if (isFree(cand, cand + 30)) {
+      return { start_minutes: cand, end_minutes: cand + 30 };
+    }
+  }
+  return { start_minutes: 720, end_minutes: 780 };
+}
+
+/**
+ * 근무/휴게 블록 드래그 이동 시 다른 블록의 앞이나 뒤로 자연스럽게 넘어가도록
+ * 가장 가까운 비충돌 슬롯을 계산
+ */
+export function resolveNearestNonOverlappingSlot(
+  desiredStart: number,
+  duration: number,
+  obstacles: { start: number; end: number }[],
+  minBound = 0,
+  maxBound = 1440
+): number {
+  const safeDur = Math.max(15, Math.min(maxBound - minBound, duration));
+  const clampedDesired = Math.max(
+    minBound,
+    Math.min(maxBound - safeDur, desiredStart)
+  );
+
+  if (!obstacles || obstacles.length === 0) {
+    return clampedDesired;
+  }
+
+  const sortedObs = [...obstacles]
+    .map((o) => ({
+      start: Math.max(minBound, o.start),
+      end: Math.min(maxBound, o.end),
+    }))
+    .filter((o) => o.end > o.start)
+    .sort((a, b) => a.start - b.start);
+
+  const freeGaps: { start: number; end: number }[] = [];
+  let cursor = minBound;
+  for (const ob of sortedObs) {
+    if (ob.start > cursor) {
+      freeGaps.push({ start: cursor, end: ob.start });
+    }
+    cursor = Math.max(cursor, ob.end);
+  }
+  if (cursor < maxBound) {
+    freeGaps.push({ start: cursor, end: maxBound });
+  }
+
+  let bestStart: number | null = null;
+  let bestDist = Infinity;
+
+  for (const gap of freeGaps) {
+    if (gap.end - gap.start < safeDur) continue;
+    const minS = gap.start;
+    const maxS = gap.end - safeDur;
+    const candidate = Math.max(minS, Math.min(maxS, clampedDesired));
+    const dist = Math.abs(candidate - clampedDesired);
+    if (dist < bestDist) {
+      bestDist = dist;
+      bestStart = candidate;
+    }
+  }
+
+  return bestStart !== null ? bestStart : clampedDesired;
 }
 
 export function calcDraftNetWorkedMinutes(draft: DraftWorkEdit): number {
   if (draft.actionMode === "DELETE") return 0;
+  if (Array.isArray(draft.segments)) {
+    return calcDayScheduleSummary(
+      draft.segments,
+      draft.breaks || [],
+      draft.ruleDailyMinutes
+    ).workedMinutes;
+  }
   const gross =
     draft.outMinutes >= draft.inMinutes
       ? draft.outMinutes - draft.inMinutes
@@ -137,31 +627,277 @@ export function calcDraftNetWorkedMinutes(draft: DraftWorkEdit): number {
   return Math.max(0, gross - Math.max(0, draft.breakMinutes));
 }
 
-export function isDraftIdenticalToBaseline(
-  draft: Pick<
-    DraftWorkEdit,
-    | "actionMode"
-    | "workMode"
-    | "policyName"
-    | "inMinutes"
-    | "outMinutes"
-    | "breakMinutes"
-    | "memo"
-  >,
-  target: InlineWorkPopoverTarget
-): boolean {
-  if (draft.actionMode === "DELETE") return false;
-  if (!target.hadExistingRecord && !target.wasScheduledWorkday) {
-    return false;
+export function isScheduleIdenticalToBaseline(params: {
+  segments: HqRecognizedWorkSegment[];
+  breaks: HqRecognizedBreakBlock[];
+  baselineSegments: HqRecognizedWorkSegment[];
+  baselineBreaks: HqRecognizedBreakBlock[];
+}): boolean {
+  const s1 = [...params.segments].sort((a, b) => a.in_minutes - b.in_minutes);
+  const s2 = [...params.baselineSegments].sort(
+    (a, b) => a.in_minutes - b.in_minutes
+  );
+  if (s1.length !== s2.length) return false;
+  for (let i = 0; i < s1.length; i += 1) {
+    if (
+      s1[i].in_minutes !== s2[i].in_minutes ||
+      s1[i].out_minutes !== s2[i].out_minutes ||
+      s1[i].work_mode !== s2[i].work_mode ||
+      s1[i].policy_name !== s2[i].policy_name ||
+      (s1[i].memo || "").trim() !== (s2[i].memo || "").trim()
+    ) {
+      return false;
+    }
   }
-  const b = target.baseline;
+
+  const b1 = [...params.breaks].sort(
+    (a, b) => a.start_minutes - b.start_minutes
+  );
+  const b2 = [...params.baselineBreaks].sort(
+    (a, b) => a.start_minutes - b.start_minutes
+  );
+  if (b1.length !== b2.length) return false;
+  for (let i = 0; i < b1.length; i += 1) {
+    if (
+      b1[i].start_minutes !== b2[i].start_minutes ||
+      b1[i].end_minutes !== b2[i].end_minutes
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
+export function buildDraftWorkEditFromSchedule(params: {
+  key: string;
+  memberId: string;
+  memberName: string;
+  department: string;
+  workDate: string;
+  attendanceId?: string;
+  wasScheduledWorkday: boolean;
+  ruleDailyMinutes: number;
+  segments: HqRecognizedWorkSegment[];
+  breaks: HqRecognizedBreakBlock[];
+  baselineSnapshot: DraftWorkEdit["baselineSnapshot"];
+}): DraftWorkEdit {
+  const {
+    key,
+    memberId,
+    memberName,
+    department,
+    workDate,
+    attendanceId,
+    wasScheduledWorkday,
+    ruleDailyMinutes,
+    segments,
+    breaks,
+    baselineSnapshot,
+  } = params;
+
+  if (segments.length === 0 && breaks.length === 0) {
+    return {
+      key,
+      memberId,
+      memberName,
+      department,
+      workDate,
+      attendanceId,
+      actionMode: "DELETE",
+      workMode: baselineSnapshot.workMode || "OFFICE",
+      policyName: baselineSnapshot.policyName || "근무",
+      inMinutes: baselineSnapshot.inMinutes || 540,
+      outMinutes: baselineSnapshot.outMinutes || 1080,
+      breakMinutes: 0,
+      locationNote: "",
+      memo: "",
+      segments: [],
+      breaks: [],
+      wasScheduledWorkday,
+      ruleDailyMinutes,
+      baselineSnapshot,
+    };
+  }
+
+  const summary = calcDayScheduleSummary(segments, breaks, ruleDailyMinutes);
+  return {
+    key,
+    memberId,
+    memberName,
+    department,
+    workDate,
+    attendanceId,
+    actionMode: "UPSERT",
+    workMode: summary.workMode,
+    policyName: summary.policyName,
+    inMinutes: summary.inMinutes,
+    outMinutes: summary.outMinutes,
+    breakMinutes: summary.breakMinutes,
+    locationNote: summary.locationNote,
+    memo: summary.memo,
+    segments: summary.sortedSegments,
+    breaks: summary.sortedBreaks,
+    wasScheduledWorkday,
+    ruleDailyMinutes,
+    baselineSnapshot,
+  };
+}
+
+// ============================================================================
+// 플렉스 스타일 근무 정책 컬러 & 아이콘 비주얼 헬퍼
+// ============================================================================
+
+export function getWorkPolicyVisual(
+  policyName?: string,
+  workMode?: HqWorkMode
+): {
+  label: string;
+  kind: "WORK" | "OUTSIDE" | "REMOTE" | "TRIP" | "BREAK" | "LEAVE";
+  fillClass: string;
+  plannedBorderClass: string;
+  solidBorderClass: string;
+  activeBorderClass: string;
+  badgeBgClass: string;
+  badgeTextClass: string;
+  isStarDefault?: boolean;
+} {
+  const name = (policyName || "").trim();
+  if (name === "휴게") {
+    return {
+      label: "휴게",
+      kind: "BREAK",
+      fillClass: "bg-slate-100/95",
+      plannedBorderClass: "border-slate-300",
+      solidBorderClass: "border-slate-300 text-slate-700",
+      activeBorderClass:
+        "border-slate-600 ring-1 ring-slate-500/25 text-slate-800",
+      badgeBgClass: "bg-slate-100",
+      badgeTextClass: "text-slate-500",
+    };
+  }
+  if (name.includes("외근")) {
+    return {
+      label: name || "외근",
+      kind: "OUTSIDE",
+      fillClass: "bg-[#fbcfe8]/85",
+      plannedBorderClass: "border-[#f472b6]",
+      solidBorderClass: "border-[#ec4899] text-[#9d174d]",
+      activeBorderClass:
+        "border-[#be185d] ring-1 ring-[#be185d]/30 text-[#9d174d]",
+      badgeBgClass: "bg-[#fce7f3]",
+      badgeTextClass: "text-[#ec4899]",
+    };
+  }
+  if (name.includes("출장")) {
+    return {
+      label: name || "출장",
+      kind: "TRIP",
+      fillClass: "bg-[#dcfce7]/90",
+      plannedBorderClass: "border-[#86efac]",
+      solidBorderClass: "border-[#22c55e] text-[#166534]",
+      activeBorderClass:
+        "border-[#15803d] ring-1 ring-[#15803d]/30 text-[#166534]",
+      badgeBgClass: "bg-[#ecfccb]",
+      badgeTextClass: "text-[#65a30d]",
+    };
+  }
+  if (name.includes("원격") || name.includes("재택") || workMode === "REMOTE") {
+    return {
+      label: name || "원격근무",
+      kind: "REMOTE",
+      fillClass: "bg-[#fef08a]/80",
+      plannedBorderClass: "border-[#fde047]",
+      solidBorderClass: "border-[#eab308] text-[#854d0e]",
+      activeBorderClass:
+        "border-[#a16207] ring-1 ring-[#a16207]/30 text-[#854d0e]",
+      badgeBgClass: "bg-[#fef9c3]",
+      badgeTextClass: "text-[#ca8a04]",
+    };
+  }
+  if (workMode === "OUTSIDE") {
+    return {
+      label: name || "외근",
+      kind: "OUTSIDE",
+      fillClass: "bg-[#fbcfe8]/85",
+      plannedBorderClass: "border-[#f472b6]",
+      solidBorderClass: "border-[#ec4899] text-[#9d174d]",
+      activeBorderClass:
+        "border-[#be185d] ring-1 ring-[#be185d]/30 text-[#9d174d]",
+      badgeBgClass: "bg-[#fce7f3]",
+      badgeTextClass: "text-[#ec4899]",
+    };
+  }
+  return {
+    label: name || "근무",
+    kind: "WORK",
+    fillClass: "bg-[#aef4e8]/92",
+    plannedBorderClass: "border-[#5eead4]",
+    solidBorderClass: "border-[#2dd4bf] text-[#0f766e]",
+    activeBorderClass:
+      "border-[#0f766e] ring-1 ring-[#0f766e]/30 text-[#0f766e]",
+    badgeBgClass: "bg-[#ccfbf1]",
+    badgeTextClass: "text-[#14b8a6]",
+    isStarDefault: true,
+  };
+}
+
+export function PolicySvgIcon({
+  kind,
+  className = "w-3.5 h-3.5",
+}: {
+  kind: "WORK" | "OUTSIDE" | "REMOTE" | "TRIP" | "BREAK" | "LEAVE";
+  className?: string;
+}) {
+  if (kind === "OUTSIDE") {
+    return (
+      <svg viewBox="0 0 24 24" fill="currentColor" className={className}>
+        <path d="M5.5 6.5A2.5 2.5 0 0 1 8 4h8a2.5 2.5 0 0 1 2.4 1.8l1.35 4.45A2.5 2.5 0 0 1 21.5 12.6V17a1.5 1.5 0 0 1-1.5 1.5h-.5a1.5 1.5 0 0 1-1.5-1.5v-1H6v1a1.5 1.5 0 0 1-1.5 1.5H4A1.5 1.5 0 0 1 2.5 17v-4.4a2.5 2.5 0 0 1 1.75-2.35L5.5 6.5Zm1.7.5-.9 3h11.4l-.9-3H7.2ZM6.5 14a1.25 1.25 0 1 0 0-2.5 1.25 1.25 0 0 0 0 2.5Zm11 0a1.25 1.25 0 1 0 0-2.5 1.25 1.25 0 0 0 0 2.5Z" />
+      </svg>
+    );
+  }
+  if (kind === "REMOTE") {
+    return (
+      <svg viewBox="0 0 24 24" fill="currentColor" className={className}>
+        <path d="M11.3 3.3a1 1 0 0 1 1.4 0l8 7.5a1 1 0 0 1-.68 1.73H19v7.47a1 1 0 0 1-1 1h-4.5v-5h-3v5H6a1 1 0 0 1-1-1v-7.47H3.98a1 1 0 0 1-.68-1.73l8-7.5Z" />
+      </svg>
+    );
+  }
+  if (kind === "TRIP") {
+    return (
+      <svg viewBox="0 0 24 24" fill="currentColor" className={className}>
+        <path d="M21 14.5v-2l-8-5V3.5a1.5 1.5 0 0 0-3 0V7.5l-8 5v2l8-2.5v5.5L8 19v1.5l3.5-1 3.5 1V19l-2-1.5V12l8 2.5Z" />
+      </svg>
+    );
+  }
+  if (kind === "BREAK") {
+    return (
+      <svg
+        viewBox="0 0 24 24"
+        fill="currentColor"
+        stroke="currentColor"
+        strokeWidth={1.6}
+        className={className}
+      >
+        <path d="M3.5 8h12.5v5.5a4.5 4.5 0 0 1-4.5 4.5H8a4.5 4.5 0 0 1-4.5-4.5V8Z" />
+        <path
+          d="M16 9.2h1.6a2.4 2.4 0 0 1 0 4.8H16"
+          fill="none"
+          strokeWidth={2}
+        />
+      </svg>
+    );
+  }
+  if (kind === "LEAVE") {
+    return (
+      <svg viewBox="0 0 24 24" fill="currentColor" className={className}>
+        <path d="M12 3c-4.97 0-9 3.58-9 8 0 .55.45 1 1 1h7v6.5a1.5 1.5 0 0 1-3 0 .75.75 0 0 0-1.5 0 3 3 0 0 0 6 0V12h7.5c.55 0 1-.45 1-1 0-4.42-4.03-8-9-8Z" />
+      </svg>
+    );
+  }
   return (
-    draft.workMode === b.workMode &&
-    draft.policyName === b.policyName &&
-    draft.inMinutes === b.inMinutes &&
-    draft.outMinutes === b.outMinutes &&
-    draft.breakMinutes === b.breakMinutes &&
-    (draft.memo || "").trim() === (b.memo || "").trim()
+    <svg viewBox="0 0 24 24" fill="currentColor" className={className}>
+      <path d="M9 4.5A1.5 1.5 0 0 1 10.5 3h3A1.5 1.5 0 0 1 15 4.5V6h4a2 2 0 0 1 2 2v3.25a24.8 24.8 0 0 1-8 1.48 24.8 24.8 0 0 1-8-1.48V8a2 2 0 0 1 2-2h4V4.5Zm1.5.5v1h3V5h-3ZM3 13.1V18a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-4.9a26.6 26.6 0 0 1-7.5 1.35v1.05a.75.75 0 0 1-.75.75h-1.5a.75.75 0 0 1-.75-.75v-1.05A26.6 26.6 0 0 1 3 13.1Z" />
+    </svg>
   );
 }
 
@@ -171,6 +907,59 @@ function calendarDayDiffYmd(earlierYmd: string, laterYmd: string): number {
   const t1 = Date.UTC(y1 || 2026, (m1 || 1) - 1, d1 || 1);
   const t2 = Date.UTC(y2 || 2026, (m2 || 1) - 1, d2 || 1);
   return Math.round((t2 - t1) / 86_400_000);
+}
+
+function normalizePolicyChoices(workFormPolicies: HqWorkFormPolicy[]) {
+  const base: {
+    name: string;
+    mode: HqWorkMode;
+    loc: string;
+    isDefaultStar?: boolean;
+  }[] = [];
+  const seen = new Set<string>();
+
+  const pushChoice = (
+    name: string,
+    mode: HqWorkMode,
+    loc: string,
+    isDefaultStar = false
+  ) => {
+    if (seen.has(name)) return;
+    seen.add(name);
+    base.push({ name, mode, loc, isDefaultStar });
+  };
+
+  // 플렉스 기본 순서: 근무 ★ -> 외근 -> 원격근무 -> 출장
+  pushChoice(
+    "근무",
+    "OFFICE",
+    ATTENDANCE_MODES.OFFICE.defaultLocation,
+    true
+  );
+  pushChoice("외근", "OUTSIDE", "외근지", false);
+  pushChoice(
+    "원격근무",
+    "REMOTE",
+    ATTENDANCE_MODES.REMOTE.defaultLocation,
+    false
+  );
+  pushChoice("출장", "OUTSIDE", "출장지", false);
+
+  workFormPolicies.forEach((p) => {
+    const m: HqWorkMode = p.name.includes("원격")
+      ? "REMOTE"
+      : p.name.includes("외근") || p.name.includes("출장")
+        ? "OUTSIDE"
+        : "OFFICE";
+    const loc = p.name.includes("출장")
+      ? "출장지"
+      : p.name.includes("외근")
+        ? "외근지"
+        : ATTENDANCE_MODES[m].defaultLocation;
+    pushChoice(p.name, m, loc, Boolean(p.is_mandatory && p.name === "근무"));
+  });
+
+  return base;
 }
 
 /**
@@ -224,10 +1013,17 @@ export function evaluateDraftsApprovalSummary(params: {
   const results: EvaluatedDraftApprovalItem[] = [];
 
   for (const d of drafts) {
-    const triggeredPolicyIds: { id: string; label: string; reasonReq: boolean }[] =
-      [];
+    const triggeredPolicyIds: {
+      id: string;
+      label: string;
+      reasonReq: boolean;
+    }[] = [];
 
-    const pushTrigger = (policyId: string, label: string, reasonReq = false) => {
+    const pushTrigger = (
+      policyId: string,
+      label: string,
+      reasonReq = false
+    ) => {
       const pol = policyMap.get(policyId);
       if (!pol) return;
       const hasAny =
@@ -239,15 +1035,19 @@ export function evaluateDraftsApprovalSummary(params: {
       }
     };
 
-    if (d.actionMode === "UPSERT") {
-      // 1) 근무 정책(근무 / 외근 / 원격근무 / 출장) 승인·참조 확인
-      const matchedForm = formPolicies.find((f) => f.name === d.policyName);
-      if (matchedForm) {
-        pushTrigger(
-          matchedForm.policy_id,
-          matchedForm.name,
-          Boolean(matchedForm.reason_required)
+    if (d.actionMode === "UPSERT" && d.segments.length > 0) {
+      // 1) 다중 근무 블록 각각의 정책(근무 / 외근 / 원격근무 / 출장) 승인·참조 확인
+      for (const seg of d.segments) {
+        const matchedForm = formPolicies.find(
+          (f) => f.name === seg.policy_name
         );
+        if (matchedForm) {
+          pushTrigger(
+            matchedForm.policy_id,
+            matchedForm.name,
+            Boolean(matchedForm.reason_required)
+          );
+        }
       }
 
       const netMin = calcDraftNetWorkedMinutes(d);
@@ -266,7 +1066,10 @@ export function evaluateDraftsApprovalSummary(params: {
       }
 
       // 4) 야간 근무 (wk-night: 오후 10시 ~ 오전 6시 포함)
-      if (d.inMinutes < 360 || d.outMinutes > 1320) {
+      const hasNight = d.segments.some(
+        (s) => s.in_minutes < 360 || s.out_minutes > 1320
+      );
+      if (hasNight) {
         const cr = condMap.get("wk-night");
         pushTrigger("wk-night", "야간 근무", Boolean(cr?.reason_required));
       }
@@ -282,7 +1085,7 @@ export function evaluateDraftsApprovalSummary(params: {
       }
     }
 
-    // 6) 과거 근무 수정 (wk-edit-past: 달력일 기준 지정일[1~7일] 초과 과거 일정 수정 시 발동 — Screenshot c8b49118 동일!)
+    // 6) 과거 근무 수정 (wk-edit-past)
     if (d.workDate < todayStr) {
       const cr = condMap.get("wk-edit-past");
       const limitDays = Math.max(
@@ -291,7 +1094,11 @@ export function evaluateDraftsApprovalSummary(params: {
       );
       const elapsedDays = calendarDayDiffYmd(d.workDate, todayStr);
       if (elapsedDays > limitDays) {
-        pushTrigger("wk-edit-past", "과거 근무 수정", Boolean(cr?.reason_required));
+        pushTrigger(
+          "wk-edit-past",
+          "과거 근무 수정",
+          Boolean(cr?.reason_required)
+        );
       }
     }
 
@@ -341,27 +1148,23 @@ export function evaluateDraftsApprovalSummary(params: {
     const afterNet = calcDraftNetWorkedMinutes(d);
     const afterOt = Math.max(0, afterNet - d.ruleDailyMinutes);
     const reasonText = (reasonByKey[d.key] || d.memo || "").trim();
-    const memberRule = resolveWorkRuleForMember(
+    const _memberRule = resolveWorkRuleForMember(
       workRules,
       targetMember?.name || d.memberName,
       targetMember?.profile_extra?.work_schedule_type
     );
-    const beforeBreaks = d.baselineSnapshot.exists
-      ? resolveBreakWindowsForSpan({
-          inMinutes: d.baselineSnapshot.inMinutes,
-          outMinutes: d.baselineSnapshot.outMinutes,
-          breakMinutes: d.baselineSnapshot.breakMinutes,
-          rule: memberRule,
-        })
-      : [];
+    void _memberRule;
+
+    const beforeBreaks = (d.baselineSnapshot.breaks || []).map((b) => ({
+      start_minutes: b.start_minutes,
+      end_minutes: b.end_minutes,
+    }));
     const afterBreaks =
       d.actionMode === "UPSERT"
-        ? resolveBreakWindowsForSpan({
-            inMinutes: d.inMinutes,
-            outMinutes: d.outMinutes,
-            breakMinutes: d.breakMinutes,
-            rule: memberRule,
-          })
+        ? (d.breaks || []).map((b) => ({
+            start_minutes: b.start_minutes,
+            end_minutes: b.end_minutes,
+          }))
         : [];
 
     results.push({
@@ -392,11 +1195,12 @@ export function evaluateDraftsApprovalSummary(params: {
           break_start_minutes: beforeBreaks[0]?.start_minutes ?? null,
           break_end_minutes: beforeBreaks[0]?.end_minutes ?? null,
           breaks: beforeBreaks,
+          segments: d.baselineSnapshot.segments,
           worked_minutes: d.baselineSnapshot.workedMinutes,
           overtime_minutes: d.baselineSnapshot.overtimeMinutes,
         },
         after: {
-          exists: d.actionMode === "UPSERT",
+          exists: d.actionMode === "UPSERT" && d.segments.length > 0,
           policy_name: d.policyName,
           work_mode: d.workMode,
           in_minutes: d.inMinutes,
@@ -405,6 +1209,7 @@ export function evaluateDraftsApprovalSummary(params: {
           break_start_minutes: afterBreaks[0]?.start_minutes ?? null,
           break_end_minutes: afterBreaks[0]?.end_minutes ?? null,
           breaks: afterBreaks,
+          segments: d.segments,
           worked_minutes: afterNet,
           overtime_minutes: afterOt,
           location_note: d.locationNote,
@@ -417,7 +1222,7 @@ export function evaluateDraftsApprovalSummary(params: {
   return results;
 }
 
-// 15분 단위 시각 옵션 (오전 12:00 ~ 오후 11:45, 총 96개)
+// 15분 단위 시각 옵션 (오전 12:00 ~ 오후 11:45 + 자정 24:00)
 const TIME_SLOTS_15M: { minutes: number; label: string }[] = Array.from(
   { length: 96 },
   (_, idx) => {
@@ -472,9 +1277,379 @@ function parseUserTypedTime(raw: string): number | null {
   return hh * 60 + mm;
 }
 
-/**
- * 1. 인정 근무(굵은 막대) 클릭 시 열리는 플렉스 인라인 팝오버 ([근무 편집] 권한 전용)
- */
+// ============================================================================
+// 0-A. 플렉스 날짜 행 [+] 버튼 드롭다운 메뉴
+// - 오늘/미래 근무일: 근무, 외근, 원격근무, 출장 / 휴게, 연차
+// - 휴일(주말·공휴일): 연차 미노출! (근무, 외근, 원격근무, 출장 / 휴게)
+// - 지나간 날짜: 상단에 [실시간 기록 (누락된 기록을 추가할 수 있어요.)] 추가 노출 (권한 보유 시)
+// ============================================================================
+export function FlexRowAddPopover({
+  isPastDate,
+  isHolidayOrOff,
+  canEditWork,
+  canEditRealtime,
+  workFormPolicies,
+  anchorRect,
+  onSelectWorkPolicy,
+  onSelectBreak,
+  onSelectAnnualLeave,
+  onSelectRealtimeRecord,
+  onClose,
+}: {
+  isPastDate: boolean;
+  isHolidayOrOff: boolean;
+  canEditWork: boolean;
+  canEditRealtime: boolean;
+  workFormPolicies: HqWorkFormPolicy[];
+  anchorRect: {
+    top: number;
+    bottom: number;
+    left: number;
+    right: number;
+    width: number;
+  };
+  onSelectWorkPolicy: (
+    policyName: string,
+    workMode: HqWorkMode,
+    defaultLoc: string
+  ) => void;
+  onSelectBreak: () => void;
+  onSelectAnnualLeave: () => void;
+  onSelectRealtimeRecord: () => void;
+  onClose: () => void;
+}) {
+  const menuRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const onOutside = (e: MouseEvent) => {
+      if (menuRef.current?.contains(e.target as Node)) return;
+      onClose();
+    };
+    const timer = window.setTimeout(() => {
+      document.addEventListener("mousedown", onOutside);
+    }, 10);
+    return () => {
+      window.clearTimeout(timer);
+      document.removeEventListener("mousedown", onOutside);
+    };
+  }, [onClose]);
+
+  const choices = useMemo(
+    () => normalizePolicyChoices(workFormPolicies),
+    [workFormPolicies]
+  );
+
+  const showRealtimeItem = isPastDate && canEditRealtime;
+  const showLeaveItem = !isHolidayOrOff;
+
+  const posStyle = useMemo<React.CSSProperties>(() => {
+    const winW = typeof window !== "undefined" ? window.innerWidth : 1280;
+    const winH = typeof window !== "undefined" ? window.innerHeight : 860;
+    const menuW = 214;
+    const estH =
+      (showRealtimeItem ? 64 : 0) +
+      (canEditWork ? choices.length * 36 + 50 : 0) +
+      (showLeaveItem ? 38 : 0) +
+      24;
+
+    const left = Math.max(12, Math.min(winW - menuW - 16, anchorRect.left));
+    const openUp =
+      anchorRect.bottom + estH > winH - 16 && anchorRect.top > estH + 16;
+
+    if (openUp) {
+      return {
+        position: "fixed",
+        left: `${left}px`,
+        bottom: `${Math.max(12, winH - anchorRect.top + 6)}px`,
+        width: `${menuW}px`,
+      };
+    }
+    return {
+      position: "fixed",
+      left: `${left}px`,
+      top: `${anchorRect.bottom + 6}px`,
+      width: `${menuW}px`,
+    };
+  }, [anchorRect, canEditWork, choices.length, showLeaveItem, showRealtimeItem]);
+
+  return (
+    <div
+      ref={menuRef}
+      style={posStyle}
+      onClick={(e) => e.stopPropagation()}
+      className="z-[165] rounded-2xl bg-white shadow-[0_12px_38px_rgba(15,23,42,0.16)] border border-slate-200/90 py-2 text-xs select-none"
+    >
+      {/* 지나간 날짜 + 실시간 기록 편집 권한 보유 시 상단 노출 */}
+      {showRealtimeItem && (
+        <>
+          <button
+            type="button"
+            onClick={() => {
+              onClose();
+              onSelectRealtimeRecord();
+            }}
+            className="w-full px-4 py-2.5 text-left hover:bg-slate-50 transition-colors flex items-start gap-2.5"
+          >
+            <span className="mt-0.5 text-slate-700 shrink-0">
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth={2}
+                className="w-4 h-4"
+              >
+                <circle cx="12" cy="13" r="8" />
+                <path strokeLinecap="round" d="M12 9v4l2.5 1.5M9.5 3h5" />
+              </svg>
+            </span>
+            <div className="min-w-0">
+              <div className="flex items-center gap-1.5">
+                <span className="text-[12.5px] font-bold text-slate-800">
+                  실시간 기록
+                </span>
+                <span className="w-1.5 h-1.5 rounded-full bg-[#16cc3b]" />
+              </div>
+              <div className="text-[11px] text-slate-400 font-medium mt-0.5 leading-snug">
+                누락된 기록을 추가할 수 있어요.
+              </div>
+            </div>
+          </button>
+          {(canEditWork || showLeaveItem) && (
+            <div className="my-1.5 border-t border-slate-100" />
+          )}
+        </>
+      )}
+
+      {/* 근무 정책 목록 (근무 ★, 외근, 원격근무, 출장) */}
+      {canEditWork && (
+        <div className="space-y-0.5">
+          {choices.map((ch) => {
+            const vis = getWorkPolicyVisual(ch.name, ch.mode);
+            return (
+              <button
+                key={ch.name}
+                type="button"
+                onClick={() => {
+                  onClose();
+                  onSelectWorkPolicy(ch.name, ch.mode, ch.loc);
+                }}
+                className="w-full px-4 py-2 text-left hover:bg-slate-50 transition-colors flex items-center gap-2.5 font-semibold text-slate-800"
+              >
+                <span
+                  className={`w-5 h-5 rounded-md flex items-center justify-center shrink-0 ${vis.badgeBgClass} ${vis.badgeTextClass}`}
+                >
+                  <PolicySvgIcon kind={vis.kind} className="w-3.5 h-3.5" />
+                </span>
+                <span className="text-[12.5px]">{ch.name}</span>
+                {ch.isDefaultStar && (
+                  <span className="w-3.5 h-3.5 rounded-full bg-[#facc15] text-white text-[9px] font-black inline-flex items-center justify-center">
+                    ★
+                  </span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+      )}
+
+      {canEditWork && (canEditWork || showLeaveItem) && (
+        <div className="my-1.5 border-t border-slate-100" />
+      )}
+
+      {/* 하단: 휴게 + (휴일이 아닐 때만) 연차 */}
+      <div className="space-y-0.5">
+        {canEditWork && (
+          <button
+            type="button"
+            onClick={() => {
+              onClose();
+              onSelectBreak();
+            }}
+            className="w-full px-4 py-2 text-left hover:bg-slate-50 transition-colors flex items-center gap-2.5 font-semibold text-slate-700"
+          >
+            <span className="w-5 h-5 rounded-md bg-slate-100 text-slate-400 flex items-center justify-center shrink-0">
+              <PolicySvgIcon kind="BREAK" className="w-3.5 h-3.5" />
+            </span>
+            <span className="text-[12.5px]">휴게</span>
+          </button>
+        )}
+
+        {showLeaveItem && (
+          <button
+            type="button"
+            onClick={() => {
+              onClose();
+              onSelectAnnualLeave();
+            }}
+            className="w-full px-4 py-2 text-left hover:bg-purple-50/50 transition-colors flex items-center gap-2.5 font-semibold text-slate-800"
+          >
+            <span className="w-5 h-5 rounded-md bg-purple-100 text-[#9333ea] flex items-center justify-center shrink-0">
+              <PolicySvgIcon kind="LEAVE" className="w-3.5 h-3.5" />
+            </span>
+            <span className="text-[12.5px]">연차</span>
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ============================================================================
+// 0-B. 블록 하단 '휴게 N건' / '휴게 없음' 클릭 시 열리는 휴게 목록 & [+ 휴게 추가] 팝오버
+// ============================================================================
+export function FlexBreakListPopover({
+  breaks,
+  canEdit,
+  anchorRect,
+  onAddBreak,
+  onEditBreak,
+  onDeleteBreak,
+  onClose,
+}: {
+  breaks: HqRecognizedBreakBlock[];
+  canEdit: boolean;
+  anchorRect: {
+    top: number;
+    bottom: number;
+    left: number;
+    right: number;
+    width: number;
+  };
+  onAddBreak: () => void;
+  onEditBreak: (breakId: string) => void;
+  onDeleteBreak: (breakId: string) => void;
+  onClose: () => void;
+}) {
+  const cardRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const onOutside = (e: MouseEvent) => {
+      if (cardRef.current?.contains(e.target as Node)) return;
+      onClose();
+    };
+    const timer = window.setTimeout(() => {
+      document.addEventListener("mousedown", onOutside);
+    }, 10);
+    return () => {
+      window.clearTimeout(timer);
+      document.removeEventListener("mousedown", onOutside);
+    };
+  }, [onClose]);
+
+  const posStyle = useMemo<React.CSSProperties>(() => {
+    const winW = typeof window !== "undefined" ? window.innerWidth : 1280;
+    const winH = typeof window !== "undefined" ? window.innerHeight : 860;
+    const cardW = 216;
+    const estH = Math.max(1, breaks.length) * 52 + 56;
+    const left = Math.max(16, Math.min(winW - cardW - 16, anchorRect.left));
+    const openUp =
+      anchorRect.bottom + estH > winH - 20 && anchorRect.top > estH + 20;
+
+    if (openUp) {
+      return {
+        position: "fixed",
+        left: `${left}px`,
+        bottom: `${Math.max(14, winH - anchorRect.top + 6)}px`,
+        width: `${cardW}px`,
+      };
+    }
+    return {
+      position: "fixed",
+      left: `${left}px`,
+      top: `${anchorRect.bottom + 6}px`,
+      width: `${cardW}px`,
+    };
+  }, [anchorRect, breaks.length]);
+
+  return (
+    <div
+      ref={cardRef}
+      style={posStyle}
+      onClick={(e) => e.stopPropagation()}
+      className="z-[165] rounded-2xl bg-white shadow-[0_14px_38px_rgba(15,23,42,0.16)] border border-slate-200/90 overflow-hidden select-none text-xs"
+    >
+      <div className="py-1.5">
+        {breaks.length === 0 ? (
+          <div className="px-4 py-2.5 text-[11.5px] font-semibold text-slate-400 flex items-center gap-2">
+            <span className="text-slate-300">
+              <PolicySvgIcon kind="BREAK" className="w-3.5 h-3.5" />
+            </span>
+            <span>등록된 휴게가 없어요</span>
+          </div>
+        ) : (
+          breaks.map((brk) => {
+            const dur = Math.max(0, brk.end_minutes - brk.start_minutes);
+            return (
+              <div
+                key={brk.id}
+                onClick={() => {
+                  if (!canEdit) return;
+                  onEditBreak(brk.id);
+                }}
+                className={`px-3.5 py-2 flex items-start justify-between gap-2 group transition-colors ${
+                  canEdit ? "hover:bg-slate-50 cursor-pointer" : ""
+                }`}
+              >
+                <div className="flex items-start gap-2.5 min-w-0">
+                  <span className="mt-0.5 text-slate-400 shrink-0">
+                    <PolicySvgIcon kind="BREAK" className="w-3.5 h-3.5" />
+                  </span>
+                  <div className="min-w-0">
+                    <div className="text-[12.5px] font-extrabold text-slate-800 leading-tight">
+                      {formatDurationKoreanCompact(dur)}
+                    </div>
+                    <div className="text-[11px] font-medium text-slate-400 mt-0.5 tabular-nums whitespace-nowrap">
+                      {formatMinutesToKoreanAmPm(brk.start_minutes)} –{" "}
+                      {formatMinutesToKoreanAmPm(brk.end_minutes)}
+                    </div>
+                  </div>
+                </div>
+
+                {canEdit && (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onDeleteBreak(brk.id);
+                    }}
+                    title="휴게 삭제"
+                    className="opacity-0 group-hover:opacity-100 w-5 h-5 rounded hover:bg-rose-50 text-slate-400 hover:text-rose-500 flex items-center justify-center text-[11px] font-bold transition-all"
+                  >
+                    ✕
+                  </button>
+                )}
+              </div>
+            );
+          })
+        )}
+      </div>
+
+      {canEdit && (
+        <div className="p-1.5 border-t border-slate-100">
+          <button
+            type="button"
+            onClick={() => {
+              onAddBreak();
+            }}
+            className="w-full px-3 py-2 rounded-xl bg-slate-100/85 hover:bg-slate-200/75 transition-colors flex items-center gap-2 text-left"
+          >
+            <span className="w-4 h-4 rounded-[4px] bg-[#2563eb] text-white inline-flex items-center justify-center text-[11px] font-black leading-none shrink-0">
+              +
+            </span>
+            <span className="text-xs font-extrabold text-slate-700">
+              휴게 추가
+            </span>
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ============================================================================
+// 1. 인정 근무 블록 / 휴게 블록 클릭 또는 하단 시간 클릭 시 열리는 플렉스 인라인 팝오버
+// - 종료 시각 클릭 시 시작 시각으로부터 경과한 근무 시간(예: 30분, 1시간, 1시간 15분) 배지 표시
+// ============================================================================
 export function FlexInlineWorkPopover({
   target,
   currentDraft,
@@ -482,7 +1657,7 @@ export function FlexInlineWorkPopover({
   baselineSnapshot,
   onChangeDraft,
   onClearDraft,
-  onStageDelete,
+  onSwitchTarget,
   onConfirmClose,
   onSwitchToLeaveModal,
 }: {
@@ -492,37 +1667,121 @@ export function FlexInlineWorkPopover({
   baselineSnapshot: DraftWorkEdit["baselineSnapshot"];
   onChangeDraft: (next: DraftWorkEdit) => void;
   onClearDraft: (key: string) => void;
-  onStageDelete: (target: InlineWorkPopoverTarget) => void;
+  onSwitchTarget?: (nextTarget: InlineWorkPopoverTarget) => void;
   onConfirmClose: () => void;
   onSwitchToLeaveModal: (workDate: string) => void;
 }) {
   const cardRef = useRef<HTMLDivElement | null>(null);
   const timeListRef = useRef<HTMLDivElement | null>(null);
+  const idSeqRef = useRef(1);
 
   const [policyDropdownOpen, setPolicyDropdownOpen] = useState(false);
-  const [activeTimeField, setActiveTimeField] = useState<"START" | "END" | null>(
-    null
-  );
+  const [activeTimeField, setActiveTimeField] = useState<
+    "START" | "END" | null
+  >(target.initialTimeFocus ?? null);
   const [typedTimeText, setTypedTimeText] = useState("");
   const [isTypingTime, setIsTypingTime] = useState(false);
   const [moreMenuOpen, setMoreMenuOpen] = useState(false);
-  const [showBreakPicker, setShowBreakPicker] = useState(false);
   const [showMemoInput, setShowMemoInput] = useState(false);
 
-  const effectiveState = useMemo(() => {
-    if (currentDraft && currentDraft.actionMode === "UPSERT") {
+  const effectiveDay = useMemo(() => {
+    if (currentDraft) {
+      if (currentDraft.actionMode === "DELETE") {
+        return {
+          segments: [] as HqRecognizedWorkSegment[],
+          breaks: [] as HqRecognizedBreakBlock[],
+        };
+      }
       return {
-        workMode: currentDraft.workMode,
-        policyName: currentDraft.policyName,
-        inMinutes: currentDraft.inMinutes,
-        outMinutes: currentDraft.outMinutes,
-        breakMinutes: currentDraft.breakMinutes,
-        locationNote: currentDraft.locationNote,
-        memo: currentDraft.memo,
+        segments: currentDraft.segments,
+        breaks: currentDraft.breaks,
       };
     }
-    return target.baseline;
-  }, [currentDraft, target.baseline]);
+    return {
+      segments: target.baselineSegments,
+      breaks: target.baselineBreaks,
+    };
+  }, [currentDraft, target.baselineBreaks, target.baselineSegments]);
+
+  const activeSegment = useMemo(
+    () =>
+      target.targetKind === "SEGMENT"
+        ? effectiveDay.segments.find((s) => s.id === target.itemId) ||
+          effectiveDay.segments[0] ||
+          null
+        : null,
+    [effectiveDay.segments, target.itemId, target.targetKind]
+  );
+
+  const activeBreak = useMemo(
+    () =>
+      target.targetKind === "BREAK"
+        ? effectiveDay.breaks.find((b) => b.id === target.itemId) ||
+          effectiveDay.breaks[0] ||
+          null
+        : null,
+    [effectiveDay.breaks, target.itemId, target.targetKind]
+  );
+
+  const curInMin =
+    target.targetKind === "BREAK"
+      ? activeBreak?.start_minutes ?? 780
+      : activeSegment?.in_minutes ?? 540;
+  const curOutMin =
+    target.targetKind === "BREAK"
+      ? activeBreak?.end_minutes ?? 840
+      : activeSegment?.out_minutes ?? 1080;
+  const curPolicyName =
+    target.targetKind === "BREAK"
+      ? "휴게"
+      : activeSegment?.policy_name || "근무";
+  const curWorkMode: HqWorkMode =
+    target.targetKind === "BREAK"
+      ? "OFFICE"
+      : activeSegment?.work_mode || "OFFICE";
+  const curMemo =
+    target.targetKind === "SEGMENT" ? activeSegment?.memo || "" : "";
+
+  const overlappingBreakMinForActiveSeg = useMemo(() => {
+    if (target.targetKind !== "SEGMENT" || !activeSegment) return 0;
+    return calcSegmentOverlappingBreaks(activeSegment, effectiveDay.breaks)
+      .overlapMinutes;
+  }, [activeSegment, effectiveDay.breaks, target.targetKind]);
+
+  // 종료 시각 드롭다운 옵션: 시작 시각 이후 15분 간격 + 경과 시간 배지 (플렉스 동일!)
+  const endTimeOptions = useMemo(() => {
+    const out: {
+      minutes: number;
+      label: string;
+      elapsedLabel: string;
+      netWorkLabel: string | null;
+    }[] = [];
+
+    for (let m = curInMin + 15; m <= 1440; m += 15) {
+      const elapsed = m - curInMin;
+      const label =
+        m === 1440 ? "오전 12:00 (자정)" : formatMinutesToKoreanAmPm(m);
+      let netWorkLabel: string | null = null;
+      if (target.targetKind === "SEGMENT") {
+        const { overlapMinutes } = calcSegmentOverlappingBreaks(
+          { in_minutes: curInMin, out_minutes: m },
+          effectiveDay.breaks
+        );
+        if (overlapMinutes > 0 && elapsed > overlapMinutes) {
+          netWorkLabel = `실근무 ${formatDurationKoreanCompact(
+            elapsed - overlapMinutes
+          )}`;
+        }
+      }
+      out.push({
+        minutes: m,
+        label,
+        elapsedLabel: formatDurationKoreanCompact(elapsed),
+        netWorkLabel,
+      });
+    }
+    return out;
+  }, [curInMin, effectiveDay.breaks, target.targetKind]);
 
   useEffect(() => {
     const handleOutside = (e: MouseEvent) => {
@@ -543,80 +1802,194 @@ export function FlexInlineWorkPopover({
 
   useEffect(() => {
     if (!activeTimeField || !timeListRef.current) return;
-    const curMin =
-      activeTimeField === "START"
-        ? effectiveState.inMinutes
-        : effectiveState.outMinutes;
-    const nearestIdx = Math.max(
-      0,
-      Math.min(95, Math.round((curMin % 1440) / 15))
-    );
     const rowHeight = 34;
-    timeListRef.current.scrollTop = Math.max(0, nearestIdx * rowHeight - 96);
-  }, [activeTimeField, effectiveState.inMinutes, effectiveState.outMinutes]);
-
-  const applyFieldPatch = (
-    patch: Partial<{
-      workMode: HqWorkMode;
-      policyName: string;
-      inMinutes: number;
-      outMinutes: number;
-      breakMinutes: number;
-      locationNote: string;
-      memo: string;
-    }>
-  ) => {
-    const merged = {
-      ...effectiveState,
-      ...patch,
-    };
-
-    if (
-      (patch.inMinutes !== undefined || patch.outMinutes !== undefined) &&
-      patch.breakMinutes === undefined
-    ) {
-      const span =
-        merged.outMinutes >= merged.inMinutes
-          ? merged.outMinutes - merged.inMinutes
-          : 1440 - merged.inMinutes + merged.outMinutes;
-      if (span >= 540) merged.breakMinutes = 60;
-      else if (span >= 270) merged.breakMinutes = Math.min(merged.breakMinutes, 30);
-      else merged.breakMinutes = 0;
+    if (activeTimeField === "START") {
+      const nearestIdx = Math.max(
+        0,
+        Math.min(95, Math.round((curInMin % 1440) / 15))
+      );
+      timeListRef.current.scrollTop = Math.max(0, nearestIdx * rowHeight - 84);
+    } else {
+      const idx = endTimeOptions.findIndex((o) => o.minutes >= curOutMin);
+      const safeIdx = idx >= 0 ? idx : 0;
+      timeListRef.current.scrollTop = Math.max(0, safeIdx * rowHeight - 84);
     }
+  }, [activeTimeField, curInMin, curOutMin, endTimeOptions]);
+
+  const commitNextSchedule = (
+    nextSegments: HqRecognizedWorkSegment[],
+    nextBreaks: HqRecognizedBreakBlock[]
+  ) => {
+    const identical = isScheduleIdenticalToBaseline({
+      segments: nextSegments,
+      breaks: nextBreaks,
+      baselineSegments: target.baselineSegments,
+      baselineBreaks: target.baselineBreaks,
+    });
 
     if (
-      isDraftIdenticalToBaseline(
-        {
-          actionMode: "UPSERT",
-          ...merged,
-        },
-        target
-      )
+      identical &&
+      (target.hadExistingRecord ||
+        target.wasScheduledWorkday ||
+        (nextSegments.length === 0 && nextBreaks.length === 0))
     ) {
       onClearDraft(target.key);
       return;
     }
 
-    onChangeDraft({
-      key: target.key,
-      memberId: target.memberId,
-      memberName: target.memberName,
-      department: target.department,
-      workDate: target.workDate,
-      attendanceId: target.attendanceId,
-      actionMode: "UPSERT",
-      wasScheduledWorkday: target.wasScheduledWorkday,
-      ruleDailyMinutes: target.ruleDailyMinutes,
-      baselineSnapshot,
-      ...merged,
+    onChangeDraft(
+      buildDraftWorkEditFromSchedule({
+        key: target.key,
+        memberId: target.memberId,
+        memberName: target.memberName,
+        department: target.department,
+        workDate: target.workDate,
+        attendanceId: target.attendanceId,
+        wasScheduledWorkday: target.wasScheduledWorkday,
+        ruleDailyMinutes: target.ruleDailyMinutes,
+        segments: nextSegments,
+        breaks: nextBreaks,
+        baselineSnapshot,
+      })
+    );
+  };
+
+  const updateCurrentTimeSpan = (nextIn: number, nextOut: number) => {
+    const clampedIn = Math.max(0, Math.min(1425, Math.round(nextIn)));
+    const clampedOut = Math.max(
+      clampedIn + 15,
+      Math.min(1440, Math.round(nextOut))
+    );
+
+    if (target.targetKind === "BREAK") {
+      const targetId = activeBreak?.id || target.itemId;
+      const exists = effectiveDay.breaks.some((b) => b.id === targetId);
+      const nextBreaks = exists
+        ? effectiveDay.breaks.map((b) =>
+            b.id === targetId
+              ? { ...b, start_minutes: clampedIn, end_minutes: clampedOut }
+              : b
+          )
+        : [
+            ...effectiveDay.breaks,
+            { id: targetId, start_minutes: clampedIn, end_minutes: clampedOut },
+          ];
+      commitNextSchedule(effectiveDay.segments, nextBreaks);
+    } else {
+      const targetId = activeSegment?.id || target.itemId;
+      const exists = effectiveDay.segments.some((s) => s.id === targetId);
+      const nextSegments = exists
+        ? effectiveDay.segments.map((s) =>
+            s.id === targetId
+              ? { ...s, in_minutes: clampedIn, out_minutes: clampedOut }
+              : s
+          )
+        : [
+            ...effectiveDay.segments,
+            {
+              id: targetId,
+              work_mode: curWorkMode,
+              policy_name: curPolicyName,
+              in_minutes: clampedIn,
+              out_minutes: clampedOut,
+            },
+          ];
+      commitNextSchedule(nextSegments, effectiveDay.breaks);
+    }
+  };
+
+  const handleSelectPolicy = (
+    name: string,
+    mode: HqWorkMode,
+    defaultLoc: string
+  ) => {
+    setPolicyDropdownOpen(false);
+    if (target.targetKind === "BREAK") {
+      // 휴게 블록을 근무 정책 블록으로 전환
+      const brkId = activeBreak?.id || target.itemId;
+      const nextBreaks = effectiveDay.breaks.filter((b) => b.id !== brkId);
+      idSeqRef.current += 1;
+      const newSegId = `seg-conv-${target.itemId}-${idSeqRef.current}`;
+      const nextSegments: HqRecognizedWorkSegment[] = [
+        ...effectiveDay.segments,
+        {
+          id: newSegId,
+          work_mode: mode,
+          policy_name: name,
+          in_minutes: curInMin,
+          out_minutes: curOutMin,
+          location_note: defaultLoc,
+        },
+      ];
+      commitNextSchedule(nextSegments, nextBreaks);
+      onSwitchTarget?.({
+        ...target,
+        targetKind: "SEGMENT",
+        itemId: newSegId,
+      });
+      return;
+    }
+
+    const segId = activeSegment?.id || target.itemId;
+    const nextSegments = effectiveDay.segments.map((s) =>
+      s.id === segId
+        ? {
+            ...s,
+            policy_name: name,
+            work_mode: mode,
+            location_note: defaultLoc,
+          }
+        : s
+    );
+    commitNextSchedule(nextSegments, effectiveDay.breaks);
+  };
+
+  const handleConvertSegmentToBreak = () => {
+    setPolicyDropdownOpen(false);
+    if (target.targetKind === "BREAK") return;
+    const segId = activeSegment?.id || target.itemId;
+    const nextSegments = effectiveDay.segments.filter((s) => s.id !== segId);
+    idSeqRef.current += 1;
+    const newBrkId = `brk-conv-${target.itemId}-${idSeqRef.current}`;
+    const nextBreaks: HqRecognizedBreakBlock[] = [
+      ...effectiveDay.breaks,
+      {
+        id: newBrkId,
+        start_minutes: curInMin,
+        end_minutes: curOutMin,
+      },
+    ];
+    commitNextSchedule(nextSegments, nextBreaks);
+    onSwitchTarget?.({
+      ...target,
+      targetKind: "BREAK",
+      itemId: newBrkId,
     });
+  };
+
+  const handleDeleteCurrentItem = () => {
+    setMoreMenuOpen(false);
+    if (target.targetKind === "BREAK") {
+      const brkId = activeBreak?.id || target.itemId;
+      const nextBreaks = effectiveDay.breaks.filter((b) => b.id !== brkId);
+      commitNextSchedule(effectiveDay.segments, nextBreaks);
+      onConfirmClose();
+      return;
+    }
+    const segId = activeSegment?.id || target.itemId;
+    const remainingSegs = effectiveDay.segments.filter((s) => s.id !== segId);
+    // 마지막 근무 블록까지 모두 지우는 경우 해당 블록에 속해 있던 휴게도 함께 정리
+    const remainingBreaks =
+      remainingSegs.length === 0 ? [] : effectiveDay.breaks;
+    commitNextSchedule(remainingSegs, remainingBreaks);
+    onConfirmClose();
   };
 
   const positionStyle = useMemo<React.CSSProperties>(() => {
     const winW = typeof window !== "undefined" ? window.innerWidth : 1280;
     const winH = typeof window !== "undefined" ? window.innerHeight : 800;
-    const cardW = 276;
-    const estH = 210;
+    const cardW = 286;
+    const estH = 215;
 
     const left = Math.max(
       16,
@@ -643,47 +2016,10 @@ export function FlexInlineWorkPopover({
     };
   }, [target.anchorRect]);
 
-  const policyChoices = useMemo(() => {
-    const base: { name: string; icon: string; mode: HqWorkMode; loc: string }[] =
-      [];
-    const seen = new Set<string>();
-
-    const pushChoice = (
-      name: string,
-      icon: string,
-      mode: HqWorkMode,
-      loc: string
-    ) => {
-      if (seen.has(name)) return;
-      seen.add(name);
-      base.push({ name, icon, mode, loc });
-    };
-
-    pushChoice("근무", "💼", "OFFICE", ATTENDANCE_MODES.OFFICE.defaultLocation);
-    workFormPolicies.forEach((p) => {
-      const m: HqWorkMode = p.name.includes("원격")
-        ? "REMOTE"
-        : p.name.includes("외근") || p.name.includes("출장")
-          ? "OUTSIDE"
-          : "OFFICE";
-      const loc = p.name.includes("출장")
-        ? "출장지"
-        : p.name.includes("외근")
-          ? "외근지"
-          : ATTENDANCE_MODES[m].defaultLocation;
-      pushChoice(p.name, p.icon || "💼", m, loc);
-    });
-    pushChoice(
-      "원격근무",
-      "🏠",
-      "REMOTE",
-      ATTENDANCE_MODES.REMOTE.defaultLocation
-    );
-    pushChoice("외근", "🚗", "OUTSIDE", "외근지");
-    pushChoice("출장", "✈️", "OUTSIDE", "출장지");
-
-    return base;
-  }, [workFormPolicies]);
+  const policyChoices = useMemo(
+    () => normalizePolicyChoices(workFormPolicies),
+    [workFormPolicies]
+  );
 
   const commitTypedTime = (field: "START" | "END") => {
     if (!isTypingTime) return;
@@ -692,24 +2028,25 @@ export function FlexInlineWorkPopover({
     if (parsed === null) return;
     if (field === "START") {
       const nextOut =
-        parsed >= effectiveState.outMinutes
-          ? Math.min(1440, parsed + 60)
-          : effectiveState.outMinutes;
-      applyFieldPatch({ inMinutes: parsed, outMinutes: nextOut });
+        parsed >= curOutMin ? Math.min(1440, parsed + 60) : curOutMin;
+      updateCurrentTimeSpan(parsed, nextOut);
     } else {
-      applyFieldPatch({ outMinutes: parsed });
+      const safeOut = parsed <= curInMin ? Math.min(1440, curInMin + 15) : parsed;
+      updateCurrentTimeSpan(curInMin, safeOut);
     }
   };
+
+  const activeVis = getWorkPolicyVisual(curPolicyName, curWorkMode);
 
   return (
     <div
       ref={cardRef}
       style={positionStyle}
       onClick={(e) => e.stopPropagation()}
-      className="z-[150] rounded-2xl bg-white shadow-[0_14px_42px_rgba(15,23,42,0.16)] border border-slate-200/85 select-none"
+      className="z-[160] rounded-2xl bg-white shadow-[0_14px_42px_rgba(15,23,42,0.16)] border border-slate-200/85 select-none"
     >
       <div className="px-4 pt-4 pb-3.5 space-y-3">
-        {/* 상단: 근무 정책 선택 드롭다운 (💼 근무 ▾) */}
+        {/* 상단: 근무 정책 / 휴게 선택 드롭다운 */}
         <div className="relative flex items-center justify-between">
           <button
             type="button"
@@ -720,40 +2057,42 @@ export function FlexInlineWorkPopover({
             }}
             className="inline-flex items-center gap-2.5 px-1.5 py-1 -ml-1.5 rounded-lg hover:bg-slate-50 transition-colors"
           >
-            <span className="w-5 h-5 rounded-md bg-[#ccfbf1] text-[#0d9488] flex items-center justify-center text-xs shadow-2xs">
-              {effectiveState.workMode === "REMOTE"
-                ? "🏠"
-                : effectiveState.workMode === "OUTSIDE"
-                  ? "🚗"
-                  : "💼"}
+            <span
+              className={`w-5 h-5 rounded-md flex items-center justify-center shadow-2xs ${activeVis.badgeBgClass} ${activeVis.badgeTextClass}`}
+            >
+              <PolicySvgIcon kind={activeVis.kind} className="w-3.5 h-3.5" />
             </span>
             <span className="text-[13px] font-extrabold text-slate-800">
-              {effectiveState.policyName || "근무"}
+              {curPolicyName}
             </span>
             <span className="text-[10px] text-slate-400">▾</span>
           </button>
 
           {policyDropdownOpen && (
-            <div className="absolute left-0 top-full mt-1 w-48 rounded-xl bg-white shadow-xl border border-slate-200/90 py-1.5 z-[165] text-xs">
+            <div className="absolute left-0 top-full mt-1 w-48 rounded-xl bg-white shadow-xl border border-slate-200/90 py-1.5 z-[175] text-xs">
               {policyChoices.map((ch) => {
-                const selected = effectiveState.policyName === ch.name;
+                const vis = getWorkPolicyVisual(ch.name, ch.mode);
+                const selected =
+                  target.targetKind === "SEGMENT" && curPolicyName === ch.name;
                 return (
                   <button
                     key={ch.name}
                     type="button"
-                    onClick={() => {
-                      applyFieldPatch({
-                        policyName: ch.name,
-                        workMode: ch.mode,
-                        locationNote: ch.loc,
-                      });
-                      setPolicyDropdownOpen(false);
-                    }}
+                    onClick={() => handleSelectPolicy(ch.name, ch.mode, ch.loc)}
                     className="w-full px-3.5 py-2 text-left hover:bg-slate-50 flex items-center justify-between font-semibold text-slate-700"
                   >
                     <span className="flex items-center gap-2">
-                      <span>{ch.icon}</span>
+                      <span
+                        className={`w-4.5 h-4.5 rounded flex items-center justify-center ${vis.badgeBgClass} ${vis.badgeTextClass}`}
+                      >
+                        <PolicySvgIcon kind={vis.kind} className="w-3 h-3" />
+                      </span>
                       <span>{ch.name}</span>
+                      {ch.isDefaultStar && (
+                        <span className="w-3.5 h-3.5 rounded-full bg-[#facc15] text-white text-[8.5px] font-black inline-flex items-center justify-center">
+                          ★
+                        </span>
+                      )}
                     </span>
                     {selected && (
                       <span className="text-[#0d9488] font-extrabold">✓</span>
@@ -765,21 +2104,41 @@ export function FlexInlineWorkPopover({
               <div className="my-1 border-t border-slate-100" />
               <button
                 type="button"
-                onClick={() => {
-                  setPolicyDropdownOpen(false);
-                  onConfirmClose();
-                  onSwitchToLeaveModal(target.workDate);
-                }}
-                className="w-full px-3.5 py-2 text-left hover:bg-purple-50/60 flex items-center gap-2 font-semibold text-purple-700"
+                onClick={handleConvertSegmentToBreak}
+                className="w-full px-3.5 py-2 text-left hover:bg-slate-50 flex items-center justify-between font-semibold text-slate-700"
               >
-                <span>🏖️</span>
-                <span>연차 · 휴가 등록...</span>
+                <span className="flex items-center gap-2">
+                  <span className="w-4.5 h-4.5 rounded bg-slate-100 text-slate-400 flex items-center justify-center">
+                    <PolicySvgIcon kind="BREAK" className="w-3 h-3" />
+                  </span>
+                  <span>휴게</span>
+                </span>
+                {target.targetKind === "BREAK" && (
+                  <span className="text-[#0d9488] font-extrabold">✓</span>
+                )}
               </button>
+
+              {!target.isHolidayOrOff && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPolicyDropdownOpen(false);
+                    onConfirmClose();
+                    onSwitchToLeaveModal(target.workDate);
+                  }}
+                  className="w-full px-3.5 py-2 text-left hover:bg-purple-50/60 flex items-center gap-2 font-semibold text-purple-700"
+                >
+                  <span className="w-4.5 h-4.5 rounded bg-purple-100 text-[#9333ea] flex items-center justify-center">
+                    <PolicySvgIcon kind="LEAVE" className="w-3 h-3" />
+                  </span>
+                  <span>연차</span>
+                </button>
+              )}
             </div>
           )}
         </div>
 
-        {/* 중단: 출퇴근 시간 범위 (🕒 오전 9:00 -> 오후 6:00) + 총 시간 */}
+        {/* 중단: 시작 시각 -> 종료 시각 + 총 시간 / 실근무 시간 */}
         <div className="relative flex items-start gap-2.5">
           <span className="mt-1.5 text-slate-400 shrink-0" aria-hidden="true">
             <svg className="w-4 h-4" viewBox="0 0 20 20" fill="currentColor">
@@ -802,7 +2161,7 @@ export function FlexInlineWorkPopover({
                       value={
                         isTypingTime
                           ? typedTimeText
-                          : formatMinutesToKoreanAmPm(effectiveState.inMinutes)
+                          : formatMinutesToKoreanAmPm(curInMin)
                       }
                       onFocus={(e) => e.currentTarget.select()}
                       onChange={(e) => {
@@ -819,7 +2178,7 @@ export function FlexInlineWorkPopover({
                           setActiveTimeField(null);
                         }
                       }}
-                      className="w-[74px] bg-[#0066ff] text-white selection:bg-[#0066ff] selection:text-white px-1.5 py-0.5 rounded-[3px] text-xs font-bold outline-none tabular-nums"
+                      className="w-[76px] bg-[#0066ff] text-white selection:bg-[#0066ff] selection:text-white px-1.5 py-0.5 rounded-[3px] text-xs font-bold outline-none tabular-nums"
                     />
                   </div>
                 ) : (
@@ -833,32 +2192,30 @@ export function FlexInlineWorkPopover({
                     }}
                     className="px-2 py-1 -ml-1.5 rounded-md hover:bg-slate-100 text-[12.5px] font-bold text-slate-800 tabular-nums transition-colors"
                   >
-                    {formatMinutesToKoreanAmPm(effectiveState.inMinutes)}
+                    {formatMinutesToKoreanAmPm(curInMin)}
                   </button>
                 )}
 
                 {activeTimeField === "START" && (
                   <div
                     ref={timeListRef}
-                    className="absolute left-0 top-full mt-1.5 w-[166px] max-h-[238px] overflow-y-auto rounded-xl bg-white shadow-[0_12px_34px_rgba(15,23,42,0.16)] border border-slate-200/85 py-1.5 z-[170]"
+                    className="absolute left-0 top-full mt-1.5 w-[166px] max-h-[244px] overflow-y-auto rounded-xl bg-white shadow-[0_12px_34px_rgba(15,23,42,0.16)] border border-slate-200/85 py-1.5 z-[180]"
                   >
                     {TIME_SLOTS_15M.map((slot) => {
-                      const isCur = slot.minutes === effectiveState.inMinutes;
+                      const isCur = slot.minutes === curInMin;
                       return (
                         <button
                           key={slot.minutes}
                           type="button"
                           onMouseDown={(e) => {
                             e.preventDefault();
+                            const curDur = Math.max(15, curOutMin - curInMin);
                             const nextOut =
-                              slot.minutes >= effectiveState.outMinutes
-                                ? Math.min(1440, slot.minutes + 60)
-                                : effectiveState.outMinutes;
+                              slot.minutes >= curOutMin
+                                ? Math.min(1440, slot.minutes + curDur)
+                                : curOutMin;
                             setIsTypingTime(false);
-                            applyFieldPatch({
-                              inMinutes: slot.minutes,
-                              outMinutes: nextOut,
-                            });
+                            updateCurrentTimeSpan(slot.minutes, nextOut);
                             setActiveTimeField(null);
                           }}
                           className={`w-full px-3.5 py-2 text-left text-xs tabular-nums transition-colors ${
@@ -877,7 +2234,7 @@ export function FlexInlineWorkPopover({
 
               <span className="text-slate-300 text-xs font-bold px-0.5">→</span>
 
-              {/* 종료 시각 */}
+              {/* 종료 시각 (클릭 시 경과 근무 시간 배지 함께 표시 — Screenshots 8 & 9 동일!) */}
               <div className="relative">
                 {activeTimeField === "END" ? (
                   <div className="px-2 py-1 rounded-md bg-slate-100 inline-flex items-center">
@@ -886,7 +2243,9 @@ export function FlexInlineWorkPopover({
                       value={
                         isTypingTime
                           ? typedTimeText
-                          : formatMinutesToKoreanAmPm(effectiveState.outMinutes)
+                          : curOutMin === 1440
+                            ? "오전 12:00"
+                            : formatMinutesToKoreanAmPm(curOutMin)
                       }
                       onFocus={(e) => e.currentTarget.select()}
                       onChange={(e) => {
@@ -903,7 +2262,7 @@ export function FlexInlineWorkPopover({
                           setActiveTimeField(null);
                         }
                       }}
-                      className="w-[74px] bg-[#0066ff] text-white selection:bg-[#0066ff] selection:text-white px-1.5 py-0.5 rounded-[3px] text-xs font-bold outline-none tabular-nums"
+                      className="w-[76px] bg-[#0066ff] text-white selection:bg-[#0066ff] selection:text-white px-1.5 py-0.5 rounded-[3px] text-xs font-bold outline-none tabular-nums"
                     />
                   </div>
                 ) : (
@@ -917,34 +2276,46 @@ export function FlexInlineWorkPopover({
                     }}
                     className="px-2 py-1 rounded-md hover:bg-slate-100 text-[12.5px] font-bold text-slate-800 tabular-nums transition-colors"
                   >
-                    {formatMinutesToKoreanAmPm(effectiveState.outMinutes)}
+                    {curOutMin === 1440
+                      ? "오전 12:00"
+                      : formatMinutesToKoreanAmPm(curOutMin)}
                   </button>
                 )}
 
                 {activeTimeField === "END" && (
                   <div
                     ref={timeListRef}
-                    className="absolute right-0 top-full mt-1.5 w-[166px] max-h-[238px] overflow-y-auto rounded-xl bg-white shadow-[0_12px_34px_rgba(15,23,42,0.16)] border border-slate-200/85 py-1.5 z-[170]"
+                    className="absolute left-0 top-full mt-1.5 w-[212px] max-h-[252px] overflow-y-auto rounded-xl bg-white shadow-[0_14px_38px_rgba(15,23,42,0.18)] border border-slate-200/90 py-1.5 z-[180]"
                   >
-                    {TIME_SLOTS_15M.map((slot) => {
-                      const isCur = slot.minutes === effectiveState.outMinutes;
+                    {endTimeOptions.map((opt) => {
+                      const isCur = opt.minutes === curOutMin;
                       return (
                         <button
-                          key={slot.minutes}
+                          key={opt.minutes}
                           type="button"
                           onMouseDown={(e) => {
                             e.preventDefault();
                             setIsTypingTime(false);
-                            applyFieldPatch({ outMinutes: slot.minutes });
+                            updateCurrentTimeSpan(curInMin, opt.minutes);
                             setActiveTimeField(null);
                           }}
-                          className={`w-full px-3.5 py-2 text-left text-xs tabular-nums transition-colors ${
+                          className={`w-full px-3.5 py-2 text-left text-xs tabular-nums transition-colors flex items-center justify-between gap-1.5 ${
                             isCur
                               ? "bg-slate-100 font-extrabold text-slate-900"
-                              : "font-medium text-slate-700 hover:bg-slate-50"
+                              : "font-semibold text-slate-700 hover:bg-slate-50"
                           }`}
                         >
-                          {slot.label}
+                          <span className="whitespace-nowrap">{opt.label}</span>
+                          <span className="inline-flex items-center gap-1 shrink-0">
+                            <span className="px-1.5 py-0.5 rounded-[4px] bg-slate-100 border border-slate-200/70 text-[10.5px] font-bold text-slate-600">
+                              {opt.elapsedLabel}
+                            </span>
+                            {opt.netWorkLabel && (
+                              <span className="text-[10px] font-bold text-[#0d9488]">
+                                ({opt.netWorkLabel})
+                              </span>
+                            )}
+                          </span>
                         </button>
                       );
                     })}
@@ -953,54 +2324,45 @@ export function FlexInlineWorkPopover({
               </div>
             </div>
 
-            <div className="mt-1 text-[11px] font-semibold text-slate-400 flex items-center gap-2">
-              <span>
-                {formatGrossSpanKorean(
-                  effectiveState.inMinutes,
-                  effectiveState.outMinutes
+            <div className="mt-1 text-[11px] font-semibold text-slate-400 flex flex-wrap items-center gap-1.5">
+              <span>{formatGrossSpanKorean(curInMin, curOutMin)}</span>
+              {target.targetKind === "SEGMENT" &&
+                overlappingBreakMinForActiveSeg > 0 && (
+                  <span className="text-[#0d9488] font-bold">
+                    · 실근무{" "}
+                    {formatDurationKoreanCompact(
+                      Math.max(
+                        0,
+                        curOutMin - curInMin - overlappingBreakMinForActiveSeg
+                      )
+                    )}{" "}
+                    <span className="text-slate-400 font-medium">
+                      (휴게 {formatDurationKoreanCompact(overlappingBreakMinForActiveSeg)})
+                    </span>
+                  </span>
                 )}
-              </span>
-              {effectiveState.breakMinutes > 0 && (
-                <span className="text-slate-300">
-                  · 휴게 {effectiveState.breakMinutes}분
-                </span>
-              )}
             </div>
           </div>
         </div>
 
-        {showBreakPicker && (
-          <div className="pt-1 flex items-center justify-between gap-1.5 text-[11px]">
-            <span className="font-bold text-slate-500">☕ 휴게</span>
-            <div className="flex items-center gap-1">
-              {[0, 30, 60, 90].map((bm) => (
-                <button
-                  key={bm}
-                  type="button"
-                  onClick={() => applyFieldPatch({ breakMinutes: bm })}
-                  className={`px-2 py-1 rounded-md font-bold transition-colors ${
-                    effectiveState.breakMinutes === bm
-                      ? "bg-slate-800 text-white"
-                      : "bg-slate-100 text-slate-600 hover:bg-slate-200"
-                  }`}
-                >
-                  {bm === 0 ? "없음" : `${bm}분`}
-                </button>
-              ))}
+        {target.targetKind === "SEGMENT" &&
+          (showMemoInput || Boolean(curMemo)) && (
+            <div className="pt-0.5">
+              <input
+                value={curMemo}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  const segId = activeSegment?.id || target.itemId;
+                  const nextSegs = effectiveDay.segments.map((s) =>
+                    s.id === segId ? { ...s, memo: val } : s
+                  );
+                  commitNextSchedule(nextSegs, effectiveDay.breaks);
+                }}
+                placeholder="인정 근무 사유·메모 입력 (선택)"
+                className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 bg-slate-50/70 text-xs text-slate-800 placeholder:text-slate-400 outline-none focus:border-slate-400"
+              />
             </div>
-          </div>
-        )}
-
-        {(showMemoInput || Boolean(effectiveState.memo)) && (
-          <div className="pt-0.5">
-            <input
-              value={effectiveState.memo}
-              onChange={(e) => applyFieldPatch({ memo: e.target.value })}
-              placeholder="인정 근무 사유·메모 입력 (선택)"
-              className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 bg-slate-50/70 text-xs text-slate-800 placeholder:text-slate-400 outline-none focus:border-slate-400"
-            />
-          </div>
-        )}
+          )}
       </div>
 
       {/* 하단 푸터: ⋯ 더보기 + 확인 */}
@@ -1020,52 +2382,30 @@ export function FlexInlineWorkPopover({
           </button>
 
           {moreMenuOpen && (
-            <div className="absolute right-0 bottom-full mb-1.5 w-40 rounded-xl bg-white shadow-xl border border-slate-200 py-1.5 z-[175] text-xs">
-              <button
-                type="button"
-                onClick={() => {
-                  setShowBreakPicker((v) => !v);
-                  setMoreMenuOpen(false);
-                }}
-                className="w-full px-3.5 py-2 text-left hover:bg-slate-50 font-semibold text-slate-700 flex items-center gap-2"
-              >
-                <span>☕</span>
-                <span>휴게 시간 조정</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setShowMemoInput((v) => !v);
-                  setMoreMenuOpen(false);
-                }}
-                className="w-full px-3.5 py-2 text-left hover:bg-slate-50 font-semibold text-slate-700 flex items-center gap-2"
-              >
-                <span>📝</span>
-                <span>사유 · 메모 입력</span>
-              </button>
-              {(target.hadExistingRecord || Boolean(currentDraft)) && (
-                <>
-                  <div className="my-1 border-t border-slate-100" />
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setMoreMenuOpen(false);
-                      if (target.hadExistingRecord) {
-                        onStageDelete(target);
-                      } else {
-                        onClearDraft(target.key);
-                      }
-                      onConfirmClose();
-                    }}
-                    className="w-full px-3.5 py-2 text-left hover:bg-rose-50 font-semibold text-rose-600 flex items-center gap-2"
-                  >
-                    <span>🗑️</span>
-                    <span>
-                      {target.hadExistingRecord ? "인정 근무 삭제" : "변경 취소"}
-                    </span>
-                  </button>
-                </>
+            <div className="absolute right-0 bottom-full mb-1.5 w-40 rounded-xl bg-white shadow-xl border border-slate-200 py-1.5 z-[185] text-xs">
+              {target.targetKind === "SEGMENT" && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowMemoInput((v) => !v);
+                    setMoreMenuOpen(false);
+                  }}
+                  className="w-full px-3.5 py-2 text-left hover:bg-slate-50 font-semibold text-slate-700 flex items-center gap-2"
+                >
+                  <span>📝</span>
+                  <span>사유 · 메모 입력</span>
+                </button>
               )}
+              <button
+                type="button"
+                onClick={handleDeleteCurrentItem}
+                className="w-full px-3.5 py-2 text-left hover:bg-rose-50 font-semibold text-rose-600 flex items-center gap-2"
+              >
+                <span>🗑️</span>
+                <span>
+                  {target.targetKind === "BREAK" ? "휴게 삭제" : "일정 삭제"}
+                </span>
+              </button>
             </div>
           )}
         </div>
@@ -1074,25 +2414,6 @@ export function FlexInlineWorkPopover({
           type="button"
           onClick={() => {
             if (activeTimeField) commitTypedTime(activeTimeField);
-            if (
-              !currentDraft &&
-              !target.hadExistingRecord &&
-              !target.wasScheduledWorkday
-            ) {
-              onChangeDraft({
-                key: target.key,
-                memberId: target.memberId,
-                memberName: target.memberName,
-                department: target.department,
-                workDate: target.workDate,
-                attendanceId: target.attendanceId,
-                actionMode: "UPSERT",
-                wasScheduledWorkday: target.wasScheduledWorkday,
-                ruleDailyMinutes: target.ruleDailyMinutes,
-                baselineSnapshot,
-                ...effectiveState,
-              });
-            }
             onConfirmClose();
           }}
           className="px-2.5 py-1 rounded-lg hover:bg-slate-100 text-xs font-extrabold text-slate-700 transition-colors"
@@ -1235,7 +2556,7 @@ export function FlexDraftFloatingBar({
 }
 
 /**
- * 3. 우측 [승인 · 참조] 패널 (Screenshot 369d6a95 + 승인조건 발동 시 승인선·사유 입력 표시)
+ * 3. 우측 [승인 · 참조] 패널
  */
 export function FlexApprovalSidePanel({
   rangeStart,
@@ -1380,7 +2701,7 @@ export function FlexApprovalSidePanel({
 }
 
 /**
- * 4. 실시간 근무 기록(얇은 줄) 호버 다크 툴팁 (Screenshot c34f6653 100% 재현)
+ * 4. 실시간 근무 기록(얇은 줄) 호버 다크 툴팁
  */
 export function FlexRealtimeHoverTooltip({
   startMin,
@@ -1408,8 +2729,17 @@ export function FlexRealtimeHoverTooltip({
     <div
       style={{
         position: "fixed",
-        left: `${Math.max(16, Math.min((typeof window !== "undefined" ? window.innerWidth : 1200) - 240, anchorPos.x - 105))}px`,
-        top: `${Math.max(12, anchorPos.y - (visibleBreaks.length > 0 ? 112 : 82))}px`,
+        left: `${Math.max(
+          16,
+          Math.min(
+            (typeof window !== "undefined" ? window.innerWidth : 1200) - 240,
+            anchorPos.x - 105
+          )
+        )}px`,
+        top: `${Math.max(
+          12,
+          anchorPos.y - (visibleBreaks.length > 0 ? 112 : 82)
+        )}px`,
       }}
       className="pointer-events-none z-[180] w-[224px] rounded-xl bg-[#2b303a] text-white px-3.5 py-2.5 shadow-2xl text-[11px] space-y-1.5"
     >
@@ -1452,7 +2782,7 @@ export function FlexRealtimeHoverTooltip({
 }
 
 /**
- * 5. 플렉스 [실시간 기록 수정] 모달 (Screenshot 8e9c06fa 100% 재현 — 얇은 줄만 독립 수정!)
+ * 5. 플렉스 [실시간 기록 수정] 모달 (Screenshots 4 & 5 재현 — 얇은 줄만 독립 수정!)
  */
 export function FlexRealtimeRecordEditModal({
   isOpen,
@@ -1480,11 +2810,11 @@ export function FlexRealtimeRecordEditModal({
     payload: Record<string, any>
   ) => Promise<void>;
 }) {
-  const [startMin, setStartMin] = useState(
-    existingLog?.start_min ?? defaultStartMin
+  const [startMin, setStartMin] = useState<number | null>(
+    existingLog ? existingLog.start_min : null
   );
   const [endMin, setEndMin] = useState<number | null>(
-    existingLog ? existingLog.end_min : defaultEndMin
+    existingLog ? existingLog.end_min : null
   );
   const [policyName, setPolicyName] = useState(
     existingLog?.policy_name || "근무"
@@ -1492,25 +2822,25 @@ export function FlexRealtimeRecordEditModal({
   const [workMode, setWorkMode] = useState<HqWorkMode>(
     existingLog?.work_mode || "OFFICE"
   );
+  const [policyMenuOpen, setPolicyMenuOpen] = useState(false);
   const [transitions, setTransitions] = useState<HqRealtimeModeSegment[]>(
     existingLog?.transitions || []
   );
   const [breaks, setBreaks] = useState<HqRealtimeBreakSpan[]>(
-    existingLog?.breaks || [{ id: "brk-1", start_min: 720, end_min: 780 }]
+    existingLog?.breaks || []
   );
   const [moreOpen, setMoreOpen] = useState(false);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     if (!isOpen) return;
-    setStartMin(existingLog?.start_min ?? defaultStartMin);
-    setEndMin(existingLog ? existingLog.end_min : defaultEndMin);
+    setStartMin(existingLog ? existingLog.start_min : null);
+    setEndMin(existingLog ? existingLog.end_min : null);
     setPolicyName(existingLog?.policy_name || "근무");
     setWorkMode(existingLog?.work_mode || "OFFICE");
     setTransitions(existingLog?.transitions || []);
-    setBreaks(
-      existingLog?.breaks || [{ id: "brk-1", start_min: 720, end_min: 780 }]
-    );
+    setBreaks(existingLog?.breaks || []);
+    setPolicyMenuOpen(false);
     setMoreOpen(false);
   }, [defaultEndMin, defaultStartMin, existingLog, isOpen]);
 
@@ -1522,7 +2852,22 @@ export function FlexRealtimeRecordEditModal({
   ];
   const dateHeader = `${wy}년 ${wm}월 ${wd}일 (${dowKo})`;
 
+  const rtPolicyChoices: {
+    name: string;
+    mode: HqWorkMode;
+    isDefaultStar?: boolean;
+  }[] = [
+    { name: "근무", mode: "OFFICE", isDefaultStar: true },
+    { name: "외근", mode: "OUTSIDE" },
+    { name: "원격근무", mode: "REMOTE" },
+    { name: "출장", mode: "OUTSIDE" },
+  ];
+
   const handleSave = async () => {
+    if (startMin === null) {
+      alert("기록 시작 시각을 선택해 주세요.");
+      return;
+    }
     setSaving(true);
     try {
       await onSaved("UPSERT_REALTIME_LOG", {
@@ -1544,7 +2889,9 @@ export function FlexRealtimeRecordEditModal({
   };
 
   const handleDelete = async () => {
-    if (!confirm("해당 날짜의 실시간 근무 기록(얇은 줄)을 삭제하시겠습니까?")) {
+    if (
+      !confirm("해당 날짜의 실시간 근무 기록(얇은 줄)을 삭제하시겠습니까?")
+    ) {
       return;
     }
     setSaving(true);
@@ -1559,6 +2906,8 @@ export function FlexRealtimeRecordEditModal({
     }
   };
 
+  const curRtVis = getWorkPolicyVisual(policyName, workMode);
+
   return (
     <div
       onClick={onClose}
@@ -1566,7 +2915,7 @@ export function FlexRealtimeRecordEditModal({
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-[460px] rounded-2xl bg-white shadow-2xl border border-slate-200 overflow-hidden text-xs"
+        className="w-full max-w-[468px] rounded-2xl bg-white shadow-2xl border border-slate-200 overflow-visible text-xs"
       >
         {/* 모달 헤더 */}
         <div className="px-6 pt-5 pb-4 flex items-center justify-between">
@@ -1590,7 +2939,7 @@ export function FlexRealtimeRecordEditModal({
                   ⋯
                 </button>
                 {moreOpen && (
-                  <div className="absolute right-8 top-full mt-1 w-36 rounded-xl bg-white shadow-xl border border-slate-200 py-1.5 z-20">
+                  <div className="absolute right-8 top-full mt-1 w-36 rounded-xl bg-white shadow-xl border border-slate-200 py-1.5 z-30">
                     <button
                       type="button"
                       onClick={handleDelete}
@@ -1612,9 +2961,9 @@ export function FlexRealtimeRecordEditModal({
           </div>
         </div>
 
-        {/* 본문 폼 (Screenshot 8e9c06fa 동일 레이아웃) */}
-        <div className="px-6 py-3 space-y-5 max-h-[68vh] overflow-y-auto">
-          {/* 1) 기록 시작 + 전환 기록 추가 */}
+        {/* 본문 폼 (Screenshots 4 & 5 동일 레이아웃) */}
+        <div className="px-6 py-3 space-y-5">
+          {/* 1) 기록 시작 + 정책 드롭다운 + 전환 기록 추가 */}
           <div className="grid grid-cols-12 items-start gap-3">
             <label className="col-span-3 pt-2 font-bold text-slate-500">
               기록 시작 <span className="text-rose-500">*</span>
@@ -1622,37 +2971,92 @@ export function FlexRealtimeRecordEditModal({
             <div className="col-span-9 space-y-2">
               <div className="grid grid-cols-2 gap-2">
                 <select
-                  value={startMin}
-                  onChange={(e) => setStartMin(Number(e.target.value))}
-                  className="px-3 py-2 rounded-lg border border-slate-200 focus:border-[#16cc3b] bg-white font-bold text-slate-800 outline-none tabular-nums"
+                  value={startMin ?? ""}
+                  onChange={(e) =>
+                    setStartMin(
+                      e.target.value === "" ? null : Number(e.target.value)
+                    )
+                  }
+                  className={`px-3 py-2 rounded-lg border border-slate-200 focus:border-[#16cc3b] bg-white font-bold outline-none tabular-nums ${
+                    startMin === null ? "text-slate-400" : "text-slate-800"
+                  }`}
                 >
+                  <option value="">시작 시각 입력</option>
                   {TIME_SLOTS_15M.map((s) => (
-                    <option key={s.minutes} value={s.minutes}>
+                    <option
+                      key={s.minutes}
+                      value={s.minutes}
+                      className="text-slate-800"
+                    >
                       {s.label}
                     </option>
                   ))}
                 </select>
 
-                <select
-                  value={policyName}
-                  onChange={(e) => {
-                    const val = e.target.value;
-                    setPolicyName(val);
-                    setWorkMode(
-                      val === "원격근무"
-                        ? "REMOTE"
-                        : val === "외근" || val === "출장"
-                          ? "OUTSIDE"
-                          : "OFFICE"
-                    );
-                  }}
-                  className="px-3 py-2 rounded-lg border border-slate-200 bg-white font-bold text-slate-800 outline-none"
-                >
-                  <option value="근무">💼 근무</option>
-                  <option value="원격근무">🏠 원격근무</option>
-                  <option value="외근">🚗 외근</option>
-                  <option value="출장">✈️ 출장</option>
-                </select>
+                {/* 플렉스 커스텀 근무 정책 선택기 (Screenshot 5 동일) */}
+                <div className="relative">
+                  <button
+                    type="button"
+                    onClick={() => setPolicyMenuOpen((v) => !v)}
+                    className="w-full px-3 py-2 rounded-lg border border-slate-200 hover:border-slate-300 bg-white font-bold text-slate-800 flex items-center justify-between"
+                  >
+                    <span className="flex items-center gap-2">
+                      <span
+                        className={`w-4.5 h-4.5 rounded flex items-center justify-center ${curRtVis.badgeBgClass} ${curRtVis.badgeTextClass}`}
+                      >
+                        <PolicySvgIcon
+                          kind={curRtVis.kind}
+                          className="w-3 h-3"
+                        />
+                      </span>
+                      <span>{policyName}</span>
+                    </span>
+                    <span className="text-[10px] text-slate-400">▾</span>
+                  </button>
+
+                  {policyMenuOpen && (
+                    <div className="absolute left-0 right-0 top-full mt-1 rounded-xl bg-white shadow-2xl border border-slate-200 py-1.5 z-40">
+                      {rtPolicyChoices.map((ch) => {
+                        const vis = getWorkPolicyVisual(ch.name, ch.mode);
+                        const selected = policyName === ch.name;
+                        return (
+                          <button
+                            key={ch.name}
+                            type="button"
+                            onClick={() => {
+                              setPolicyName(ch.name);
+                              setWorkMode(ch.mode);
+                              setPolicyMenuOpen(false);
+                            }}
+                            className="w-full px-3.5 py-2 text-left hover:bg-slate-50 flex items-center justify-between font-bold text-slate-800"
+                          >
+                            <span className="flex items-center gap-2">
+                              <span
+                                className={`w-4.5 h-4.5 rounded flex items-center justify-center ${vis.badgeBgClass} ${vis.badgeTextClass}`}
+                              >
+                                <PolicySvgIcon
+                                  kind={vis.kind}
+                                  className="w-3 h-3"
+                                />
+                              </span>
+                              <span>{ch.name}</span>
+                              {ch.isDefaultStar && (
+                                <span className="w-3.5 h-3.5 rounded-full bg-[#facc15] text-white text-[8.5px] font-black inline-flex items-center justify-center">
+                                  ★
+                                </span>
+                              )}
+                            </span>
+                            {selected && (
+                              <span className="text-[#16cc3b] font-black">
+                                ✓
+                              </span>
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
               </div>
 
               {transitions.map((tr, idx) => (
@@ -1665,7 +3069,9 @@ export function FlexRealtimeRecordEditModal({
                     onChange={(e) => {
                       const v = Number(e.target.value);
                       setTransitions((prev) =>
-                        prev.map((x, i) => (i === idx ? { ...x, at_min: v } : x))
+                        prev.map((x, i) =>
+                          i === idx ? { ...x, at_min: v } : x
+                        )
                       );
                     }}
                     className="col-span-5 px-2.5 py-1.5 rounded-lg border border-slate-200 bg-white font-semibold text-slate-700 outline-none tabular-nums"
@@ -1696,15 +3102,17 @@ export function FlexRealtimeRecordEditModal({
                     }}
                     className="col-span-6 px-2.5 py-1.5 rounded-lg border border-slate-200 bg-white font-semibold text-slate-700 outline-none"
                   >
-                    <option value="근무">💼 근무</option>
-                    <option value="원격근무">🏠 원격근무</option>
-                    <option value="외근">🚗 외근</option>
-                    <option value="출장">✈️ 출장</option>
+                    <option value="근무">근무</option>
+                    <option value="외근">외근</option>
+                    <option value="원격근무">원격근무</option>
+                    <option value="출장">출장</option>
                   </select>
                   <button
                     type="button"
                     onClick={() =>
-                      setTransitions((prev) => prev.filter((_, i) => i !== idx))
+                      setTransitions((prev) =>
+                        prev.filter((_, i) => i !== idx)
+                      )
                     }
                     className="col-span-1 text-slate-400 hover:text-rose-500 font-bold text-center"
                   >
@@ -1720,13 +3128,16 @@ export function FlexRealtimeRecordEditModal({
                     ...prev,
                     {
                       id: `tr-${Date.now()}`,
-                      at_min: Math.min(1380, startMin + 240),
+                      at_min: Math.min(
+                        1380,
+                        (startMin ?? defaultStartMin) + 240
+                      ),
                       policy_name: "원격근무",
                       work_mode: "REMOTE",
                     },
                   ])
                 }
-                className="text-[11px] font-bold text-slate-400 hover:text-slate-700 flex items-center gap-1"
+                className="text-[11.5px] font-bold text-slate-500 hover:text-slate-800 flex items-center gap-1 pt-0.5"
               >
                 <span>+</span>
                 <span>전환 기록 추가</span>
@@ -1748,11 +3159,17 @@ export function FlexRealtimeRecordEditModal({
                       e.target.value === "" ? null : Number(e.target.value)
                     )
                   }
-                  className="w-44 px-3 py-2 rounded-lg border border-slate-200 focus:border-[#16cc3b] bg-white font-bold text-slate-800 outline-none tabular-nums"
+                  className={`w-44 px-3 py-2 rounded-lg border border-slate-200 focus:border-[#16cc3b] bg-white font-bold outline-none tabular-nums ${
+                    endMin === null ? "text-slate-400" : "text-slate-800"
+                  }`}
                 >
-                  <option value="">종료 시각 없음</option>
+                  <option value="">종료 시각 입력</option>
                   {TIME_SLOTS_15M.map((s) => (
-                    <option key={s.minutes} value={s.minutes}>
+                    <option
+                      key={s.minutes}
+                      value={s.minutes}
+                      className="text-slate-800"
+                    >
                       {s.label}
                     </option>
                   ))}
@@ -1773,7 +3190,7 @@ export function FlexRealtimeRecordEditModal({
 
           {/* 3) 휴게 기록 */}
           <div className="grid grid-cols-12 items-start gap-3">
-            <label className="col-span-3 pt-2 font-bold text-slate-500">
+            <label className="col-span-3 pt-1 font-bold text-slate-500">
               휴게 기록
             </label>
             <div className="col-span-9 space-y-2">
@@ -1835,27 +3252,22 @@ export function FlexRealtimeRecordEditModal({
                     ...prev,
                     {
                       id: `brk-${Date.now()}`,
-                      start_min: 720,
-                      end_min: 780,
+                      start_min: 780,
+                      end_min: 840,
                     },
                   ])
                 }
-                className="text-[11px] font-bold text-slate-400 hover:text-slate-700 flex items-center gap-1"
+                className="text-[11.5px] font-bold text-slate-500 hover:text-slate-800 flex items-center gap-1 pt-0.5"
               >
                 <span>+</span>
                 <span>휴게 기록 추가</span>
               </button>
             </div>
           </div>
-
-          <div className="p-3 rounded-xl bg-slate-50 border border-slate-200/70 text-[11px] text-slate-500 leading-relaxed">
-            • 실시간 기록(얇은 줄)을 수정하더라도 <strong>인정 근무(굵은 막대)</strong>에는 영향을 주지 않아요.
-            <br />• 실시간 기록 편집 내용은 별도 승인 절차 없이 즉시 반영됩니다.
-          </div>
         </div>
 
         {/* 모달 푸터 */}
-        <div className="px-6 py-4 border-t border-slate-100 flex items-center justify-end gap-2 bg-white">
+        <div className="px-6 py-4 mt-2 border-t border-slate-100 flex items-center justify-end gap-2 bg-white rounded-b-2xl">
           <button
             type="button"
             disabled={saving}

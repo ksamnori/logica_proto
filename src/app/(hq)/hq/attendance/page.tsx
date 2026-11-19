@@ -18,16 +18,29 @@ import {
   RecurringScheduleModal,
 } from "@/components/hq/attendance/HqAttendanceModals";
 import {
+  buildDraftWorkEditFromSchedule,
+  calcDayScheduleSummary,
   calcDraftNetWorkedMinutes,
+  computeSegmentsOvertimeMeta,
   type DraftWorkEdit,
   evaluateDraftsApprovalSummary,
+  findNextFreeBreakSlot,
+  findNextFreeSegmentSlot,
   FlexApprovalSidePanel,
+  FlexBreakListPopover,
   FlexDraftFloatingBar,
   FlexInlineWorkPopover,
   FlexRealtimeHoverTooltip,
   FlexRealtimeRecordEditModal,
+  FlexRowAddPopover,
+  formatDurationKoreanCompact,
+  getBreaksOverlappingSegment,
+  getWorkPolicyVisual,
   type InlineWorkPopoverTarget,
+  isScheduleIdenticalToBaseline,
   minutesToHm24,
+  PolicySvgIcon,
+  resolveNearestNonOverlappingSlot,
 } from "@/components/hq/attendance/HqFlexInlineWorkEditor";
 import { ATTENDANCE_MODES } from "@/lib/hq/constants";
 import { hqFetch } from "@/lib/hq/clientApi";
@@ -47,6 +60,9 @@ import type {
   HqMember,
   HqRealtimeBreakSpan,
   HqRealtimeWorkLog,
+  HqRecognizedBreakBlock,
+  HqRecognizedDaySchedule,
+  HqRecognizedWorkSegment,
   HqWorkFormPolicy,
   HqWorkMode,
   HqWorkRuleItem,
@@ -319,6 +335,9 @@ export default function HqAttendancePage() {
   const [records, setRecords] = useState<HqAttendanceRecord[]>([]);
   const [leaveApprovals, setLeaveApprovals] = useState<LeaveApprovalLite[]>([]);
   const [realtimeLogs, setRealtimeLogs] = useState<HqRealtimeWorkLog[]>([]);
+  const [recognizedSchedules, setRecognizedSchedules] = useState<
+    HqRecognizedDaySchedule[]
+  >([]);
   const [pendingWorkApprovals, setPendingWorkApprovals] = useState<
     PendingWorkApprovalLite[]
   >([]);
@@ -342,6 +361,38 @@ export default function HqAttendancePage() {
   const [approvalReasonByKey, setApprovalReasonByKey] = useState<
     Record<string, string>
   >({});
+
+  // 플렉스 날짜 행 [+] 메뉴 & 블록 하단 '휴게 N건 / 휴게 없음' 팝오버 & 타임라인 드래그/리사이즈 상태
+  const [rowAddMenu, setRowAddMenu] = useState<{
+    member: HqMember;
+    ymd: string;
+    anchorRect: {
+      top: number;
+      bottom: number;
+      left: number;
+      right: number;
+      width: number;
+    };
+  } | null>(null);
+  const [breakListPopover, setBreakListPopover] = useState<{
+    member: HqMember;
+    ymd: string;
+    segmentId: string;
+    anchorRect: {
+      top: number;
+      bottom: number;
+      left: number;
+      right: number;
+      width: number;
+    };
+  } | null>(null);
+  const [activeDrag, setActiveDrag] = useState<{
+    dayKey: string;
+    kind: "SEGMENT" | "BREAK";
+    itemId: string;
+    startMin: number;
+    endMin: number;
+  } | null>(null);
 
   // 플렉스 실시간 근무 기록(굵은 막대 위의 가느다란 막대) 툴팁 & [실시간 기록 수정] 모달 상태
   const [hoveredRealtimeTip, setHoveredRealtimeTip] = useState<{
@@ -408,6 +459,9 @@ export default function HqAttendancePage() {
   const [recurringOpen, setRecurringOpen] = useState(false);
   const [uploadModalOpen, setUploadModalOpen] = useState(false);
   const [leaveModalOpen, setLeaveModalOpen] = useState(false);
+  const [leaveModalInitialDate, setLeaveModalInitialDate] = useState<
+    string | undefined
+  >(undefined);
   const [leaveRegisterKind, setLeaveRegisterKind] = useState<LeaveRegisterKind>(
     { type: "ANNUAL" }
   );
@@ -660,6 +714,7 @@ export default function HqAttendancePage() {
           records: HqAttendanceRecord[];
           leaveApprovals?: LeaveApprovalLite[];
           realtimeLogs?: HqRealtimeWorkLog[];
+          recognizedSchedules?: HqRecognizedDaySchedule[];
           pendingWorkApprovals?: PendingWorkApprovalLite[];
         };
       }>(
@@ -671,6 +726,7 @@ export default function HqAttendancePage() {
       setRecords(res.data?.records || []);
       setLeaveApprovals(res.data?.leaveApprovals || []);
       setRealtimeLogs(res.data?.realtimeLogs || []);
+      setRecognizedSchedules(res.data?.recognizedSchedules || []);
       setPendingWorkApprovals(res.data?.pendingWorkApprovals || []);
 
       if (res.data?.myToday) {
@@ -713,6 +769,14 @@ export default function HqAttendancePage() {
     realtimeLogs.forEach((rt) => m.set(`${rt.instructor_id}__${rt.work_date}`, rt));
     return m;
   }, [realtimeLogs]);
+
+  const recognizedScheduleByMemberDate = useMemo(() => {
+    const m = new Map<string, HqRecognizedDaySchedule>();
+    recognizedSchedules.forEach((sc) =>
+      m.set(`${sc.instructor_id}__${sc.work_date}`, sc)
+    );
+    return m;
+  }, [recognizedSchedules]);
 
   const pendingWorkApprovalByMemberDate = useMemo(() => {
     const m = new Map<string, PendingWorkApprovalLite>();
@@ -785,6 +849,7 @@ export default function HqAttendancePage() {
     fullDates.forEach((ymd) => {
       const key = me ? `${me.instructor_id}__${ymd}` : "";
       const draft = key ? draftEdits[key] : undefined;
+      const storedSched = key ? recognizedScheduleByMemberDate.get(key) : undefined;
       const rec = me ? recordByMemberDate.get(key) : undefined;
       const dowKo = WEEKDAY_KO[parseYmdLocal(ymd).getDay()];
       const isHoliday = holidayMap.has(ymd);
@@ -801,6 +866,18 @@ export default function HqAttendancePage() {
         totalLoggedMin += m;
         totalEffectiveMin += m;
         totalOvertimeMin += Math.max(0, m - ruleDailyMin);
+        return;
+      }
+
+      if (storedSched) {
+        const sum = calcDayScheduleSummary(
+          storedSched.segments,
+          storedSched.breaks,
+          ruleDailyMin
+        );
+        totalLoggedMin += sum.workedMinutes;
+        totalEffectiveMin += sum.workedMinutes;
+        totalOvertimeMin += sum.overtimeMinutes;
         return;
       }
 
@@ -831,6 +908,7 @@ export default function HqAttendancePage() {
     activeQueryRange.end,
     me,
     draftEdits,
+    recognizedScheduleByMemberDate,
     recordByMemberDate,
     holidayMap,
     myRule,
@@ -883,8 +961,14 @@ export default function HqAttendancePage() {
       );
     }
     draftList.forEach((d) => {
-      if (d.actionMode === "UPSERT" && calcDraftNetWorkedMinutes(d) <= 0) {
-        warns.push(`${d.workDate}: 실근무 시간이 0분입니다. 출·퇴근 시각을 확인해 주세요.`);
+      if (
+        d.actionMode === "UPSERT" &&
+        d.segments.length > 0 &&
+        calcDraftNetWorkedMinutes(d) <= 0
+      ) {
+        warns.push(
+          `${d.workDate}: 실근무 시간이 0분입니다. 출·퇴근 시각 또는 휴게 시간을 확인해 주세요.`
+        );
       }
     });
     return warns;
@@ -947,34 +1031,553 @@ export default function HqAttendancePage() {
     }
   };
 
-  const computeBaselineSnapshotForTarget = useCallback(
-    (t: InlineWorkPopoverTarget): DraftWorkEdit["baselineSnapshot"] => {
-      const exists = Boolean(t.hadExistingRecord || t.wasScheduledWorkday);
-      const gross =
-        t.baseline.outMinutes >= t.baseline.inMinutes
-          ? t.baseline.outMinutes - t.baseline.inMinutes
-          : 1440 - t.baseline.inMinutes + t.baseline.outMinutes;
-      const workedMinutes = exists
-        ? Math.max(0, gross - Math.max(0, t.baseline.breakMinutes))
-        : 0;
-      const overtimeMinutes = exists
-        ? Math.max(0, workedMinutes - t.ruleDailyMinutes)
-        : 0;
-      return {
+  // =========================================================================
+  // 일자별 기준 인정 근무 스케줄(다중 근무 블록 + 다중 휴게 블록) 산출 엔진
+  // =========================================================================
+  const getBaselineDaySchedule = useCallback(
+    (member: HqMember, ymd: string) => {
+      const key = `${member.instructor_id}__${ymd}`;
+      const storedSched = recognizedScheduleByMemberDate.get(key);
+      const existing = recordByMemberDate.get(key);
+      const lvDoc = leaveApprovalByMemberDate.get(key);
+      const rule = resolveMemberWorkRule(
+        member.name,
+        member.profile_extra?.work_schedule_type
+      );
+      const dow = parseYmdLocal(ymd).getDay();
+      const dowKo = WEEKDAY_KO[dow];
+      const holiday = holidayMap.get(ymd);
+      const wasScheduledWorkday = rule.work_days.includes(dowKo) && !holiday;
+      const isHolidayOrOff = !wasScheduledWorkday;
+
+      const dayCustom =
+        rule.per_day_custom_enabled && rule.per_day_schedule?.[dowKo]
+          ? rule.per_day_schedule[dowKo]
+          : null;
+      const ruleStartMin =
+        parseHmToMinutes(dayCustom?.start_time || rule.start_time) ?? 540;
+      const ruleWorkMin =
+        Number(dayCustom ? dayCustom.work_hours : rule.daily_work_hours ?? 8) *
+          60 +
+        Number(
+          dayCustom ? dayCustom.work_minutes : rule.daily_work_minutes ?? 0
+        );
+      const b1Start = parseHmToMinutes(rule.break_start_1);
+      const b1End = parseHmToMinutes(rule.break_end_1);
+      const b2Start = parseHmToMinutes(rule.break_start_2);
+      const b2End = parseHmToMinutes(rule.break_end_2);
+      const ruleBreakMin = calcBreakMinutes(rule);
+      const ruleEndMin = ruleStartMin + ruleWorkMin + ruleBreakMin;
+
+      const leaveLabel = String(
+        lvDoc?.leave_type ||
+          (existing?.work_mode === "LEAVE" ? existing.location_note : "") ||
+          ""
+      );
+      const isHalfAm = leaveLabel.includes("오전 반차");
+      const isHalfPm =
+        leaveLabel.includes("오후 반차") ||
+        ((existing?.status === "HALF_LEAVE" || leaveLabel.includes("반차")) &&
+          !isHalfAm);
+      const isHourlyLeave =
+        leaveLabel.includes("반반차") || leaveLabel.includes("시간차");
+      const hasFullLeave =
+        (existing?.work_mode === "LEAVE" &&
+          existing?.status !== "HALF_LEAVE") ||
+        existing?.status === "LEAVE" ||
+        (Boolean(lvDoc) && !isHalfAm && !isHalfPm && !isHourlyLeave);
+
+      let segments: HqRecognizedWorkSegment[] = [];
+      let breaks: HqRecognizedBreakBlock[] = [];
+      let hadExistingRecord = Boolean(existing || storedSched);
+
+      if (hasFullLeave) {
+        segments = [];
+        breaks = [];
+      } else if (storedSched) {
+        segments = (storedSched.segments || []).map((s, idx) => ({
+          ...s,
+          id: s.id || `seg-stored-${idx}`,
+        }));
+        breaks = (storedSched.breaks || []).map((b, idx) => ({
+          ...b,
+          id: b.id || `brk-stored-${idx}`,
+        }));
+      } else if (existing && existing.check_in_at) {
+        const actualInMin =
+          isoToMinutesOfDay(existing.check_in_at, ymd) ?? ruleStartMin;
+        const isCurrentlyWorkingToday =
+          existing.status === "WORKING" &&
+          !existing.check_out_at &&
+          ymd === todayStr;
+        const recognizedOutMin = isCurrentlyWorkingToday
+          ? Math.max(ruleEndMin, actualInMin + 60)
+          : Math.max(
+              actualInMin + 15,
+              isoToMinutesOfDay(existing.check_out_at, ymd) ?? ruleEndMin
+            );
+        const baseMode: HqWorkMode =
+          existing.work_mode && existing.work_mode !== "LEAVE"
+            ? existing.work_mode
+            : "OFFICE";
+        const basePolicyName =
+          baseMode === "REMOTE"
+            ? "원격근무"
+            : baseMode === "OUTSIDE"
+              ? existing.location_note === "출장지"
+                ? "출장"
+                : "외근"
+              : baseMode.startsWith("FLEX_")
+                ? ATTENDANCE_MODES[baseMode]?.shortLabel || "근무"
+                : "근무";
+
+        segments = [
+          {
+            id: "seg-rec-0",
+            work_mode: baseMode,
+            policy_name: basePolicyName,
+            in_minutes: actualInMin,
+            out_minutes: recognizedOutMin,
+            location_note:
+              existing.location_note ||
+              ATTENDANCE_MODES[baseMode]?.defaultLocation,
+            memo: existing.memo || undefined,
+          },
+        ];
+
+        const recBreakWins = resolveBreakWindowsForSpan({
+          inMinutes: actualInMin,
+          outMinutes: recognizedOutMin,
+          breakMinutes: existing.break_minutes ?? ruleBreakMin,
+          rule,
+        });
+        breaks = recBreakWins.map((w, idx) => ({
+          id: `brk-rec-${idx}`,
+          start_minutes: w.start_minutes,
+          end_minutes: w.end_minutes,
+        }));
+      } else if (wasScheduledWorkday) {
+        const workBarStart = isHalfAm
+          ? ruleStartMin + 240 + ruleBreakMin
+          : ruleStartMin;
+        const workBarEnd = isHalfPm ? ruleStartMin + 240 : ruleEndMin;
+        segments = [
+          {
+            id: "seg-plan-0",
+            work_mode: "OFFICE",
+            policy_name: "근무",
+            in_minutes: workBarStart,
+            out_minutes: workBarEnd,
+            location_note: ATTENDANCE_MODES.OFFICE.defaultLocation,
+          },
+        ];
+        if (!isHalfAm && !isHalfPm) {
+          if (
+            b1Start !== null &&
+            b1End !== null &&
+            b1End > b1Start &&
+            b1Start >= workBarStart &&
+            b1End <= workBarEnd
+          ) {
+            breaks.push({
+              id: "brk-plan-0",
+              start_minutes: b1Start,
+              end_minutes: b1End,
+            });
+          }
+          if (
+            b2Start !== null &&
+            b2End !== null &&
+            b2End > b2Start &&
+            b2Start >= workBarStart &&
+            b2End <= workBarEnd
+          ) {
+            breaks.push({
+              id: "brk-plan-1",
+              start_minutes: b2Start,
+              end_minutes: b2End,
+            });
+          }
+        }
+        hadExistingRecord = false;
+      }
+
+      const summary = calcDayScheduleSummary(segments, breaks, ruleWorkMin);
+      const exists = segments.length > 0 || breaks.length > 0;
+
+      const baselineSnapshot: DraftWorkEdit["baselineSnapshot"] = {
         exists,
-        policyName: t.baseline.policyName,
-        workMode: t.baseline.workMode,
-        inMinutes: t.baseline.inMinutes,
-        outMinutes: t.baseline.outMinutes,
-        breakMinutes: t.baseline.breakMinutes,
-        workedMinutes,
-        overtimeMinutes,
+        policyName: summary.policyName,
+        workMode: summary.workMode,
+        inMinutes: summary.inMinutes,
+        outMinutes: summary.outMinutes,
+        breakMinutes: summary.breakMinutes,
+        workedMinutes: exists ? summary.workedMinutes : 0,
+        overtimeMinutes: exists ? summary.overtimeMinutes : 0,
+        segments,
+        breaks,
+      };
+
+      return {
+        key,
+        attendanceId: existing?.attendance_id,
+        hadExistingRecord,
+        wasScheduledWorkday,
+        isHolidayOrOff,
+        hasFullLeave,
+        isHalfAm,
+        isHalfPm,
+        leaveLabel,
+        ruleStartMin,
+        ruleWorkMin,
+        ruleBreakMin,
+        ruleEndMin,
+        b1Start,
+        b1End,
+        segments,
+        breaks,
+        baselineSnapshot,
       };
     },
-    []
+    [
+      holidayMap,
+      leaveApprovalByMemberDate,
+      recognizedScheduleByMemberDate,
+      recordByMemberDate,
+      resolveMemberWorkRule,
+      todayStr,
+    ]
   );
 
-  // 플렉스 인라인 인정 근무(굵은 막대) 편집 팝오버 열기 ([근무 편집 work.record_edit] 권한 전용!)
+  const getEffectiveDaySchedule = useCallback(
+    (member: HqMember, ymd: string) => {
+      const base = getBaselineDaySchedule(member, ymd);
+      const draft = draftEdits[base.key];
+      if (draft) {
+        if (draft.actionMode === "DELETE") {
+          return {
+            base,
+            segments: [] as HqRecognizedWorkSegment[],
+            breaks: [] as HqRecognizedBreakBlock[],
+            isDeletedDraft: true,
+          };
+        }
+        return {
+          base,
+          segments: draft.segments,
+          breaks: draft.breaks,
+          isDeletedDraft: false,
+        };
+      }
+      return {
+        base,
+        segments: base.segments,
+        breaks: base.breaks,
+        isDeletedDraft: false,
+      };
+    },
+    [draftEdits, getBaselineDaySchedule]
+  );
+
+  const commitScheduleForMemberDate = useCallback(
+    (
+      member: HqMember,
+      ymd: string,
+      nextSegments: HqRecognizedWorkSegment[],
+      nextBreaks: HqRecognizedBreakBlock[]
+    ) => {
+      const base = getBaselineDaySchedule(member, ymd);
+      const identical = isScheduleIdenticalToBaseline({
+        segments: nextSegments,
+        breaks: nextBreaks,
+        baselineSegments: base.segments,
+        baselineBreaks: base.breaks,
+      });
+
+      if (
+        identical &&
+        (base.hadExistingRecord ||
+          base.wasScheduledWorkday ||
+          (nextSegments.length === 0 && nextBreaks.length === 0))
+      ) {
+        setDraftEdits((prev) => {
+          if (!prev[base.key]) return prev;
+          const copy = { ...prev };
+          delete copy[base.key];
+          return copy;
+        });
+        return;
+      }
+
+      const nextDraft = buildDraftWorkEditFromSchedule({
+        key: base.key,
+        memberId: member.instructor_id,
+        memberName: member.name,
+        department: member.department || "미지정",
+        workDate: ymd,
+        attendanceId: base.attendanceId,
+        wasScheduledWorkday: base.wasScheduledWorkday,
+        ruleDailyMinutes: base.ruleWorkMin,
+        segments: nextSegments,
+        breaks: nextBreaks,
+        baselineSnapshot: base.baselineSnapshot,
+      });
+
+      setDraftEdits((prev) => ({
+        ...prev,
+        [base.key]: nextDraft,
+      }));
+    },
+    [getBaselineDaySchedule]
+  );
+
+  const openItemPopover = useCallback(
+    (
+      member: HqMember,
+      ymd: string,
+      targetKind: "SEGMENT" | "BREAK",
+      itemId: string,
+      anchorEl?: HTMLElement | null,
+      initialTimeFocus: "START" | "END" | null = null
+    ) => {
+      if (!canEditTargetWork(member)) return;
+      const base = getBaselineDaySchedule(member, ymd);
+
+      let anchorRect = {
+        top: 240,
+        bottom: 276,
+        left: 420,
+        right: 680,
+        width: 260,
+      };
+
+      const resolveDomAnchor = () => {
+        if (typeof document === "undefined") return anchorEl || null;
+        if (anchorEl) return anchorEl;
+        const selector =
+          targetKind === "BREAK"
+            ? `[data-break-box="${base.key}__${itemId}"]`
+            : `[data-work-seg="${base.key}__${itemId}"]`;
+        return (
+          (document.querySelector(selector) as HTMLElement | null) ||
+          (document.querySelector(
+            `[data-work-bar="${base.key}"]`
+          ) as HTMLElement | null)
+        );
+      };
+
+      const el = resolveDomAnchor();
+      if (el) {
+        const r = el.getBoundingClientRect();
+        anchorRect = {
+          top: r.top,
+          bottom: r.bottom,
+          left: r.left,
+          right: r.right,
+          width: r.width,
+        };
+      }
+
+      setRowAddMenu(null);
+      setBreakListPopover(null);
+      setHoveredBreakTip(null);
+
+      setInlineTarget({
+        key: base.key,
+        targetKind,
+        itemId,
+        initialTimeFocus,
+        memberId: member.instructor_id,
+        memberName: member.name,
+        department: member.department || "미지정",
+        workDate: ymd,
+        attendanceId: base.attendanceId,
+        hadExistingRecord: base.hadExistingRecord,
+        wasScheduledWorkday: base.wasScheduledWorkday,
+        isHolidayOrOff: base.isHolidayOrOff,
+        ruleDailyMinutes: base.ruleWorkMin,
+        anchorRect,
+        baselineSegments: base.segments,
+        baselineBreaks: base.breaks,
+      });
+    },
+    [canEditTargetWork, getBaselineDaySchedule]
+  );
+
+  // 기존 근무 블록을 없애지 않고 새 근무 블록(근무/외근/원격근무/출장)을 추가!
+  const addWorkSegmentForDate = useCallback(
+    (
+      targetMember: HqMember | null,
+      ymd: string,
+      policyName = "근무",
+      workMode: HqWorkMode = "OFFICE",
+      defaultLoc?: string
+    ) => {
+      const member = targetMember || me;
+      if (!member || !canEditTargetWork(member)) return;
+
+      const { base, segments, breaks } = getEffectiveDaySchedule(member, ymd);
+      const slot = findNextFreeSegmentSlot({
+        existingSegments: segments,
+        preferredDuration: 60,
+        ruleStartMin: base.ruleStartMin,
+        ruleEndMin: base.ruleEndMin,
+      });
+
+      const newSegId = `seg-${Date.now()}-${Math.random()
+        .toString(36)
+        .slice(2, 6)}`;
+      const loc =
+        defaultLoc ||
+        (policyName === "출장"
+          ? "출장지"
+          : policyName === "외근"
+            ? "외근지"
+            : ATTENDANCE_MODES[workMode]?.defaultLocation || "본사 편집·연구실");
+
+      const nextSegments: HqRecognizedWorkSegment[] = [
+        ...segments,
+        {
+          id: newSegId,
+          work_mode: workMode,
+          policy_name: policyName,
+          in_minutes: slot.in_minutes,
+          out_minutes: slot.out_minutes,
+          location_note: loc,
+        },
+      ];
+
+      // 휴일 등 근무 블록이 하나도 없던 날 첫 전체 구간을 생성할 때만 기본 휴게 1건 포함 (기존 블록 뒤에 추가할 때는 휴게 없음 유지)
+      const nextBreaks: HqRecognizedBreakBlock[] = [...breaks];
+      if (
+        slot.isInitialFullSpan &&
+        nextBreaks.length === 0 &&
+        base.b1Start !== null &&
+        base.b1End !== null &&
+        base.b1Start >= slot.in_minutes &&
+        base.b1End <= slot.out_minutes
+      ) {
+        nextBreaks.push({
+          id: `brk-${Date.now()}`,
+          start_minutes: base.b1Start,
+          end_minutes: base.b1End,
+        });
+      }
+
+      commitScheduleForMemberDate(member, ymd, nextSegments, nextBreaks);
+
+      if (typeof window !== "undefined") {
+        window.requestAnimationFrame(() => {
+          window.requestAnimationFrame(() => {
+            openItemPopover(member, ymd, "SEGMENT", newSegId, null, null);
+          });
+        });
+      }
+    },
+    [
+      canEditTargetWork,
+      commitScheduleForMemberDate,
+      getEffectiveDaySchedule,
+      me,
+      openItemPopover,
+    ]
+  );
+
+  // 기존 휴게 블록을 없애지 않고 새 휴게 시간 블록을 추가!
+  const addBreakBlockForDate = useCallback(
+    (
+      targetMember: HqMember | null,
+      ymd: string,
+      targetSegmentId?: string | null
+    ) => {
+      const member = targetMember || me;
+      if (!member || !canEditTargetWork(member)) return;
+
+      const { base, segments, breaks } = getEffectiveDaySchedule(member, ymd);
+      const targetSeg = targetSegmentId
+        ? segments.find((s) => s.id === targetSegmentId) || null
+        : null;
+
+      const slot = findNextFreeBreakSlot({
+        existingBreaks: breaks,
+        targetSegment: targetSeg,
+        allSegments: segments,
+        ruleBreakStart: base.b1Start,
+        ruleBreakEnd: base.b1End,
+      });
+
+      const newBreakId = `brk-${Date.now()}-${Math.random()
+        .toString(36)
+        .slice(2, 6)}`;
+      const nextBreaks: HqRecognizedBreakBlock[] = [
+        ...breaks,
+        {
+          id: newBreakId,
+          start_minutes: slot.start_minutes,
+          end_minutes: slot.end_minutes,
+        },
+      ];
+
+      commitScheduleForMemberDate(member, ymd, segments, nextBreaks);
+      setBreakListPopover(null);
+
+      if (typeof window !== "undefined") {
+        window.requestAnimationFrame(() => {
+          window.requestAnimationFrame(() => {
+            openItemPopover(member, ymd, "BREAK", newBreakId, null, null);
+          });
+        });
+      }
+    },
+    [
+      canEditTargetWork,
+      commitScheduleForMemberDate,
+      getEffectiveDaySchedule,
+      me,
+      openItemPopover,
+    ]
+  );
+
+  const deleteBreakBlockForDate = useCallback(
+    (member: HqMember, ymd: string, breakId: string) => {
+      if (!canEditTargetWork(member)) return;
+      const { segments, breaks } = getEffectiveDaySchedule(member, ymd);
+      const nextBreaks = breaks.filter((b) => b.id !== breakId);
+      commitScheduleForMemberDate(member, ymd, segments, nextBreaks);
+    },
+    [canEditTargetWork, commitScheduleForMemberDate, getEffectiveDaySchedule]
+  );
+
+  const openRowAddMenuForDate = useCallback(
+    (targetMember: HqMember | null, ymd: string, btnEl: HTMLElement) => {
+      const member = targetMember || me;
+      if (!member) return;
+      const r = btnEl.getBoundingClientRect();
+      setInlineTarget(null);
+      setBreakListPopover(null);
+      setHoveredBreakTip(null);
+      setRowAddMenu((prev) =>
+        prev &&
+        prev.member.instructor_id === member.instructor_id &&
+        prev.ymd === ymd
+          ? null
+          : {
+              member,
+              ymd,
+              anchorRect: {
+                top: r.top,
+                bottom: r.bottom,
+                left: r.left,
+                right: r.right,
+                width: r.width,
+              },
+            }
+      );
+    },
+    [me]
+  );
+
+  // 호환용 엔트리 오픈 헬퍼 (상단 오늘 기록 수정 / 월간·주간 셀 클릭 등)
   const openEntryForDate = (
     targetMember: HqMember | null,
     ymd: string,
@@ -986,164 +1589,267 @@ export default function HqAttendancePage() {
     }
   ) => {
     const member = targetMember || me;
-    if (!member) return;
-    if (!canEditTargetWork(member)) {
+    if (!member || !canEditTargetWork(member)) return;
+
+    if (opts?.focusBreak || opts?.policyLabel === "휴게") {
+      addBreakBlockForDate(member, ymd, null);
+      return;
+    }
+    if (opts?.policyLabel) {
+      addWorkSegmentForDate(
+        member,
+        ymd,
+        opts.policyLabel,
+        opts.presetMode || "OFFICE"
+      );
       return;
     }
 
-    const key = `${member.instructor_id}__${ymd}`;
-    const existing = recordByMemberDate.get(key);
-    const rule = resolveMemberWorkRule(
-      member.name,
-      member.profile_extra?.work_schedule_type
-    );
-    const dowKo = WEEKDAY_KO[parseYmdLocal(ymd).getDay()];
-    const holiday = holidayMap.get(ymd);
-    const wasScheduledWorkday = rule.work_days.includes(dowKo) && !holiday;
+    const { segments } = getEffectiveDaySchedule(member, ymd);
+    if (segments.length > 0) {
+      openItemPopover(
+        member,
+        ymd,
+        "SEGMENT",
+        segments[0].id,
+        opts?.anchorEl || null,
+        null
+      );
+    } else {
+      addWorkSegmentForDate(member, ymd, "근무", "OFFICE");
+    }
+  };
 
-    const dayCustom =
-      rule.per_day_custom_enabled && rule.per_day_schedule?.[dowKo]
-        ? rule.per_day_schedule[dowKo]
+  // =========================================================================
+  // 24시간 타임라인 블록 드래그 이동(앞·뒤 배치) 및 좌·우 끝 시간 늘리기/줄이기 핸들러
+  // =========================================================================
+  const startTimelineItemPointerDown = (
+    e: React.PointerEvent<HTMLElement>,
+    params: {
+      member: HqMember;
+      ymd: string;
+      kind: "SEGMENT" | "BREAK";
+      itemId: string;
+      interaction: "MOVE" | "RESIZE_LEFT" | "RESIZE_RIGHT";
+      anchorEl: HTMLElement;
+    }
+  ) => {
+    if (e.button !== 0) return;
+    e.stopPropagation();
+
+    const { member, ymd, kind, itemId, interaction, anchorEl } = params;
+    if (!canEditTargetWork(member)) return;
+
+    const trackEl = anchorEl.closest(
+      "[data-timeline-track]"
+    ) as HTMLElement | null;
+    if (!trackEl) {
+      openItemPopover(member, ymd, kind, itemId, anchorEl, null);
+      return;
+    }
+
+    const trackRect = trackEl.getBoundingClientRect();
+    if (trackRect.width <= 0) return;
+
+    const { base, segments: origSegments, breaks: origBreaks } =
+      getEffectiveDaySchedule(member, ymd);
+    const origSeg =
+      kind === "SEGMENT"
+        ? origSegments.find((s) => s.id === itemId) || null
         : null;
-    const ruleStartMin =
-      parseHmToMinutes(dayCustom?.start_time || rule.start_time) ?? 540;
-    const ruleWorkMin =
-      Number(dayCustom ? dayCustom.work_hours : rule.daily_work_hours ?? 8) *
-        60 +
-      Number(dayCustom ? dayCustom.work_minutes : rule.daily_work_minutes ?? 0);
-    const ruleBreakMin = calcBreakMinutes(rule);
-    const ruleEndMin = ruleStartMin + ruleWorkMin + ruleBreakMin;
+    const origBrk =
+      kind === "BREAK" ? origBreaks.find((b) => b.id === itemId) || null : null;
 
-    const baseMode: HqWorkMode = existing?.work_mode && existing.work_mode !== "LEAVE"
-      ? existing.work_mode
-      : "OFFICE";
-    const basePolicyName =
-      baseMode === "REMOTE"
-        ? "원격근무"
-        : baseMode === "OUTSIDE"
-          ? existing?.location_note === "출장지"
-            ? "출장"
-            : "외근"
-          : "근무";
+    if (kind === "SEGMENT" && !origSeg) return;
+    if (kind === "BREAK" && !origBrk) return;
 
-    const baseInMin = existing?.check_in_at
-      ? isoToMinutesOfDay(existing.check_in_at, ymd) ?? ruleStartMin
-      : ruleStartMin;
-    const baseOutMin =
-      existing?.check_out_at && existing.status === "DONE"
-        ? isoToMinutesOfDay(existing.check_out_at, ymd) ?? ruleEndMin
-        : ruleEndMin;
-    const baseBreakMin =
-      existing?.break_minutes !== undefined
-        ? Number(existing.break_minutes)
-        : ruleBreakMin || 60;
-    const baseLocation =
-      existing?.location_note ||
-      ATTENDANCE_MODES[baseMode]?.defaultLocation ||
-      "본사 편집·연구실";
-    const baseMemo = existing?.memo || "";
-
-    let anchorRect = {
-      top: 240,
-      bottom: 276,
-      left: 420,
-      right: 680,
-      width: 260,
-    };
-    if (typeof document !== "undefined") {
-      const barEl = document.querySelector(
-        `[data-work-bar="${key}"]`
-      ) as HTMLElement | null;
-      const targetEl = barEl || opts?.anchorEl || null;
-      if (targetEl) {
-        const r = targetEl.getBoundingClientRect();
-        anchorRect = {
-          top: r.top,
-          bottom: r.bottom,
-          left: barEl ? r.left : Math.max(260, r.left + 120),
-          right: r.right,
-          width: r.width,
-        };
-      }
+    // 근무 블록 통째 이동 시 그 안에 포함되어 있던 휴게 블록도 함께 평행 이동
+    const attachedBreakIds = new Set<string>();
+    if (kind === "SEGMENT" && origSeg && interaction === "MOVE") {
+      origBreaks.forEach((b) => {
+        if (
+          b.start_minutes >= origSeg.in_minutes &&
+          b.end_minutes <= origSeg.out_minutes
+        ) {
+          attachedBreakIds.add(b.id);
+        }
+      });
     }
 
-    const baseline = {
-      workMode: baseMode,
-      policyName: basePolicyName,
-      inMinutes: baseInMin,
-      outMinutes: baseOutMin,
-      breakMinutes: baseBreakMin,
-      locationNote: baseLocation,
-      memo: baseMemo,
-    };
+    const parentSegForBreak =
+      kind === "BREAK" && origBrk
+        ? origSegments.find(
+            (s) =>
+              origBrk.start_minutes >= s.in_minutes &&
+              origBrk.end_minutes <= s.out_minutes
+          ) || null
+        : null;
 
-    const nextTarget: InlineWorkPopoverTarget = {
-      key,
-      memberId: member.instructor_id,
-      memberName: member.name,
-      department: member.department || "미지정",
-      workDate: ymd,
-      attendanceId: existing?.attendance_id,
-      hadExistingRecord: Boolean(existing),
-      wasScheduledWorkday,
-      ruleDailyMinutes: ruleWorkMin,
-      anchorRect,
-      baseline,
-    };
+    const startX = e.clientX;
+    let hasMoved = false;
 
-    const baseSnap = computeBaselineSnapshotForTarget(nextTarget);
-    setInlineTarget(nextTarget);
-
-    if (opts?.presetMode || (opts?.policyLabel && opts.policyLabel !== "휴게")) {
-      const nextMode = opts.presetMode || baseMode;
-      const nextPolicy = opts.policyLabel || basePolicyName;
-      const nextLoc =
-        nextPolicy === "출장"
-          ? "출장지"
-          : nextPolicy === "외근"
-            ? "외근지"
-            : ATTENDANCE_MODES[nextMode]?.defaultLocation || baseLocation;
-      if (nextMode !== baseMode || nextPolicy !== basePolicyName || !wasScheduledWorkday) {
-        setDraftEdits((prev) => ({
-          ...prev,
-          [key]: {
-            key,
-            memberId: member.instructor_id,
-            memberName: member.name,
-            department: member.department || "미지정",
-            workDate: ymd,
-            attendanceId: existing?.attendance_id,
-            actionMode: "UPSERT",
-            workMode: nextMode,
-            policyName: nextPolicy,
-            inMinutes: prev[key]?.inMinutes ?? baseInMin,
-            outMinutes: prev[key]?.outMinutes ?? baseOutMin,
-            breakMinutes: prev[key]?.breakMinutes ?? baseBreakMin,
-            locationNote: nextLoc,
-            memo: prev[key]?.memo ?? baseMemo,
-            wasScheduledWorkday,
-            ruleDailyMinutes: ruleWorkMin,
-            baselineSnapshot: baseSnap,
-          },
-        }));
+    const onPointerMove = (ev: PointerEvent) => {
+      const dx = ev.clientX - startX;
+      if (!hasMoved && Math.abs(dx) < 4) {
+        return;
       }
-    } else if (!existing && !wasScheduledWorkday && !draftEdits[key]) {
-      setDraftEdits((prev) => ({
-        ...prev,
-        [key]: {
-          key,
-          memberId: member.instructor_id,
-          memberName: member.name,
-          department: member.department || "미지정",
-          workDate: ymd,
-          actionMode: "UPSERT",
-          wasScheduledWorkday,
-          ruleDailyMinutes: ruleWorkMin,
-          baselineSnapshot: baseSnap,
-          ...baseline,
-        },
-      }));
-    }
+      if (!hasMoved) {
+        hasMoved = true;
+        setInlineTarget(null);
+        setBreakListPopover(null);
+        setRowAddMenu(null);
+        setHoveredBreakTip(null);
+      }
+
+      const rawDeltaMin = Math.round((dx / trackRect.width) * 96) * 15;
+
+      if (kind === "SEGMENT" && origSeg) {
+        const otherSegs = origSegments.filter((s) => s.id !== origSeg.id);
+        let nextIn = origSeg.in_minutes;
+        let nextOut = origSeg.out_minutes;
+
+        if (interaction === "MOVE") {
+          const dur = origSeg.out_minutes - origSeg.in_minutes;
+          const desiredStart = origSeg.in_minutes + rawDeltaMin;
+          nextIn = resolveNearestNonOverlappingSlot(
+            desiredStart,
+            dur,
+            otherSegs.map((s) => ({
+              start: s.in_minutes,
+              end: s.out_minutes,
+            })),
+            0,
+            1440
+          );
+          nextOut = nextIn + dur;
+        } else if (interaction === "RESIZE_LEFT") {
+          const prevEnds = otherSegs
+            .filter((s) => s.out_minutes <= origSeg.in_minutes)
+            .map((s) => s.out_minutes);
+          const minIn = prevEnds.length > 0 ? Math.max(...prevEnds) : 0;
+          nextIn = Math.max(
+            minIn,
+            Math.min(origSeg.out_minutes - 15, origSeg.in_minutes + rawDeltaMin)
+          );
+          nextOut = origSeg.out_minutes;
+        } else {
+          const nextStarts = otherSegs
+            .filter((s) => s.in_minutes >= origSeg.out_minutes)
+            .map((s) => s.in_minutes);
+          const maxOut = nextStarts.length > 0 ? Math.min(...nextStarts) : 1440;
+          nextIn = origSeg.in_minutes;
+          nextOut = Math.max(
+            origSeg.in_minutes + 15,
+            Math.min(maxOut, origSeg.out_minutes + rawDeltaMin)
+          );
+        }
+
+        const shift = nextIn - origSeg.in_minutes;
+        const nextSegments = origSegments.map((s) =>
+          s.id === origSeg.id
+            ? { ...s, in_minutes: nextIn, out_minutes: nextOut }
+            : s
+        );
+        const nextBreaks =
+          interaction === "MOVE" && shift !== 0 && attachedBreakIds.size > 0
+            ? origBreaks.map((b) => {
+                if (!attachedBreakIds.has(b.id)) return b;
+                const bDur = b.end_minutes - b.start_minutes;
+                const ns = Math.max(
+                  0,
+                  Math.min(1440 - bDur, b.start_minutes + shift)
+                );
+                return { ...b, start_minutes: ns, end_minutes: ns + bDur };
+              })
+            : origBreaks;
+
+        setActiveDrag({
+          dayKey: base.key,
+          kind: "SEGMENT",
+          itemId: origSeg.id,
+          startMin: nextIn,
+          endMin: nextOut,
+        });
+        commitScheduleForMemberDate(member, ymd, nextSegments, nextBreaks);
+      } else if (kind === "BREAK" && origBrk) {
+        const otherBreaks = origBreaks.filter((b) => b.id !== origBrk.id);
+        let nextStart = origBrk.start_minutes;
+        let nextEnd = origBrk.end_minutes;
+
+        if (interaction === "MOVE") {
+          const dur = origBrk.end_minutes - origBrk.start_minutes;
+          const desired = origBrk.start_minutes + rawDeltaMin;
+          const minB = parentSegForBreak ? parentSegForBreak.in_minutes : 0;
+          const maxB = parentSegForBreak ? parentSegForBreak.out_minutes : 1440;
+          nextStart = resolveNearestNonOverlappingSlot(
+            desired,
+            dur,
+            otherBreaks.map((b) => ({
+              start: b.start_minutes,
+              end: b.end_minutes,
+            })),
+            minB,
+            maxB
+          );
+          nextEnd = nextStart + dur;
+        } else if (interaction === "RESIZE_LEFT") {
+          const prevEnds = otherBreaks
+            .filter((b) => b.end_minutes <= origBrk.start_minutes)
+            .map((b) => b.end_minutes);
+          const minStart = Math.max(
+            parentSegForBreak ? parentSegForBreak.in_minutes : 0,
+            prevEnds.length > 0 ? Math.max(...prevEnds) : 0
+          );
+          nextStart = Math.max(
+            minStart,
+            Math.min(
+              origBrk.end_minutes - 15,
+              origBrk.start_minutes + rawDeltaMin
+            )
+          );
+          nextEnd = origBrk.end_minutes;
+        } else {
+          const nextStarts = otherBreaks
+            .filter((b) => b.start_minutes >= origBrk.end_minutes)
+            .map((b) => b.start_minutes);
+          const maxEnd = Math.min(
+            parentSegForBreak ? parentSegForBreak.out_minutes : 1440,
+            nextStarts.length > 0 ? Math.min(...nextStarts) : 1440
+          );
+          nextStart = origBrk.start_minutes;
+          nextEnd = Math.max(
+            origBrk.start_minutes + 15,
+            Math.min(maxEnd, origBrk.end_minutes + rawDeltaMin)
+          );
+        }
+
+        const nextBreaks = origBreaks.map((b) =>
+          b.id === origBrk.id
+            ? { ...b, start_minutes: nextStart, end_minutes: nextEnd }
+            : b
+        );
+        setActiveDrag({
+          dayKey: base.key,
+          kind: "BREAK",
+          itemId: origBrk.id,
+          startMin: nextStart,
+          endMin: nextEnd,
+        });
+        commitScheduleForMemberDate(member, ymd, origSegments, nextBreaks);
+      }
+    };
+
+    const onPointerUp = () => {
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointerup", onPointerUp);
+      setActiveDrag(null);
+      if (!hasMoved) {
+        openItemPopover(member, ymd, kind, itemId, anchorEl, null);
+      }
+    };
+
+    window.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("pointerup", onPointerUp);
   };
 
   // 플렉스 [실시간 기록 수정] 모달 열기 ([구성원 실시간 근무 기록 편집 work.realtime_edit] 권한 전용 — 가느다란 막대 독립 수정!)
@@ -1246,33 +1952,12 @@ export default function HqAttendancePage() {
     });
   }, []);
 
-  const handleStageDeleteDraft = useCallback(
-    (t: InlineWorkPopoverTarget) => {
-      const snap = computeBaselineSnapshotForTarget(t);
-      setDraftEdits((prev) => ({
-        ...prev,
-        [t.key]: {
-          key: t.key,
-          memberId: t.memberId,
-          memberName: t.memberName,
-          department: t.department,
-          workDate: t.workDate,
-          attendanceId: t.attendanceId,
-          actionMode: "DELETE",
-          wasScheduledWorkday: t.wasScheduledWorkday,
-          ruleDailyMinutes: t.ruleDailyMinutes,
-          baselineSnapshot: snap,
-          ...t.baseline,
-        },
-      }));
-    },
-    [computeBaselineSnapshotForTarget]
-  );
-
   const handleCancelAllDrafts = useCallback(() => {
     setDraftEdits({});
     setApprovalReasonByKey({});
     setInlineTarget(null);
+    setBreakListPopover(null);
+    setRowAddMenu(null);
     setApprovalPanelOpen(false);
   }, []);
 
@@ -1309,6 +1994,9 @@ export default function HqAttendancePage() {
           check_in_time: minutesToHm24(d.inMinutes),
           check_out_time: minutesToHm24(d.outMinutes),
           break_minutes: d.breakMinutes,
+          rule_daily_minutes: d.ruleDailyMinutes,
+          segments: d.segments,
+          breaks: d.breaks,
           location_note: d.locationNote,
           memo: d.memo,
           requires_approval: Boolean(ev?.requiresApproval),
@@ -1325,6 +2013,7 @@ export default function HqAttendancePage() {
 
       const res = await hqFetch<{
         success: boolean;
+        data?: { submittedApprovals?: number };
         submittedApprovals?: number;
       }>("/api/hq/attendance", {
         method: "POST",
@@ -1337,14 +2026,18 @@ export default function HqAttendancePage() {
       setDraftEdits({});
       setApprovalReasonByKey({});
       setInlineTarget(null);
+      setBreakListPopover(null);
+      setRowAddMenu(null);
       setApprovalPanelOpen(false);
       await Promise.all([loadAttendance(), refreshAttendanceState()]);
       if (typeof window !== "undefined") {
         window.dispatchEvent(new Event("hq:approval-updated"));
       }
-      if ((res as any)?.submittedApprovals > 0) {
+      const submittedCount =
+        res?.data?.submittedApprovals ?? res?.submittedApprovals ?? 0;
+      if (submittedCount > 0) {
         alert(
-          `승인 대상 일정 ${(res as any).submittedApprovals}건이 워크플로우 결재 요청으로 상신되었습니다.`
+          `승인 대상 일정 ${submittedCount}건이 워크플로우 결재 요청으로 상신되었습니다.`
         );
       }
     } catch (err: any) {
@@ -1722,11 +2415,20 @@ export default function HqAttendancePage() {
     }
 
     // =========================================================================
-    // [Layer 2] 하단 굵은 막대: 인정 근무 (top-[16px], h-[26px] — [근무 편집] 권한으로만 수정!)
+    // [Layer 2] 하단 굵은 막대: 인정 근무 다중 블록 + 다중 휴게 블록 (드래그 이동 & 좌우 리사이즈 & 인라인 시간·휴게 패널 지원)
     // =========================================================================
+    const { base, segments, breaks, isDeletedDraft } = getEffectiveDaySchedule(
+      member,
+      ymd
+    );
+    const canEditThisMember = canEditTargetWork(member);
+    const hasDraft = Boolean(draft);
+    const hasStoredMultiSched = Boolean(
+      recognizedScheduleByMemberDate.get(barKey)
+    );
 
-    // 0) 드래프트로 삭제 예정인 경우
-    if (draft?.actionMode === "DELETE") {
+    // 0) 드래프트로 전체 일정 삭제 예정인 경우
+    if (isDeletedDraft) {
       return (
         <>
           {thinRealtimeOverlay}
@@ -1740,143 +2442,7 @@ export default function HqAttendancePage() {
       );
     }
 
-    // 0-B) 인정 근무 편집 드래프트가 존재하는 경우 즉시 굵은 막대에 반영
-    if (draft?.actionMode === "UPSERT") {
-      const dStart = draft.inMinutes;
-      const dEnd =
-        draft.outMinutes > draft.inMinutes
-          ? draft.outMinutes
-          : Math.min(1440, draft.inMinutes + 60);
-      const leftPct = Math.max(0, Math.min(96, (dStart / 1440) * 100));
-      const widthPct = Math.max(
-        3,
-        Math.min(100 - leftPct, ((dEnd - dStart) / 1440) * 100)
-      );
-      const netMin = calcDraftNetWorkedMinutes(draft);
-      const overtimeMin = Math.max(0, netMin - ruleWorkMin);
-      const spanMin = Math.max(1, dEnd - dStart);
-      const overtimeTailPct =
-        overtimeMin > 0 ? Math.min(100, (overtimeMin / spanMin) * 100) : 0;
-
-      const draftBreakWindows = resolveBreakWindowsForSpan({
-        inMinutes: dStart,
-        outMinutes: dEnd,
-        breakMinutes: draft.breakMinutes,
-        rule,
-      });
-
-      const modeIcon =
-        draft.workMode === "REMOTE"
-          ? "🏠"
-          : draft.workMode === "OUTSIDE"
-            ? "🚗"
-            : "💼";
-
-      return (
-        <>
-          {thinRealtimeOverlay}
-          <div
-            data-work-bar={barKey}
-            style={{ left: `${leftPct}%`, width: `${widthPct}%` }}
-            className="absolute top-[16px] bottom-2 z-15"
-          >
-            <div className="relative h-6.5 rounded-[5px] border border-[#0f766e] ring-1 ring-[#0f766e]/25 px-2 flex items-center justify-between overflow-hidden bg-[#aef4e8]/95 text-[#0f766e] shadow-2xs">
-              {overtimeTailPct > 0 && (
-                <div
-                  style={{ width: `${overtimeTailPct}%` }}
-                  className="pointer-events-none absolute top-0 right-0 h-[3px] bg-[#f05638] z-20"
-                />
-              )}
-
-              <div className="flex items-center gap-1.5 min-w-0 z-10">
-                <span className="text-[11px]">{modeIcon}</span>
-                {draft.policyName !== "근무" && (
-                  <span className="text-[11px] font-extrabold truncate">
-                    {draft.policyName}
-                  </span>
-                )}
-              </div>
-
-              {draftBreakWindows.map((brk, bIdx) => {
-                const bLeft = Math.max(
-                  0,
-                  Math.min(100, ((brk.start_minutes - dStart) / spanMin) * 100)
-                );
-                const bWidth = Math.max(
-                  0,
-                  Math.min(
-                    100 - bLeft,
-                    ((brk.end_minutes - brk.start_minutes) / spanMin) * 100
-                  )
-                );
-                if (bWidth <= 0) return null;
-                const tipKey = `${barKey}__draft_brk_${bIdx}`;
-                return (
-                  <div
-                    key={bIdx}
-                    style={{
-                      left: `${bLeft}%`,
-                      width: `${bWidth}%`,
-                    }}
-                    onMouseEnter={(e) =>
-                      showBreakTip(
-                        tipKey,
-                        [
-                          {
-                            startMin: brk.start_minutes,
-                            endMin: brk.end_minutes,
-                          },
-                        ],
-                        e.currentTarget
-                      )
-                    }
-                    onMouseLeave={() => hideBreakTip(tipKey)}
-                    className="absolute top-1 bottom-1 min-w-[18px] rounded-[3px] bg-white/95 border border-slate-200/90 hover:border-slate-300 flex items-center px-1.5 text-[10px] text-slate-500 z-10 overflow-hidden transition-colors"
-                  >
-                    ☕
-                  </div>
-                );
-              })}
-            </div>
-
-            <div className="flex items-center justify-between text-[10px] text-slate-600 font-semibold mt-0.5 px-0.5 whitespace-nowrap">
-              <span>
-                {formatMinutesToKoreanAmPm(dStart)}
-                {draft.breakMinutes > 0 && (
-                  <span
-                    onMouseEnter={(e) =>
-                      showBreakTip(
-                        `${barKey}__draft_brk_lbl`,
-                        draftBreakWindows.map((w) => ({
-                          startMin: w.start_minutes,
-                          endMin: w.end_minutes,
-                        })),
-                        e.currentTarget
-                      )
-                    }
-                    onMouseLeave={() =>
-                      hideBreakTip(`${barKey}__draft_brk_lbl`)
-                    }
-                    className="text-slate-400 hover:text-slate-600 ml-1 font-medium transition-colors"
-                  >
-                    휴게 {Math.max(1, draftBreakWindows.length)}건
-                  </span>
-                )}
-              </span>
-              <span
-                className={
-                  overtimeTailPct > 0 ? "text-[#e85d3f] font-bold" : undefined
-                }
-              >
-                {formatMinutesToKoreanAmPm(dEnd)}
-              </span>
-            </div>
-          </div>
-        </>
-      );
-    }
-
-    // 1) 종일 휴가 상태인 경우
+    // 1) 종일 휴가 상태인 경우 (드래프트로 근무가 추가되지 않은 상태)
     if (hasFullLeave) {
       const barStart = ruleStartMin;
       const barEnd = ruleEndMin;
@@ -1939,314 +2505,476 @@ export default function HqAttendancePage() {
         </div>
       ) : null;
 
-    // 2) 인정 근무 기록이 존재하는 경우 (당일 WORKING 포함 — 굵은 막대는 항상 전체 인정 근무 구간을 표시!)
-    if (rec && rec.check_in_at) {
-      const actualInMin =
-        isoToMinutesOfDay(rec.check_in_at, ymd) ?? ruleStartMin;
+    const shouldHidePlannedOnly =
+      !hasDraft &&
+      !base.hadExistingRecord &&
+      base.wasScheduledWorkday &&
+      !showPlannedGuide;
+
+    // 2) 인정 근무 블록(다중) 및 휴게 블록(다중) 렌더링
+    if (!shouldHidePlannedOnly && (segments.length > 0 || breaks.length > 0)) {
+      const otMeta = computeSegmentsOvertimeMeta(
+        segments,
+        breaks,
+        base.ruleWorkMin
+      );
       const isCurrentlyWorkingToday =
-        rec.status === "WORKING" && !rec.check_out_at && ymd === todayStr;
-
-      const recognizedOutMin = isCurrentlyWorkingToday
-        ? Math.max(ruleEndMin, actualInMin + 60)
-        : Math.max(
-            actualInMin + 25,
-            isoToMinutesOfDay(rec.check_out_at, ymd) ?? ruleEndMin
-          );
-
-      const leftPct = Math.max(0, Math.min(96, (actualInMin / 1440) * 100));
-      const widthPct = Math.max(
-        3,
-        Math.min(100 - leftPct, ((recognizedOutMin - actualInMin) / 1440) * 100)
-      );
-
-      const isCustomWorkMode =
-        rec.work_mode === "REMOTE" ||
-        rec.work_mode === "OUTSIDE" ||
-        rec.work_mode.startsWith("FLEX_");
-
-      const fillColorClass =
-        rec.work_mode === "REMOTE"
-          ? "bg-teal-200/80"
-          : rec.work_mode === "OUTSIDE"
-            ? "bg-amber-200/80"
-            : rec.work_mode.startsWith("FLEX_")
-              ? "bg-indigo-200/80"
-              : isCurrentlyWorkingToday
-                ? "bg-[#c8f9ef]/85"
-                : "bg-[#aef4e8]/90";
-
-      const borderColorClass = isActivePopover
-        ? "border-[#0f766e] ring-1 ring-[#0f766e]/30 text-[#0f766e]"
-        : pendingWorkAppr
-          ? "border-amber-400 border-dashed text-amber-900"
-          : rec.work_mode === "REMOTE"
-            ? "border-teal-500 text-teal-900"
-            : rec.work_mode === "OUTSIDE"
-              ? "border-amber-500 text-amber-950"
-              : rec.work_mode.startsWith("FLEX_")
-                ? "border-indigo-500 text-indigo-950"
-                : "border-[#2dd4bf] text-[#0f766e]";
-
-      const modeIcon =
-        rec.work_mode === "REMOTE"
-          ? "🏠"
-          : rec.work_mode === "OUTSIDE"
-            ? "🚗"
-            : rec.work_mode.startsWith("FLEX_")
-              ? "🌅"
-              : "💼";
-
-      const spanMin = Math.max(1, recognizedOutMin - actualInMin);
-      const loggedOvertime = Math.max(
-        0,
-        Number(rec.overtime_minutes || 0) ||
-          Number(rec.worked_minutes || 0) - ruleWorkMin
-      );
-      const overtimeTailPct =
-        !isCurrentlyWorkingToday && loggedOvertime > 0
-          ? Math.min(100, (loggedOvertime / spanMin) * 100)
-          : 0;
-
-      const recBreakWindows = resolveBreakWindowsForSpan({
-        inMinutes: actualInMin,
-        outMinutes: recognizedOutMin,
-        breakMinutes: rec.break_minutes ?? ruleBreakMin,
-        rule,
-      });
-
-      const hasBreakInside =
-        b1Start !== null &&
-        b1End !== null &&
-        actualInMin < b1Start &&
-        recognizedOutMin > b1End &&
-        (rec.break_minutes ?? 60) > 0;
-
-      const resolvedRecTipWindows =
-        recBreakWindows.length > 0
-          ? recBreakWindows.map((w) => ({
-              startMin: w.start_minutes,
-              endMin: w.end_minutes,
-            }))
-          : hasBreakInside && b1Start !== null && b1End !== null
-            ? [{ startMin: b1Start, endMin: b1End }]
-            : [];
-
-      const breakLeftInBar =
-        hasBreakInside && b1Start !== null
-          ? ((b1Start - actualInMin) / spanMin) * 100
-          : 0;
-      const breakWidthInBar =
-        hasBreakInside && b1Start !== null && b1End !== null
-          ? ((b1End - b1Start) / spanMin) * 100
-          : 0;
+        Boolean(rec?.status === "WORKING" && !rec?.check_out_at) &&
+        ymd === todayStr &&
+        !hasDraft;
 
       return (
         <>
           {thinRealtimeOverlay}
           {halfLeaveOverlay}
-          <div
-            data-work-bar={barKey}
-            style={{ left: `${leftPct}%`, width: `${widthPct}%` }}
-            className="absolute top-[16px] bottom-2 z-10"
-          >
-            <div
-              className={`relative h-6.5 rounded-[5px] border px-2 flex items-center justify-between overflow-hidden bg-white transition-all hover:brightness-97 ${borderColorClass}`}
-            >
+
+          {/* 근무 블록 레이어 (드래그 이동 & 좌우 리사이즈) */}
+          {segments.map((seg, segIdx) => {
+            const spanMin = Math.max(15, seg.out_minutes - seg.in_minutes);
+            const leftPct = Math.max(
+              0,
+              Math.min(99, (seg.in_minutes / 1440) * 100)
+            );
+            const widthPct = Math.max(
+              0.8,
+              Math.min(100 - leftPct, (spanMin / 1440) * 100)
+            );
+            const vis = getWorkPolicyVisual(seg.policy_name, seg.work_mode);
+            const segOt = otMeta[seg.id];
+            const segBreaks = getBreaksOverlappingSegment(seg, breaks);
+
+            const isSelectedSeg =
+              isActivePopover &&
+              inlineTarget?.targetKind === "SEGMENT" &&
+              inlineTarget?.itemId === seg.id;
+            const isDraggingSeg =
+              activeDrag?.dayKey === barKey &&
+              activeDrag?.kind === "SEGMENT" &&
+              activeDrag?.itemId === seg.id;
+
+            const isFilled =
+              hasDraft ||
+              hasStoredMultiSched ||
+              ymd < todayStr ||
+              rec?.status === "DONE" ||
+              seg.policy_name !== "근무";
+
+            const boxBorderClass =
+              isSelectedSeg || isDraggingSeg
+                ? vis.activeBorderClass
+                : pendingWorkAppr && segIdx === 0
+                  ? "border-amber-400 border-dashed text-amber-900"
+                  : isFilled
+                    ? vis.solidBorderClass
+                    : `${vis.plannedBorderClass} text-[#0f766e]`;
+
+            const showOvertimeStrip =
+              !isCurrentlyWorkingToday && (segOt?.overtimeWidthPct || 0) > 0;
+
+            return (
               <div
-                className={`absolute inset-0 pointer-events-none ${fillColorClass}`}
-              />
-
-              {overtimeTailPct > 0 && (
-                <div
-                  style={{ width: `${overtimeTailPct}%` }}
-                  className="pointer-events-none absolute top-0 right-0 h-[3px] bg-[#f05638] z-20"
-                />
-              )}
-
-              <div className="flex items-center gap-1.5 min-w-0 z-10">
-                <span className="text-[11px]">{modeIcon}</span>
-                {isCustomWorkMode && (
-                  <span className="text-[11px] font-extrabold truncate">
-                    {ATTENDANCE_MODES[rec.work_mode]?.shortLabel || "근무"}
-                  </span>
+                key={seg.id}
+                data-work-bar={segIdx === 0 ? barKey : undefined}
+                data-work-seg={`${barKey}__${seg.id}`}
+                style={{ left: `${leftPct}%`, width: `${widthPct}%` }}
+                className={`absolute top-[16px] bottom-2 group/seg ${
+                  isSelectedSeg || isDraggingSeg ? "z-20" : "z-12"
+                }`}
+              >
+                {isDraggingSeg && (
+                  <div className="pointer-events-none absolute -top-7 left-1/2 -translate-x-1/2 px-2 py-0.5 rounded-md bg-slate-900 text-white text-[10.5px] font-bold whitespace-nowrap shadow-lg z-40 tabular-nums">
+                    {formatMinutesToKoreanAmPm(seg.in_minutes)} –{" "}
+                    {seg.out_minutes === 1440
+                      ? "오전 12:00"
+                      : formatMinutesToKoreanAmPm(seg.out_minutes)}{" "}
+                    · {formatDurationKoreanCompact(spanMin)}
+                  </div>
                 )}
-                {pendingWorkAppr && (
-                  <span className="px-1.5 py-0.2 rounded bg-amber-100/95 text-amber-800 text-[9.5px] font-extrabold truncate">
-                    승인대기 ({formatMinutesToKoreanAmPm(pendingWorkAppr.after_in_minutes)}~
-                    {formatMinutesToKoreanAmPm(pendingWorkAppr.after_out_minutes)})
+
+                <div
+                  onPointerDown={(e) =>
+                    startTimelineItemPointerDown(e, {
+                      member,
+                      ymd,
+                      kind: "SEGMENT",
+                      itemId: seg.id,
+                      interaction: "MOVE",
+                      anchorEl: e.currentTarget,
+                    })
+                  }
+                  onClick={(e) => e.stopPropagation()}
+                  className={`relative h-6.5 rounded-[5px] border px-2 flex items-center justify-between overflow-hidden bg-white transition-colors ${boxBorderClass} ${
+                    canEditThisMember
+                      ? "cursor-grab active:cursor-grabbing hover:brightness-98"
+                      : "cursor-default"
+                  }`}
+                >
+                  {isFilled && (
+                    <div
+                      className={`absolute inset-0 pointer-events-none ${vis.fillClass}`}
+                    />
+                  )}
+
+                  {showOvertimeStrip && segOt && (
+                    <div
+                      style={{
+                        left: `${segOt.overtimeLeftPct}%`,
+                        width: `${segOt.overtimeWidthPct}%`,
+                      }}
+                      className="pointer-events-none absolute top-0 h-[3px] bg-[#f05638] z-20"
+                    />
+                  )}
+
+                  {/* 좌측 끝 시간 조절 리사이즈 핸들 */}
+                  {canEditThisMember && (
+                    <div
+                      onPointerDown={(e) => {
+                        const parentBox = e.currentTarget
+                          .parentElement as HTMLElement | null;
+                        if (!parentBox) return;
+                        startTimelineItemPointerDown(e, {
+                          member,
+                          ymd,
+                          kind: "SEGMENT",
+                          itemId: seg.id,
+                          interaction: "RESIZE_LEFT",
+                          anchorEl: parentBox,
+                        });
+                      }}
+                      title="좌측 끝을 끌어 시작 시각 조정"
+                      className="absolute left-0 top-0 bottom-0 w-2 cursor-ew-resize z-30 flex items-center justify-start pl-[1.5px] group/lhandle"
+                    >
+                      <span className="w-[2px] h-3 rounded-full bg-transparent group-hover/seg:bg-slate-600/35 group-hover/lhandle:!bg-slate-900 transition-colors" />
+                    </div>
+                  )}
+
+                  {/* 우측 끝 시간 조절 리사이즈 핸들 */}
+                  {canEditThisMember && (
+                    <div
+                      onPointerDown={(e) => {
+                        const parentBox = e.currentTarget
+                          .parentElement as HTMLElement | null;
+                        if (!parentBox) return;
+                        startTimelineItemPointerDown(e, {
+                          member,
+                          ymd,
+                          kind: "SEGMENT",
+                          itemId: seg.id,
+                          interaction: "RESIZE_RIGHT",
+                          anchorEl: parentBox,
+                        });
+                      }}
+                      title="우측 끝을 끌어 종료 시각 조정"
+                      className="absolute right-0 top-0 bottom-0 w-2 cursor-ew-resize z-30 flex items-center justify-end pr-[1.5px] group/rhandle"
+                    >
+                      <span className="w-[2px] h-3 rounded-full bg-transparent group-hover/seg:bg-slate-600/35 group-hover/rhandle:!bg-slate-900 transition-colors" />
+                    </div>
+                  )}
+
+                  <div className="flex items-center gap-1.5 min-w-0 z-10 pointer-events-none">
+                    <span className={vis.badgeTextClass}>
+                      <PolicySvgIcon kind={vis.kind} className="w-3.5 h-3.5" />
+                    </span>
+                    {seg.policy_name !== "근무" && spanMin >= 75 && (
+                      <span className="text-[11px] font-extrabold truncate">
+                        {seg.policy_name}
+                      </span>
+                    )}
+                    {pendingWorkAppr && segIdx === 0 && (
+                      <span className="px-1.5 py-0.2 rounded bg-amber-100/95 text-amber-800 text-[9.5px] font-extrabold truncate">
+                        승인대기 (
+                        {formatMinutesToKoreanAmPm(
+                          pendingWorkAppr.after_in_minutes
+                        )}
+                        ~
+                        {formatMinutesToKoreanAmPm(
+                          pendingWorkAppr.after_out_minutes
+                        )}
+                        )
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                {/* 블록 아래 클릭 가능한 시각 & '휴게 N건 / 휴게 없음' 라벨 */}
+                <div
+                  onClick={(e) => e.stopPropagation()}
+                  className="flex items-center justify-between text-[10px] text-slate-500 font-medium mt-0.5 px-0.5 whitespace-nowrap"
+                >
+                  <span className="inline-flex items-center gap-1">
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (!canEditThisMember) return;
+                        const segWrap = e.currentTarget.closest(
+                          "[data-work-seg]"
+                        ) as HTMLElement | null;
+                        openItemPopover(
+                          member,
+                          ymd,
+                          "SEGMENT",
+                          seg.id,
+                          segWrap || e.currentTarget,
+                          "START"
+                        );
+                      }}
+                      className={`${
+                        canEditThisMember
+                          ? "hover:text-slate-900 cursor-pointer"
+                          : "cursor-default"
+                      } ${isSelectedSeg ? "text-slate-900 font-bold" : ""}`}
+                    >
+                      {formatMinutesToKoreanAmPm(seg.in_minutes)}
+                    </button>
+
+                    <button
+                      type="button"
+                      onMouseEnter={(e) => {
+                        if (segBreaks.length > 0 && !activeDrag) {
+                          showBreakTip(
+                            `${barKey}__${seg.id}__brk_lbl`,
+                            segBreaks.map((w) => ({
+                              startMin: w.start_minutes,
+                              endMin: w.end_minutes,
+                            })),
+                            e.currentTarget
+                          );
+                        }
+                      }}
+                      onMouseLeave={() =>
+                        hideBreakTip(`${barKey}__${seg.id}__brk_lbl`)
+                      }
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (!canEditThisMember && segBreaks.length === 0) {
+                          return;
+                        }
+                        const r = e.currentTarget.getBoundingClientRect();
+                        setInlineTarget(null);
+                        setRowAddMenu(null);
+                        setHoveredBreakTip(null);
+                        setBreakListPopover((prev) =>
+                          prev &&
+                          prev.member.instructor_id === member.instructor_id &&
+                          prev.ymd === ymd &&
+                          prev.segmentId === seg.id
+                            ? null
+                            : {
+                                member,
+                                ymd,
+                                segmentId: seg.id,
+                                anchorRect: {
+                                  top: r.top,
+                                  bottom: r.bottom,
+                                  left: r.left,
+                                  right: r.right,
+                                  width: r.width,
+                                },
+                              }
+                        );
+                      }}
+                      className={`text-slate-400 font-normal transition-colors ${
+                        canEditThisMember
+                          ? "hover:text-slate-700 cursor-pointer"
+                          : "cursor-default"
+                      }`}
+                    >
+                      {segBreaks.length > 0
+                        ? `휴게 ${segBreaks.length}건`
+                        : "휴게 없음"}
+                    </button>
                   </span>
+
+                  {spanMin >= 210 && (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (!canEditThisMember) return;
+                        const segWrap = e.currentTarget.closest(
+                          "[data-work-seg]"
+                        ) as HTMLElement | null;
+                        openItemPopover(
+                          member,
+                          ymd,
+                          "SEGMENT",
+                          seg.id,
+                          segWrap || e.currentTarget,
+                          "END"
+                        );
+                      }}
+                      className={`${
+                        canEditThisMember
+                          ? "hover:text-slate-900 cursor-pointer"
+                          : "cursor-default"
+                      } ${
+                        showOvertimeStrip
+                          ? "text-[#e85d3f] font-bold hover:!text-[#c94124]"
+                          : isSelectedSeg
+                            ? "text-slate-900 font-bold"
+                            : ""
+                      }`}
+                    >
+                      {seg.out_minutes === 1440
+                        ? "오전 12:00"
+                        : formatMinutesToKoreanAmPm(seg.out_minutes)}
+                    </button>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+
+          {/* 휴게 블록 레이어 (다중 휴게 지원 + 드래그 이동 & 좌우 리사이즈) */}
+          {breaks.map((brk) => {
+            const bDur = Math.max(15, brk.end_minutes - brk.start_minutes);
+            const bLeftPct = Math.max(
+              0,
+              Math.min(99, (brk.start_minutes / 1440) * 100)
+            );
+            const bWidthPct = Math.max(
+              0.7,
+              Math.min(100 - bLeftPct, (bDur / 1440) * 100)
+            );
+            const isInsideAnySeg = segments.some(
+              (s) =>
+                brk.start_minutes >= s.in_minutes &&
+                brk.end_minutes <= s.out_minutes
+            );
+            const isSelectedBrk =
+              isActivePopover &&
+              inlineTarget?.targetKind === "BREAK" &&
+              inlineTarget?.itemId === brk.id;
+            const isDraggingBrk =
+              activeDrag?.dayKey === barKey &&
+              activeDrag?.kind === "BREAK" &&
+              activeDrag?.itemId === brk.id;
+            const tipKey = `${barKey}__brk_${brk.id}`;
+
+            return (
+              <div
+                key={brk.id}
+                data-break-box={`${barKey}__${brk.id}`}
+                style={{ left: `${bLeftPct}%`, width: `${bWidthPct}%` }}
+                className="absolute top-[20px] z-25 group/brk"
+              >
+                {isDraggingBrk && (
+                  <div className="pointer-events-none absolute -top-8 left-1/2 -translate-x-1/2 px-2 py-0.5 rounded-md bg-slate-900 text-white text-[10.5px] font-bold whitespace-nowrap shadow-lg z-40 tabular-nums">
+                    ☕ {formatMinutesToKoreanAmPm(brk.start_minutes)} –{" "}
+                    {formatMinutesToKoreanAmPm(brk.end_minutes)} ·{" "}
+                    {formatDurationKoreanCompact(bDur)}
+                  </div>
+                )}
+
+                <div
+                  onPointerDown={(e) =>
+                    startTimelineItemPointerDown(e, {
+                      member,
+                      ymd,
+                      kind: "BREAK",
+                      itemId: brk.id,
+                      interaction: "MOVE",
+                      anchorEl: e.currentTarget,
+                    })
+                  }
+                  onClick={(e) => e.stopPropagation()}
+                  onMouseEnter={(e) => {
+                    if (!activeDrag) {
+                      showBreakTip(
+                        tipKey,
+                        [
+                          {
+                            startMin: brk.start_minutes,
+                            endMin: brk.end_minutes,
+                          },
+                        ],
+                        e.currentTarget
+                      );
+                    }
+                  }}
+                  onMouseLeave={() => hideBreakTip(tipKey)}
+                  className={`relative h-[18px] min-w-[16px] rounded-[3px] bg-white/96 border flex items-center px-1.5 text-[10px] text-slate-500 overflow-hidden transition-colors ${
+                    isSelectedBrk || isDraggingBrk
+                      ? "border-slate-700 ring-1 ring-slate-600/25"
+                      : "border-slate-200/95 hover:border-slate-400"
+                  } ${
+                    canEditThisMember
+                      ? "cursor-grab active:cursor-grabbing"
+                      : "cursor-default"
+                  }`}
+                >
+                  {canEditThisMember && (
+                    <div
+                      onPointerDown={(e) => {
+                        const parentBox = e.currentTarget
+                          .parentElement as HTMLElement | null;
+                        if (!parentBox) return;
+                        startTimelineItemPointerDown(e, {
+                          member,
+                          ymd,
+                          kind: "BREAK",
+                          itemId: brk.id,
+                          interaction: "RESIZE_LEFT",
+                          anchorEl: parentBox,
+                        });
+                      }}
+                      title="휴게 시작 시각 조절"
+                      className="absolute left-0 top-0 bottom-0 w-1.5 cursor-ew-resize z-30 flex items-center justify-start pl-[1px] group/bl"
+                    >
+                      <span className="w-[1.5px] h-2.5 rounded-full bg-transparent group-hover/brk:bg-slate-400/70 group-hover/bl:!bg-slate-800" />
+                    </div>
+                  )}
+
+                  {canEditThisMember && (
+                    <div
+                      onPointerDown={(e) => {
+                        const parentBox = e.currentTarget
+                          .parentElement as HTMLElement | null;
+                        if (!parentBox) return;
+                        startTimelineItemPointerDown(e, {
+                          member,
+                          ymd,
+                          kind: "BREAK",
+                          itemId: brk.id,
+                          interaction: "RESIZE_RIGHT",
+                          anchorEl: parentBox,
+                        });
+                      }}
+                      title="휴게 종료 시각 조절"
+                      className="absolute right-0 top-0 bottom-0 w-1.5 cursor-ew-resize z-30 flex items-center justify-end pr-[1px] group/br"
+                    >
+                      <span className="w-[1.5px] h-2.5 rounded-full bg-transparent group-hover/brk:bg-slate-400/70 group-hover/br:!bg-slate-800" />
+                    </div>
+                  )}
+
+                  <span className="pointer-events-none text-slate-400 shrink-0">
+                    <PolicySvgIcon kind="BREAK" className="w-3 h-3" />
+                  </span>
+                </div>
+
+                {!isInsideAnySeg && (
+                  <div
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (!canEditThisMember) return;
+                      openItemPopover(
+                        member,
+                        ymd,
+                        "BREAK",
+                        brk.id,
+                        e.currentTarget,
+                        "START"
+                      );
+                    }}
+                    className="mt-1.5 text-[10px] text-slate-400 hover:text-slate-700 font-medium whitespace-nowrap cursor-pointer"
+                  >
+                    {formatMinutesToKoreanAmPm(brk.start_minutes)} 휴게
+                  </div>
                 )}
               </div>
-
-              {hasBreakInside && (
-                <div
-                  style={{
-                    left: `${breakLeftInBar}%`,
-                    width: `${breakWidthInBar}%`,
-                  }}
-                  onMouseEnter={(e) =>
-                    showBreakTip(
-                      `${barKey}__rec_brk`,
-                      resolvedRecTipWindows,
-                      e.currentTarget
-                    )
-                  }
-                  onMouseLeave={() => hideBreakTip(`${barKey}__rec_brk`)}
-                  className="absolute top-1 bottom-1 rounded-[3px] bg-white/95 border border-slate-200/90 hover:border-slate-300 flex items-center px-1.5 text-[10px] text-slate-500 z-10 transition-colors"
-                >
-                  ☕
-                </div>
-              )}
-            </div>
-
-            <div className="flex items-center justify-between text-[10px] text-slate-500 font-medium mt-0.5 px-0.5 whitespace-nowrap">
-              <span
-                className={
-                  isActivePopover ? "text-slate-800 font-bold" : undefined
-                }
-              >
-                {formatMinutesToKoreanAmPm(actualInMin)}
-                {(rec.break_minutes || 0) > 0 && (
-                  <span
-                    onMouseEnter={(e) =>
-                      showBreakTip(
-                        `${barKey}__rec_brk_lbl`,
-                        resolvedRecTipWindows,
-                        e.currentTarget
-                      )
-                    }
-                    onMouseLeave={() => hideBreakTip(`${barKey}__rec_brk_lbl`)}
-                    className="text-slate-400 hover:text-slate-600 ml-1 font-normal transition-colors"
-                  >
-                    휴게 {Math.max(1, resolvedRecTipWindows.length)}건
-                  </span>
-                )}
-              </span>
-              <span
-                className={
-                  overtimeTailPct > 0
-                    ? "text-[#e85d3f] font-bold"
-                    : isActivePopover
-                      ? "text-slate-800 font-bold"
-                      : undefined
-                }
-              >
-                {formatMinutesToKoreanAmPm(recognizedOutMin)}
-              </span>
-            </div>
-          </div>
-        </>
-      );
-    }
-
-    // 3) 아직 출퇴근 기록이 없는 평일(미래 소정근로일 등) -> Flex 스타일 민트 윤곽선 예정 인정 근무(굵은 막대) 표시
-    if (isScheduledWorkday && showPlannedGuide) {
-      const workBarStart = isHalfAm
-        ? ruleStartMin + 240 + ruleBreakMin
-        : ruleStartMin;
-      const workBarEnd = isHalfPm ? ruleStartMin + 240 : ruleEndMin;
-      const leftPct = (workBarStart / 1440) * 100;
-      const widthPct = ((workBarEnd - workBarStart) / 1440) * 100;
-      const hasBreak =
-        !isHalfAm &&
-        !isHalfPm &&
-        b1Start !== null &&
-        b1End !== null &&
-        b1Start >= workBarStart &&
-        b1End <= workBarEnd;
-      const breakLeftPct =
-        hasBreak && b1Start !== null
-          ? ((b1Start - workBarStart) / (workBarEnd - workBarStart)) * 100
-          : 44;
-      const breakWidthPct =
-        hasBreak && b1Start !== null && b1End !== null
-          ? ((b1End - b1Start) / (workBarEnd - workBarStart)) * 100
-          : 11;
-
-      const plannedTipWindows =
-        hasBreak && b1Start !== null && b1End !== null
-          ? [{ startMin: b1Start, endMin: b1End }]
-          : [];
-
-      return (
-        <>
-          {thinRealtimeOverlay}
-          {halfLeaveOverlay}
-          <div
-            data-work-bar={barKey}
-            style={{ left: `${leftPct}%`, width: `${widthPct}%` }}
-            className="absolute top-[16px] bottom-2 z-10"
-          >
-            <div
-              className={`relative h-6.5 rounded-[5px] border bg-white hover:bg-teal-50/30 transition-colors flex items-center justify-between px-2 ${
-                isActivePopover
-                  ? "border-[#0f766e] ring-1 ring-[#0f766e]/25"
-                  : pendingWorkAppr
-                    ? "border-amber-400 border-dashed"
-                    : "border-[#5eead4]"
-              }`}
-            >
-              <div className="flex items-center gap-1.5 min-w-0 z-10">
-                <span className="text-[11px] text-[#14b8a6]">💼</span>
-                {pendingWorkAppr && (
-                  <span className="px-1.5 py-0.2 rounded bg-amber-100/95 text-amber-800 text-[9.5px] font-extrabold truncate">
-                    승인대기 ({formatMinutesToKoreanAmPm(pendingWorkAppr.after_in_minutes)}~
-                    {formatMinutesToKoreanAmPm(pendingWorkAppr.after_out_minutes)})
-                  </span>
-                )}
-              </div>
-              {hasBreak && (
-                <div
-                  style={{
-                    left: `${breakLeftPct}%`,
-                    width: `${breakWidthPct}%`,
-                  }}
-                  onMouseEnter={(e) =>
-                    showBreakTip(
-                      `${barKey}__plan_brk`,
-                      plannedTipWindows,
-                      e.currentTarget
-                    )
-                  }
-                  onMouseLeave={() => hideBreakTip(`${barKey}__plan_brk`)}
-                  className="absolute top-1 bottom-1 rounded-[3px] border border-slate-200 hover:border-slate-300 bg-slate-50/90 flex items-center px-1.5 text-[10px] text-slate-500 z-10 transition-colors"
-                >
-                  ☕
-                </div>
-              )}
-            </div>
-            <div className="flex items-center justify-between text-[10px] font-medium text-slate-500 mt-0.5 px-0.5 whitespace-nowrap">
-              <span
-                className={
-                  isActivePopover ? "text-slate-800 font-bold" : undefined
-                }
-              >
-                {formatMinutesToKoreanAmPm(workBarStart)}{" "}
-                {hasBreak && (
-                  <span
-                    onMouseEnter={(e) =>
-                      showBreakTip(
-                        `${barKey}__plan_brk_lbl`,
-                        plannedTipWindows,
-                        e.currentTarget
-                      )
-                    }
-                    onMouseLeave={() => hideBreakTip(`${barKey}__plan_brk_lbl`)}
-                    className="text-slate-400 hover:text-slate-600 ml-0.5 font-normal transition-colors"
-                  >
-                    휴게 1건
-                  </span>
-                )}
-              </span>
-              <span
-                className={
-                  isActivePopover ? "text-slate-800 font-bold" : undefined
-                }
-              >
-                {formatMinutesToKoreanAmPm(workBarEnd)}
-              </span>
-            </div>
-          </div>
+            );
+          })}
         </>
       );
     }
@@ -2535,10 +3263,12 @@ export default function HqAttendancePage() {
                             type="button"
                             onClick={() => {
                               setAddMenuOpen(false);
-                              openEntryForDate(me, todayStr, {
-                                presetMode,
-                                policyLabel: pol.name,
-                              });
+                              addWorkSegmentForDate(
+                                me,
+                                todayStr,
+                                pol.name,
+                                presetMode
+                              );
                             }}
                             className="w-full px-3.5 py-2 text-left hover:bg-slate-50 font-semibold text-slate-800 flex items-center gap-2"
                           >
@@ -2557,10 +3287,7 @@ export default function HqAttendancePage() {
                         type="button"
                         onClick={() => {
                           setAddMenuOpen(false);
-                          openEntryForDate(me, todayStr, {
-                            policyLabel: "휴게",
-                            focusBreak: true,
-                          });
+                          addBreakBlockForDate(me, todayStr, null);
                         }}
                         className="w-full px-3.5 py-2 text-left hover:bg-slate-50 font-semibold text-slate-700 flex items-center gap-2"
                       >
@@ -2576,6 +3303,7 @@ export default function HqAttendancePage() {
                         type="button"
                         onClick={() => {
                           setAddMenuOpen(false);
+                          setLeaveModalInitialDate(undefined);
                           setLeaveRegisterKind({ type: "ANNUAL" });
                           setLeaveModalOpen(true);
                         }}
@@ -2590,6 +3318,7 @@ export default function HqAttendancePage() {
                           type="button"
                           onClick={() => {
                             setAddMenuOpen(false);
+                            setLeaveModalInitialDate(undefined);
                             setLeaveRegisterKind({ type: "CUSTOM", item: lv });
                             setLeaveModalOpen(true);
                           }}
@@ -3144,34 +3873,39 @@ export default function HqAttendancePage() {
                     const isWorkDay =
                       myRule.work_days.includes(dowKo) && !holiday;
 
-                    const ruleStartMin =
-                      parseHmToMinutes(myRule.start_time) ?? 540;
                     const ruleWorkMin =
                       Number(myRule.daily_work_hours || 8) * 60 +
                       Number(myRule.daily_work_minutes || 0);
-                    const ruleBreakMin = calcBreakMinutes(myRule);
-                    const ruleEndMin = ruleStartMin + ruleWorkMin + ruleBreakMin;
-                    const monthB1Start = parseHmToMinutes(myRule.break_start_1);
-                    const monthB1End = parseHmToMinutes(myRule.break_end_1);
-                    const monthBreakTipWindows =
-                      monthB1Start !== null && monthB1End !== null
-                        ? [{ startMin: monthB1Start, endMin: monthB1End }]
-                        : [];
+
+                    const storedCellSched = cellKey
+                      ? recognizedScheduleByMemberDate.get(cellKey)
+                      : undefined;
+                    const cellEff = me
+                      ? getEffectiveDaySchedule(me, ymd)
+                      : null;
 
                     const dayMin = cellDraft
                       ? calcDraftNetWorkedMinutes(cellDraft)
-                      : rec
-                        ? rec.status === "WORKING" && ymd === todayStr
-                          ? ruleWorkMin
-                          : rec.work_mode === "LEAVE" && rec.status === "LEAVE"
+                      : storedCellSched
+                        ? calcDayScheduleSummary(
+                            storedCellSched.segments,
+                            storedCellSched.breaks,
+                            ruleWorkMin
+                          ).workedMinutes
+                        : rec
+                          ? rec.status === "WORKING" && ymd === todayStr
                             ? ruleWorkMin
-                            : Number(rec.worked_minutes || ruleWorkMin)
-                        : isWorkDay
-                          ? ruleWorkMin
-                          : 0;
+                            : rec.work_mode === "LEAVE" &&
+                                rec.status === "LEAVE"
+                              ? ruleWorkMin
+                              : Number(rec.worked_minutes || ruleWorkMin)
+                          : isWorkDay
+                            ? ruleWorkMin
+                            : 0;
 
                     const isPastOrDone =
                       Boolean(cellDraft) ||
+                      Boolean(storedCellSched) ||
                       ymd < todayStr ||
                       rec?.status === "DONE";
                     const hasFullLeave =
@@ -3182,27 +3916,23 @@ export default function HqAttendancePage() {
                         (Boolean(lvDoc) &&
                           !String(lvDoc?.leave_type || "").includes("반차") &&
                           !String(lvDoc?.leave_type || "").includes("시간차")));
+                    const canShowCellPlus = Boolean(
+                      me &&
+                        (canEditSelfWork ||
+                          isWorkDay ||
+                          (ymd < todayStr && canEditRealtimeWork(me)))
+                    );
 
                     return (
                       <div
                         key={ymd}
-                        onClick={(e) =>
-                          canEditSelfWork &&
-                          openEntryForDate(me, ymd, {
-                            anchorEl: e.currentTarget,
-                          })
-                        }
                         className={`min-h-[116px] p-3 transition-colors flex flex-col justify-between group ${
                           cellDraft
                             ? "bg-[#f5f9ff]"
                             : inCurrentMonth
                               ? "bg-white"
                               : "opacity-55 bg-slate-50/25"
-                        } ${
-                          canEditSelfWork
-                            ? "hover:bg-slate-50/70 cursor-pointer"
-                            : "cursor-default"
-                        }`}
+                        } hover:bg-slate-50/55`}
                       >
                         <div className="flex items-center justify-between">
                           <div className="flex items-center gap-1.5">
@@ -3230,16 +3960,20 @@ export default function HqAttendancePage() {
                             </span>
                           </div>
 
-                          {canEditSelfWork && (
+                          {canShowCellPlus && (
                             <button
                               type="button"
                               onClick={(e) => {
                                 e.stopPropagation();
-                                openEntryForDate(me, ymd, {
-                                  anchorEl: e.currentTarget,
-                                });
+                                if (me) {
+                                  openRowAddMenuForDate(
+                                    me,
+                                    ymd,
+                                    e.currentTarget
+                                  );
+                                }
                               }}
-                              className="w-5 h-5 rounded text-slate-300 hover:text-slate-700 hover:bg-slate-100 flex items-center justify-center text-xs font-bold"
+                              className="w-5 h-5 rounded text-slate-300 hover:text-slate-800 hover:bg-slate-100 flex items-center justify-center text-xs font-bold"
                             >
                               +
                             </button>
@@ -3264,98 +3998,97 @@ export default function HqAttendancePage() {
                               </span>
                               <span>8h</span>
                             </div>
-                          ) : cellDraft || isWorkDay || rec ? (
-                            isPastOrDone ? (
-                              <div className="space-y-0.5">
-                                <div className="flex items-center justify-between text-[11px] pl-1.5 border-l-2 border-[#14b8a6]">
-                                  <span className="font-extrabold text-slate-800">
-                                    {cellDraft
-                                      ? cellDraft.policyName
-                                      : rec &&
-                                          rec.work_mode !== "OFFICE" &&
-                                          ATTENDANCE_MODES[rec.work_mode]
-                                        ? ATTENDANCE_MODES[rec.work_mode]
-                                            .shortLabel
-                                        : "근무"}
-                                  </span>
-                                  <span className="text-[10.5px] text-slate-500 tabular-nums">
-                                    {formatMinutesToKoreanAmPm(
-                                      cellDraft
-                                        ? cellDraft.inMinutes
-                                        : isoToMinutesOfDay(
-                                            rec?.check_in_at,
-                                            ymd
-                                          ) ?? ruleStartMin
-                                    )}{" "}
-                                    -{" "}
-                                    {formatMinutesToKoreanAmPm(
-                                      cellDraft
-                                        ? cellDraft.outMinutes
-                                        : isoToMinutesOfDay(
-                                            rec?.check_out_at,
-                                            ymd
-                                          ) ?? ruleEndMin
-                                    )}
-                                  </span>
-                                </div>
-                                {(cellDraft
-                                  ? cellDraft.breakMinutes
-                                  : ruleBreakMin) > 0 && (
-                                  <div className="text-right">
-                                    <span
-                                      onMouseEnter={(e) =>
-                                        showBreakTip(
-                                          `${cellKey || ymd}__mo_brk_1`,
-                                          monthBreakTipWindows,
-                                          e.currentTarget
-                                        )
-                                      }
-                                      onMouseLeave={() =>
-                                        hideBreakTip(
-                                          `${cellKey || ymd}__mo_brk_1`
-                                        )
-                                      }
-                                      className="text-[10px] text-slate-400 hover:text-slate-600 transition-colors"
-                                    >
-                                      휴게 1건
-                                    </span>
-                                  </div>
-                                )}
-                              </div>
-                            ) : (
-                              <div className="space-y-0.5">
-                                <div className="px-2 py-1 rounded-[5px] border border-dashed border-[#4fd1c5] bg-white flex items-center justify-between text-[11px]">
-                                  <span className="font-extrabold text-slate-800 pl-1 border-l-2 border-[#14b8a6]">
-                                    근무
+                          ) : cellEff && cellEff.segments.length > 0 ? (
+                            <div className="space-y-1">
+                              {cellEff.segments.map((mSeg) => (
+                                <div
+                                  key={mSeg.id}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    if (canEditSelfWork && me) {
+                                      openItemPopover(
+                                        me,
+                                        ymd,
+                                        "SEGMENT",
+                                        mSeg.id,
+                                        e.currentTarget,
+                                        null
+                                      );
+                                    }
+                                  }}
+                                  className={
+                                    isPastOrDone
+                                      ? `flex items-center justify-between text-[11px] pl-1.5 border-l-2 border-[#14b8a6] rounded hover:bg-slate-100/70 py-0.5 ${
+                                          canEditSelfWork ? "cursor-pointer" : ""
+                                        }`
+                                      : `px-2 py-1 rounded-[5px] border border-dashed border-[#4fd1c5] bg-white hover:bg-teal-50/30 flex items-center justify-between text-[11px] ${
+                                          canEditSelfWork ? "cursor-pointer" : ""
+                                        }`
+                                  }
+                                >
+                                  <span
+                                    className={`font-extrabold text-slate-800 ${
+                                      !isPastOrDone
+                                        ? "pl-1 border-l-2 border-[#14b8a6]"
+                                        : ""
+                                    }`}
+                                  >
+                                    {mSeg.policy_name || "근무"}
                                   </span>
                                   <span className="text-[10px] text-slate-500 tabular-nums">
-                                    {formatMinutesToKoreanAmPm(ruleStartMin)} -{" "}
-                                    {formatMinutesToKoreanAmPm(ruleEndMin)}
+                                    {formatMinutesToKoreanAmPm(mSeg.in_minutes)}{" "}
+                                    -{" "}
+                                    {formatMinutesToKoreanAmPm(mSeg.out_minutes)}
                                   </span>
                                 </div>
-                                {ruleBreakMin > 0 && (
-                                  <div className="text-right">
-                                    <span
-                                      onMouseEnter={(e) =>
-                                        showBreakTip(
-                                          `${cellKey || ymd}__mo_brk_2`,
-                                          monthBreakTipWindows,
-                                          e.currentTarget
-                                        )
-                                      }
-                                      onMouseLeave={() =>
-                                        hideBreakTip(
-                                          `${cellKey || ymd}__mo_brk_2`
-                                        )
-                                      }
-                                      className="text-[10px] text-slate-400 hover:text-slate-600 transition-colors"
-                                    >
-                                      휴게 1건
-                                    </span>
-                                  </div>
-                                )}
+                              ))}
+                              <div className="text-right">
+                                <button
+                                  type="button"
+                                  onMouseEnter={(e) => {
+                                    if (cellEff.breaks.length > 0) {
+                                      showBreakTip(
+                                        `${cellKey || ymd}__mo_brk`,
+                                        cellEff.breaks.map((b) => ({
+                                          startMin: b.start_minutes,
+                                          endMin: b.end_minutes,
+                                        })),
+                                        e.currentTarget
+                                      );
+                                    }
+                                  }}
+                                  onMouseLeave={() =>
+                                    hideBreakTip(`${cellKey || ymd}__mo_brk`)
+                                  }
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    if (!canEditSelfWork || !me) return;
+                                    const r =
+                                      e.currentTarget.getBoundingClientRect();
+                                    setInlineTarget(null);
+                                    setRowAddMenu(null);
+                                    setHoveredBreakTip(null);
+                                    setBreakListPopover({
+                                      member: me,
+                                      ymd,
+                                      segmentId: cellEff.segments[0].id,
+                                      anchorRect: {
+                                        top: r.top,
+                                        bottom: r.bottom,
+                                        left: r.left,
+                                        right: r.right,
+                                        width: r.width,
+                                      },
+                                    });
+                                  }}
+                                  className="text-[10px] text-slate-400 hover:text-slate-700 transition-colors"
+                                >
+                                  {cellEff.breaks.length > 0
+                                    ? `휴게 ${cellEff.breaks.length}건`
+                                    : "휴게 없음"}
+                                </button>
                               </div>
-                            )
+                            </div>
                           ) : null}
                         </div>
                       </div>
@@ -3409,6 +4142,9 @@ export default function HqAttendancePage() {
                           const colDraft = colKey
                             ? draftEdits[colKey]
                             : undefined;
+                          const storedColSched = colKey
+                            ? recognizedScheduleByMemberDate.get(colKey)
+                            : undefined;
                           const rec = colKey
                             ? recordByMemberDate.get(colKey)
                             : undefined;
@@ -3420,31 +4156,32 @@ export default function HqAttendancePage() {
                             : 0;
                           const displayMin = colDraft
                             ? calcDraftNetWorkedMinutes(colDraft)
-                            : rec
-                              ? rec.status === "WORKING" && ymd === todayStr
-                                ? plannedMin
-                                : rec.work_mode === "LEAVE" &&
-                                    rec.status === "LEAVE"
-                                  ? plannedMin || 480
-                                  : Number(rec.worked_minutes || plannedMin)
-                              : plannedMin;
+                            : storedColSched
+                              ? calcDayScheduleSummary(
+                                  storedColSched.segments,
+                                  storedColSched.breaks,
+                                  plannedMin || 480
+                                ).workedMinutes
+                              : rec
+                                ? rec.status === "WORKING" && ymd === todayStr
+                                  ? plannedMin
+                                  : rec.work_mode === "LEAVE" &&
+                                      rec.status === "LEAVE"
+                                    ? plannedMin || 480
+                                    : Number(rec.worked_minutes || plannedMin)
+                                : plannedMin;
+                          const canShowColPlus = Boolean(
+                            me &&
+                              (canEditSelfWork ||
+                                isWorkDay ||
+                                (ymd < todayStr && canEditRealtimeWork(me)))
+                          );
 
                           return (
                             <div
                               key={ymd}
-                              onClick={(e) =>
-                                canEditSelfWork &&
-                                me &&
-                                openEntryForDate(me, ymd, {
-                                  anchorEl: e.currentTarget,
-                                })
-                              }
                               className={`px-3.5 py-2.5 transition-colors ${
                                 colDraft ? "bg-[#f5f9ff]" : ""
-                              } ${
-                                canEditSelfWork
-                                  ? "hover:bg-slate-50/70 cursor-pointer"
-                                  : "cursor-default"
                               }`}
                             >
                               <div className="flex items-center justify-between">
@@ -3471,15 +4208,18 @@ export default function HqAttendancePage() {
                                   </span>
                                 </div>
 
-                                {canEditSelfWork && (
+                                {canShowColPlus && (
                                   <button
                                     type="button"
                                     onClick={(e) => {
                                       e.stopPropagation();
-                                      if (me)
-                                        openEntryForDate(me, ymd, {
-                                          anchorEl: e.currentTarget,
-                                        });
+                                      if (me) {
+                                        openRowAddMenuForDate(
+                                          me,
+                                          ymd,
+                                          e.currentTarget
+                                        );
+                                      }
                                     }}
                                     className="w-5 h-5 rounded text-slate-400 hover:text-slate-800 hover:bg-slate-100 flex items-center justify-center text-xs font-bold"
                                   >
@@ -3580,8 +4320,6 @@ export default function HqAttendancePage() {
                           const lvDoc = colKey
                             ? leaveApprovalByMemberDate.get(colKey)
                             : undefined;
-                          const isWorkDay =
-                            myRule.work_days.includes(dowKo) && !holiday;
 
                           const dayCustom =
                             myRule.per_day_custom_enabled &&
@@ -3604,8 +4342,6 @@ export default function HqAttendancePage() {
                                 ? dayCustom.work_minutes
                                 : myRule.daily_work_minutes ?? 0
                             );
-                          const b1Start = parseHmToMinutes(myRule.break_start_1);
-                          const b1End = parseHmToMinutes(myRule.break_end_1);
                           const ruleBreakMin = calcBreakMinutes(myRule);
                           const ruleEndMin =
                             ruleStartMin + ruleWorkMin + ruleBreakMin;
@@ -3662,66 +4398,15 @@ export default function HqAttendancePage() {
                             ((blockEndMin - blockStartMin) / 60) * hourHeightPx
                           );
 
-                          const isPastOrDone =
-                            colDraft?.actionMode === "UPSERT" ||
-                            ymd < todayStr ||
-                            rec?.status === "DONE";
-                          const isWorkingToday =
-                            ymd === todayStr &&
-                            !isPastOrDone &&
-                            nowMinutesOfDay >= blockStartMin;
-                          const verticalFillPct = isPastOrDone
-                            ? 100
-                            : isWorkingToday
-                              ? Math.max(
-                                  0,
-                                  Math.min(
-                                    100,
-                                    ((nowMinutesOfDay - blockStartMin) /
-                                      Math.max(1, blockEndMin - blockStartMin)) *
-                                      100
-                                  )
-                                )
-                              : 0;
-
-                          const hasBreakBox =
-                            !hasFullLeave &&
-                            !isHalfAm &&
-                            !isHalfPm &&
-                            b1Start !== null &&
-                            b1End !== null &&
-                            b1Start >= blockStartMin &&
-                            b1End <= blockEndMin;
-
-                          const breakTopPct =
-                            hasBreakBox && b1Start !== null
-                              ? ((b1Start - blockStartMin) /
-                                  (blockEndMin - blockStartMin)) *
-                                100
-                              : 44;
-                          const breakHeightPct =
-                            hasBreakBox && b1Start !== null && b1End !== null
-                              ? ((b1End - b1Start) /
-                                  (blockEndMin - blockStartMin)) *
-                                100
-                              : 11;
+                          const colEff = me
+                            ? getEffectiveDaySchedule(me, ymd)
+                            : null;
 
                           return (
                             <div
                               key={ymd}
-                              onClick={(e) =>
-                                canEditSelfWork &&
-                                me &&
-                                openEntryForDate(me, ymd, {
-                                  anchorEl: e.currentTarget,
-                                })
-                              }
                               className={`relative ${
                                 colDraft ? "bg-[#f5f9ff]/60" : ""
-                              } ${
-                                canEditSelfWork
-                                  ? "cursor-pointer hover:bg-slate-50/40"
-                                  : "cursor-default"
                               }`}
                             >
                               {/* 가로 정시 그리드 라인 */}
@@ -3758,92 +4443,209 @@ export default function HqAttendancePage() {
                                     {formatMinutesToKoreanAmPm(blockEndMin)}
                                   </div>
                                 </div>
-                              ) : colDraft || isWorkDay || rec ? (
-                                <div
-                                  data-work-bar={colKey}
-                                  style={{
-                                    top: `${clampedTopPx}px`,
-                                    height: `${clampedHeightPx}px`,
-                                  }}
-                                  className="absolute left-2 right-2 z-10"
-                                >
-                                  <div
-                                    className={`w-full h-full rounded-lg border bg-white relative overflow-hidden p-2.5 ${
-                                      colDraft || inlineTarget?.key === colKey
-                                        ? "border-[#0f766e] ring-1 ring-[#0f766e]/25"
-                                        : "border-[#38d9a9]"
-                                    }`}
-                                  >
-                                    {verticalFillPct > 0 && (
-                                      <div
-                                        style={{ height: `${verticalFillPct}%` }}
-                                        className="pointer-events-none absolute inset-x-0 top-0 bg-[#aef4e8]/90 transition-all duration-500"
-                                      />
-                                    )}
+                              ) : colEff && colEff.segments.length > 0 ? (
+                                colEff.segments.map((vSeg, vIdx) => {
+                                  const vTopPx = Math.max(
+                                    0,
+                                    ((vSeg.in_minutes - startHour * 60) / 60) *
+                                      hourHeightPx
+                                  );
+                                  const vSpan = Math.max(
+                                    15,
+                                    vSeg.out_minutes - vSeg.in_minutes
+                                  );
+                                  const vHeightPx = Math.max(
+                                    32,
+                                    (vSpan / 60) * hourHeightPx
+                                  );
+                                  const vVis = getWorkPolicyVisual(
+                                    vSeg.policy_name,
+                                    vSeg.work_mode
+                                  );
+                                  const vBreaks = getBreaksOverlappingSegment(
+                                    vSeg,
+                                    colEff.breaks
+                                  );
+                                  const vFill =
+                                    Boolean(colDraft) ||
+                                    Boolean(
+                                      colKey &&
+                                        recognizedScheduleByMemberDate.get(colKey)
+                                    ) ||
+                                    ymd < todayStr ||
+                                    rec?.status === "DONE" ||
+                                    vSeg.policy_name !== "근무"
+                                      ? 100
+                                      : ymd === todayStr &&
+                                          nowMinutesOfDay >= vSeg.in_minutes
+                                        ? Math.max(
+                                            0,
+                                            Math.min(
+                                              100,
+                                              ((nowMinutesOfDay -
+                                                vSeg.in_minutes) /
+                                                vSpan) *
+                                                100
+                                            )
+                                          )
+                                        : 0;
 
-                                    <div className="relative z-10">
-                                      <div className="text-xs font-extrabold text-[#0f766e]">
-                                        {colDraft
-                                          ? colDraft.policyName
-                                          : rec &&
-                                              rec.work_mode !== "OFFICE" &&
-                                              ATTENDANCE_MODES[rec.work_mode]
-                                            ? ATTENDANCE_MODES[rec.work_mode]
-                                                .shortLabel
-                                            : "근무"}
+                                  return (
+                                    <div
+                                      key={vSeg.id}
+                                      data-work-bar={
+                                        vIdx === 0 ? colKey : undefined
+                                      }
+                                      data-work-seg={`${colKey}__${vSeg.id}`}
+                                      style={{
+                                        top: `${vTopPx}px`,
+                                        height: `${vHeightPx}px`,
+                                      }}
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        if (canEditSelfWork && me) {
+                                          openItemPopover(
+                                            me,
+                                            ymd,
+                                            "SEGMENT",
+                                            vSeg.id,
+                                            e.currentTarget,
+                                            null
+                                          );
+                                        }
+                                      }}
+                                      className={`absolute left-2 right-2 z-10 ${
+                                        canEditSelfWork
+                                          ? "cursor-pointer"
+                                          : "cursor-default"
+                                      }`}
+                                    >
+                                      <div
+                                        className={`w-full h-full rounded-lg border bg-white relative overflow-hidden p-2 ${
+                                          colDraft ||
+                                          (inlineTarget?.key === colKey &&
+                                            inlineTarget?.itemId === vSeg.id)
+                                            ? vVis.activeBorderClass
+                                            : vVis.solidBorderClass
+                                        }`}
+                                      >
+                                        {vFill > 0 && (
+                                          <div
+                                            style={{ height: `${vFill}%` }}
+                                            className={`pointer-events-none absolute inset-x-0 top-0 ${vVis.fillClass} transition-all duration-500`}
+                                          />
+                                        )}
+
+                                        <div className="relative z-10">
+                                          <div className="text-xs font-extrabold">
+                                            {vSeg.policy_name || "근무"}
+                                          </div>
+                                          <div className="text-[10.5px] font-semibold opacity-85 mt-0.5 tabular-nums">
+                                            {formatMinutesToKoreanAmPm(
+                                              vSeg.in_minutes
+                                            )}{" "}
+                                            –{" "}
+                                            {formatMinutesToKoreanAmPm(
+                                              vSeg.out_minutes
+                                            )}
+                                          </div>
+                                        </div>
+
+                                        {vBreaks.map((vb) => {
+                                          const bTop = Math.max(
+                                            0,
+                                            ((vb.start_minutes -
+                                              vSeg.in_minutes) /
+                                              vSpan) *
+                                              100
+                                          );
+                                          const bH = Math.max(
+                                            10,
+                                            ((vb.end_minutes -
+                                              vb.start_minutes) /
+                                              vSpan) *
+                                              100
+                                          );
+                                          return (
+                                            <div
+                                              key={vb.id}
+                                              style={{
+                                                top: `${bTop}%`,
+                                                height: `${bH}%`,
+                                              }}
+                                              onClick={(e) => {
+                                                e.stopPropagation();
+                                                if (canEditSelfWork && me) {
+                                                  openItemPopover(
+                                                    me,
+                                                    ymd,
+                                                    "BREAK",
+                                                    vb.id,
+                                                    e.currentTarget,
+                                                    null
+                                                  );
+                                                }
+                                              }}
+                                              onMouseEnter={(e) =>
+                                                showBreakTip(
+                                                  `${colKey || ymd}__wk_brk_${vb.id}`,
+                                                  [
+                                                    {
+                                                      startMin:
+                                                        vb.start_minutes,
+                                                      endMin: vb.end_minutes,
+                                                    },
+                                                  ],
+                                                  e.currentTarget
+                                                )
+                                              }
+                                              onMouseLeave={() =>
+                                                hideBreakTip(
+                                                  `${colKey || ymd}__wk_brk_${vb.id}`
+                                                )
+                                              }
+                                              className="absolute left-1.5 right-1.5 rounded-md bg-white/95 border border-slate-200 hover:border-slate-400 px-2 flex items-center text-[11px] text-slate-500 z-10 transition-colors"
+                                            >
+                                              ☕
+                                            </div>
+                                          );
+                                        })}
                                       </div>
-                                      <div className="text-[10.5px] font-semibold text-[#0f766e]/80 mt-0.5 tabular-nums">
-                                        {formatMinutesToKoreanAmPm(blockStartMin)}{" "}
-                                        –{" "}
-                                        {formatMinutesToKoreanAmPm(blockEndMin)}
+
+                                      <div className="mt-0.5 pl-1">
+                                        <button
+                                          type="button"
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            if (!canEditSelfWork || !me) return;
+                                            const r =
+                                              e.currentTarget.getBoundingClientRect();
+                                            setInlineTarget(null);
+                                            setRowAddMenu(null);
+                                            setHoveredBreakTip(null);
+                                            setBreakListPopover({
+                                              member: me,
+                                              ymd,
+                                              segmentId: vSeg.id,
+                                              anchorRect: {
+                                                top: r.top,
+                                                bottom: r.bottom,
+                                                left: r.left,
+                                                right: r.right,
+                                                width: r.width,
+                                              },
+                                            });
+                                          }}
+                                          className="text-[10.5px] font-medium text-slate-400 hover:text-slate-700 transition-colors"
+                                        >
+                                          {vBreaks.length > 0
+                                            ? `휴게 ${vBreaks.length}건`
+                                            : "휴게 없음"}
+                                        </button>
                                       </div>
                                     </div>
-
-                                    {hasBreakBox && b1Start !== null && b1End !== null && (
-                                      <div
-                                        style={{
-                                          top: `${breakTopPct}%`,
-                                          height: `${breakHeightPct}%`,
-                                        }}
-                                        onMouseEnter={(e) =>
-                                          showBreakTip(
-                                            `${colKey || ymd}__wk_brk`,
-                                            [{ startMin: b1Start, endMin: b1End }],
-                                            e.currentTarget
-                                          )
-                                        }
-                                        onMouseLeave={() =>
-                                          hideBreakTip(`${colKey || ymd}__wk_brk`)
-                                        }
-                                        className="absolute left-1.5 right-1.5 rounded-md bg-slate-50/95 border border-slate-200 hover:border-slate-300 px-2 flex items-center text-[11px] text-slate-500 z-10 transition-colors"
-                                      >
-                                        ☕
-                                      </div>
-                                    )}
-                                  </div>
-
-                                  {hasBreakBox && b1Start !== null && b1End !== null && (
-                                    <div className="mt-1 pl-1">
-                                      <span
-                                        onMouseEnter={(e) =>
-                                          showBreakTip(
-                                            `${colKey || ymd}__wk_brk_lbl`,
-                                            [{ startMin: b1Start, endMin: b1End }],
-                                            e.currentTarget
-                                          )
-                                        }
-                                        onMouseLeave={() =>
-                                          hideBreakTip(
-                                            `${colKey || ymd}__wk_brk_lbl`
-                                          )
-                                        }
-                                        className="text-[10.5px] font-medium text-slate-400 hover:text-slate-600 transition-colors"
-                                      >
-                                        휴게 1건
-                                      </span>
-                                    </div>
-                                  )}
-                                </div>
+                                  );
+                                })
                               ) : null}
                             </div>
                           );
@@ -3934,6 +4736,9 @@ export default function HqAttendancePage() {
                     const holiday = holidayMap.get(ymd);
                     const rowKey = me ? `${me.instructor_id}__${ymd}` : "";
                     const rowDraft = rowKey ? draftEdits[rowKey] : undefined;
+                    const storedRowSched = rowKey
+                      ? recognizedScheduleByMemberDate.get(rowKey)
+                      : undefined;
                     const rec = rowKey
                       ? recordByMemberDate.get(rowKey)
                       : undefined;
@@ -3948,36 +4753,38 @@ export default function HqAttendancePage() {
                     const plannedMin = isWorkDay ? ruleDailyMin : 0;
                     const displayMin = rowDraft
                       ? calcDraftNetWorkedMinutes(rowDraft)
-                      : rec
-                        ? rec.status === "WORKING"
-                          ? plannedMin || ruleDailyMin
-                          : rec.work_mode === "LEAVE" && rec.status === "LEAVE"
-                            ? plannedMin || 480
-                            : Number(rec.worked_minutes || 0)
-                        : plannedMin;
+                      : storedRowSched
+                        ? calcDayScheduleSummary(
+                            storedRowSched.segments,
+                            storedRowSched.breaks,
+                            ruleDailyMin
+                          ).workedMinutes
+                        : rec
+                          ? rec.status === "WORKING"
+                            ? plannedMin || ruleDailyMin
+                            : rec.work_mode === "LEAVE" &&
+                                rec.status === "LEAVE"
+                              ? plannedMin || 480
+                              : Number(rec.worked_minutes || 0)
+                          : plannedMin;
                     const isOvertimeRow =
                       !rowDraft &&
                       displayMin > ruleDailyMin &&
-                      (Boolean(rec) || displayMin > 0);
+                      (Boolean(rec) || Boolean(storedRowSched) || displayMin > 0);
                     const canEditMyRt = Boolean(me && canEditRealtimeWork(me));
+                    const canShowRowPlus = Boolean(
+                      me &&
+                        (canEditSelfWork ||
+                          isWorkDay ||
+                          (ymd < todayStr && canEditMyRt))
+                    );
 
                     return (
                       <div
                         key={ymd}
-                        onClick={(e) =>
-                          canEditSelfWork &&
-                          me &&
-                          openEntryForDate(me, ymd, {
-                            anchorEl: e.currentTarget,
-                          })
-                        }
-                        className={`flex h-[74px] transition-colors group ${
-                          canEditSelfWork
-                            ? "hover:bg-slate-50/70 cursor-pointer"
-                            : "cursor-default"
-                        }`}
+                        className="flex h-[74px] transition-colors group hover:bg-slate-50/45"
                       >
-                        {/* 좌측 일자 + 인정근무 시간 배지(초과 시 🔥) + [◐ 실시간기록] + [+ 인정근무] 버튼 */}
+                        {/* 좌측 일자 + 인정근무 시간 배지(초과 시 🔥) + [◐ 실시간기록] + [+ 메뉴] 버튼 */}
                         <div
                           className={`w-52 shrink-0 px-7 flex items-center justify-between border-r bg-white ${
                             rowDraft
@@ -4046,18 +4853,21 @@ export default function HqAttendancePage() {
                               </button>
                             )}
 
-                            {canEditSelfWork && (
+                            {canShowRowPlus && (
                               <button
                                 type="button"
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  if (me)
-                                    openEntryForDate(me, ymd, {
-                                      anchorEl: e.currentTarget,
-                                    });
+                                  if (me) {
+                                    openRowAddMenuForDate(
+                                      me,
+                                      ymd,
+                                      e.currentTarget
+                                    );
+                                  }
                                 }}
                                 className="w-6 h-6 rounded-md text-slate-400 hover:text-slate-800 hover:bg-slate-200/60 flex items-center justify-center text-sm font-semibold"
-                                title="인정 근무 추가·수정 (굵은 막대)"
+                                title="근무 · 휴게 · 연차 · 실시간 기록 추가"
                               >
                                 +
                               </button>
@@ -4067,6 +4877,7 @@ export default function HqAttendancePage() {
 
                         {/* 우측 24시간 그리드 셀 + 듀얼 레이어 블록 */}
                         <div
+                          data-timeline-track={rowKey}
                           className={`flex-1 relative ${
                             rowDraft ? "bg-[#f5f9ff]/65" : ""
                           }`}
@@ -4510,6 +5321,8 @@ export default function HqAttendancePage() {
                       const canEditMRt = canEditRealtimeWork(m);
                       const rowKey = `${m.instructor_id}__${teamAnchorDate}`;
                       const rowDraft = draftEdits[rowKey];
+                      const storedTeamSched =
+                        recognizedScheduleByMemberDate.get(rowKey);
                       const storedRt = realtimeLogByMemberDate.get(rowKey);
                       const rule = resolveMemberWorkRule(
                         m.name,
@@ -4527,15 +5340,23 @@ export default function HqAttendancePage() {
                       const plannedMin = isWorkDay ? ruleDailyMin : 0;
                       const displayMin = rowDraft
                         ? calcDraftNetWorkedMinutes(rowDraft)
-                        : rec
-                          ? rec.status === "WORKING"
-                            ? plannedMin || ruleDailyMin
-                            : Number(rec.worked_minutes || plannedMin)
-                          : plannedMin;
+                        : storedTeamSched
+                          ? calcDayScheduleSummary(
+                              storedTeamSched.segments,
+                              storedTeamSched.breaks,
+                              ruleDailyMin
+                            ).workedMinutes
+                          : rec
+                            ? rec.status === "WORKING"
+                              ? plannedMin || ruleDailyMin
+                              : Number(rec.worked_minutes || plannedMin)
+                            : plannedMin;
                       const isOvertimeRow =
                         !rowDraft &&
                         displayMin > ruleDailyMin &&
-                        (Boolean(rec) || displayMin > 0);
+                        (Boolean(rec) ||
+                          Boolean(storedTeamSched) ||
+                          displayMin > 0);
 
                       const shortTwo = m.name.slice(-2);
                       const subRole =
@@ -4545,19 +5366,9 @@ export default function HqAttendancePage() {
                       return (
                         <div
                           key={m.instructor_id}
-                          onClick={(e) =>
-                            canEditM &&
-                            openEntryForDate(m, teamAnchorDate, {
-                              anchorEl: e.currentTarget,
-                            })
-                          }
-                          className={`flex h-[74px] transition-colors ${
-                            canEditM
-                              ? "hover:bg-slate-50/70 cursor-pointer"
-                              : "cursor-default"
-                          }`}
+                          className="flex h-[74px] transition-colors hover:bg-slate-50/45"
                         >
-                          {/* 좌측: 2글자 컬러 아바타 + 성명/직무 + 8:00(초과 시 🔥) + [◐] */}
+                          {/* 좌측: 2글자 컬러 아바타 + 성명/직무 + 8:00(초과 시 🔥) + [◐] + [+] */}
                           <div
                             className={`w-60 shrink-0 px-6 flex items-center justify-between border-r bg-white ${
                               rowDraft
@@ -4619,11 +5430,31 @@ export default function HqAttendancePage() {
                                   ◐
                                 </button>
                               )}
+
+                              {(canEditM ||
+                                (teamAnchorDate < todayStr && canEditMRt)) && (
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    openRowAddMenuForDate(
+                                      m,
+                                      teamAnchorDate,
+                                      e.currentTarget
+                                    );
+                                  }}
+                                  className="w-5.5 h-5.5 rounded-md text-slate-400 hover:text-slate-800 hover:bg-slate-100 flex items-center justify-center text-xs font-bold"
+                                  title="일정 · 휴게 추가"
+                                >
+                                  +
+                                </button>
+                              )}
                             </div>
                           </div>
 
                           {/* 우측: 24시간 그리드 + 예정/실제 근무 바 */}
                           <div
+                            data-timeline-track={rowKey}
                             className={`flex-1 relative ${
                               rowDraft ? "bg-[#f5f9ff]/65" : ""
                             }`}
@@ -5348,26 +6179,140 @@ export default function HqAttendancePage() {
       )}
 
       {/* =====================================================================
-          플렉스 인라인 인정 근무 팝오버 & 실시간 기록 툴팁/수정 모달 & 하단 드래프트 바
+          플렉스 [+] 메뉴 / 휴게 목록 팝오버 / 인라인 인정 근무·휴게 팝오버 & 하단 드래프트 바
          ===================================================================== */}
-      {inlineTarget && (
-        <FlexInlineWorkPopover
-          target={inlineTarget}
-          currentDraft={draftEdits[inlineTarget.key]}
-          workFormPolicies={workFormPolicies}
-          baselineSnapshot={computeBaselineSnapshotForTarget(inlineTarget)}
-          onChangeDraft={handleUpsertDraft}
-          onClearDraft={handleClearDraft}
-          onStageDelete={handleStageDeleteDraft}
-          onConfirmClose={() => setInlineTarget(null)}
-          onSwitchToLeaveModal={() => {
-            setLeaveRegisterKind({ type: "ANNUAL" });
-            setLeaveModalOpen(true);
-          }}
-        />
-      )}
+      {rowAddMenu && (() => {
+        const menuBase = getBaselineDaySchedule(
+          rowAddMenu.member,
+          rowAddMenu.ymd
+        );
+        return (
+          <FlexRowAddPopover
+            isPastDate={rowAddMenu.ymd < todayStr}
+            isHolidayOrOff={menuBase.isHolidayOrOff}
+            canEditWork={canEditTargetWork(rowAddMenu.member)}
+            canEditRealtime={canEditRealtimeWork(rowAddMenu.member)}
+            workFormPolicies={workFormPolicies}
+            anchorRect={rowAddMenu.anchorRect}
+            onSelectWorkPolicy={(policyName, workMode, defaultLoc) =>
+              addWorkSegmentForDate(
+                rowAddMenu.member,
+                rowAddMenu.ymd,
+                policyName,
+                workMode,
+                defaultLoc
+              )
+            }
+            onSelectBreak={() =>
+              addBreakBlockForDate(rowAddMenu.member, rowAddMenu.ymd, null)
+            }
+            onSelectAnnualLeave={() => {
+              setLeaveModalInitialDate(rowAddMenu.ymd);
+              setLeaveRegisterKind({ type: "ANNUAL" });
+              setLeaveModalOpen(true);
+            }}
+            onSelectRealtimeRecord={() =>
+              openRealtimeEditForDate(rowAddMenu.member, rowAddMenu.ymd)
+            }
+            onClose={() => setRowAddMenu(null)}
+          />
+        );
+      })()}
 
-      {hoveredBreakTip && !inlineTarget && !realtimeEditModal && (
+      {breakListPopover && (() => {
+        const eff = getEffectiveDaySchedule(
+          breakListPopover.member,
+          breakListPopover.ymd
+        );
+        const seg = eff.segments.find(
+          (s) => s.id === breakListPopover.segmentId
+        );
+        const matchingBreaks = seg
+          ? getBreaksOverlappingSegment(seg, eff.breaks)
+          : eff.breaks;
+        return (
+          <FlexBreakListPopover
+            breaks={matchingBreaks}
+            canEdit={canEditTargetWork(breakListPopover.member)}
+            anchorRect={breakListPopover.anchorRect}
+            onAddBreak={() =>
+              addBreakBlockForDate(
+                breakListPopover.member,
+                breakListPopover.ymd,
+                breakListPopover.segmentId
+              )
+            }
+            onEditBreak={(breakId) => {
+              const targetM = breakListPopover.member;
+              const targetYmd = breakListPopover.ymd;
+              setBreakListPopover(null);
+              openItemPopover(targetM, targetYmd, "BREAK", breakId, null, null);
+            }}
+            onDeleteBreak={(breakId) =>
+              deleteBreakBlockForDate(
+                breakListPopover.member,
+                breakListPopover.ymd,
+                breakId
+              )
+            }
+            onClose={() => setBreakListPopover(null)}
+          />
+        );
+      })()}
+
+      {inlineTarget && (() => {
+        const tMember =
+          members.find((m) => m.instructor_id === inlineTarget.memberId) || me;
+        const snap = tMember
+          ? getBaselineDaySchedule(tMember, inlineTarget.workDate)
+              .baselineSnapshot
+          : {
+              exists: Boolean(
+                inlineTarget.hadExistingRecord ||
+                  inlineTarget.wasScheduledWorkday
+              ),
+              policyName:
+                inlineTarget.baselineSegments[0]?.policy_name || "근무",
+              workMode:
+                inlineTarget.baselineSegments[0]?.work_mode ||
+                ("OFFICE" as HqWorkMode),
+              inMinutes: inlineTarget.baselineSegments[0]?.in_minutes ?? 540,
+              outMinutes: inlineTarget.baselineSegments[0]?.out_minutes ?? 1080,
+              breakMinutes: inlineTarget.baselineBreaks.reduce(
+                (acc, b) => acc + (b.end_minutes - b.start_minutes),
+                0
+              ),
+              workedMinutes: inlineTarget.ruleDailyMinutes,
+              overtimeMinutes: 0,
+              segments: inlineTarget.baselineSegments,
+              breaks: inlineTarget.baselineBreaks,
+            };
+        return (
+          <FlexInlineWorkPopover
+            key={`${inlineTarget.key}__${inlineTarget.targetKind}__${inlineTarget.itemId}__${inlineTarget.initialTimeFocus || ""}`}
+            target={inlineTarget}
+            currentDraft={draftEdits[inlineTarget.key]}
+            workFormPolicies={workFormPolicies}
+            baselineSnapshot={snap}
+            onChangeDraft={handleUpsertDraft}
+            onClearDraft={handleClearDraft}
+            onSwitchTarget={(nextTarget) => setInlineTarget(nextTarget)}
+            onConfirmClose={() => setInlineTarget(null)}
+            onSwitchToLeaveModal={(workDate) => {
+              setLeaveModalInitialDate(workDate);
+              setLeaveRegisterKind({ type: "ANNUAL" });
+              setLeaveModalOpen(true);
+            }}
+          />
+        );
+      })()}
+
+      {hoveredBreakTip &&
+        !inlineTarget &&
+        !breakListPopover &&
+        !rowAddMenu &&
+        !activeDrag &&
+        !realtimeEditModal && (
         <div
           style={{
             position: "fixed",
@@ -5485,6 +6430,7 @@ export default function HqAttendancePage() {
         isOpen={leaveModalOpen}
         onClose={() => setLeaveModalOpen(false)}
         initialKind={leaveRegisterKind}
+        initialDate={leaveModalInitialDate}
         allowSwitchLeaveKind={true}
         onSubmitted={async () => {
           setLeaveModalOpen(false);

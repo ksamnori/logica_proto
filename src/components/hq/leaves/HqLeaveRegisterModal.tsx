@@ -80,6 +80,7 @@ interface Props {
   isOpen: boolean;
   onClose: () => void;
   initialKind?: LeaveRegisterKind;
+  initialDate?: string;
   availableAnnualDays?: number;
   allowSwitchLeaveKind?: boolean;
   leaveDocs?: HqApprovalDoc[];
@@ -282,6 +283,7 @@ export default function HqLeaveRegisterModal({
   isOpen,
   onClose,
   initialKind = DEFAULT_INITIAL_KIND,
+  initialDate,
   availableAnnualDays,
   allowSwitchLeaveKind = false,
   leaveDocs = EMPTY_LEAVE_DOCS,
@@ -514,9 +516,18 @@ export default function HqLeaveRegisterModal({
     setInfoPopoverOpen(false);
     setDetailSheetOpen(false);
     setQuitConfirmOpen(false);
-    setCalBaseYm({ year: currentYear, month: currentMonth });
-    setPickStart("");
-    setPickEnd("");
+    const validInitDate =
+      initialDate && /^\d{4}-\d{2}-\d{2}$/.test(initialDate) ? initialDate : "";
+    if (validInitDate) {
+      const [iy, im] = validInitDate.split("-").map(Number);
+      setCalBaseYm({ year: iy || currentYear, month: im || currentMonth });
+      setPickStart(validInitDate);
+      setPickEnd(validInitDate);
+    } else {
+      setCalBaseYm({ year: currentYear, month: currentMonth });
+      setPickStart("");
+      setPickEnd("");
+    }
     setDaySchedules({});
     setFloatingDropdown(null);
     setReason("");
@@ -526,9 +537,9 @@ export default function HqLeaveRegisterModal({
     setNotifyMenuTargetId(null);
     setAutoProceedMenuStepId(null);
     setLineManuallyEdited(false);
-    syncApprovalLineFromKind(initialKind, 0);
+    syncApprovalLineFromKind(initialKind, validInitDate ? 1 : 0);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isOpen, initialKindKey, me?.instructor_id]);
+  }, [isOpen, initialKindKey, initialDate, me?.instructor_id]);
 
   const secondMonthYm = useMemo(() => {
     if (calBaseYm.month === 12) {

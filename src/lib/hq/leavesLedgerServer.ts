@@ -11,16 +11,20 @@ import type {
   HqLeavePromotionCampaign,
   HqLeavePromotionTargetItem,
   HqRealtimeWorkLog,
+  HqRecognizedDaySchedule,
   HqUploadedMonthlyUsageItem,
 } from "./types";
 
 export const LEAVES_LEDGER_SETTING_KEY = "LEAVES_LEDGER";
 export const WORK_MGMT_SETTING_KEY = "WORK_MGMT_STATE";
 export const REALTIME_LOGS_SETTING_KEY = "HQ_REALTIME_WORK_LOGS";
+export const RECOGNIZED_SCHEDULES_SETTING_KEY = "HQ_RECOGNIZED_WORK_SEGMENTS";
 export const LEAVES_LEDGER_PATH = "hq_system_config/leaves_ledger.json";
 export const WORK_MGMT_STORAGE_PATH = "hq_system_config/work_management.json";
 export const REALTIME_LOGS_STORAGE_PATH =
   "hq_system_config/realtime_work_logs.json";
+export const RECOGNIZED_SCHEDULES_STORAGE_PATH =
+  "hq_system_config/recognized_work_segments.json";
 
 export interface StoredLeavesLedger {
   adjustments: HqLeaveAdjustmentItem[];
@@ -161,5 +165,39 @@ export async function writeRealtimeWorkLogsServer(
     REALTIME_LOGS_SETTING_KEY,
     { logsByKey },
     REALTIME_LOGS_STORAGE_PATH
+  );
+}
+
+export interface StoredRecognizedWorkSchedules {
+  schedulesByKey: Record<string, HqRecognizedDaySchedule>;
+}
+
+export async function readRecognizedWorkSchedulesServer(
+  supabaseAdmin: SupabaseClient
+): Promise<Record<string, HqRecognizedDaySchedule>> {
+  const parsed = await readHqKvPayload<Partial<StoredRecognizedWorkSchedules>>(
+    supabaseAdmin,
+    RECOGNIZED_SCHEDULES_SETTING_KEY,
+    RECOGNIZED_SCHEDULES_STORAGE_PATH
+  );
+  if (
+    !parsed ||
+    !parsed.schedulesByKey ||
+    typeof parsed.schedulesByKey !== "object"
+  ) {
+    return {};
+  }
+  return parsed.schedulesByKey;
+}
+
+export async function writeRecognizedWorkSchedulesServer(
+  supabaseAdmin: SupabaseClient,
+  schedulesByKey: Record<string, HqRecognizedDaySchedule>
+): Promise<void> {
+  await writeHqKvPayload(
+    supabaseAdmin,
+    RECOGNIZED_SCHEDULES_SETTING_KEY,
+    { schedulesByKey },
+    RECOGNIZED_SCHEDULES_STORAGE_PATH
   );
 }

@@ -611,32 +611,22 @@ export default function ApprovalDetailModal({
                   </div>
                 );
               }
-              const rawSpan =
-                snap.out_minutes >= snap.in_minutes
-                  ? snap.out_minutes - snap.in_minutes
-                  : 1440 - snap.in_minutes + snap.out_minutes;
-              const span = Math.max(30, rawSpan);
-              const leftPct = Math.max(
-                0,
-                Math.min(96, (snap.in_minutes / 1440) * 100)
-              );
-              const widthPct = Math.min(100 - leftPct, (span / 1440) * 100);
-              const visibleSpanMin = Math.max(1, (widthPct / 100) * 1440);
-              const otPct =
-                snap.overtime_minutes > 0
-                  ? Math.min(100, (snap.overtime_minutes / visibleSpanMin) * 100)
-                  : 0;
-              const modeIcon =
-                snap.policy_name === "출장"
-                  ? "✈️"
-                  : snap.work_mode === "REMOTE"
-                    ? "🏠"
-                    : snap.work_mode === "OUTSIDE"
-                      ? "🚗"
-                      : "💼";
+              const segList =
+                Array.isArray(snap.segments) && snap.segments.length > 0
+                  ? snap.segments
+                  : [
+                      {
+                        id: "seg-single",
+                        work_mode: snap.work_mode,
+                        policy_name: snap.policy_name,
+                        in_minutes: snap.in_minutes,
+                        out_minutes: snap.out_minutes,
+                      },
+                    ];
+
               return (
                 <div className="relative h-16 border-b border-slate-100 last:border-b-0">
-                  <span className="absolute left-2.5 top-2 z-10 px-1.5 py-0.5 rounded bg-slate-100 text-[10px] font-bold text-slate-500 pointer-events-none">
+                  <span className="absolute left-2.5 top-2 z-20 px-1.5 py-0.5 rounded bg-slate-100 text-[10px] font-bold text-slate-500 pointer-events-none">
                     {badgeLabel}
                   </span>
                   <div className="grid grid-cols-24 h-full pointer-events-none">
@@ -651,69 +641,117 @@ export default function ApprovalDetailModal({
                       />
                     ))}
                   </div>
-                  <div
-                    style={{ left: `${leftPct}%`, width: `${widthPct}%` }}
-                    className="absolute top-3.5"
-                  >
-                    <div className="relative h-6 rounded-[5px] border border-[#2dd4bf] bg-[#aef4e8]/95 px-2 flex items-center overflow-hidden text-[#0f766e]">
-                      {otPct > 0 && (
-                        <div
-                          style={{ width: `${otPct}%` }}
-                          className="pointer-events-none absolute top-0 right-0 h-[3px] bg-[#f05638] z-20"
-                        />
-                      )}
-                      <span className="relative z-10 text-[10.5px] font-extrabold leading-none">
-                        {modeIcon}
-                      </span>
-                      {resolvedBreaks.map((brk, bIdx) => {
-                        const bLeft = Math.max(
-                          0,
-                          Math.min(
+                  {segList.map((sg, sgIdx) => {
+                    const rawSpan =
+                      sg.out_minutes >= sg.in_minutes
+                        ? sg.out_minutes - sg.in_minutes
+                        : 1440 - sg.in_minutes + sg.out_minutes;
+                    const span = Math.max(15, rawSpan);
+                    const leftPct = Math.max(
+                      0,
+                      Math.min(96, (sg.in_minutes / 1440) * 100)
+                    );
+                    const widthPct = Math.min(
+                      100 - leftPct,
+                      (span / 1440) * 100
+                    );
+                    const visibleSpanMin = Math.max(1, (widthPct / 100) * 1440);
+                    const isLastSeg = sgIdx === segList.length - 1;
+                    const otPct =
+                      isLastSeg && snap.overtime_minutes > 0
+                        ? Math.min(
                             100,
-                            ((brk.start_minutes - snap.in_minutes) /
-                              visibleSpanMin) *
-                              100
+                            (snap.overtime_minutes / visibleSpanMin) * 100
                           )
-                        );
-                        const bWidth = Math.max(
-                          0,
-                          Math.min(
-                            100 - bLeft,
-                            ((brk.end_minutes - brk.start_minutes) /
-                              visibleSpanMin) *
-                              100
-                          )
-                        );
-                        if (bWidth <= 0) return null;
-                        return (
-                          <div
-                            key={bIdx}
-                            title={`휴게: ${formatMinutesToKoreanAmPm(brk.start_minutes)} – ${formatMinutesToKoreanAmPm(brk.end_minutes)}`}
-                            style={{
-                              left: `${bLeft}%`,
-                              width: `${bWidth}%`,
-                            }}
-                            className="absolute top-1 bottom-1 min-w-[18px] rounded-[3px] bg-white/95 border border-slate-200/90 flex items-center px-1 text-[9.5px] text-slate-500 z-10 overflow-hidden"
-                          >
-                            ☕
-                          </div>
-                        );
-                      })}
-                    </div>
-                    <div className="flex items-center justify-between text-[9.5px] text-slate-500 font-semibold mt-0.5 whitespace-nowrap">
-                      <span>
-                        {formatMinutesToKoreanAmPm(snap.in_minutes)}
-                        {snap.break_minutes > 0 && (
-                          <span className="text-slate-400 ml-1">
-                            휴게 {Math.max(1, resolvedBreaks.length)}건
+                        : 0;
+                    const modeIcon =
+                      sg.policy_name === "출장"
+                        ? "✈️"
+                        : sg.work_mode === "REMOTE"
+                          ? "🏠"
+                          : sg.work_mode === "OUTSIDE"
+                            ? "🚗"
+                            : "💼";
+                    const segBreaks = resolvedBreaks.filter(
+                      (b) =>
+                        Math.min(sg.out_minutes, b.end_minutes) >
+                        Math.max(sg.in_minutes, b.start_minutes)
+                    );
+                    return (
+                      <div
+                        key={sg.id || sgIdx}
+                        style={{ left: `${leftPct}%`, width: `${widthPct}%` }}
+                        className="absolute top-3.5"
+                      >
+                        <div className="relative h-6 rounded-[5px] border border-[#2dd4bf] bg-[#aef4e8]/95 px-2 flex items-center overflow-hidden text-[#0f766e]">
+                          {otPct > 0 && (
+                            <div
+                              style={{ width: `${otPct}%` }}
+                              className="pointer-events-none absolute top-0 right-0 h-[3px] bg-[#f05638] z-20"
+                            />
+                          )}
+                          <span className="relative z-10 text-[10.5px] font-extrabold leading-none">
+                            {modeIcon}
                           </span>
-                        )}
-                      </span>
-                      <span className={otPct > 0 ? "text-[#e85d3f] font-bold" : undefined}>
-                        {formatMinutesToKoreanAmPm(snap.out_minutes)}
-                      </span>
-                    </div>
-                  </div>
+                          {segBreaks.map((brk, bIdx) => {
+                            const bLeft = Math.max(
+                              0,
+                              Math.min(
+                                100,
+                                ((brk.start_minutes - sg.in_minutes) /
+                                  visibleSpanMin) *
+                                  100
+                              )
+                            );
+                            const bWidth = Math.max(
+                              0,
+                              Math.min(
+                                100 - bLeft,
+                                ((brk.end_minutes - brk.start_minutes) /
+                                  visibleSpanMin) *
+                                  100
+                              )
+                            );
+                            if (bWidth <= 0) return null;
+                            return (
+                              <div
+                                key={bIdx}
+                                title={`휴게: ${formatMinutesToKoreanAmPm(brk.start_minutes)} – ${formatMinutesToKoreanAmPm(brk.end_minutes)}`}
+                                style={{
+                                  left: `${bLeft}%`,
+                                  width: `${bWidth}%`,
+                                }}
+                                className="absolute top-1 bottom-1 min-w-[18px] rounded-[3px] bg-white/95 border border-slate-200/90 flex items-center px-1 text-[9.5px] text-slate-500 z-10 overflow-hidden"
+                              >
+                                ☕
+                              </div>
+                            );
+                          })}
+                        </div>
+                        <div className="flex items-center justify-between text-[9.5px] text-slate-500 font-semibold mt-0.5 whitespace-nowrap">
+                          <span>
+                            {formatMinutesToKoreanAmPm(sg.in_minutes)}
+                            {segBreaks.length > 0 && (
+                              <span className="text-slate-400 ml-1">
+                                휴게 {segBreaks.length}건
+                              </span>
+                            )}
+                          </span>
+                          {span >= 180 && (
+                            <span
+                              className={
+                                otPct > 0
+                                  ? "text-[#e85d3f] font-bold"
+                                  : undefined
+                              }
+                            >
+                              {formatMinutesToKoreanAmPm(sg.out_minutes)}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               );
             };

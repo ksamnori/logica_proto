@@ -1751,6 +1751,31 @@ export interface HqWorkEditBreakWindow {
   end_minutes: number;
 }
 
+export interface HqRecognizedBreakBlock {
+  id: string;
+  start_minutes: number;
+  end_minutes: number;
+}
+
+export interface HqRecognizedWorkSegment {
+  id: string;
+  work_mode: HqWorkMode;
+  policy_name: string;
+  in_minutes: number;
+  out_minutes: number;
+  location_note?: string;
+  memo?: string;
+}
+
+export interface HqRecognizedDaySchedule {
+  key: string; // `${instructor_id}__${work_date}`
+  instructor_id: string;
+  work_date: string;
+  segments: HqRecognizedWorkSegment[];
+  breaks: HqRecognizedBreakBlock[];
+  updated_at: string;
+}
+
 export interface HqWorkEditComparisonSnapshot {
   exists: boolean;
   policy_name: string;
@@ -1761,6 +1786,7 @@ export interface HqWorkEditComparisonSnapshot {
   break_start_minutes?: number | null;
   break_end_minutes?: number | null;
   breaks?: HqWorkEditBreakWindow[];
+  segments?: HqRecognizedWorkSegment[];
   worked_minutes: number;
   overtime_minutes: number;
   location_note?: string;

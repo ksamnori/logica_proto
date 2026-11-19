@@ -15,8 +15,10 @@ import {
 } from "@/lib/hq/orgTreeHelper";
 import {
   readRealtimeWorkLogsServer,
+  readRecognizedWorkSchedulesServer,
   readWorkMgmtStateServer,
   writeRealtimeWorkLogsServer,
+  writeRecognizedWorkSchedulesServer,
 } from "@/lib/hq/leavesLedgerServer";
 import {
   apiFail,
@@ -32,6 +34,9 @@ import type {
   HqRealtimeBreakSpan,
   HqRealtimeModeSegment,
   HqRealtimeWorkLog,
+  HqRecognizedBreakBlock,
+  HqRecognizedDaySchedule,
+  HqRecognizedWorkSegment,
   HqWorkEditApprovalPayload,
   HqWorkMode,
   HqWorkRuleItem,
@@ -174,6 +179,91 @@ function calcWorkedMinutes(
   const workedMinutes = Math.max(0, grossMin - autoBreak);
   const overtimeMinutes = Math.max(0, workedMinutes - 480);
   return { breakMinutes: autoBreak, workedMinutes, overtimeMinutes };
+}
+
+function normalizeAndCalcRecognizedSchedule(
+  rawSegments: any[],
+  rawBreaks: any[],
+  ruleDailyMinutes = 480
+): {
+  segments: HqRecognizedWorkSegment[];
+  breaks: HqRecognizedBreakBlock[];
+  workedMinutes: number;
+  breakMinutes: number;
+  overtimeMinutes: number;
+} {
+  const segments: HqRecognizedWorkSegment[] = (rawSegments || [])
+    .map((s: any, idx: number) => {
+      const inMin = Math.max(0, Math.min(1439, Math.round(Number(s?.in_minutes ?? 540))));
+      const rawOut = Math.round(Number(s?.out_minutes ?? inMin + 60));
+      const outMin = Math.max(inMin + 5, Math.min(1440, rawOut));
+      return {
+        id: String(s?.id || `seg-${idx}`),
+        work_mode: (s?.work_mode || "OFFICE") as HqWorkMode,
+        policy_name: String(s?.policy_name || "근무").trim() || "근무",
+        in_minutes: inMin,
+        out_minutes: outMin,
+        location_note: String(s?.location_note || "").trim() || undefined,
+        memo: String(s?.memo || "").trim() || undefined,
+      };
+    })
+    .sort((a, b) => a.in_minutes - b.in_minutes);
+
+  const breaks: HqRecognizedBreakBlock[] = (rawBreaks || [])
+    .map((b: any, idx: number) => {
+      const sMin = Math.max(0, Math.min(1439, Math.round(Number(b?.start_minutes ?? 780))));
+      const eMin = Math.max(sMin + 5, Math.min(1440, Math.round(Number(b?.end_minutes ?? sMin + 60))));
+      return {
+        id: String(b?.id || `brk-${idx}`),
+        start_minutes: sMin,
+        end_minutes: eMin,
+      };
+    })
+    .filter((b) => b.end_minutes > b.start_minutes)
+    .sort((a, b) => a.start_minutes - b.start_minutes);
+
+  let workedMinutes = 0;
+  let totalOverlapBreakMinutes = 0;
+
+  for (const seg of segments) {
+    const gross = Math.max(0, seg.out_minutes - seg.in_minutes);
+    const clipped = breaks
+      .map((b) => ({
+        s: Math.max(seg.in_minutes, b.start_minutes),
+        e: Math.min(seg.out_minutes, b.end_minutes),
+      }))
+      .filter((x) => x.e > x.s)
+      .sort((a, b) => a.s - b.s);
+
+    const merged: { s: number; e: number }[] = [];
+    for (const c of clipped) {
+      const last = merged[merged.length - 1];
+      if (last && c.s <= last.e) {
+        last.e = Math.max(last.e, c.e);
+      } else {
+        merged.push({ ...c });
+      }
+    }
+    const segBrk = merged.reduce((acc, m) => acc + (m.e - m.s), 0);
+    totalOverlapBreakMinutes += segBrk;
+    workedMinutes += Math.max(0, gross - segBrk);
+  }
+
+  const standaloneBreakSum = breaks.reduce(
+    (acc, b) => acc + (b.end_minutes - b.start_minutes),
+    0
+  );
+  const breakMinutes =
+    segments.length > 0 ? totalOverlapBreakMinutes : standaloneBreakSum;
+  const overtimeMinutes = Math.max(0, workedMinutes - Math.max(0, ruleDailyMinutes));
+
+  return {
+    segments,
+    breaks,
+    workedMinutes,
+    breakMinutes,
+    overtimeMinutes,
+  };
 }
 
 async function buildWorkPermissionGuard(
@@ -857,6 +947,7 @@ export async function GET(req: NextRequest) {
 
     // 실시간 근무 기록(얇은 줄) 조회 — 당일 진행분은 허용 대상에게 표시, 지나간 날짜는 [구성원 실시간 근무 기록 조회] 보유자에게만 표시
     let visibleRealtimeLogs: HqRealtimeWorkLog[] = [];
+    let visibleRecognizedSchedules: HqRecognizedDaySchedule[] = [];
     let pendingWorkApprovals: {
       approval_id: string;
       doc_no: string;
@@ -870,8 +961,9 @@ export async function GET(req: NextRequest) {
     }[] = [];
 
     try {
-      const [rtLogsByKey, wfStore, pendingGenRes] = await Promise.all([
+      const [rtLogsByKey, recSchedByKey, wfStore, pendingGenRes] = await Promise.all([
         readRealtimeWorkLogsServer(supabaseAdmin).catch(() => ({})),
+        readRecognizedWorkSchedulesServer(supabaseAdmin).catch(() => ({})),
         readWorkflowMetaPayload(supabaseAdmin).catch(() => ({
           docMetaById: {} as Record<string, any>,
           starredByUser: {},
@@ -897,6 +989,13 @@ export async function GET(req: NextRequest) {
         return permGuard.canViewPastRealtimeWork(tid);
       });
 
+      visibleRecognizedSchedules = Object.values(recSchedByKey).filter((sc) => {
+        if (!sc || sc.work_date < rangeStart || sc.work_date > rangeEnd) {
+          return false;
+        }
+        return permGuard.canViewRecognizedWork(String(sc.instructor_id || ""));
+      });
+
       (pendingGenRes.data || []).forEach((doc: any) => {
         const meta = wfStore.docMetaById?.[String(doc.approval_id)];
         const wp = meta?.work_edit_payload;
@@ -916,6 +1015,7 @@ export async function GET(req: NextRequest) {
       });
     } catch {
       visibleRealtimeLogs = [];
+      visibleRecognizedSchedules = [];
     }
 
     return NextResponse.json({
@@ -934,6 +1034,7 @@ export async function GET(req: NextRequest) {
         records: rangeRecords,
         leaveApprovals: visibleLeaveApprovals,
         realtimeLogs: visibleRealtimeLogs,
+        recognizedSchedules: visibleRecognizedSchedules,
         pendingWorkApprovals,
       },
     });
@@ -1421,6 +1522,7 @@ export async function POST(req: NextRequest) {
 
       const upserts: any[] = [];
       const deleteKeys: { instructor_id: string; work_date: string; attendance_id?: string }[] = [];
+      const recognizedScheduleUpdates: Record<string, HqRecognizedDaySchedule | null> = {};
       let submittedApprovals = 0;
 
       for (const item of items.slice(0, 200)) {
@@ -1595,6 +1697,8 @@ export async function POST(req: NextRequest) {
           }
         }
 
+        const schedKey = `${targetId}__${workDate}`;
+
         if (item?.mode === "DELETE") {
           deleteKeys.push({
             instructor_id: targetId,
@@ -1603,13 +1707,58 @@ export async function POST(req: NextRequest) {
               ? String(item.attendance_id)
               : undefined,
           });
+          recognizedScheduleUpdates[schedKey] = null;
           continue;
         }
 
-        const workMode = (item?.work_mode || "OFFICE") as HqWorkMode;
+        const hasMultiPayload =
+          Array.isArray(item?.segments) || Array.isArray(item?.breaks);
+        const normalizedSched = hasMultiPayload
+          ? normalizeAndCalcRecognizedSchedule(
+              Array.isArray(item?.segments) ? item.segments : [],
+              Array.isArray(item?.breaks) ? item.breaks : [],
+              Number(item?.rule_daily_minutes || 480)
+            )
+          : null;
+
+        if (normalizedSched) {
+          recognizedScheduleUpdates[schedKey] = {
+            key: schedKey,
+            instructor_id: targetId,
+            work_date: workDate,
+            segments: normalizedSched.segments,
+            breaks: normalizedSched.breaks,
+            updated_at: nowIso,
+          };
+
+          // 근무 블록 없이 휴게 블록만 단독 등록한 날은 hq_attendance 행을 비우거나 0분 유지
+          if (normalizedSched.segments.length === 0) {
+            deleteKeys.push({
+              instructor_id: targetId,
+              work_date: workDate,
+              attendance_id: item?.attendance_id
+                ? String(item.attendance_id)
+                : undefined,
+            });
+            continue;
+          }
+        }
+
+        const workMode = (
+          normalizedSched?.segments[0]?.work_mode ||
+          item?.work_mode ||
+          "OFFICE"
+        ) as HqWorkMode;
         const statusOverride = String(item?.status_override || "");
-        const inTime = String(item?.check_in_time || "").trim();
-        const outTime = String(item?.check_out_time || "").trim();
+        const inTime = normalizedSched?.segments[0]
+          ? minutesToHmStr(normalizedSched.segments[0].in_minutes)
+          : String(item?.check_in_time || "").trim();
+        const outTime = normalizedSched?.segments.length
+          ? minutesToHmStr(
+              normalizedSched.segments[normalizedSched.segments.length - 1]
+                .out_minutes
+            )
+          : String(item?.check_out_time || "").trim();
         const isFullLeave =
           workMode === "LEAVE" && statusOverride !== "HALF_LEAVE";
         const { checkInIso, checkOutIso } = isFullLeave
@@ -1618,13 +1767,19 @@ export async function POST(req: NextRequest) {
 
         const calc = isFullLeave
           ? { breakMinutes: 0, workedMinutes: 0, overtimeMinutes: 0 }
-          : calcWorkedMinutes(
-              checkInIso,
-              checkOutIso,
-              item?.break_minutes !== undefined
-                ? Number(item.break_minutes)
-                : undefined
-            );
+          : normalizedSched
+            ? {
+                breakMinutes: normalizedSched.breakMinutes,
+                workedMinutes: normalizedSched.workedMinutes,
+                overtimeMinutes: normalizedSched.overtimeMinutes,
+              }
+            : calcWorkedMinutes(
+                checkInIso,
+                checkOutIso,
+                item?.break_minutes !== undefined
+                  ? Number(item.break_minutes)
+                  : undefined
+              );
 
         const status: HqAttendanceStatus =
           statusOverride === "HALF_LEAVE"
@@ -1681,6 +1836,23 @@ export async function POST(req: NextRequest) {
           .upsert(upserts, { onConflict: "instructor_id,work_date" });
         if (upErr) {
           return apiFail(`근무 일정 등록 실패: ${upErr.message}`, 500);
+        }
+      }
+
+      if (Object.keys(recognizedScheduleUpdates).length > 0) {
+        try {
+          const prevMap = await readRecognizedWorkSchedulesServer(supabaseAdmin);
+          const nextMap = { ...prevMap };
+          for (const [k, val] of Object.entries(recognizedScheduleUpdates)) {
+            if (val === null) {
+              delete nextMap[k];
+            } else {
+              nextMap[k] = val;
+            }
+          }
+          await writeRecognizedWorkSchedulesServer(supabaseAdmin, nextMap);
+        } catch (schedErr) {
+          console.warn("Recognized schedule write warning:", schedErr);
         }
       }
 
@@ -1908,6 +2080,19 @@ export async function POST(req: NextRequest) {
         .eq("attendance_id", attendanceId);
 
       if (delErr) return apiFail(`삭제 실패: ${delErr.message}`, 500);
+
+      try {
+        const prevMap = await readRecognizedWorkSchedulesServer(supabaseAdmin);
+        const schedKey = `${existing.instructor_id}__${existing.work_date}`;
+        if (prevMap[schedKey]) {
+          const nextMap = { ...prevMap };
+          delete nextMap[schedKey];
+          await writeRecognizedWorkSchedulesServer(supabaseAdmin, nextMap);
+        }
+      } catch {
+        // ignore
+      }
+
       return NextResponse.json({ success: true });
     }
 

@@ -11,6 +11,10 @@ import {
   resolveMemberDisplayPosition,
 } from "@/lib/hq/orgTreeHelper";
 import {
+  readRecognizedWorkSchedulesServer,
+  writeRecognizedWorkSchedulesServer,
+} from "@/lib/hq/leavesLedgerServer";
+import {
   apiFail,
   getSupabaseAdmin,
   isMissingHqTableError,
@@ -158,6 +162,7 @@ async function applyPostApprovalSideEffects(
     const docMeta = wfStore.docMetaById?.[String(doc.approval_id)];
     const wp = docMeta?.work_edit_payload;
     if (wp && wp.target_member_id && wp.work_date) {
+      const schedKey = `${wp.target_member_id}__${wp.work_date}`;
       if (wp.action_mode === "DELETE") {
         if (wp.attendance_id) {
           await supabaseAdmin
@@ -170,6 +175,16 @@ async function applyPostApprovalSideEffects(
             .delete()
             .eq("instructor_id", wp.target_member_id)
             .eq("work_date", wp.work_date);
+        }
+        try {
+          const prevMap = await readRecognizedWorkSchedulesServer(supabaseAdmin);
+          if (prevMap[schedKey]) {
+            const nextMap = { ...prevMap };
+            delete nextMap[schedKey];
+            await writeRecognizedWorkSchedulesServer(supabaseAdmin, nextMap);
+          }
+        } catch {
+          // ignore
         }
       } else {
         const toHm = (mins: number) => {
@@ -210,6 +225,42 @@ async function applyPostApprovalSideEffects(
           },
           { onConflict: "instructor_id,work_date" }
         );
+
+        try {
+          const prevMap = await readRecognizedWorkSchedulesServer(supabaseAdmin);
+          const nextSegments =
+            Array.isArray(wp.after.segments) && wp.after.segments.length > 0
+              ? wp.after.segments
+              : [
+                  {
+                    id: "seg-approved-1",
+                    work_mode: wp.after.work_mode || "OFFICE",
+                    policy_name: wp.after.policy_name || "근무",
+                    in_minutes: wp.after.in_minutes,
+                    out_minutes: wp.after.out_minutes,
+                    location_note: wp.after.location_note,
+                    memo: wp.after.memo,
+                  },
+                ];
+          const nextBreaks = (wp.after.breaks || []).map((b, idx) => ({
+            id: `brk-approved-${idx}`,
+            start_minutes: b.start_minutes,
+            end_minutes: b.end_minutes,
+          }));
+          await writeRecognizedWorkSchedulesServer(supabaseAdmin, {
+            ...prevMap,
+            [schedKey]: {
+              key: schedKey,
+              instructor_id: wp.target_member_id,
+              work_date: wp.work_date,
+              segments: nextSegments,
+              breaks: nextBreaks,
+              updated_at: nowIso,
+            },
+          });
+        } catch {
+          // ignore
+        }
       }
     }
   } catch {
