@@ -30,16 +30,76 @@ const WORKBOOK_SERVER_CACHE_TTL_MS = 10 * 60 * 1000;
 function getWorkbookServerCacheHolder(): ServerWorkbookCacheHolder {
   const g = globalThis as unknown as {
     __logicaTaxonomyWorkbookServerCache?: ServerWorkbookCacheHolder;
+    __logicaTaxonomyWorkbookServerCacheV2?: ServerWorkbookCacheHolder;
   };
-  if (!g.__logicaTaxonomyWorkbookServerCache) {
-    g.__logicaTaxonomyWorkbookServerCache = { cache: null, inflight: null };
+  if (!g.__logicaTaxonomyWorkbookServerCacheV2) {
+    g.__logicaTaxonomyWorkbookServerCacheV2 = { cache: null, inflight: null };
   }
-  return g.__logicaTaxonomyWorkbookServerCache;
+  return g.__logicaTaxonomyWorkbookServerCacheV2;
 }
 
 function invalidateWorkbookServerCache(): void {
   const holder = getWorkbookServerCacheHolder();
   holder.cache = null;
+  const g = globalThis as unknown as {
+    __logicaTaxonomyWorkbookServerCache?: ServerWorkbookCacheHolder;
+  };
+  if (g.__logicaTaxonomyWorkbookServerCache) {
+    g.__logicaTaxonomyWorkbookServerCache.cache = null;
+  }
+}
+
+const sleepMs = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+async function fetchAllKeysetCursor(
+  supabaseAdmin: SupabaseClient,
+  tableName: string,
+  selectCols: string,
+  orderCol: string,
+  step: number = 1000
+): Promise<any[]> {
+  const rows: any[] = [];
+  let lastCursor: any = null;
+
+  while (true) {
+    let pageData: any[] | null = null;
+    let lastErr: any = null;
+
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      let query = supabaseAdmin
+        .from(tableName)
+        .select(selectCols)
+        .order(orderCol, { ascending: true })
+        .limit(step);
+      if (lastCursor !== null && lastCursor !== undefined) {
+        query = query.gt(orderCol, lastCursor);
+      }
+      const { data, error } = await query;
+      if (!error && data) {
+        pageData = data;
+        lastErr = null;
+        break;
+      }
+      lastErr = error;
+      await sleepMs(150 * attempt);
+    }
+
+    if (lastErr || !pageData) {
+      throw new Error(
+        `[${tableName}] 전체 인덱스 커서 조회 실패: ${lastErr?.message || "unknown error"}`
+      );
+    }
+    if (pageData.length === 0) break;
+
+    rows.push(...pageData);
+    const tailVal = pageData[pageData.length - 1]?.[orderCol];
+    if (tailVal === undefined || tailVal === null || pageData.length < step) {
+      break;
+    }
+    lastCursor = tailVal;
+  }
+
+  return rows;
 }
 
 async function fetchAllServerParallel(
@@ -49,53 +109,51 @@ async function fetchAllServerParallel(
   orderCol: string
 ): Promise<any[]> {
   const step = 1000;
-  const concurrency = 10;
+  const concurrency = 6;
   const { count, error: countErr } = await supabaseAdmin
     .from(tableName)
-    .select("*", { count: "exact", head: true });
+    .select(orderCol, { count: "exact", head: true });
 
   if (!countErr && count !== null) {
     if (count === 0) return [];
     const totalPages = Math.ceil(count / step);
     const chunks: any[][] = new Array(totalPages);
-    for (let p = 0; p < totalPages; p += concurrency) {
+    let rangeFailed = false;
+
+    for (let p = 0; p < totalPages && !rangeFailed; p += concurrency) {
       const wave = Math.min(concurrency, totalPages - p);
       await Promise.all(
-        Array.from({ length: wave }, (_, idx) => {
+        Array.from({ length: wave }, async (_, idx) => {
           const pageIdx = p + idx;
           const start = pageIdx * step;
-          return supabaseAdmin
-            .from(tableName)
-            .select(selectCols)
-            .order(orderCol, { ascending: true })
-            .range(start, start + step - 1)
-            .then(({ data }) => {
-              chunks[pageIdx] = data || [];
-            });
+          for (let attempt = 1; attempt <= 3; attempt++) {
+            const { data, error } = await supabaseAdmin
+              .from(tableName)
+              .select(selectCols)
+              .order(orderCol, { ascending: true })
+              .range(start, start + step - 1);
+            if (!error && data) {
+              chunks[pageIdx] = data;
+              return;
+            }
+            await sleepMs(150 * attempt);
+          }
+          rangeFailed = true;
         })
       );
     }
-    const merged: any[] = [];
-    for (const c of chunks) {
-      if (c && c.length > 0) merged.push(...c);
+
+    if (!rangeFailed) {
+      const merged: any[] = [];
+      for (const c of chunks) {
+        if (c && c.length > 0) merged.push(...c);
+      }
+      return merged;
     }
-    return merged;
   }
 
-  const fallback: any[] = [];
-  let start = 0;
-  while (true) {
-    const { data, error } = await supabaseAdmin
-      .from(tableName)
-      .select(selectCols)
-      .order(orderCol, { ascending: true })
-      .range(start, start + step - 1);
-    if (error || !data || data.length === 0) break;
-    fallback.push(...data);
-    if (data.length < step) break;
-    start += step;
-  }
-  return fallback;
+  // OFFSET 페이지 중 하나라도 타임아웃/실패 시 O(log N) Keyset 커서 페이지네이션으로 무손실 완주
+  return fetchAllKeysetCursor(supabaseAdmin, tableName, selectCols, orderCol, step);
 }
 
 async function getServerWorkbookIndex(
@@ -116,18 +174,18 @@ async function getServerWorkbookIndex(
 
   holder.inflight = (async () => {
     try {
-      const [tbRows, qbRows] = await Promise.all([
-        fetchAllServerParallel(supabaseAdmin, "textbook", "title", "book_id"),
+      const [tbRows, tqRows, qbRows] = await Promise.all([
+        fetchAllServerParallel(supabaseAdmin, "textbook", "book_id, title", "book_id"),
+        fetchAllServerParallel(supabaseAdmin, "textbook_question", "book_id, question_id", "tq_id"),
         fetchAllServerParallel(
           supabaseAdmin,
           "question_db",
-          "question_id, source_book_name, book_name, pdf_source, final_printed_page, detected_page_num, question_number, sub_num, question, question_2, answer, derivation_type, parent_question_id, is_hidden",
+          "question_id, source_book_name, book_name, pdf_source, final_printed_page, detected_page_num, question_number, sub_num, answer, taxonomy_id, derivation_type, parent_question_id, is_hidden",
           "question_id"
         ),
       ]);
 
-      const tbTitles = (tbRows || []).map((t: any) => String(t?.title || ""));
-      const built = buildWorkbookIndexAndDuplicates(qbRows || [], tbTitles);
+      const built = buildWorkbookIndexAndDuplicates(qbRows || [], tbRows || [], tqRows || []);
       const payload: ServerWorkbookCachePayload = {
         builtAt: Date.now(),
         workbooks: built.workbooks,

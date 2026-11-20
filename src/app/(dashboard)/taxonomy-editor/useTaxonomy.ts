@@ -168,7 +168,8 @@ export const isExcludedDiagnosticQuestionRow = (q: any): boolean => {
 
 // 🌟 탭 내 페이지 이동 및 재방문 시 재다운로드(수만 건 풀스캔) 방지를 위한 다계층 캐시
 const MASTER_TAXONOMY_TTL_MS = 60 * 60 * 1000;
-const WORKBOOKS_CACHE_KEY = "logica_taxonomy_workbooks_v4";
+const WORKBOOKS_CACHE_KEY = "logica_taxonomy_workbooks_v5";
+const LEGACY_WORKBOOKS_CACHE_KEY = "logica_taxonomy_workbooks_v4";
 const PERMS_CACHE_KEY = "logica_taxonomy_perms_v1";
 const WORKBOOKS_TTL_MS = 15 * 60 * 1000;
 
@@ -195,6 +196,10 @@ function persistWorkbooksCache(payload: CachedWorkbooksBundle) {
 function readPersistedWorkbooksCache(): CachedWorkbooksBundle | null {
   if (cachedWorkbooksMemory) return cachedWorkbooksMemory;
   if (typeof window === "undefined") return null;
+  try {
+    localStorage.removeItem(LEGACY_WORKBOOKS_CACHE_KEY);
+    sessionStorage.removeItem(LEGACY_WORKBOOKS_CACHE_KEY);
+  } catch {}
   try {
     const raw =
       localStorage.getItem(WORKBOOKS_CACHE_KEY) ||
@@ -627,9 +632,12 @@ export function useTaxonomy() {
       }
 
       // 2순위 폴백: 클라이언트 직접 스캔
-      const tbData = await fetchAllRows('textbook', 'title');
+      const [tbData, tqData] = await Promise.all([
+        fetchAllRows('textbook', 'book_id, title'),
+        fetchAllRows('textbook_question', 'book_id, question_id'),
+      ]);
       const titles = (tbData || [])
-        .map((t: any) => String(t.title || "").normalize("NFC").trim())
+        .map((t: any) => String(t?.title || "").normalize("NFC").trim())
         .filter((t: string) => t && !isExcludedDiagnosticBookName(t));
 
       if (titles.length > 0) {
@@ -643,7 +651,7 @@ export function useTaxonomy() {
 
       const qbRows = await fetchAllRows(
         'question_db',
-        'question_id, source_book_name, book_name, pdf_source, final_printed_page, detected_page_num, question_number, sub_num, question, question_2, answer, derivation_type, parent_question_id, is_hidden',
+        'question_id, source_book_name, book_name, pdf_source, final_printed_page, detected_page_num, question_number, sub_num, answer, taxonomy_id, derivation_type, parent_question_id, is_hidden',
         undefined,
         undefined,
         (loaded, total) => {
@@ -653,10 +661,11 @@ export function useTaxonomy() {
         }
       );
 
-      const built = buildWorkbookIndexAndDuplicates(qbRows || [], [
-        ...titles,
-        ...pendingUploadedBooks,
-      ]);
+      const built = buildWorkbookIndexAndDuplicates(
+        qbRows || [],
+        [...(tbData || []), ...pendingUploadedBooks],
+        tqData || []
+      );
 
       setWorkbooks(built.workbooks);
       setQuestionDbBooks(built.questionDbBooks);
@@ -847,6 +856,10 @@ export function useTaxonomy() {
         fetchTextbookLinkedIds(),
       ]);
 
+      directRows.forEach((r: any) => {
+        if (r) r._linkedToSelectedBook = true;
+      });
+
       let fetchedQuestions: any[] = [...directRows];
       const currentQids = new Set(fetchedQuestions.map(q => String(q.question_id).trim().toLowerCase()));
 
@@ -862,6 +875,7 @@ export function useTaxonomy() {
         extraResults.forEach(({ data }: any) => {
           (data || []).forEach((q: any) => {
             if (isExcludedDiagnosticQuestionRow(q)) return;
+            q._linkedToSelectedBook = true;
             const k = String(q.question_id).trim().toLowerCase();
             if (!currentQids.has(k)) {
               currentQids.add(k);
@@ -932,6 +946,39 @@ export function useTaxonomy() {
       const finalQuestions = Array.from(finalMap.values());
       setFetchStepMessage("문항 이미지 및 수식 렌더링을 마무리하고 있습니다...");
       await hydrateMissingQuestionImages(supabase, finalQuestions);
+
+      // 🌟 실제 조회된 현재 교재 소속 활성 문항 수로 드롭다운 메타(count) 즉시 동기화
+      const normTarget = String(targetBook).normalize("NFC").trim();
+      const ownActiveCount = finalQuestions.filter((q: any) => {
+        if (!q || q.is_hidden === true || q.is_hidden === "Y" || q.is_hidden === "true") return false;
+        if (q._linkedToSelectedBook) return true;
+        const sb = String(q.source_book_name || "").normalize("NFC").trim();
+        const bn = String(q.book_name || "").normalize("NFC").trim();
+        return sb === normTarget || bn === normTarget;
+      }).length;
+
+      setWorkbookMetaMap((prev) => {
+        const prevEntry = prev[normTarget];
+        if (prevEntry && prevEntry.count === ownActiveCount) return prev;
+        const updated: Record<string, WorkbookDuplicateSummary> = {
+          ...prev,
+          [normTarget]: {
+            count: ownActiveCount,
+            inQuestionDb: prevEntry?.inQuestionDb ?? directRows.length > 0,
+            internalDupCount: prevEntry?.internalDupCount ?? 0,
+            internalDupGroups: prevEntry?.internalDupGroups ?? 0,
+            ...(prevEntry?.aliasBook ? { aliasBook: prevEntry.aliasBook, aliasSharedPct: prevEntry.aliasSharedPct } : {}),
+            ...(prevEntry?.crossDupBook ? { crossDupBook: prevEntry.crossDupBook, crossDupPct: prevEntry.crossDupPct } : {}),
+          },
+        };
+        if (cachedWorkbooksMemory) {
+          persistWorkbooksCache({
+            ...cachedWorkbooksMemory,
+            metaByBook: updated,
+          });
+        }
+        return updated;
+      });
 
       setQuestions(sortQuestionsList(finalQuestions));
       setSelectedQuestion(null); 

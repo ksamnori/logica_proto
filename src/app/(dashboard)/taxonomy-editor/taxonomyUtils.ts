@@ -90,11 +90,17 @@ export const fetchAllRows = async (
   onProgress?: (loaded: number, total: number) => void
 ) => {
   const step = 1000;
-  const concurrency = 8;
+  const concurrency = 6;
 
   const applyOrder = (q: any) => {
-    if (tableName === 'question_db' || tableName === 'textbook_question') {
+    if (tableName === 'question_db') {
       return q.order('question_id', { ascending: true });
+    }
+    if (tableName === 'textbook_question') {
+      return q.order('tq_id', { ascending: true });
+    }
+    if (tableName === 'textbook') {
+      return q.order('book_id', { ascending: true });
     }
     if (tableName === 'master_category') {
       return q.order('category_id', { ascending: true });
@@ -128,21 +134,30 @@ export const fetchAllRows = async (
     for (let p = 0; p < totalPages; p += concurrency) {
       const wave = Math.min(concurrency, totalPages - p);
       await Promise.all(
-        Array.from({ length: wave }, (_, idx) => {
+        Array.from({ length: wave }, async (_, idx) => {
           const pageIndex = p + idx;
           const start = pageIndex * step;
-          let q = supabase.from(tableName).select(selectQuery);
-          if (filterCol && filterVal !== undefined) {
-            q = q.eq(filterCol, filterVal);
+          let rows: any[] = [];
+          for (let attempt = 1; attempt <= 3; attempt++) {
+            let q = supabase.from(tableName).select(selectQuery);
+            if (filterCol && filterVal !== undefined) {
+              q = q.eq(filterCol, filterVal);
+            }
+            q = applyOrder(q).range(start, start + step - 1);
+            const { data, error }: any = await q;
+            if (!error && data) {
+              rows = data;
+              break;
+            }
+            if (attempt === 3 && error) {
+              console.error(`${tableName} 로드 실패 (page ${pageIndex}):`, error);
+            } else {
+              await new Promise((r) => setTimeout(r, 150 * attempt));
+            }
           }
-          q = applyOrder(q).range(start, start + step - 1);
-          return q.then(({ data, error }: any) => {
-            if (error) console.error(`${tableName} 로드 실패:`, error);
-            const rows = !error && data ? data : [];
-            chunks[pageIndex] = rows;
-            loaded += rows.length;
-            onProgress?.(Math.min(loaded, count), count);
-          });
+          chunks[pageIndex] = rows;
+          loaded += rows.length;
+          onProgress?.(Math.min(loaded, count), count);
         })
       );
     }

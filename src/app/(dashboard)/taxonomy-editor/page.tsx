@@ -196,6 +196,18 @@ export default function TaxonomyEditorPage() {
     }
   };
 
+  const isItemInSelectedBook = React.useCallback(
+    (item: any): boolean => {
+      if (!item || !selectedBook) return false;
+      if (item._linkedToSelectedBook) return true;
+      const target = String(selectedBook).normalize("NFC").trim();
+      const sb = String(item.source_book_name || "").normalize("NFC").trim();
+      const bn = String(item.book_name || "").normalize("NFC").trim();
+      return sb === target || bn === target;
+    },
+    [selectedBook]
+  );
+
   const renderGroups = React.useMemo(() => {
     if (!selectedBook || questions.length === 0) return [];
 
@@ -212,7 +224,7 @@ export default function TaxonomyEditorPage() {
       const descendants = getDescendants(String(root.question_id).trim().toLowerCase());
       const family = [root, ...descendants];
       
-      const currentBookItems = family.filter((item: any) => item.source_book_name === selectedBook || item.book_name === selectedBook);
+      const currentBookItems = family.filter((item: any) => isItemInSelectedBook(item));
 
       if (currentBookItems.length > 0) {
         const sortedCurrent = [...currentBookItems].sort((a, b) => {
@@ -251,7 +263,7 @@ export default function TaxonomyEditorPage() {
         return qText.includes(kw) || ans.includes(kw) || qNum.includes(kw) || page.includes(kw) || book.includes(kw) || tax.includes(kw) || subTax.includes(kw) || taxName.includes(kw) || subTaxName.includes(kw);
       });
     });
-  }, [normalRoots, trueOrphans, selectedBook, getDescendants, questions, questionTextFilter, onlyDupQuestions, duplicateQuestionMap]);
+  }, [normalRoots, trueOrphans, selectedBook, getDescendants, questions, questionTextFilter, onlyDupQuestions, duplicateQuestionMap, isItemInSelectedBook]);
 
   const renderImageBox = (label: string, fieldKey: string, boxFieldKey: string | null, colorTheme: 'indigo' | 'emerald') => {
     const rawValue = editForm[fieldKey as keyof typeof editForm] as string;
@@ -1258,7 +1270,7 @@ export default function TaxonomyEditorPage() {
               <div className="flex flex-col gap-3">
                 {renderGroups.map((group: any, gIdx: number) => {
                   const { root, descendants } = group;
-                  const isRootCurrent = root.source_book_name === selectedBook || root.book_name === selectedBook;
+                  const isRootCurrent = isItemInSelectedBook(root);
                   const rootDupFlag = (duplicateQuestionMap as Map<string, QuestionDuplicateFlag> | undefined)?.get(
                     String(root.question_id)
                   );
@@ -1347,7 +1359,7 @@ export default function TaxonomyEditorPage() {
                           )}
                           
                           {descendants.map((desc: any) => {
-                            const isDescCurrent = desc.source_book_name === selectedBook || desc.book_name === selectedBook;
+                            const isDescCurrent = isItemInSelectedBook(desc);
                             const descDupFlag = (duplicateQuestionMap as Map<string, QuestionDuplicateFlag> | undefined)?.get(
                               String(desc.question_id)
                             );
