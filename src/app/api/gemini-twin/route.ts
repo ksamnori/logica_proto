@@ -12,185 +12,451 @@ import {
   buildWorkbookIndexAndDuplicates,
   type WorkbookDuplicateSummary,
 } from "@/lib/questionDuplicateAnalyzer";
+import { isConfidentialExamText, isConfidentialQuestionObj } from "@/lib/confidentialExamGuard";
 
 interface ServerWorkbookCachePayload {
   builtAt: number;
+  deepScanned: boolean;
   workbooks: string[];
   questionDbBooks: string[];
   metaByBook: Record<string, WorkbookDuplicateSummary>;
 }
 
 interface ServerWorkbookCacheHolder {
-  cache: ServerWorkbookCachePayload | null;
-  inflight: Promise<ServerWorkbookCachePayload> | null;
+  fastCache: ServerWorkbookCachePayload | null;
+  deepCache: ServerWorkbookCachePayload | null;
+  fastInflight: Promise<ServerWorkbookCachePayload> | null;
+  deepInflight: Promise<ServerWorkbookCachePayload> | null;
 }
 
-const WORKBOOK_SERVER_CACHE_TTL_MS = 10 * 60 * 1000;
+export interface ServerFactoryStatsPayload {
+  builtAt: number;
+  totalQuestions: number;
+  totalBooks: number;
+  recentUploads: number;
+  difficulty: { 최상: number; 상: number; 중: number; 하: number; 최하: number; 미지정: number };
+  schoolLevel: { 초등: number; 중등: number; 고등: number; 분류필요: number };
+}
+
+interface ServerFactoryStatsHolder {
+  cache: ServerFactoryStatsPayload | null;
+  inflight: Promise<ServerFactoryStatsPayload> | null;
+}
+
+const WORKBOOK_SERVER_CACHE_TTL_MS = 2 * 60 * 60 * 1000; // 2시간 서버 캐시 (변경 시 자동 무효화)
+const FACTORY_STATS_CACHE_TTL_MS = 30 * 60 * 1000; // 30분 서버 캐시
 
 function getWorkbookServerCacheHolder(): ServerWorkbookCacheHolder {
   const g = globalThis as unknown as {
-    __logicaTaxonomyWorkbookServerCache?: ServerWorkbookCacheHolder;
-    __logicaTaxonomyWorkbookServerCacheV2?: ServerWorkbookCacheHolder;
+    __logicaTaxonomyWorkbookServerCacheV3?: ServerWorkbookCacheHolder;
   };
-  if (!g.__logicaTaxonomyWorkbookServerCacheV2) {
-    g.__logicaTaxonomyWorkbookServerCacheV2 = { cache: null, inflight: null };
+  if (!g.__logicaTaxonomyWorkbookServerCacheV3) {
+    g.__logicaTaxonomyWorkbookServerCacheV3 = {
+      fastCache: null,
+      deepCache: null,
+      fastInflight: null,
+      deepInflight: null,
+    };
   }
-  return g.__logicaTaxonomyWorkbookServerCacheV2;
+  return g.__logicaTaxonomyWorkbookServerCacheV3;
+}
+
+function getFactoryStatsCacheHolder(): ServerFactoryStatsHolder {
+  const g = globalThis as unknown as {
+    __logicaFactoryStatsCacheV2?: ServerFactoryStatsHolder;
+  };
+  if (!g.__logicaFactoryStatsCacheV2) {
+    g.__logicaFactoryStatsCacheV2 = { cache: null, inflight: null };
+  }
+  return g.__logicaFactoryStatsCacheV2;
 }
 
 function invalidateWorkbookServerCache(): void {
   const holder = getWorkbookServerCacheHolder();
-  holder.cache = null;
-  const g = globalThis as unknown as {
-    __logicaTaxonomyWorkbookServerCache?: ServerWorkbookCacheHolder;
-  };
-  if (g.__logicaTaxonomyWorkbookServerCache) {
-    g.__logicaTaxonomyWorkbookServerCache.cache = null;
-  }
+  holder.fastCache = null;
+  holder.deepCache = null;
+  const statsHolder = getFactoryStatsCacheHolder();
+  statsHolder.cache = null;
 }
 
 const sleepMs = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-async function fetchAllKeysetCursor(
-  supabaseAdmin: SupabaseClient,
-  tableName: string,
-  selectCols: string,
-  orderCol: string,
-  step: number = 1000
+const UUID_SHARD_BOUNDS: Array<[string | null, string | null]> = [
+  [null, "20000000-0000-0000-0000-000000000000"],
+  ["20000000-0000-0000-0000-000000000000", "40000000-0000-0000-0000-000000000000"],
+  ["40000000-0000-0000-0000-000000000000", "60000000-0000-0000-0000-000000000000"],
+  ["60000000-0000-0000-0000-000000000000", "80000000-0000-0000-0000-000000000000"],
+  ["80000000-0000-0000-0000-000000000000", "a0000000-0000-0000-0000-000000000000"],
+  ["a0000000-0000-0000-0000-000000000000", "c0000000-0000-0000-0000-000000000000"],
+  ["c0000000-0000-0000-0000-000000000000", "e0000000-0000-0000-0000-000000000000"],
+  ["e0000000-0000-0000-0000-000000000000", null],
+];
+
+// 🌟 OFFSET 및 COUNT(*) 없이 PK B-Tree 인덱스만 타는 8-샤드 병렬 Keyset 스캐너
+async function fetchQuestionDbUuidShards(
+  supabaseReader: SupabaseClient,
+  selectCols: string
 ): Promise<any[]> {
-  const rows: any[] = [];
-  let lastCursor: any = null;
+  const step = 1000;
+  const shardResults = await Promise.all(
+    UUID_SHARD_BOUNDS.map(async ([lo, hi]) => {
+      const rows: any[] = [];
+      let cursor: string | null = null;
 
-  while (true) {
-    let pageData: any[] | null = null;
-    let lastErr: any = null;
+      while (true) {
+        let pageData: any[] | null = null;
+        let lastErr: any = null;
 
-    for (let attempt = 1; attempt <= 3; attempt++) {
-      let query = supabaseAdmin
-        .from(tableName)
-        .select(selectCols)
-        .order(orderCol, { ascending: true })
-        .limit(step);
-      if (lastCursor !== null && lastCursor !== undefined) {
-        query = query.gt(orderCol, lastCursor);
+        for (let attempt = 1; attempt <= 3; attempt++) {
+          let q = supabaseReader
+            .from("question_db")
+            .select(selectCols)
+            .order("question_id", { ascending: true })
+            .limit(step);
+
+          if (cursor !== null) {
+            q = q.gt("question_id", cursor);
+          } else if (lo !== null) {
+            q = q.gte("question_id", lo);
+          }
+          if (hi !== null) {
+            q = q.lt("question_id", hi);
+          }
+
+          const { data, error } = await q;
+          if (!error && data) {
+            pageData = data;
+            lastErr = null;
+            break;
+          }
+          lastErr = error;
+          await sleepMs(120 * attempt);
+        }
+
+        if (lastErr || !pageData) {
+          throw new Error(`question_db 샤드 조회 실패: ${lastErr?.message || "unknown"}`);
+        }
+        if (pageData.length === 0) break;
+
+        rows.push(...pageData);
+        const tailId = pageData[pageData.length - 1]?.question_id;
+        if (!tailId || pageData.length < step) break;
+        cursor = String(tailId);
       }
-      const { data, error } = await query;
-      if (!error && data) {
-        pageData = data;
-        lastErr = null;
-        break;
-      }
-      lastErr = error;
-      await sleepMs(150 * attempt);
-    }
 
-    if (lastErr || !pageData) {
-      throw new Error(
-        `[${tableName}] 전체 인덱스 커서 조회 실패: ${lastErr?.message || "unknown error"}`
-      );
-    }
-    if (pageData.length === 0) break;
+      return rows;
+    })
+  );
 
-    rows.push(...pageData);
-    const tailVal = pageData[pageData.length - 1]?.[orderCol];
-    if (tailVal === undefined || tailVal === null || pageData.length < step) {
-      break;
+  const merged: any[] = [];
+  for (const shard of shardResults) {
+    for (let i = 0; i < shard.length; i++) {
+      merged.push(shard[i]);
     }
-    lastCursor = tailVal;
   }
+  return merged;
+}
 
+async function fetchTextbooksSimple(supabaseReader: SupabaseClient): Promise<any[]> {
+  const rows: any[] = [];
+  let cursor: any = null;
+  const step = 1000;
+  while (true) {
+    let q = supabaseReader
+      .from("textbook")
+      .select("book_id, title")
+      .order("book_id", { ascending: true })
+      .limit(step);
+    if (cursor !== null) q = q.gt("book_id", cursor);
+    const { data, error } = await q;
+    if (error || !data || data.length === 0) break;
+    rows.push(...data);
+    if (data.length < step) break;
+    cursor = data[data.length - 1]?.book_id;
+    if (cursor === undefined || cursor === null) break;
+  }
   return rows;
 }
 
-async function fetchAllServerParallel(
-  supabaseAdmin: SupabaseClient,
-  tableName: string,
-  selectCols: string,
-  orderCol: string
-): Promise<any[]> {
-  const step = 1000;
-  const concurrency = 6;
-  const { count, error: countErr } = await supabaseAdmin
-    .from(tableName)
-    .select(orderCol, { count: "exact", head: true });
+// textbook.title 과 question_db.book_name 이 달라 count === 0 인 소수 교재에 대해서만 textbook_question 보완 조회
+async function fetchMissingTextbookQuestionLinks(
+  supabaseReader: SupabaseClient,
+  tbRows: any[],
+  qbRows: any[]
+): Promise<Array<{ book_id: any; question_id: any }>> {
+  if (!tbRows || tbRows.length === 0) return [];
+  const qdbNames = new Set<string>();
+  for (let i = 0; i < qbRows.length; i++) {
+    const q = qbRows[i];
+    if (!q) continue;
+    if (q.book_name) qdbNames.add(String(q.book_name).normalize("NFC").trim());
+    if (q.source_book_name) qdbNames.add(String(q.source_book_name).normalize("NFC").trim());
+  }
 
-  if (!countErr && count !== null) {
-    if (count === 0) return [];
-    const totalPages = Math.ceil(count / step);
-    const chunks: any[][] = new Array(totalPages);
-    let rangeFailed = false;
-
-    for (let p = 0; p < totalPages && !rangeFailed; p += concurrency) {
-      const wave = Math.min(concurrency, totalPages - p);
-      await Promise.all(
-        Array.from({ length: wave }, async (_, idx) => {
-          const pageIdx = p + idx;
-          const start = pageIdx * step;
-          for (let attempt = 1; attempt <= 3; attempt++) {
-            const { data, error } = await supabaseAdmin
-              .from(tableName)
-              .select(selectCols)
-              .order(orderCol, { ascending: true })
-              .range(start, start + step - 1);
-            if (!error && data) {
-              chunks[pageIdx] = data;
-              return;
-            }
-            await sleepMs(150 * attempt);
-          }
-          rangeFailed = true;
-        })
-      );
-    }
-
-    if (!rangeFailed) {
-      const merged: any[] = [];
-      for (const c of chunks) {
-        if (c && c.length > 0) merged.push(...c);
-      }
-      return merged;
+  const unmatchedBookIds: string[] = [];
+  for (const tb of tbRows) {
+    const title = String(tb?.title || "").normalize("NFC").trim();
+    const bid = String(tb?.book_id ?? "").trim();
+    if (!title || !bid || isConfidentialExamText(title)) continue;
+    if (!qdbNames.has(title)) {
+      unmatchedBookIds.push(bid);
     }
   }
 
-  // OFFSET 페이지 중 하나라도 타임아웃/실패 시 O(log N) Keyset 커서 페이지네이션으로 무손실 완주
-  return fetchAllKeysetCursor(supabaseAdmin, tableName, selectCols, orderCol, step);
+  if (unmatchedBookIds.length === 0) return [];
+
+  const links: Array<{ book_id: any; question_id: any }> = [];
+  for (let i = 0; i < unmatchedBookIds.length; i += 50) {
+    const chunk = unmatchedBookIds.slice(i, i + 50);
+    let cursor: any = null;
+    while (true) {
+      let q = supabaseReader
+        .from("textbook_question")
+        .select("tq_id, book_id, question_id")
+        .in("book_id", chunk)
+        .order("tq_id", { ascending: true })
+        .limit(1000);
+      if (cursor !== null) q = q.gt("tq_id", cursor);
+      const { data, error } = await q;
+      if (error || !data || data.length === 0) break;
+      links.push(...data);
+      if (data.length < 1000) break;
+      cursor = data[data.length - 1]?.tq_id;
+      if (cursor === undefined || cursor === null) break;
+    }
+  }
+  return links;
 }
 
 async function getServerWorkbookIndex(
-  supabaseAdmin: SupabaseClient,
-  forceRefresh: boolean = false
+  supabaseReader: SupabaseClient,
+  forceRefresh: boolean = false,
+  deep: boolean = false
 ): Promise<ServerWorkbookCachePayload> {
   const holder = getWorkbookServerCacheHolder();
-  if (
-    !forceRefresh &&
-    holder.cache &&
-    Date.now() - holder.cache.builtAt < WORKBOOK_SERVER_CACHE_TTL_MS
-  ) {
-    return holder.cache;
-  }
-  if (!forceRefresh && holder.inflight) {
-    return holder.inflight;
+  const now = Date.now();
+
+  if (!forceRefresh) {
+    if (
+      holder.deepCache &&
+      now - holder.deepCache.builtAt < WORKBOOK_SERVER_CACHE_TTL_MS
+    ) {
+      return holder.deepCache;
+    }
+    if (
+      !deep &&
+      holder.fastCache &&
+      now - holder.fastCache.builtAt < WORKBOOK_SERVER_CACHE_TTL_MS
+    ) {
+      return holder.fastCache;
+    }
   }
 
-  holder.inflight = (async () => {
+  if (deep) {
+    if (!forceRefresh && holder.deepInflight) return holder.deepInflight;
+    holder.deepInflight = (async () => {
+      try {
+        const [tbRows, qbRows] = await Promise.all([
+          fetchTextbooksSimple(supabaseReader),
+          fetchQuestionDbUuidShards(
+            supabaseReader,
+            "question_id, source_book_name, book_name, pdf_source, final_printed_page, detected_page_num, question_number, sub_num, answer, taxonomy_id, derivation_type, parent_question_id, is_hidden"
+          ),
+        ]);
+        const tqRows = await fetchMissingTextbookQuestionLinks(supabaseReader, tbRows, qbRows);
+        const built = buildWorkbookIndexAndDuplicates(qbRows, tbRows, tqRows, {
+          skipDeepFingerprints: false,
+        });
+        const payload: ServerWorkbookCachePayload = {
+          builtAt: Date.now(),
+          deepScanned: true,
+          workbooks: built.workbooks,
+          questionDbBooks: built.questionDbBooks,
+          metaByBook: built.metaByBook,
+        };
+        holder.deepCache = payload;
+        holder.fastCache = payload;
+        return payload;
+      } finally {
+        holder.deepInflight = null;
+      }
+    })();
+    return holder.deepInflight;
+  }
+
+  if (!forceRefresh && holder.fastInflight) return holder.fastInflight;
+  holder.fastInflight = (async () => {
     try {
-      const [tbRows, tqRows, qbRows] = await Promise.all([
-        fetchAllServerParallel(supabaseAdmin, "textbook", "book_id, title", "book_id"),
-        fetchAllServerParallel(supabaseAdmin, "textbook_question", "book_id, question_id", "tq_id"),
-        fetchAllServerParallel(
-          supabaseAdmin,
-          "question_db",
-          "question_id, source_book_name, book_name, pdf_source, final_printed_page, detected_page_num, question_number, sub_num, answer, taxonomy_id, derivation_type, parent_question_id, is_hidden",
-          "question_id"
+      const [tbRows, qbRows] = await Promise.all([
+        fetchTextbooksSimple(supabaseReader),
+        fetchQuestionDbUuidShards(
+          supabaseReader,
+          "question_id, source_book_name, book_name, pdf_source, is_hidden"
         ),
       ]);
-
-      const built = buildWorkbookIndexAndDuplicates(qbRows || [], tbRows || [], tqRows || []);
+      const tqRows = await fetchMissingTextbookQuestionLinks(supabaseReader, tbRows, qbRows);
+      const built = buildWorkbookIndexAndDuplicates(qbRows, tbRows, tqRows, {
+        skipDeepFingerprints: true,
+      });
       const payload: ServerWorkbookCachePayload = {
         builtAt: Date.now(),
+        deepScanned: false,
         workbooks: built.workbooks,
         questionDbBooks: built.questionDbBooks,
         metaByBook: built.metaByBook,
+      };
+      holder.fastCache = payload;
+      return payload;
+    } finally {
+      holder.fastInflight = null;
+    }
+  })();
+  return holder.fastInflight;
+}
+
+async function getServerFactoryStats(
+  supabaseReader: SupabaseClient,
+  forceRefresh: boolean = false
+): Promise<ServerFactoryStatsPayload> {
+  const holder = getFactoryStatsCacheHolder();
+  if (
+    !forceRefresh &&
+    holder.cache &&
+    Date.now() - holder.cache.builtAt < FACTORY_STATS_CACHE_TTL_MS
+  ) {
+    return holder.cache;
+  }
+  if (!forceRefresh && holder.inflight) return holder.inflight;
+
+  holder.inflight = (async () => {
+    try {
+      const sevenDaysAgoIso = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+      const activeOr = "is_hidden.is.null,is_hidden.eq.false";
+
+      const countActive = (
+        customize?: (q: any) => any
+      ): PromiseLike<number> => {
+        let q: any = supabaseReader
+          .from("question_db")
+          .select("question_id", { count: "exact", head: true })
+          .or(activeOr);
+        if (customize) q = customize(q);
+        return q.then(({ count }: any) => Number(count || 0));
+      };
+
+      const fetchConfidentialActiveRows = async (): Promise<any[]> => {
+        const confRows: any[] = [];
+        let cursor: string | null = null;
+        while (true) {
+          let q = supabaseReader
+            .from("question_db")
+            .select(
+              "question_id, difficulty, taxonomy_id, created_at, is_hidden, source_book_name, book_name, pdf_source"
+            )
+            .or(
+              "pdf_source.ilike.%입학테스트%,pdf_source.ilike.%진단평가%,source_book_name.ilike.%입학테스트%,source_book_name.ilike.%진단평가%,book_name.ilike.%입학테스트%,book_name.ilike.%진단평가%,pdf_source.ilike.%입학 테스트%,pdf_source.ilike.%진단 평가%,source_book_name.ilike.%입학 테스트%,source_book_name.ilike.%진단 평가%,book_name.ilike.%입학 테스트%,book_name.ilike.%진단 평가%"
+            )
+            .order("question_id", { ascending: true })
+            .limit(1000);
+          if (cursor) q = q.gt("question_id", cursor);
+          const { data, error } = await q;
+          if (error || !data || data.length === 0) break;
+          confRows.push(...data);
+          if (data.length < 1000) break;
+          cursor = String(data[data.length - 1]?.question_id || "");
+          if (!cursor) break;
+        }
+        return confRows;
+      };
+
+      const [
+        tbRows,
+        confRows,
+        rawTotal,
+        rawRecent,
+        rawElem,
+        rawMid,
+        rawHigh,
+        rawD1,
+        rawD2,
+        rawD3,
+        rawD4,
+        rawD5,
+      ] = await Promise.all([
+        fetchTextbooksSimple(supabaseReader),
+        fetchConfidentialActiveRows(),
+        countActive(),
+        countActive((q) => q.gte("created_at", sevenDaysAgoIso)),
+        countActive((q) => q.gte("taxonomy_id", "E").lt("taxonomy_id", "F")),
+        countActive((q) => q.gte("taxonomy_id", "M").lt("taxonomy_id", "N")),
+        countActive((q) => q.gte("taxonomy_id", "H").lt("taxonomy_id", "I")),
+        countActive((q) => q.eq("difficulty", "최상")),
+        countActive((q) => q.eq("difficulty", "상")),
+        countActive((q) => q.eq("difficulty", "중")),
+        countActive((q) => q.eq("difficulty", "하")),
+        countActive((q) => q.eq("difficulty", "최하")),
+      ]);
+
+      const sevenDaysAgoMs = Date.now() - 7 * 24 * 60 * 60 * 1000;
+      let confTotal = 0;
+      let confRecent = 0;
+      let confElem = 0;
+      let confMid = 0;
+      let confHigh = 0;
+      const confDiff = { 최상: 0, 상: 0, 중: 0, 하: 0, 최하: 0 };
+
+      for (const r of confRows) {
+        if (!r || r.is_hidden === true || r.is_hidden === "Y" || r.is_hidden === "true") continue;
+        if (!isConfidentialQuestionObj(r)) continue;
+        confTotal++;
+        if (r.created_at && new Date(r.created_at).getTime() >= sevenDaysAgoMs) confRecent++;
+        const tax = String(r.taxonomy_id || "");
+        if (tax >= "E" && tax < "F") confElem++;
+        else if (tax >= "M" && tax < "N") confMid++;
+        else if (tax >= "H" && tax < "I") confHigh++;
+        const d = String(r.difficulty || "").trim();
+        if (d === "최상" || d === "상" || d === "중" || d === "하" || d === "최하") {
+          confDiff[d]++;
+        }
+      }
+
+      const totalQuestions = Math.max(0, rawTotal - confTotal);
+      const recentUploads = Math.max(0, rawRecent - confRecent);
+      const elem = Math.max(0, rawElem - confElem);
+      const mid = Math.max(0, rawMid - confMid);
+      const high = Math.max(0, rawHigh - confHigh);
+      const unmapped = Math.max(0, totalQuestions - elem - mid - high);
+
+      const d최상 = Math.max(0, rawD1 - confDiff.최상);
+      const d상 = Math.max(0, rawD2 - confDiff.상);
+      const d중 = Math.max(0, rawD3 - confDiff.중);
+      const d하 = Math.max(0, rawD4 - confDiff.하);
+      const d최하 = Math.max(0, rawD5 - confDiff.최하);
+      const d미지정 = Math.max(0, totalQuestions - d최상 - d상 - d중 - d하 - d최하);
+
+      const totalBooks = (tbRows || []).filter(
+        (t: any) => t?.title && !isConfidentialExamText(t.title)
+      ).length;
+
+      const payload: ServerFactoryStatsPayload = {
+        builtAt: Date.now(),
+        totalQuestions,
+        totalBooks,
+        recentUploads,
+        difficulty: {
+          최상: d최상,
+          상: d상,
+          중: d중,
+          하: d하,
+          최하: d최하,
+          미지정: d미지정,
+        },
+        schoolLevel: {
+          초등: elem,
+          중등: mid,
+          고등: high,
+          분류필요: unmapped,
+        },
       };
       holder.cache = payload;
       return payload;
@@ -471,6 +737,11 @@ export async function PUT(req: NextRequest) {
       }
     }
 
+    // 조회 전용 액션(list_workbooks, factory_stats)은 만료된 브라우저 쿠키(JWT expired)나 authenticated RLS 함수 오버헤드를 피하기 위해 순수 service/anon 클라이언트 사용
+    const supabaseReader = createClient(supabaseUrl, serviceKey, {
+      auth: { persistSession: false, autoRefreshToken: false },
+    });
+
     const supabaseAdmin = createClient(supabaseUrl, serviceKey, {
       auth: { persistSession: false, autoRefreshToken: false },
       ...(!hasServiceRoleKey && userToken
@@ -483,13 +754,24 @@ export async function PUT(req: NextRequest) {
 
     if (action === "list_workbooks") {
       const forceRefresh = Boolean(body?.forceRefresh);
-      const indexed = await getServerWorkbookIndex(supabaseAdmin, forceRefresh);
+      const deep = Boolean(body?.deep);
+      const indexed = await getServerWorkbookIndex(supabaseReader, forceRefresh, deep);
       return NextResponse.json({
         success: true,
+        deepScanned: indexed.deepScanned,
         workbooks: indexed.workbooks,
         questionDbBooks: indexed.questionDbBooks,
         metaByBook: indexed.metaByBook,
         builtAt: indexed.builtAt,
+      });
+    }
+
+    if (action === "factory_stats") {
+      const forceRefresh = Boolean(body?.forceRefresh);
+      const stats = await getServerFactoryStats(supabaseReader, forceRefresh);
+      return NextResponse.json({
+        success: true,
+        stats,
       });
     }
 

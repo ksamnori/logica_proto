@@ -4,6 +4,7 @@
 import React, { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
+import { isConfidentialExamText, isConfidentialQuestionObj } from "@/lib/confidentialExamGuard";
 
 type DashboardStats = {
   totalQuestions: number;
@@ -13,85 +14,107 @@ type DashboardStats = {
   schoolLevel: { 초등: number; 중등: number; 고등: number; 분류필요: number };
 };
 
-const STATS_CACHE_KEY = "logica_factory_stats_cache_v1";
-const STATS_CACHE_TTL_MS = 10 * 60 * 1000; // 10분 캐시 (재진입 시 0ms 즉시 표시 + 백그라운드 갱신)
+const STATS_CACHE_KEY = "logica_factory_stats_cache_v2";
+const LEGACY_STATS_CACHE_KEY = "logica_factory_stats_cache_v1";
+const STATS_CACHE_TTL_MS = 30 * 60 * 1000; // 30분 캐시 (재진입·새 탭 0ms 즉시 표시 + 만료 시 백그라운드 갱신)
 let memoryStatsCache: { stats: DashboardStats; updatedAt: number } | null = null;
 
-// 🌟 [초고속 병렬 로더] 전체 행 수를 HEAD 쿼리로 먼저 확인한 뒤 8개씩 병렬 range 요청으로 고속 수집
-const fetchAllRowsParallel = async (
-  tableName: string,
-  selectQuery: string,
-  orderCol: string,
-  onProgress?: (loaded: number, total: number) => void
-) => {
-  const step = 1000;
-  const concurrency = 8;
+async function computeFactoryStatsClientFallback(): Promise<DashboardStats> {
+  const sevenDaysAgoIso = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+  const activeOr = "is_hidden.is.null,is_hidden.eq.false";
 
-  const { count, error: countErr } = await supabase
-    .from(tableName)
-    .select("*", { count: "exact", head: true });
+  const countActive = (customize?: (q: any) => any): PromiseLike<number> => {
+    let q: any = supabase
+      .from("question_db")
+      .select("question_id", { count: "exact", head: true })
+      .or(activeOr);
+    if (customize) q = customize(q);
+    return q.then(({ count }: any) => Number(count || 0));
+  };
 
-  // count 조회가 지원되지 않는 예외 상황에서는 안전한 병렬 배치 폴백
-  if (countErr || count === null) {
-    const fallback: any[] = [];
-    let page = 0;
-    let hasMore = true;
-    while (hasMore) {
-      const batch = Array.from({ length: concurrency }, (_, idx) => {
-        const start = (page + idx) * step;
-        return supabase
-          .from(tableName)
-          .select(selectQuery)
-          .order(orderCol, { ascending: true })
-          .range(start, start + step - 1);
-      });
-      const results = await Promise.all(batch);
-      for (const res of results) {
-        const rows = res.data || [];
-        if (rows.length > 0) fallback.push(...rows);
-        if (rows.length < step) hasMore = false;
-      }
-      page += concurrency;
-      onProgress?.(fallback.length, fallback.length);
+  const [
+    tbRes,
+    confRes,
+    rawTotal,
+    rawRecent,
+    rawElem,
+    rawMid,
+    rawHigh,
+    rawD1,
+    rawD2,
+    rawD3,
+    rawD4,
+    rawD5,
+  ] = await Promise.all([
+    supabase.from("textbook").select("title"),
+    supabase
+      .from("question_db")
+      .select("question_id, difficulty, taxonomy_id, created_at, is_hidden, source_book_name, book_name, pdf_source")
+      .or(
+        "pdf_source.ilike.%입학테스트%,pdf_source.ilike.%진단평가%,source_book_name.ilike.%입학테스트%,source_book_name.ilike.%진단평가%,book_name.ilike.%입학테스트%,book_name.ilike.%진단평가%,pdf_source.ilike.%입학 테스트%,pdf_source.ilike.%진단 평가%,source_book_name.ilike.%입학 테스트%,source_book_name.ilike.%진단 평가%,book_name.ilike.%입학 테스트%,book_name.ilike.%진단 평가%"
+      )
+      .limit(2000),
+    countActive(),
+    countActive((q) => q.gte("created_at", sevenDaysAgoIso)),
+    countActive((q) => q.gte("taxonomy_id", "E").lt("taxonomy_id", "F")),
+    countActive((q) => q.gte("taxonomy_id", "M").lt("taxonomy_id", "N")),
+    countActive((q) => q.gte("taxonomy_id", "H").lt("taxonomy_id", "I")),
+    countActive((q) => q.eq("difficulty", "최상")),
+    countActive((q) => q.eq("difficulty", "상")),
+    countActive((q) => q.eq("difficulty", "중")),
+    countActive((q) => q.eq("difficulty", "하")),
+    countActive((q) => q.eq("difficulty", "최하")),
+  ]);
+
+  const sevenDaysAgoMs = Date.now() - 7 * 24 * 60 * 60 * 1000;
+  let confTotal = 0;
+  let confRecent = 0;
+  let confElem = 0;
+  let confMid = 0;
+  let confHigh = 0;
+  const confDiff = { 최상: 0, 상: 0, 중: 0, 하: 0, 최하: 0 };
+
+  for (const r of confRes.data || []) {
+    if (!r || r.is_hidden === true || r.is_hidden === "Y" || r.is_hidden === "true") continue;
+    if (!isConfidentialQuestionObj(r)) continue;
+    confTotal++;
+    if (r.created_at && new Date(r.created_at).getTime() >= sevenDaysAgoMs) confRecent++;
+    const tax = String(r.taxonomy_id || "");
+    if (tax >= "E" && tax < "F") confElem++;
+    else if (tax >= "M" && tax < "N") confMid++;
+    else if (tax >= "H" && tax < "I") confHigh++;
+    const d = String(r.difficulty || "").trim();
+    if (d === "최상" || d === "상" || d === "중" || d === "하" || d === "최하") {
+      confDiff[d]++;
     }
-    return fallback;
   }
 
-  if (count === 0) {
-    onProgress?.(0, 0);
-    return [];
-  }
+  const totalQuestions = Math.max(0, rawTotal - confTotal);
+  const recentUploads = Math.max(0, rawRecent - confRecent);
+  const elem = Math.max(0, rawElem - confElem);
+  const mid = Math.max(0, rawMid - confMid);
+  const high = Math.max(0, rawHigh - confHigh);
+  const unmapped = Math.max(0, totalQuestions - elem - mid - high);
 
-  const totalPages = Math.ceil(count / step);
-  const pageChunks: any[][] = new Array(totalPages);
-  let loadedCount = 0;
+  const d최상 = Math.max(0, rawD1 - confDiff.최상);
+  const d상 = Math.max(0, rawD2 - confDiff.상);
+  const d중 = Math.max(0, rawD3 - confDiff.중);
+  const d하 = Math.max(0, rawD4 - confDiff.하);
+  const d최하 = Math.max(0, rawD5 - confDiff.최하);
+  const d미지정 = Math.max(0, totalQuestions - d최상 - d상 - d중 - d하 - d최하);
 
-  for (let p = 0; p < totalPages; p += concurrency) {
-    const waveSize = Math.min(concurrency, totalPages - p);
-    const promises = Array.from({ length: waveSize }, (_, idx) => {
-      const pageIndex = p + idx;
-      const start = pageIndex * step;
-      return supabase
-        .from(tableName)
-        .select(selectQuery)
-        .order(orderCol, { ascending: true })
-        .range(start, start + step - 1)
-        .then(({ data, error }: { data: any[] | null; error: any }) => {
-          const rows = !error && data ? data : [];
-          pageChunks[pageIndex] = rows;
-          loadedCount += rows.length;
-          onProgress?.(Math.min(loadedCount, count), count);
-        });
-    });
-    await Promise.all(promises);
-  }
+  const totalBooks = (tbRes.data || []).filter(
+    (t: any) => t?.title && !isConfidentialExamText(t.title)
+  ).length;
 
-  const allData: any[] = [];
-  for (const chunk of pageChunks) {
-    if (chunk && chunk.length > 0) allData.push(...chunk);
-  }
-  return allData;
-};
+  return {
+    totalQuestions,
+    totalBooks,
+    recentUploads,
+    difficulty: { 최상: d최상, 상: d상, 중: d중, 하: d하, 최하: d최하, 미지정: d미지정 },
+    schoolLevel: { 초등: elem, 중등: mid, 고등: high, 분류필요: unmapped },
+  };
+}
 
 export default function FactoryDashboardPage() {
   const router = useRouter();
@@ -132,7 +155,11 @@ export default function FactoryDashboardPage() {
   useEffect(() => {
     if (!isAuthorized) return;
 
-    // 1. 메모리 또는 세션 캐시가 있으면 0ms 즉시 렌더링하고, 만료 시에만 백그라운드 갱신
+    try {
+      sessionStorage.removeItem(LEGACY_STATS_CACHE_KEY);
+    } catch {}
+
+    // 1. 메모리 또는 localStorage 캐시가 있으면 0ms 즉시 렌더링하고, 만료 시에만 백그라운드 갱신
     let hydrated = false;
     if (memoryStatsCache) {
       setStats(memoryStatsCache.stats);
@@ -144,7 +171,7 @@ export default function FactoryDashboardPage() {
       }
     } else {
       try {
-        const raw = sessionStorage.getItem(STATS_CACHE_KEY);
+        const raw = localStorage.getItem(STATS_CACHE_KEY) || sessionStorage.getItem(STATS_CACHE_KEY);
         if (raw) {
           const parsed = JSON.parse(raw);
           if (parsed?.stats && parsed?.updatedAt) {
@@ -161,10 +188,10 @@ export default function FactoryDashboardPage() {
       } catch {}
     }
 
-    loadDashboardData(hydrated);
+    loadDashboardData(hydrated, false);
   }, [isAuthorized]);
 
-  const loadDashboardData = async (silentBackground: boolean = false) => {
+  const loadDashboardData = async (silentBackground: boolean = false, forceRefresh: boolean = false) => {
     if (silentBackground) {
       setIsRefreshingBg(true);
     } else {
@@ -173,74 +200,44 @@ export default function FactoryDashboardPage() {
     }
 
     try {
-      // 🌟 교재 수, 카테고리, 아이템, 문제은행 메타데이터(무거운 UUID question_id 제외!)를 모두 동시에 병렬 호출
-      const [bookRes, categories, items, qData] = await Promise.all([
-        supabase.from("textbook").select("*", { count: "exact", head: true }),
-        fetchAllRowsParallel("master_category", "category_id, depth1", "category_id"),
-        fetchAllRowsParallel("master_item", "item_id, category_id", "item_id"),
-        fetchAllRowsParallel(
-          "question_db",
-          "difficulty, taxonomy_id, created_at, is_hidden",
-          "question_id",
-          (loaded, total) => setLoadProgress({ loaded, total })
-        ),
-      ]);
+      let nextStats: DashboardStats | null = null;
+      let builtAt = Date.now();
 
-      const catMap = new Map<string, string>();
-      categories.forEach((c: any) => {
-        if (c.category_id) catMap.set(c.category_id, c.depth1 || "");
-      });
-      items.forEach((i: any) => {
-        if (i.item_id) catMap.set(i.item_id, catMap.get(i.category_id) || "");
-      });
-
-      const sevenDaysAgoMs = Date.now() - 7 * 24 * 60 * 60 * 1000;
-      let totalQ = 0;
-      let recent = 0;
-      const diffCount = { 최상: 0, 상: 0, 중: 0, 하: 0, 최하: 0, 미지정: 0 };
-      const schoolCount = { 초등: 0, 중등: 0, 고등: 0, 분류필요: 0 };
-
-      for (let i = 0; i < qData.length; i++) {
-        const q = qData[i];
-        if (q.is_hidden === true || q.is_hidden === "Y" || q.is_hidden === "true") continue;
-        totalQ++;
-
-        if (q.created_at && new Date(q.created_at).getTime() >= sevenDaysAgoMs) {
-          recent++;
+      try {
+        const res = await fetch("/api/gemini-twin", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "factory_stats", forceRefresh }),
+        });
+        if (res.ok) {
+          const json = await res.json();
+          if (json?.success && json.stats) {
+            nextStats = {
+              totalQuestions: json.stats.totalQuestions,
+              totalBooks: json.stats.totalBooks,
+              recentUploads: json.stats.recentUploads,
+              difficulty: json.stats.difficulty,
+              schoolLevel: json.stats.schoolLevel,
+            };
+            builtAt = Number(json.stats.builtAt) || Date.now();
+          }
         }
+      } catch {}
 
-        const diff: string = String(q.difficulty ?? "").trim();
-        if (diff === "최상" || diff === "상" || diff === "중" || diff === "하" || diff === "최하") {
-          diffCount[diff]++;
-        } else {
-          diffCount["미지정"]++;
-        }
-
-        const taxId: string = q.taxonomy_id ? String(q.taxonomy_id) : "";
-        const depth1Str = (taxId && catMap.get(taxId)) || "";
-
-        if (depth1Str.includes("초등") || (taxId && taxId.startsWith("E"))) schoolCount["초등"]++;
-        else if (depth1Str.includes("중등") || depth1Str.includes("중학") || (taxId && taxId.startsWith("M"))) schoolCount["중등"]++;
-        else if (depth1Str.includes("고등") || (taxId && taxId.startsWith("H"))) schoolCount["고등"]++;
-        else schoolCount["분류필요"]++;
+      if (!nextStats) {
+        nextStats = await computeFactoryStatsClientFallback();
+        builtAt = Date.now();
       }
 
-      const nextStats: DashboardStats = {
-        totalQuestions: totalQ,
-        totalBooks: bookRes.count || 0,
-        recentUploads: recent,
-        difficulty: diffCount,
-        schoolLevel: schoolCount,
-      };
-
-      const now = Date.now();
-      memoryStatsCache = { stats: nextStats, updatedAt: now };
+      memoryStatsCache = { stats: nextStats, updatedAt: builtAt };
       try {
-        sessionStorage.setItem(STATS_CACHE_KEY, JSON.stringify(memoryStatsCache));
+        const serialized = JSON.stringify(memoryStatsCache);
+        localStorage.setItem(STATS_CACHE_KEY, serialized);
+        sessionStorage.setItem(STATS_CACHE_KEY, serialized);
       } catch {}
 
       setStats(nextStats);
-      setLastUpdatedAt(now);
+      setLastUpdatedAt(builtAt);
     } catch (e) {
       console.error(e);
     } finally {
@@ -306,7 +303,7 @@ export default function FactoryDashboardPage() {
           </p>
         </div>
         <button
-          onClick={() => loadDashboardData(false)}
+          onClick={() => loadDashboardData(false, true)}
           disabled={isLoading || isRefreshingBg}
           className="relative z-10 px-5 py-2.5 bg-white/10 hover:bg-white/20 disabled:opacity-60 text-white font-bold rounded-xl border border-white/20 transition-colors flex items-center gap-2 cursor-pointer"
         >

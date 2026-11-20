@@ -4,6 +4,7 @@ import { isConfidentialExamText, isConfidentialQuestionObj } from "./confidentia
 export interface WorkbookDuplicateSummary {
   count: number;
   inQuestionDb: boolean;
+  hasSourceOnlyRows?: boolean;
   internalDupCount: number;
   internalDupGroups: number;
   aliasBook?: string;
@@ -226,12 +227,14 @@ const taxSortLocal = (a: string, b: string) => {
 export function buildWorkbookIndexAndDuplicates(
   qbRows: any[],
   tbRowsOrTitles: Array<string | { book_id?: any; title?: any }>,
-  tqRows?: Array<{ book_id?: any; question_id?: any }>
+  tqRows?: Array<{ book_id?: any; question_id?: any }>,
+  options?: { skipDeepFingerprints?: boolean }
 ): {
   workbooks: string[];
   questionDbBooks: string[];
   metaByBook: Record<string, WorkbookDuplicateSummary>;
 } {
+  const skipDeep = Boolean(options?.skipDeepFingerprints);
   const bookIdToTitle = new Map<string, string>();
   const cleanTitles: string[] = [];
 
@@ -253,6 +256,8 @@ export function buildWorkbookIndexAndDuplicates(
   const bundleRowsMap = new Map<string, Map<string, any>>();
   // question_db의 source_book_name 또는 book_name에 직접 등장한 묶음 집합
   const directQdbBookSet = new Set<string>();
+  // book_name 없이(또는 다르게) source_book_name으로만 매칭되는 행이 있는 묶음 집합
+  const sourceOnlyBookSet = new Set<string>();
   // qid -> row (비대외비 유효 문항 전체 맵)
   const validRowByQid = new Map<string, any>();
   // qid -> string[] (bundleNames)
@@ -277,17 +282,25 @@ export function buildWorkbookIndexAndDuplicates(
     }
   };
 
+  const hasTqRows = Array.isArray(tqRows) && tqRows.length > 0 && bookIdToTitle.size > 0;
+
   for (let i = 0; i < (qbRows || []).length; i++) {
     const q = qbRows[i];
     if (!q || isConfidentialQuestionObj(q)) continue;
     const qid = String(q.question_id || "").trim();
     if (!qid) continue;
 
-    validRowByQid.set(qid, q);
-    validRowByQid.set(qid.toLowerCase(), q);
+    if (hasTqRows) {
+      validRowByQid.set(qid, q);
+      validRowByQid.set(qid.toLowerCase(), q);
+    }
 
     const sb = String(q.source_book_name || "").normalize("NFC").trim();
     const bn = String(q.book_name || "").normalize("NFC").trim();
+
+    if (sb && sb !== bn && !isConfidentialExamText(sb)) {
+      sourceOnlyBookSet.add(sb);
+    }
 
     const names: string[] = [];
     if (sb && !isConfidentialExamText(sb)) names.push(sb);
@@ -301,7 +314,7 @@ export function buildWorkbookIndexAndDuplicates(
   }
 
   // textbook_question 매핑으로 연결된 문항도 해당 교재 묶음 수량·중복 분석에 빠짐없이 편입
-  if (Array.isArray(tqRows) && tqRows.length > 0 && bookIdToTitle.size > 0) {
+  if (hasTqRows && tqRows) {
     for (let i = 0; i < tqRows.length; i++) {
       const tq = tqRows[i];
       if (!tq) continue;
@@ -328,6 +341,7 @@ export function buildWorkbookIndexAndDuplicates(
     metaByBook[w] = {
       count: 0,
       inQuestionDb: directQdbBookSet.has(w),
+      hasSourceOnlyRows: sourceOnlyBookSet.has(w),
       internalDupCount: 0,
       internalDupGroups: 0,
     };
@@ -337,15 +351,24 @@ export function buildWorkbookIndexAndDuplicates(
   const hashToBooks = new Map<number, Map<string, string>>();
   const bundleHashSetMap = new Map<string, Map<number, string>>();
 
-  // 1) 각 묶음의 활성 문항 수 및 내부 2중 중복(internalDupCount) 계산
+  // 1) 각 묶음의 활성 문항 수 및 (정밀모드 시) 내부 2중 중복 계산
   bundleRowsMap.forEach((qMap, bName) => {
+    const summary = metaByBook[bName];
+    if (!summary) return;
+
+    if (skipDeep) {
+      let activeCnt = 0;
+      qMap.forEach((row) => {
+        if (!isHiddenRow(row)) activeCnt++;
+      });
+      summary.count = activeCnt;
+      return;
+    }
+
     const activeRows: any[] = [];
     qMap.forEach((row) => {
       if (!isHiddenRow(row)) activeRows.push(row);
     });
-
-    const summary = metaByBook[bName];
-    if (!summary) return;
     summary.count = activeRows.length;
 
     const textSeen = new Map<string, number>();

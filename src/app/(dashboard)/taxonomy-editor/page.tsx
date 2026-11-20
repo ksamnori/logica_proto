@@ -31,6 +31,7 @@ const getBoxWidth = (box: any) => {
 export default function TaxonomyEditorPage() {
   const {
     isAuthorized, perms, isTaxonomyLoading, isWorkbooksLoading, workbookScanProgress,
+    isDeepDupScanned, isScanningDuplicates,
     isFetchingQuestions, fetchStepMessage, loadWorkbooks,
     workbooks, questionDbBookSet, workbookMetaMap, duplicateQuestionMap,
     selectedBook, questions, selectedQuestion, isLoading,
@@ -881,21 +882,32 @@ export default function TaxonomyEditorPage() {
             ))}
             <button
               type="button"
+              disabled={isScanningDuplicates}
               onClick={() => {
-                setOnlyDupBundles((prev) => !prev);
+                const nextActive = !onlyDupBundles;
+                setOnlyDupBundles(nextActive);
                 setPickerLimit(500);
                 setIsBookPickerOpen(true);
+                if (nextActive && !isDeepDupScanned && !isScanningDuplicates) {
+                  loadWorkbooks(false, true);
+                }
               }}
               className={`ml-1 px-2.5 py-1 rounded-md text-xs font-bold border transition-all ${
                 onlyDupBundles
                   ? "bg-rose-600 text-white border-rose-600 shadow-sm"
                   : dupWorkbookCount > 0
                   ? "bg-rose-50 text-rose-700 border-rose-200 hover:bg-rose-100"
-                  : "bg-slate-50 text-slate-400 border-slate-200 hover:bg-slate-100"
+                  : "bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100"
               }`}
               title="묶음 내부 중복 문항, book_name≠source_book_name 별칭 중복, 또는 타 묶음과 동일 문제가 2중 적재된 의심 묶음만 모아서 봅니다."
             >
-              ⚠️ 중복 의심 묶음 ({dupWorkbookCount})
+              {isScanningDuplicates
+                ? "⏳ 중복 정밀검사 중..."
+                : isDeepDupScanned
+                ? `⚠️ 중복 의심 묶음 (${dupWorkbookCount})`
+                : dupWorkbookCount > 0
+                ? `⚠️ 중복 의심 묶음 (${dupWorkbookCount}+)`
+                : "⚠️ 중복 의심 묶음 검사"}
             </button>
           </div>
         </div>
@@ -990,7 +1002,12 @@ export default function TaxonomyEditorPage() {
                 </div>
 
                 <div className="overflow-y-auto flex-1 divide-y divide-slate-100 custom-scroll">
-                  {filteredWorkbooks.length === 0 ? (
+                  {isScanningDuplicates && filteredWorkbooks.length === 0 ? (
+                    <div className="py-10 text-center text-rose-600 font-bold text-sm flex items-center justify-center gap-2">
+                      <span className="w-4 h-4 border-2 border-rose-600 border-t-transparent rounded-full animate-spin" />
+                      <span>전체 묶음의 2중 적재·복제 여부를 정밀 분석하고 있습니다...</span>
+                    </div>
+                  ) : filteredWorkbooks.length === 0 ? (
                     <div className="py-10 text-center text-slate-400 font-bold text-sm">
                       선택한 필터 조건에 맞는 교재가 없습니다.
                     </div>

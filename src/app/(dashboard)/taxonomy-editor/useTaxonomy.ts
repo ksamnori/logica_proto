@@ -168,15 +168,16 @@ export const isExcludedDiagnosticQuestionRow = (q: any): boolean => {
 
 // 🌟 탭 내 페이지 이동 및 재방문 시 재다운로드(수만 건 풀스캔) 방지를 위한 다계층 캐시
 const MASTER_TAXONOMY_TTL_MS = 60 * 60 * 1000;
-const WORKBOOKS_CACHE_KEY = "logica_taxonomy_workbooks_v5";
-const LEGACY_WORKBOOKS_CACHE_KEY = "logica_taxonomy_workbooks_v4";
+const WORKBOOKS_CACHE_KEY = "logica_taxonomy_workbooks_v6";
+const LEGACY_WORKBOOKS_CACHE_KEYS = ["logica_taxonomy_workbooks_v4", "logica_taxonomy_workbooks_v5"];
 const PERMS_CACHE_KEY = "logica_taxonomy_perms_v1";
-const WORKBOOKS_TTL_MS = 15 * 60 * 1000;
+const WORKBOOKS_TTL_MS = 2 * 60 * 60 * 1000; // 2시간 로컬 캐시 (Stale-While-Revalidate)
 
 interface CachedWorkbooksBundle {
   list: string[];
   questionDbBooks: string[];
   metaByBook: Record<string, WorkbookDuplicateSummary>;
+  deepScanned?: boolean;
   updatedAt: number;
 }
 
@@ -197,8 +198,10 @@ function readPersistedWorkbooksCache(): CachedWorkbooksBundle | null {
   if (cachedWorkbooksMemory) return cachedWorkbooksMemory;
   if (typeof window === "undefined") return null;
   try {
-    localStorage.removeItem(LEGACY_WORKBOOKS_CACHE_KEY);
-    sessionStorage.removeItem(LEGACY_WORKBOOKS_CACHE_KEY);
+    for (const k of LEGACY_WORKBOOKS_CACHE_KEYS) {
+      localStorage.removeItem(k);
+      sessionStorage.removeItem(k);
+    }
   } catch {}
   try {
     const raw =
@@ -223,6 +226,7 @@ function readPersistedWorkbooksCache(): CachedWorkbooksBundle | null {
         list: cleanList,
         questionDbBooks: cleanQdb,
         metaByBook: cleanMeta,
+        deepScanned: Boolean(parsed.deepScanned),
         updatedAt: Number(parsed.updatedAt) || 0,
       };
       cachedWorkbooksMemory = bundle;
@@ -249,8 +253,13 @@ export function useTaxonomy() {
   const [workbookMetaMap, setWorkbookMetaMap] = useState<Record<string, WorkbookDuplicateSummary>>(
     () => cachedWorkbooksMemory?.metaByBook || {}
   );
+  const [isDeepDupScanned, setIsDeepDupScanned] = useState<boolean>(
+    () => Boolean(cachedWorkbooksMemory?.deepScanned)
+  );
+  const [isScanningDuplicates, setIsScanningDuplicates] = useState<boolean>(false);
   const [isWorkbooksLoading, setIsWorkbooksLoading] = useState<boolean>(() => !cachedWorkbooksMemory);
   const [workbookScanProgress, setWorkbookScanProgress] = useState<number>(0);
+  const fetchSeqRef = useRef<number>(0);
 
   const [selectedBook, setSelectedBook] = useState<string>("");
   const [questions, setQuestions] = useState<any[]>([]);
@@ -528,7 +537,8 @@ export function useTaxonomy() {
     });
   };
 
-  const loadWorkbooks = async (forceRefresh: boolean = false) => {
+  const loadWorkbooks = async (forceRefresh: boolean = false, deep: boolean = false) => {
+    if (deep) setIsScanningDuplicates(true);
     try {
       // 업로드 페이지(/qdb-upload, /book-upload)에서 방금 추가된 교재명이 있으면 캐시에 즉시 병합
       let pendingUploadedBooks: string[] = [];
@@ -546,6 +556,7 @@ export function useTaxonomy() {
       } catch {}
 
       const persisted = readPersistedWorkbooksCache();
+      let silentBackground = false;
       if (persisted && persisted.list.length > 0) {
         const mergedList =
           pendingUploadedBooks.length > 0
@@ -563,24 +574,51 @@ export function useTaxonomy() {
         setWorkbooks(mergedList);
         setQuestionDbBooks(mergedQdb);
         setWorkbookMetaMap(persisted.metaByBook || {});
+        setIsDeepDupScanned(Boolean(persisted.deepScanned));
 
         if (pendingUploadedBooks.length > 0) {
           forceRefresh = true;
-        } else if (!forceRefresh && Date.now() - persisted.updatedAt < WORKBOOKS_TTL_MS) {
+          silentBackground = true;
           setIsWorkbooksLoading(false);
-          return;
+        } else if (!forceRefresh && (!deep || persisted.deepScanned)) {
+          setIsWorkbooksLoading(false);
+          if (Date.now() - persisted.updatedAt < WORKBOOKS_TTL_MS) {
+            return;
+          }
+          // 캐시 만료 시에도 스피너 없이 백그라운드에서만 조용히 최신화(Stale-While-Revalidate)
+          silentBackground = true;
         }
       }
 
-      setIsWorkbooksLoading(true);
-      setWorkbookScanProgress(20);
+      if (!silentBackground && !deep) {
+        setIsWorkbooksLoading(true);
+        setWorkbookScanProgress(15);
+        // 캐시가 전혀 없는 첫 방문 시에도 textbook 제목(수백 건, ~40ms)을 먼저 띄워 즉시 선택 가능하게 함
+        supabase
+          .from("textbook")
+          .select("title")
+          .limit(1000)
+          .then(({ data }) => {
+            if (!data || data.length === 0) return;
+            const fastTitles = data
+              .map((t: any) => String(t?.title || "").normalize("NFC").trim())
+              .filter((t: string) => t && !isExcludedDiagnosticBookName(t));
+            if (fastTitles.length > 0) {
+              setWorkbooks((prev) =>
+                prev.length > 0
+                  ? prev
+                  : Array.from(new Set([...fastTitles, ...pendingUploadedBooks])).sort(taxSort)
+              );
+            }
+          });
+      }
 
-      // 🌟 1순위: 서버 인메모리 캐시 API(/api/gemini-twin PUT list_workbooks)로 단 1회 고속 조회
+      // 🌟 1순위: 서버 8-샤드 PK Keyset 인덱스 캐시 API(/api/gemini-twin PUT list_workbooks)
       try {
         const srvRes = await fetch("/api/gemini-twin", {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ action: "list_workbooks", forceRefresh }),
+          body: JSON.stringify({ action: "list_workbooks", forceRefresh, deep }),
         });
         if (srvRes.ok) {
           const srvJson = await srvRes.json();
@@ -614,73 +652,97 @@ export function useTaxonomy() {
               }
             }
 
+            const nextDeep = Boolean(srvJson.deepScanned);
             setWorkbooks(srvList);
             setQuestionDbBooks(srvQdb);
             setWorkbookMetaMap(srvMeta);
+            setIsDeepDupScanned(nextDeep);
             setWorkbookScanProgress(100);
             persistWorkbooksCache({
               list: srvList,
               questionDbBooks: srvQdb,
               metaByBook: srvMeta,
+              deepScanned: nextDeep,
               updatedAt: Date.now(),
             });
             return;
           }
         }
       } catch {
-        // 서버 요청 예외 시 아래 클라이언트 병렬 스캔으로 안전하게 폴백
+        // 서버 요청 예외 시 아래 클라이언트 8-샤드 Keyset 폴백 실행
       }
 
-      // 2순위 폴백: 클라이언트 직접 스캔
-      const [tbData, tqData] = await Promise.all([
-        fetchAllRows('textbook', 'book_id, title'),
-        fetchAllRows('textbook_question', 'book_id, question_id'),
+      // 2순위 폴백: OFFSET 없이 클라이언트 8-샤드 PK Keyset 스캔
+      const clientShards: Array<[string | null, string | null]> = [
+        [null, "20000000-0000-0000-0000-000000000000"],
+        ["20000000-0000-0000-0000-000000000000", "40000000-0000-0000-0000-000000000000"],
+        ["40000000-0000-0000-0000-000000000000", "60000000-0000-0000-0000-000000000000"],
+        ["60000000-0000-0000-0000-000000000000", "80000000-0000-0000-0000-000000000000"],
+        ["80000000-0000-0000-0000-000000000000", "a0000000-0000-0000-0000-000000000000"],
+        ["a0000000-0000-0000-0000-000000000000", "c0000000-0000-0000-0000-000000000000"],
+        ["c0000000-0000-0000-0000-000000000000", "e0000000-0000-0000-0000-000000000000"],
+        ["e0000000-0000-0000-0000-000000000000", null],
+      ];
+      const cols: string = deep
+        ? "question_id, source_book_name, book_name, pdf_source, final_printed_page, detected_page_num, question_number, sub_num, answer, taxonomy_id, derivation_type, parent_question_id, is_hidden"
+        : "question_id, source_book_name, book_name, pdf_source, is_hidden";
+
+      let doneShards = 0;
+      const [{ data: tbData }, shardArrays] = await Promise.all([
+        supabase.from("textbook").select("book_id, title").limit(2000),
+        Promise.all(
+          clientShards.map(async ([lo, hi]) => {
+            const arr: any[] = [];
+            let cursor: string | null = null;
+            while (true) {
+              let q = supabase
+                .from("question_db")
+                .select(cols)
+                .order("question_id", { ascending: true })
+                .limit(1000);
+              if (cursor !== null) q = q.gt("question_id", cursor);
+              else if (lo !== null) q = q.gte("question_id", lo);
+              if (hi !== null) q = q.lt("question_id", hi);
+              const { data, error } = await q;
+              const pageRows = data as any[] | null;
+              if (error || !pageRows || pageRows.length === 0) break;
+              arr.push(...pageRows);
+              if (pageRows.length < 1000) break;
+              cursor = String(pageRows[pageRows.length - 1]?.question_id || "");
+              if (!cursor) break;
+            }
+            doneShards++;
+            setWorkbookScanProgress(Math.min(98, 20 + Math.round((doneShards / 8) * 78)));
+            return arr;
+          })
+        ),
       ]);
-      const titles = (tbData || [])
-        .map((t: any) => String(t?.title || "").normalize("NFC").trim())
-        .filter((t: string) => t && !isExcludedDiagnosticBookName(t));
 
-      if (titles.length > 0) {
-        setWorkbooks((prev) =>
-          Array.from(new Set([...prev, ...titles]))
-            .filter((b) => b && !isExcludedDiagnosticBookName(b))
-            .sort(taxSort)
-        );
-      }
-      setWorkbookScanProgress(35);
-
-      const qbRows = await fetchAllRows(
-        'question_db',
-        'question_id, source_book_name, book_name, pdf_source, final_printed_page, detected_page_num, question_number, sub_num, answer, taxonomy_id, derivation_type, parent_question_id, is_hidden',
-        undefined,
-        undefined,
-        (loaded, total) => {
-          if (total > 0) {
-            setWorkbookScanProgress(Math.min(99, 35 + Math.round((loaded / total) * 64)));
-          }
-        }
-      );
-
+      const qbRows = shardArrays.flat();
       const built = buildWorkbookIndexAndDuplicates(
-        qbRows || [],
+        qbRows,
         [...(tbData || []), ...pendingUploadedBooks],
-        tqData || []
+        [],
+        { skipDeepFingerprints: !deep }
       );
 
       setWorkbooks(built.workbooks);
       setQuestionDbBooks(built.questionDbBooks);
       setWorkbookMetaMap(built.metaByBook);
+      setIsDeepDupScanned(deep);
       setWorkbookScanProgress(100);
       persistWorkbooksCache({
         list: built.workbooks,
         questionDbBooks: built.questionDbBooks,
         metaByBook: built.metaByBook,
+        deepScanned: deep,
         updatedAt: Date.now(),
       });
     } catch (e) {
       console.error(e);
     } finally {
       setIsWorkbooksLoading(false);
+      if (deep) setIsScanningDuplicates(false);
     }
   };
 
@@ -803,29 +865,62 @@ export function useTaxonomy() {
     if (typeof bookOverride === "string" && bookOverride !== selectedBook) {
       setSelectedBook(bookOverride);
     }
+
+    const mySeq = ++fetchSeqRef.current;
+    const normTarget = String(targetBook).normalize("NFC").trim();
+    const knownMeta = workbookMetaMap[normTarget];
+
     setIsLoading(true);
     setIsFetchingQuestions(true);
     setFetchStepMessage(`'${targetBook}' 교재 문항을 조회하고 있습니다...`);
+
     try {
-      // 🌟 1단계: question_db 본문 직접 조회와 textbook 매핑 조회를 동시에 병렬 실행 (중복 SELECT * 왕복 제거!)
+      // 🌟 1단계: idx_question_db_book_name B-Tree 인덱스를 우선 활용하여 풀테이블 스캔 방지 (~20ms)
       const fetchDirectQuestions = async () => {
-        const rows: any[] = [];
-        let from1 = 0;
+        const byId = new Map<string, any>();
+
+        let fromBook = 0;
         while (true) {
           const { data } = await supabase
             .from("question_db")
             .select("*")
-            .or(`source_book_name.eq."${targetBook}",book_name.eq."${targetBook}"`)
-            .range(from1, from1 + 999);
+            .eq("book_name", targetBook)
+            .range(fromBook, fromBook + 999);
           if (data && data.length > 0) {
             for (const d of data) {
-              if (!isExcludedDiagnosticQuestionRow(d)) rows.push(d);
+              if (!isExcludedDiagnosticQuestionRow(d) && d?.question_id) {
+                byId.set(String(d.question_id).trim(), d);
+              }
             }
           }
           if (!data || data.length < 1000) break;
-          from1 += 1000;
+          fromBook += 1000;
         }
-        return rows;
+
+        // book_name 과 source_book_name 이 다른 행이 있거나 book_name 조회 결과가 0건인 경우에만 source_book_name 추가 조회
+        const needSourceScan =
+          byId.size === 0 || !knownMeta || Boolean(knownMeta.hasSourceOnlyRows);
+        if (needSourceScan) {
+          let fromSrc = 0;
+          while (true) {
+            const { data } = await supabase
+              .from("question_db")
+              .select("*")
+              .eq("source_book_name", targetBook)
+              .range(fromSrc, fromSrc + 999);
+            if (data && data.length > 0) {
+              for (const d of data) {
+                if (!isExcludedDiagnosticQuestionRow(d) && d?.question_id) {
+                  byId.set(String(d.question_id).trim(), d);
+                }
+              }
+            }
+            if (!data || data.length < 1000) break;
+            fromSrc += 1000;
+          }
+        }
+
+        return Array.from(byId.values());
       };
 
       const fetchTextbookLinkedIds = async () => {
@@ -855,20 +950,22 @@ export function useTaxonomy() {
         fetchDirectQuestions(),
         fetchTextbookLinkedIds(),
       ]);
+      if (fetchSeqRef.current !== mySeq) return;
 
       directRows.forEach((r: any) => {
         if (r) r._linkedToSelectedBook = true;
       });
 
-      let fetchedQuestions: any[] = [...directRows];
+      const fetchedQuestions: any[] = [...directRows];
       const currentQids = new Set(fetchedQuestions.map(q => String(q.question_id).trim().toLowerCase()));
 
-      // textbook_question 에만 연결되어 아직 로드되지 않은 추가 문항 ID만 조회
+      // URL 길이 한도(16KB)를 넘지 않도록 120개 단위 청크 조회
+      const ID_CHUNK_SIZE = 120;
       const extraTbIds = Array.from(new Set(tbLinkedIds)).filter(id => id && !currentQids.has(id.toLowerCase()));
       if (extraTbIds.length > 0) {
         const extraPromises: PromiseLike<any>[] = [];
-        for (let i = 0; i < extraTbIds.length; i += 500) {
-          const chunk = extraTbIds.slice(i, i + 500);
+        for (let i = 0; i < extraTbIds.length; i += ID_CHUNK_SIZE) {
+          const chunk = extraTbIds.slice(i, i + ID_CHUNK_SIZE);
           extraPromises.push(supabase.from("question_db").select("*").in("question_id", chunk));
         }
         const extraResults = await Promise.all(extraPromises);
@@ -884,77 +981,15 @@ export function useTaxonomy() {
           });
         });
       }
+      if (fetchSeqRef.current !== mySeq) return;
 
-      setFetchStepMessage("연결된 부모·쌍둥이/유사 문항 트리를 구성하고 있습니다...");
+      // 🌟 2단계: 본교재/묶음 자체 문항을 즉시 화면에 먼저 렌더링하여 대기 시간 제로화!
+      await hydrateMissingQuestionImages(supabase, fetchedQuestions);
+      if (fetchSeqRef.current !== mySeq) return;
 
-      while (true) {
-        const pids = fetchedQuestions.map(q => q.parent_question_id).filter(id => id && String(id).trim().toLowerCase() !== 'null');
-        const uniqueCleanPids = Array.from(new Set(pids.map(id => String(id).trim())));
-        const missingPids = uniqueCleanPids.filter(pid => !currentQids.has(pid.toLowerCase()));
-        
-        if (missingPids.length === 0) break; 
-        missingPids.forEach(pid => currentQids.add(pid.toLowerCase()));
-        
-        const parentPromises: PromiseLike<any>[] = [];
-        for (let i = 0; i < missingPids.length; i += 500) {
-          const chunk = missingPids.slice(i, i + 500);
-          parentPromises.push(supabase.from("question_db").select("*").in("question_id", chunk));
-        }
-        const parentResults = await Promise.all(parentPromises);
-        parentResults.forEach(({ data }: any) => {
-          (data || []).forEach((p: any) => {
-            if (!isExcludedDiagnosticQuestionRow(p)) {
-              fetchedQuestions.push(p);
-            }
-          });
-        });
-      }
-
-      const searchedParentIds = new Set<string>();
-      while (true) {
-        const qidsToSearch = fetchedQuestions.map(q => String(q.question_id).trim()).filter(id => !searchedParentIds.has(id.toLowerCase()));
-        if (qidsToSearch.length === 0) break;
-        qidsToSearch.forEach(id => searchedParentIds.add(id.toLowerCase()));
-        
-        const childPromises: PromiseLike<any>[] = [];
-        for (let i = 0; i < qidsToSearch.length; i += 500) {
-          const chunk = qidsToSearch.slice(i, i + 500);
-          childPromises.push(supabase.from("question_db").select("*").in("parent_question_id", chunk));
-        }
-        const childResults = await Promise.all(childPromises);
-        let addedAny = false;
-        childResults.forEach(({ data }: any) => {
-          (data || []).forEach((c: any) => {
-            if (isExcludedDiagnosticQuestionRow(c)) return;
-            const k = String(c.question_id).trim().toLowerCase();
-            if (!currentQids.has(k)) {
-              currentQids.add(k);
-              fetchedQuestions.push(c);
-              addedAny = true;
-            }
-          });
-        });
-        if (!addedAny) break;
-      }
-
-      const finalMap = new Map();
-      fetchedQuestions.forEach((q: any) => {
-        if (!isExcludedDiagnosticQuestionRow(q)) {
-          finalMap.set(q.question_id, q);
-        }
-      });
-      const finalQuestions = Array.from(finalMap.values());
-      setFetchStepMessage("문항 이미지 및 수식 렌더링을 마무리하고 있습니다...");
-      await hydrateMissingQuestionImages(supabase, finalQuestions);
-
-      // 🌟 실제 조회된 현재 교재 소속 활성 문항 수로 드롭다운 메타(count) 즉시 동기화
-      const normTarget = String(targetBook).normalize("NFC").trim();
-      const ownActiveCount = finalQuestions.filter((q: any) => {
+      const ownActiveCount = fetchedQuestions.filter((q: any) => {
         if (!q || q.is_hidden === true || q.is_hidden === "Y" || q.is_hidden === "true") return false;
-        if (q._linkedToSelectedBook) return true;
-        const sb = String(q.source_book_name || "").normalize("NFC").trim();
-        const bn = String(q.book_name || "").normalize("NFC").trim();
-        return sb === normTarget || bn === normTarget;
+        return true;
       }).length;
 
       setWorkbookMetaMap((prev) => {
@@ -965,6 +1000,7 @@ export function useTaxonomy() {
           [normTarget]: {
             count: ownActiveCount,
             inQuestionDb: prevEntry?.inQuestionDb ?? directRows.length > 0,
+            hasSourceOnlyRows: prevEntry?.hasSourceOnlyRows,
             internalDupCount: prevEntry?.internalDupCount ?? 0,
             internalDupGroups: prevEntry?.internalDupGroups ?? 0,
             ...(prevEntry?.aliasBook ? { aliasBook: prevEntry.aliasBook, aliasSharedPct: prevEntry.aliasSharedPct } : {}),
@@ -980,15 +1016,102 @@ export function useTaxonomy() {
         return updated;
       });
 
-      setQuestions(sortQuestionsList(finalQuestions));
-      setSelectedQuestion(null); 
+      setQuestions(sortQuestionsList(fetchedQuestions));
+      setSelectedQuestion(null);
       setIsEditingContent(false);
-    } catch (e) {
-      console.error(e);
-    } finally {
       setIsFetchingQuestions(false);
       setFetchStepMessage("");
       setIsLoading(false);
+
+      // 🌟 3단계: 연결된 부모·쌍둥이/유사 파생 트리는 UI 블로킹 없이 백그라운드에서 보강
+      void (async () => {
+        try {
+          const allTreeItems = [...fetchedQuestions];
+          let addedExternal = false;
+
+          while (fetchSeqRef.current === mySeq) {
+            const pids = allTreeItems
+              .map((q) => q.parent_question_id)
+              .filter((id) => id && String(id).trim().toLowerCase() !== "null");
+            const uniqueCleanPids = Array.from(new Set(pids.map((id) => String(id).trim())));
+            const missingPids = uniqueCleanPids.filter((pid) => !currentQids.has(pid.toLowerCase()));
+
+            if (missingPids.length === 0) break;
+            missingPids.forEach((pid) => currentQids.add(pid.toLowerCase()));
+
+            const parentPromises: PromiseLike<any>[] = [];
+            for (let i = 0; i < missingPids.length; i += ID_CHUNK_SIZE) {
+              const chunk = missingPids.slice(i, i + ID_CHUNK_SIZE);
+              parentPromises.push(supabase.from("question_db").select("*").in("question_id", chunk));
+            }
+            const parentResults = await Promise.all(parentPromises);
+            if (fetchSeqRef.current !== mySeq) return;
+            parentResults.forEach(({ data }: any) => {
+              (data || []).forEach((p: any) => {
+                if (!isExcludedDiagnosticQuestionRow(p)) {
+                  allTreeItems.push(p);
+                  addedExternal = true;
+                }
+              });
+            });
+          }
+
+          const searchedParentIds = new Set<string>();
+          while (fetchSeqRef.current === mySeq) {
+            const qidsToSearch = allTreeItems
+              .map((q) => String(q.question_id).trim())
+              .filter((id) => id && !searchedParentIds.has(id.toLowerCase()));
+            if (qidsToSearch.length === 0) break;
+            qidsToSearch.forEach((id) => searchedParentIds.add(id.toLowerCase()));
+
+            const childPromises: PromiseLike<any>[] = [];
+            for (let i = 0; i < qidsToSearch.length; i += ID_CHUNK_SIZE) {
+              const chunk = qidsToSearch.slice(i, i + ID_CHUNK_SIZE);
+              childPromises.push(supabase.from("question_db").select("*").in("parent_question_id", chunk));
+            }
+            const childResults = await Promise.all(childPromises);
+            if (fetchSeqRef.current !== mySeq) return;
+            let addedInWave = false;
+            childResults.forEach(({ data }: any) => {
+              (data || []).forEach((c: any) => {
+                if (isExcludedDiagnosticQuestionRow(c)) return;
+                const k = String(c.question_id).trim().toLowerCase();
+                if (!currentQids.has(k)) {
+                  currentQids.add(k);
+                  allTreeItems.push(c);
+                  addedInWave = true;
+                  addedExternal = true;
+                }
+              });
+            });
+            if (!addedInWave) break;
+          }
+
+          if (addedExternal && fetchSeqRef.current === mySeq) {
+            const finalMap = new Map<string, any>();
+            allTreeItems.forEach((q: any) => {
+              if (!isExcludedDiagnosticQuestionRow(q) && q?.question_id) {
+                finalMap.set(q.question_id, q);
+              }
+            });
+            const mergedList = Array.from(finalMap.values());
+            await hydrateMissingQuestionImages(supabase, mergedList);
+            if (fetchSeqRef.current === mySeq) {
+              setQuestions(sortQuestionsList(mergedList));
+            }
+          }
+        } catch (bgErr) {
+          console.warn("연결 문항 백그라운드 로드 경고:", bgErr);
+        }
+      })();
+    } catch (e) {
+      console.error(e);
+    } finally {
+      if (fetchSeqRef.current === mySeq) {
+        setIsFetchingQuestions(false);
+        setFetchStepMessage("");
+        setIsLoading(false);
+      }
     }
   };
 
@@ -2051,6 +2174,7 @@ export function useTaxonomy() {
 
   return {
     isAuthorized, perms, isTaxonomyLoading, isWorkbooksLoading, workbookScanProgress,
+    isDeepDupScanned, isScanningDuplicates,
     isFetchingQuestions, fetchStepMessage, loadWorkbooks,
     workbooks, questionDbBookSet, workbookMetaMap, duplicateQuestionMap,
     selectedBook, questions, selectedQuestion, isLoading,
