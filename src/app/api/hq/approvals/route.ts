@@ -281,31 +281,55 @@ export async function GET(req: NextRequest) {
     const caller = await requireHqCaller(req);
     if (caller instanceof NextResponse) return caller;
 
+    const targetApprovalId = (req.nextUrl.searchParams.get("id") || "").trim();
+
     if (caller.schemaMissing) {
       return NextResponse.json({
         success: true,
         schemaMissing: true,
-        data: {
-          docs: [],
-          myPendingCount: 0,
-          meId: caller.userId,
-          canViewCompanyArchive: false,
-          canDeleteCompanyDoc: false,
-        },
+        data: targetApprovalId
+          ? { doc: null }
+          : {
+              docs: [],
+              myPendingCount: 0,
+              meId: caller.userId,
+              canViewCompanyArchive: false,
+              canDeleteCompanyDoc: false,
+            },
       });
+    }
+
+    if (
+      targetApprovalId &&
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+        targetApprovalId
+      )
+    ) {
+      return apiFail("유효하지 않은 문서 ID입니다.", 400);
     }
 
     const supabaseAdmin = getSupabaseAdmin();
     const [docRes, stepRes, profRes, metaPayload] = await Promise.all([
-      supabaseAdmin
-        .from("hq_approval_doc")
-        .select("*")
-        .order("submitted_at", { ascending: false })
-        .limit(500),
-      supabaseAdmin
-        .from("hq_approval_step")
-        .select("*")
-        .order("step_order", { ascending: true }),
+      targetApprovalId
+        ? supabaseAdmin
+            .from("hq_approval_doc")
+            .select("*")
+            .eq("approval_id", targetApprovalId)
+        : supabaseAdmin
+            .from("hq_approval_doc")
+            .select("*")
+            .order("submitted_at", { ascending: false })
+            .limit(500),
+      targetApprovalId
+        ? supabaseAdmin
+            .from("hq_approval_step")
+            .select("*")
+            .eq("approval_id", targetApprovalId)
+            .order("step_order", { ascending: true })
+        : supabaseAdmin
+            .from("hq_approval_step")
+            .select("*")
+            .order("step_order", { ascending: true }),
       supabaseAdmin
         .from("hq_member_profile")
         .select(
@@ -319,13 +343,15 @@ export async function GET(req: NextRequest) {
         return NextResponse.json({
           success: true,
           schemaMissing: true,
-          data: {
-            docs: [],
-            myPendingCount: 0,
-            meId: caller.userId,
-            canViewCompanyArchive: false,
-            canDeleteCompanyDoc: false,
-          },
+          data: targetApprovalId
+            ? { doc: null }
+            : {
+                docs: [],
+                myPendingCount: 0,
+                meId: caller.userId,
+                canViewCompanyArchive: false,
+                canDeleteCompanyDoc: false,
+              },
         });
       }
       return apiFail(docRes.error.message, 500);
@@ -537,6 +563,20 @@ export async function GET(req: NextRequest) {
       }
       return false;
     });
+
+    if (targetApprovalId) {
+      if (allDocs.length === 0) {
+        return apiFail("연결된 품의 문서를 찾을 수 없습니다.", 404);
+      }
+      if (visibleDocs.length === 0) {
+        return apiFail("해당 품의 문서의 열람 권한이 없습니다.", 403);
+      }
+      return NextResponse.json({
+        success: true,
+        schemaMissing: false,
+        data: { doc: visibleDocs[0] },
+      });
+    }
 
     const myPendingCount = visibleDocs.filter((doc) => {
       if (doc.status !== "PENDING" && doc.status !== "IN_PROGRESS") return false;

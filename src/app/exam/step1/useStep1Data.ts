@@ -3,10 +3,10 @@ import { useState, useEffect, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "../../../lib/supabase";
 import { normalizeMasterCategories } from "../../../lib/normalize";
+import { fetchThinkingCategories } from "../../../lib/thinkingCategory";
 
 const URL_MASTER_CAT = "https://kfwlmbwornivkrvoeqdh.supabase.co/storage/v1/object/public/system_data/Master_Category.json";
 const URL_MASTER_ITEM = "https://kfwlmbwornivkrvoeqdh.supabase.co/storage/v1/object/public/system_data/Master_Item.json";
-const URL_THINKING_CAT = "https://kfwlmbwornivkrvoeqdh.supabase.co/storage/v1/object/public/system_data/Thinking_Category.json";
 
 export const DIAGNOSTIC_SEMESTERS: {
   group: string;
@@ -448,16 +448,15 @@ export function useStep1Data() {
           return;
         }
 
-        // 정적 JSON 3개만 병렬 다운로드하여 즉시 단원 트리 렌더링 (question_db 풀스캔 대기 제거!)
-        const [resCat, resItem, resThk] = await Promise.all([
+        // 정적 JSON 2개 + thinking_category 테이블을 병렬 조회하여 즉시 단원 트리 렌더링 (question_db 풀스캔 대기 제거!)
+        const [resCat, resItem, thkData] = await Promise.all([
           fetch(URL_MASTER_CAT),
           fetch(URL_MASTER_ITEM),
-          fetch(URL_THINKING_CAT),
+          fetchThinkingCategories(),
         ]);
-        const [rawCatData, itemData, thkData] = await Promise.all([
+        const [rawCatData, itemData] = await Promise.all([
           resCat.json(),
           resItem.json(),
-          resThk.json(),
         ]);
         // 매쓰플랫(MathFLAT) 단원 계층 보정 (누락된 중단원·소단원 복원)
         const catData = normalizeMasterCategories(rawCatData);

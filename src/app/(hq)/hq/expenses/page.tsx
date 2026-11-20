@@ -4,6 +4,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useHqShell } from "@/components/hq/HqShellContext";
+import ApprovalDetailModal from "@/components/hq/approvals/ApprovalDetailModal";
 import ExpenseCreateModal from "@/components/hq/expenses/ExpenseCreateModal";
 import {
   EXPENSE_CATEGORIES,
@@ -11,11 +12,17 @@ import {
   PAYMENT_METHODS,
 } from "@/lib/hq/constants";
 import { hqFetch, resolveStoragePublicUrl } from "@/lib/hq/clientApi";
-import type { HqExpense, HqSettlementStatus } from "@/lib/hq/types";
+import { useHqHref } from "@/lib/hq/hqRoutes";
+import type {
+  HqApprovalDoc,
+  HqExpense,
+  HqSettlementStatus,
+} from "@/lib/hq/types";
 
 export default function HqExpensesPage() {
   const router = useRouter();
-  const { me, isHrManager } = useHqShell();
+  const hqHref = useHqHref();
+  const { me, isHrManager, isHqAdmin } = useHqShell();
 
   const [month, setMonth] = useState(() => {
     const now = new Date();
@@ -39,6 +46,14 @@ export default function HqExpensesPage() {
   const [modalOpen, setModalOpen] = useState(false);
   const [modalMode, setModalMode] = useState<"create" | "edit">("create");
   const [editingRow, setEditingRow] = useState<HqExpense | null>(null);
+
+  const [docCache, setDocCache] = useState<Record<string, HqApprovalDoc>>({});
+  const [selectedApprovalDoc, setSelectedApprovalDoc] =
+    useState<HqApprovalDoc | null>(null);
+  const [approvalHistory, setApprovalHistory] = useState<HqApprovalDoc[]>([]);
+  const [loadingApprovalId, setLoadingApprovalId] = useState<string | null>(
+    null
+  );
 
   const loadExpenses = useCallback(async () => {
     setLoading(true);
@@ -217,6 +232,69 @@ export default function HqExpensesPage() {
     }
   };
 
+  const openApprovalDoc = useCallback(
+    async (approvalId: string, pushCurrentToHistory = false) => {
+      if (!approvalId) return;
+      const cached = docCache[approvalId];
+      if (cached) {
+        if (pushCurrentToHistory && selectedApprovalDoc) {
+          setApprovalHistory((prev) => [...prev, selectedApprovalDoc]);
+        } else if (!pushCurrentToHistory) {
+          setApprovalHistory([]);
+        }
+        setSelectedApprovalDoc(cached);
+        return;
+      }
+
+      setLoadingApprovalId(approvalId);
+      try {
+        const res = await hqFetch<{
+          success: boolean;
+          data: { doc: HqApprovalDoc | null };
+        }>(`/api/hq/approvals?id=${encodeURIComponent(approvalId)}`);
+        const fetched = res.data?.doc;
+        if (!fetched) {
+          alert("연결된 품의 문서를 찾을 수 없습니다.");
+          return;
+        }
+        setDocCache((prev) => ({ ...prev, [approvalId]: fetched }));
+        if (pushCurrentToHistory && selectedApprovalDoc) {
+          setApprovalHistory((prev) => [...prev, selectedApprovalDoc]);
+        } else if (!pushCurrentToHistory) {
+          setApprovalHistory([]);
+        }
+        setSelectedApprovalDoc(fetched);
+      } catch (err: any) {
+        alert(err?.message || "연결된 품의 문서를 불러오지 못했습니다.");
+      } finally {
+        setLoadingApprovalId(null);
+      }
+    },
+    [docCache, selectedApprovalDoc]
+  );
+
+  const handleApprovalUpdated = useCallback(async () => {
+    if (selectedApprovalDoc?.approval_id) {
+      const id = selectedApprovalDoc.approval_id;
+      try {
+        const res = await hqFetch<{
+          success: boolean;
+          data: { doc: HqApprovalDoc | null };
+        }>(`/api/hq/approvals?id=${encodeURIComponent(id)}`);
+        const fresh = res.data?.doc;
+        if (fresh) {
+          setDocCache((prev) => ({ ...prev, [id]: fresh }));
+          setSelectedApprovalDoc((cur) =>
+            cur && cur.approval_id === id ? fresh : cur
+          );
+        }
+      } catch {
+        // ignore
+      }
+    }
+    await loadExpenses();
+  }, [selectedApprovalDoc?.approval_id, loadExpenses]);
+
   return (
     <>
       <div className="p-6 space-y-5 max-w-[1440px] w-full mx-auto">
@@ -263,7 +341,9 @@ export default function HqExpensesPage() {
           <div className="flex flex-wrap items-center gap-2 shrink-0">
             <button
               type="button"
-              onClick={() => router.push("/hq/approvals?new=1&type=EXPENSE")}
+              onClick={() =>
+                router.push(hqHref("/hq/approvals?new=1&type=EXPENSE"))
+              }
               className="px-3.5 py-2 rounded-xl bg-amber-50 hover:bg-amber-100 border border-amber-200 text-amber-900 text-xs font-extrabold transition-colors"
             >
               ✍️ 지출결의서 전자결재 상신
@@ -331,7 +411,7 @@ export default function HqExpensesPage() {
               </span>
             </div>
             <div className="text-[11px] text-slate-400 mt-1 font-medium">
-              지출결의 최종 승인 시 장부 자동 반영
+              결재연동 전표 클릭 시 품의서 원문 즉시 열람
             </div>
           </div>
         </section>
@@ -518,14 +598,35 @@ export default function HqExpensesPage() {
                     const canDelete =
                       canModify &&
                       (ex.source_type !== "APPROVAL" || isHrManager);
+                    const hasLinkedApproval = Boolean(ex.approval_id);
+                    const isRowLoading =
+                      Boolean(ex.approval_id) &&
+                      loadingApprovalId === ex.approval_id;
+                    const cleanDescription = ex.description
+                      ? ex.description
+                          .replace(/^\[워크플로우\s+[^\]]+\]\s*/, "")
+                          .trim()
+                      : "";
 
                     return (
                       <tr
                         key={ex.expense_id}
-                        className="hover:bg-slate-50/80 transition-colors"
+                        onClick={() => {
+                          if (ex.approval_id) {
+                            void openApprovalDoc(ex.approval_id);
+                          }
+                        }}
+                        className={`transition-colors ${
+                          hasLinkedApproval
+                            ? "hover:bg-indigo-50/40 cursor-pointer"
+                            : "hover:bg-slate-50/80"
+                        }`}
                       >
                         {canSettle && (
-                          <td className="pl-4 pr-2 py-3.5">
+                          <td
+                            className="pl-4 pr-2 py-3.5"
+                            onClick={(e) => e.stopPropagation()}
+                          >
                             <input
                               type="checkbox"
                               checked={selectedIds.includes(ex.expense_id)}
@@ -539,15 +640,39 @@ export default function HqExpensesPage() {
                           <div className="font-extrabold text-slate-800">
                             {ex.expense_date}
                           </div>
-                          <div className="flex items-center gap-1.5 mt-0.5">
+                          <div className="flex flex-wrap items-center gap-1.5 mt-0.5">
                             <span className="text-[10px] font-mono text-slate-400">
                               {ex.expense_no}
                             </span>
-                            {ex.source_type === "APPROVAL" && (
-                              <span className="px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 text-[10px] font-bold">
-                                결재연동
-                              </span>
-                            )}
+                            {ex.source_type === "APPROVAL" &&
+                              (ex.approval_id ? (
+                                <button
+                                  type="button"
+                                  disabled={isRowLoading}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    void openApprovalDoc(ex.approval_id!);
+                                  }}
+                                  title={
+                                    ex.approval_doc_no
+                                      ? `원본 품의서 열기 (${ex.approval_doc_no})`
+                                      : "원본 품의서 열기"
+                                  }
+                                  className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-indigo-50 hover:bg-indigo-100 border border-indigo-200/80 text-indigo-700 text-[10px] font-extrabold transition-colors"
+                                >
+                                  <span>
+                                    {isRowLoading
+                                      ? "불러오는 중..."
+                                      : ex.approval_doc_no
+                                        ? `결재연동 · ${ex.approval_doc_no} ›`
+                                        : "결재연동 · 원문보기 ›"}
+                                  </span>
+                                </button>
+                              ) : (
+                                <span className="px-1.5 py-0.5 rounded bg-slate-100 text-slate-400 text-[10px] font-bold">
+                                  결재연동 (원문삭제)
+                                </span>
+                              ))}
                           </div>
                         </td>
 
@@ -560,7 +685,7 @@ export default function HqExpensesPage() {
                           </div>
                         </td>
 
-                        <td className="px-4 py-3.5 max-w-[260px]">
+                        <td className="px-4 py-3.5 max-w-[300px]">
                           <div className="flex items-center gap-1.5">
                             <span className="px-2 py-0.5 rounded bg-slate-100 text-slate-600 text-[10px] font-bold shrink-0">
                               {ex.category}
@@ -569,9 +694,12 @@ export default function HqExpensesPage() {
                               {ex.merchant_name}
                             </span>
                           </div>
-                          {ex.description && (
-                            <div className="text-[11px] text-slate-500 truncate mt-0.5">
-                              {ex.description}
+                          {cleanDescription && (
+                            <div
+                              title={cleanDescription}
+                              className="text-[11px] text-slate-500 truncate mt-0.5"
+                            >
+                              {cleanDescription}
                             </div>
                           )}
                           {ex.admin_memo && (
@@ -601,7 +729,10 @@ export default function HqExpensesPage() {
                           </div>
                         </td>
 
-                        <td className="px-4 py-3.5 text-center">
+                        <td
+                          className="px-4 py-3.5 text-center"
+                          onClick={(e) => e.stopPropagation()}
+                        >
                           {receiptUrl ? (
                             <a
                               href={receiptUrl}
@@ -635,8 +766,23 @@ export default function HqExpensesPage() {
                           )}
                         </td>
 
-                        <td className="px-4 py-3.5 text-right">
+                        <td
+                          className="px-4 py-3.5 text-right"
+                          onClick={(e) => e.stopPropagation()}
+                        >
                           <div className="inline-flex items-center gap-1">
+                            {ex.approval_id && (
+                              <button
+                                type="button"
+                                disabled={isRowLoading}
+                                onClick={() =>
+                                  void openApprovalDoc(ex.approval_id!)
+                                }
+                                className="px-2 py-1 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-extrabold text-[11px] transition-colors"
+                              >
+                                {isRowLoading ? "열람중..." : "품의원문"}
+                              </button>
+                            )}
                             {canSettle &&
                               ex.settlement_status !== "정산완료" && (
                                 <button
@@ -706,6 +852,30 @@ export default function HqExpensesPage() {
         expense={editingRow}
         onClose={() => setModalOpen(false)}
         onSaved={loadExpenses}
+      />
+
+      <ApprovalDetailModal
+        doc={selectedApprovalDoc}
+        me={me}
+        isHqAdmin={isHqAdmin}
+        canDeleteCompanyDoc={false}
+        onOpenRefDoc={(refId) => {
+          void openApprovalDoc(refId, true);
+        }}
+        onBack={
+          approvalHistory.length > 0
+            ? () => {
+                const prev = approvalHistory[approvalHistory.length - 1];
+                setApprovalHistory((h) => h.slice(0, -1));
+                setSelectedApprovalDoc(prev);
+              }
+            : undefined
+        }
+        onClose={() => {
+          setSelectedApprovalDoc(null);
+          setApprovalHistory([]);
+        }}
+        onUpdated={handleApprovalUpdated}
       />
     </>
   );

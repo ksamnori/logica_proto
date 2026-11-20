@@ -31,6 +31,7 @@ interface Props {
   onFollowUpPostExpense?: (doc: HqApprovalDoc) => void;
   onCloneDoc?: (doc: HqApprovalDoc) => void;
   onOpenRefDoc?: (refDocId: string) => void;
+  onBack?: () => void;
   onClose: () => void;
   onUpdated: () => void;
 }
@@ -71,6 +72,7 @@ export default function ApprovalDetailModal({
   onFollowUpPostExpense,
   onCloneDoc,
   onOpenRefDoc,
+  onBack,
   onClose,
   onUpdated,
 }: Props) {
@@ -272,6 +274,15 @@ export default function ApprovalDetailModal({
         {/* 상단 헤더 바 */}
         <div className="print:hidden px-6 py-4 border-b border-slate-100 bg-white flex items-center justify-between gap-3 shrink-0">
           <div className="flex items-center gap-2 min-w-0">
+            {onBack && (
+              <button
+                type="button"
+                onClick={onBack}
+                className="px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-extrabold shrink-0 transition-colors"
+              >
+                ← 이전 문서
+              </button>
+            )}
             <span className="w-8 h-8 rounded-xl bg-slate-100 flex items-center justify-center text-base shrink-0">
               {formIcon}
             </span>

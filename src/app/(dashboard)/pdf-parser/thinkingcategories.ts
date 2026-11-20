@@ -4,6 +4,8 @@ export interface ThinkingCategoryItem {
   depth2: string;
   depth3: string;
   full_path: string;
+  sort_order?: number;
+  is_active?: boolean;
 }
 
 export const THINKING_CATEGORIES: ThinkingCategoryItem[] = [

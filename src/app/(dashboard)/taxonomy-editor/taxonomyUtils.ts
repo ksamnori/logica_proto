@@ -102,6 +102,9 @@ export const fetchAllRows = async (
     if (tableName === 'master_item') {
       return q.order('item_id', { ascending: true });
     }
+    if (tableName === 'thinking_category') {
+      return q.order('sort_order', { ascending: true }).order('category_id', { ascending: true });
+    }
     return q;
   };
 

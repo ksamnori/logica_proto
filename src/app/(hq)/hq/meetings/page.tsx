@@ -310,13 +310,19 @@ export default function HqMeetingsPage() {
       alert("미팅 제목을 입력해 주세요.");
       return;
     }
+    if (formHasSchedule && !/^\d{4}-\d{2}-\d{2}$/.test(formStartDate)) {
+      alert("미팅 일자를 선택해 주세요.");
+      return;
+    }
     setSubmitting(true);
     try {
+      const normStartHm = (formStartTime || "10:00").slice(0, 5);
+      const normEndHm = (formEndTime || "11:00").slice(0, 5);
       const startIso = formHasSchedule
-        ? `${formStartDate}T${formStartTime}:00+09:00`
+        ? `${formStartDate}T${normStartHm}:00+09:00`
         : null;
       const endIso = formHasSchedule
-        ? `${formStartDate}T${formEndTime}:00+09:00`
+        ? `${formStartDate}T${normEndHm}:00+09:00`
         : null;
 
       const res = await hqFetch<{
@@ -338,6 +344,20 @@ export default function HqMeetingsPage() {
         },
       });
       setMeetings(res.data?.meetings || []);
+      setScheduleTab(formHasSchedule ? "SCHEDULED" : "UNSCHEDULED");
+      if (formHasSchedule && startIso && dateRangeMode === "14DAYS") {
+        const dt = new Date(startIso);
+        const now = new Date();
+        const min14 = new Date(now);
+        min14.setDate(now.getDate() - 14);
+        min14.setHours(0, 0, 0, 0);
+        const max14 = new Date(now);
+        max14.setDate(now.getDate() + 14);
+        max14.setHours(23, 59, 59, 999);
+        if (!Number.isNaN(dt.getTime()) && (dt < min14 || dt > max14)) {
+          setDateRangeMode("ALL");
+        }
+      }
       setModalOpen(false);
     } catch (err: any) {
       alert(err?.message || "미팅 저장 중 오류가 발생했습니다.");
