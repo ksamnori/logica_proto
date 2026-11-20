@@ -2,9 +2,20 @@
 import React, { useState, useEffect, useRef, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
+import { normalizeMasterCategories } from "@/lib/normalize";
+import { isConfidentialExamText, isConfidentialQuestionObj } from "@/lib/confidentialExamGuard";
+import {
+  analyzeBookInternalDuplicates,
+  buildWorkbookIndexAndDuplicates,
+  type QuestionDuplicateFlag,
+  type WorkbookDuplicateSummary,
+} from "@/lib/questionDuplicateAnalyzer";
 import { executeInteractiveQuestionDelete } from "@/lib/questionSafeDeleteClient";
 import { taxSort, generateUUID, sortQuestionsList, fetchAllRows, getCleanUrl } from "./taxonomyUtils";
 import { hydrateMissingQuestionImages } from "../../exam/step2/examUtils";
+
+const URL_MASTER_CAT = "https://kfwlmbwornivkrvoeqdh.supabase.co/storage/v1/object/public/system_data/Master_Category.json";
+const URL_MASTER_ITEM = "https://kfwlmbwornivkrvoeqdh.supabase.co/storage/v1/object/public/system_data/Master_Item.json";
 
 // 🌟 별도 파일 import 없이 기존 /api/gemini-twin (PUT) 엔드포인트를 호출하여 SERVICE_ROLE_KEY로 RLS를 우회하는 내장 헬퍼
 async function uploadQuestionImageServerAction(
@@ -148,26 +159,73 @@ async function updateQuestionServerAction(
 
 
 export const isExcludedDiagnosticBookName = (name?: any): boolean => {
-  if (!name || typeof name !== "string") return false;
-  return name.includes("입학테스트") || name.includes("진단평가");
+  return isConfidentialExamText(name);
 };
 
 export const isExcludedDiagnosticQuestionRow = (q: any): boolean => {
-  if (!q) return false;
-  return (
-    isExcludedDiagnosticBookName(q.source_book_name) ||
-    isExcludedDiagnosticBookName(q.book_name)
-  );
+  return isConfidentialQuestionObj(q);
 };
 
-// 🌟 탭 내 페이지 이동 시 재다운로드(수만 건 풀스캔) 방지를 위한 인메모리 캐시
-const MASTER_TAXONOMY_TTL_MS = 30 * 60 * 1000;
-const WORKBOOKS_CACHE_KEY = "logica_taxonomy_workbooks_v3";
+// 🌟 탭 내 페이지 이동 및 재방문 시 재다운로드(수만 건 풀스캔) 방지를 위한 다계층 캐시
+const MASTER_TAXONOMY_TTL_MS = 60 * 60 * 1000;
+const WORKBOOKS_CACHE_KEY = "logica_taxonomy_workbooks_v4";
+const PERMS_CACHE_KEY = "logica_taxonomy_perms_v1";
 const WORKBOOKS_TTL_MS = 15 * 60 * 1000;
 
+interface CachedWorkbooksBundle {
+  list: string[];
+  questionDbBooks: string[];
+  metaByBook: Record<string, WorkbookDuplicateSummary>;
+  updatedAt: number;
+}
+
 let cachedMasterTaxonomy: { categories: any[]; items: any[]; updatedAt: number } | null = null;
-let cachedWorkbooksMemory: { list: string[]; updatedAt: number } | null = null;
+let cachedWorkbooksMemory: CachedWorkbooksBundle | null = null;
 let cachedPermsMemory: { key: string; perms: { add: boolean; delete: boolean; edit: boolean; twin: boolean } } | null = null;
+
+function persistWorkbooksCache(payload: CachedWorkbooksBundle) {
+  cachedWorkbooksMemory = payload;
+  try {
+    const serialized = JSON.stringify(payload);
+    localStorage.setItem(WORKBOOKS_CACHE_KEY, serialized);
+    sessionStorage.setItem(WORKBOOKS_CACHE_KEY, serialized);
+  } catch {}
+}
+
+function readPersistedWorkbooksCache(): CachedWorkbooksBundle | null {
+  if (cachedWorkbooksMemory) return cachedWorkbooksMemory;
+  if (typeof window === "undefined") return null;
+  try {
+    const raw =
+      localStorage.getItem(WORKBOOKS_CACHE_KEY) ||
+      sessionStorage.getItem(WORKBOOKS_CACHE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (parsed && Array.isArray(parsed.list) && parsed.list.length > 0) {
+      const cleanList = parsed.list.filter((b: string) => b && !isExcludedDiagnosticBookName(b));
+      const cleanQdb = Array.isArray(parsed.questionDbBooks)
+        ? parsed.questionDbBooks.filter((b: string) => b && !isExcludedDiagnosticBookName(b))
+        : cleanList;
+      const cleanMeta: Record<string, WorkbookDuplicateSummary> = {};
+      if (parsed.metaByBook && typeof parsed.metaByBook === "object") {
+        for (const k of Object.keys(parsed.metaByBook)) {
+          if (!isExcludedDiagnosticBookName(k)) {
+            cleanMeta[k] = parsed.metaByBook[k];
+          }
+        }
+      }
+      const bundle: CachedWorkbooksBundle = {
+        list: cleanList,
+        questionDbBooks: cleanQdb,
+        metaByBook: cleanMeta,
+        updatedAt: Number(parsed.updatedAt) || 0,
+      };
+      cachedWorkbooksMemory = bundle;
+      return bundle;
+    }
+  } catch {}
+  return null;
+}
 
 export function useTaxonomy() {
   const router = useRouter();
@@ -180,6 +238,12 @@ export function useTaxonomy() {
   const [isTaxonomyLoading, setIsTaxonomyLoading] = useState<boolean>(() => !cachedMasterTaxonomy);
 
   const [workbooks, setWorkbooks] = useState<string[]>(() => cachedWorkbooksMemory?.list || []);
+  const [questionDbBooks, setQuestionDbBooks] = useState<string[]>(
+    () => cachedWorkbooksMemory?.questionDbBooks || []
+  );
+  const [workbookMetaMap, setWorkbookMetaMap] = useState<Record<string, WorkbookDuplicateSummary>>(
+    () => cachedWorkbooksMemory?.metaByBook || {}
+  );
   const [isWorkbooksLoading, setIsWorkbooksLoading] = useState<boolean>(() => !cachedWorkbooksMemory);
   const [workbookScanProgress, setWorkbookScanProgress] = useState<number>(0);
 
@@ -234,7 +298,8 @@ export function useTaxonomy() {
   const [isFixingLatex, setIsFixingLatex] = useState(false);
 
   useEffect(() => {
-    const checkAccess = async () => {
+    let cancelled = false;
+    const checkAccessAndPreload = async () => {
       const role = localStorage.getItem("logica_instructor_role") || "";
       const tId = localStorage.getItem("logica_tenant_id") || "";
       
@@ -243,10 +308,14 @@ export function useTaxonomy() {
         router.replace("/home"); 
         return; 
       }
-      
+
+      loadMathJax();
+
       if (role === 'SUPER_ADMIN') { 
-        setIsAuthorized(true); 
         setPerms({ add: true, delete: true, edit: true, twin: true });
+        setIsAuthorized(true); 
+        loadMasterTaxonomy();
+        loadWorkbooks();
         return; 
       }
 
@@ -254,11 +323,39 @@ export function useTaxonomy() {
       if (cachedPermsMemory && cachedPermsMemory.key === permKey) {
         setPerms(cachedPermsMemory.perms);
         setIsAuthorized(true);
+        loadMasterTaxonomy();
+        loadWorkbooks();
         return;
       }
+
+      try {
+        const savedPermRaw = sessionStorage.getItem(PERMS_CACHE_KEY);
+        if (savedPermRaw) {
+          const parsedPerm = JSON.parse(savedPermRaw);
+          if (parsedPerm?.key === permKey && parsedPerm?.perms) {
+            cachedPermsMemory = parsedPerm;
+            setPerms(parsedPerm.perms);
+            setIsAuthorized(true);
+            loadMasterTaxonomy();
+            loadWorkbooks();
+            return;
+          }
+        }
+      } catch {}
+
+      // 권한 DB 확인과 동시에 분류 체계·교재 인덱스 프리페치를 병렬 시작하여 직렬 대기 제거
+      const preloadTaxPromise = loadMasterTaxonomy();
+      const preloadWbPromise = loadWorkbooks();
+
+      const { data, error } = await supabase
+        .from('tenant_role_permissions')
+        .select('allowed_menus')
+        .eq('tenant_id', tId)
+        .eq('role_name', role)
+        .single();
       
-      const { data, error } = await supabase.from('tenant_role_permissions').select('allowed_menus').eq('tenant_id', tId).eq('role_name', role).single();
-      
+      if (cancelled) return;
+
       if (!error && data && (data.allowed_menus.includes("ALL") || data.allowed_menus.includes("/taxonomy-editor"))) {
         const hasAll = data.allowed_menus.includes("ALL");
         const resolvedPerms = {
@@ -267,30 +364,41 @@ export function useTaxonomy() {
           edit: hasAll || data.allowed_menus.includes("action_edit_question"),
           twin: hasAll || data.allowed_menus.includes("action_generate_twins"),
         };
-        cachedPermsMemory = { key: permKey, perms: resolvedPerms };
+        const permEntry = { key: permKey, perms: resolvedPerms };
+        cachedPermsMemory = permEntry;
+        try {
+          sessionStorage.setItem(PERMS_CACHE_KEY, JSON.stringify(permEntry));
+        } catch {}
         setPerms(resolvedPerms);
         setIsAuthorized(true);
+        await Promise.allSettled([preloadTaxPromise, preloadWbPromise]);
       } else { 
         alert("⛔ 권한이 없습니다."); 
         router.replace("/home"); 
       }
     };
-    checkAccess();
+    checkAccessAndPreload();
+    return () => {
+      cancelled = true;
+    };
   }, [router]);
 
   useEffect(() => {
-    if (isAuthorized) { loadMasterTaxonomy(); loadWorkbooks(); loadMathJax(); }
-  }, [isAuthorized]);
-
-  useEffect(() => {
     const renderMath = () => {
-      if ((window as any).MathJax && (window as any).MathJax.typesetPromise) {
-        (window as any).MathJax.typesetPromise().catch((err: any) => console.log("MathJax 에러:", err));
+      const mj = (window as any).MathJax;
+      if (mj && mj.typesetPromise) {
+        const targets = [
+          document.getElementById("taxonomy-question-viewer"),
+          document.getElementById("taxonomy-twin-modal"),
+        ].filter(Boolean);
+        if (targets.length > 0) {
+          mj.typesetPromise(targets).catch((err: any) => console.log("MathJax 에러:", err));
+        }
       }
     };
-    const timer = setTimeout(renderMath, 150);
+    const timer = setTimeout(renderMath, 80);
     return () => clearTimeout(timer);
-  }, [questions, selectedQuestion, isEditingContent, generatedTwins, isTwinModalOpen, isCloneModalOpen]);
+  }, [selectedQuestion, isEditingContent, generatedTwins, isTwinModalOpen]);
 
   const loadMathJax = () => {
     if (!document.getElementById("MathJax-script") && !mathJaxRef.current) {
@@ -315,19 +423,47 @@ export function useTaxonomy() {
 
     setIsTaxonomyLoading(true);
     try {
-      // 🌟 직렬 로드 제거: master_category와 master_item을 필요한 컬럼만 지정하여 동시에 병렬 로드!
-      const [catData, itemData] = await Promise.all([
-        fetchAllRows(
-          'master_category',
-          'category_id, curriculum_version, depth1, depth2, depth3, depth4, depth5, depth6, depth7, full_path'
-        ),
-        fetchAllRows(
-          'master_item',
-          'item_id, category_id, depth6, depth8, type'
-        ),
-      ]);
-      const safeCats = catData || [];
-      const safeItems = itemData || [];
+      let safeCats: any[] = [];
+      let safeItems: any[] = [];
+
+      // 1차: 정적 Storage CDN JSON 2개 단일 다운로드 (~150ms, 수십 번의 DB 페이지네이션 제거)
+      if (!forceRefresh) {
+        try {
+          const [resCat, resItem] = await Promise.all([
+            fetch(URL_MASTER_CAT),
+            fetch(URL_MASTER_ITEM),
+          ]);
+          if (resCat.ok && resItem.ok) {
+            const [rawCats, rawItems] = await Promise.all([
+              resCat.json(),
+              resItem.json(),
+            ]);
+            if (Array.isArray(rawCats) && rawCats.length > 0 && Array.isArray(rawItems) && rawItems.length > 0) {
+              safeCats = normalizeMasterCategories(rawCats);
+              safeItems = rawItems;
+            }
+          }
+        } catch {
+          // CDN 실패 시 아래 DB 병렬 로드로 폴백
+        }
+      }
+
+      // 2차 폴백: DB 직접 병렬 로드
+      if (safeCats.length === 0 || safeItems.length === 0) {
+        const [catData, itemData] = await Promise.all([
+          fetchAllRows(
+            'master_category',
+            'category_id, curriculum_version, depth1, depth2, depth3, depth4, depth5, depth6, depth7, full_path'
+          ),
+          fetchAllRows(
+            'master_item',
+            'item_id, category_id, depth6, depth8, type'
+          ),
+        ]);
+        safeCats = catData || [];
+        safeItems = itemData || [];
+      }
+
       if (safeCats.length > 0 && safeItems.length > 0) {
         cachedMasterTaxonomy = {
           categories: safeCats,
@@ -344,9 +480,9 @@ export function useTaxonomy() {
     }
   };
 
-  const appendWorkbooksToCache = (newNames: string[]) => {
+  const appendWorkbooksToCache = (newNames: string[], inQdb: boolean = true) => {
     const cleanNew = (newNames || [])
-      .map((b) => String(b || "").trim())
+      .map((b) => String(b || "").normalize("NFC").trim())
       .filter((b) => b && !isExcludedDiagnosticBookName(b));
     if (cleanNew.length === 0) return;
 
@@ -354,11 +490,35 @@ export function useTaxonomy() {
       const merged = Array.from(new Set([...prev, ...cleanNew]))
         .filter((b) => b && !isExcludedDiagnosticBookName(b))
         .sort(taxSort);
-      const payload = { list: merged, updatedAt: Date.now() };
-      cachedWorkbooksMemory = payload;
-      try {
-        sessionStorage.setItem(WORKBOOKS_CACHE_KEY, JSON.stringify(payload));
-      } catch {}
+      const nextQdb = inQdb
+        ? Array.from(new Set([...(cachedWorkbooksMemory?.questionDbBooks || []), ...cleanNew]))
+            .filter((b) => b && !isExcludedDiagnosticBookName(b))
+            .sort(taxSort)
+        : cachedWorkbooksMemory?.questionDbBooks || [];
+      const nextMeta: Record<string, WorkbookDuplicateSummary> = {
+        ...(cachedWorkbooksMemory?.metaByBook || {}),
+      };
+      cleanNew.forEach((n) => {
+        if (!nextMeta[n]) {
+          nextMeta[n] = {
+            count: 1,
+            inQuestionDb: inQdb,
+            internalDupCount: 0,
+            internalDupGroups: 0,
+          };
+        } else if (inQdb) {
+          nextMeta[n] = { ...nextMeta[n], inQuestionDb: true };
+        }
+      });
+
+      setQuestionDbBooks(nextQdb);
+      setWorkbookMetaMap(nextMeta);
+      persistWorkbooksCache({
+        list: merged,
+        questionDbBooks: nextQdb,
+        metaByBook: nextMeta,
+        updatedAt: Date.now(),
+      });
       return merged;
     });
   };
@@ -380,57 +540,96 @@ export function useTaxonomy() {
         }
       } catch {}
 
-      if (pendingUploadedBooks.length > 0 && cachedWorkbooksMemory) {
-        const mergedImmediate = Array.from(new Set([...cachedWorkbooksMemory.list, ...pendingUploadedBooks]))
-          .filter((b) => b && !isExcludedDiagnosticBookName(b))
-          .sort(taxSort);
-        cachedWorkbooksMemory = { list: mergedImmediate, updatedAt: cachedWorkbooksMemory.updatedAt };
-        try {
-          sessionStorage.setItem(WORKBOOKS_CACHE_KEY, JSON.stringify(cachedWorkbooksMemory));
-        } catch {}
-      }
+      const persisted = readPersistedWorkbooksCache();
+      if (persisted && persisted.list.length > 0) {
+        const mergedList =
+          pendingUploadedBooks.length > 0
+            ? Array.from(new Set([...persisted.list, ...pendingUploadedBooks]))
+                .filter((b) => b && !isExcludedDiagnosticBookName(b))
+                .sort(taxSort)
+            : persisted.list;
+        const mergedQdb =
+          pendingUploadedBooks.length > 0
+            ? Array.from(new Set([...persisted.questionDbBooks, ...pendingUploadedBooks]))
+                .filter((b) => b && !isExcludedDiagnosticBookName(b))
+                .sort(taxSort)
+            : persisted.questionDbBooks;
 
-      // 🌟 0단계: 유효 캐시(15분)가 있으면 수만 건의 question_db 풀스캔을 생략해 즉시 오픈 & 네트워크 대역폭 보존!
-      if (!forceRefresh) {
-        if (cachedWorkbooksMemory && Date.now() - cachedWorkbooksMemory.updatedAt < WORKBOOKS_TTL_MS) {
-          setWorkbooks(cachedWorkbooksMemory.list);
+        setWorkbooks(mergedList);
+        setQuestionDbBooks(mergedQdb);
+        setWorkbookMetaMap(persisted.metaByBook || {});
+
+        if (pendingUploadedBooks.length > 0) {
+          forceRefresh = true;
+        } else if (!forceRefresh && Date.now() - persisted.updatedAt < WORKBOOKS_TTL_MS) {
           setIsWorkbooksLoading(false);
           return;
         }
-        try {
-          const cachedRaw = sessionStorage.getItem(WORKBOOKS_CACHE_KEY);
-          if (cachedRaw) {
-            const parsed = JSON.parse(cachedRaw);
-            if (parsed?.list && Array.isArray(parsed.list) && parsed.list.length > 0) {
-              const combined = pendingUploadedBooks.length > 0 ? Array.from(new Set([...parsed.list, ...pendingUploadedBooks])).sort(taxSort) : parsed.list;
-              const filtered = combined.filter((b: string) => b && !isExcludedDiagnosticBookName(b));
-              cachedWorkbooksMemory = { list: filtered, updatedAt: parsed.updatedAt || Date.now() };
-              setWorkbooks(filtered);
-              if (parsed.updatedAt && Date.now() - parsed.updatedAt < WORKBOOKS_TTL_MS) {
-                setIsWorkbooksLoading(false);
-                return;
-              }
-            }
-          } else {
-            // 구버전 캐시 키(v2)가 남아 있으면 초기 표시용으로 즉시 활용
-            const legacyRaw = sessionStorage.getItem("logica_taxonomy_workbooks_v2");
-            if (legacyRaw) {
-              const legacyParsed = JSON.parse(legacyRaw);
-              if (Array.isArray(legacyParsed) && legacyParsed.length > 0) {
-                setWorkbooks(legacyParsed.filter((b: string) => b && !isExcludedDiagnosticBookName(b)));
-              }
-            }
-          }
-        } catch {}
       }
 
       setIsWorkbooksLoading(true);
-      setWorkbookScanProgress(5);
+      setWorkbookScanProgress(20);
 
-      // 1단계: 가벼운 textbook 테이블 먼저 즉시 로드하여 기본 교재 드롭다운 대기시간 제거
+      // 🌟 1순위: 서버 인메모리 캐시 API(/api/gemini-twin PUT list_workbooks)로 단 1회 고속 조회
+      try {
+        const srvRes = await fetch("/api/gemini-twin", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "list_workbooks", forceRefresh }),
+        });
+        if (srvRes.ok) {
+          const srvJson = await srvRes.json();
+          if (srvJson?.success && Array.isArray(srvJson.workbooks)) {
+            const srvList = Array.from(
+              new Set([
+                ...srvJson.workbooks,
+                ...pendingUploadedBooks,
+              ])
+            )
+              .map((b: any) => String(b || "").normalize("NFC").trim())
+              .filter((b: string) => b && !isExcludedDiagnosticBookName(b))
+              .sort(taxSort);
+
+            const srvQdb = Array.from(
+              new Set([
+                ...(Array.isArray(srvJson.questionDbBooks) ? srvJson.questionDbBooks : srvJson.workbooks),
+                ...pendingUploadedBooks,
+              ])
+            )
+              .map((b: any) => String(b || "").normalize("NFC").trim())
+              .filter((b: string) => b && !isExcludedDiagnosticBookName(b))
+              .sort(taxSort);
+
+            const srvMeta: Record<string, WorkbookDuplicateSummary> = {};
+            if (srvJson.metaByBook && typeof srvJson.metaByBook === "object") {
+              for (const k of Object.keys(srvJson.metaByBook)) {
+                if (!isExcludedDiagnosticBookName(k)) {
+                  srvMeta[k] = srvJson.metaByBook[k];
+                }
+              }
+            }
+
+            setWorkbooks(srvList);
+            setQuestionDbBooks(srvQdb);
+            setWorkbookMetaMap(srvMeta);
+            setWorkbookScanProgress(100);
+            persistWorkbooksCache({
+              list: srvList,
+              questionDbBooks: srvQdb,
+              metaByBook: srvMeta,
+              updatedAt: Date.now(),
+            });
+            return;
+          }
+        }
+      } catch {
+        // 서버 요청 예외 시 아래 클라이언트 병렬 스캔으로 안전하게 폴백
+      }
+
+      // 2순위 폴백: 클라이언트 직접 스캔
       const tbData = await fetchAllRows('textbook', 'title');
       const titles = (tbData || [])
-        .map((t: any) => String(t.title || "").trim())
+        .map((t: any) => String(t.title || "").normalize("NFC").trim())
         .filter((t: string) => t && !isExcludedDiagnosticBookName(t));
 
       if (titles.length > 0) {
@@ -440,45 +639,35 @@ export function useTaxonomy() {
             .sort(taxSort)
         );
       }
-      setWorkbookScanProgress(15);
+      setWorkbookScanProgress(35);
 
-      // 2단계: HEAD 카운트 기반 8-way 병렬 로더로 question_db 교재명을 고속 수집 + 진행률 표시
       const qbRows = await fetchAllRows(
         'question_db',
-        'source_book_name, book_name',
+        'question_id, source_book_name, book_name, pdf_source, final_printed_page, detected_page_num, question_number, sub_num, question, question_2, answer, derivation_type, parent_question_id, is_hidden',
         undefined,
         undefined,
         (loaded, total) => {
           if (total > 0) {
-            setWorkbookScanProgress(Math.min(99, 15 + Math.round((loaded / total) * 84)));
+            setWorkbookScanProgress(Math.min(99, 35 + Math.round((loaded / total) * 64)));
           }
         }
       );
 
-      const qbNames = new Set<string>();
-      for (let i = 0; i < qbRows.length; i++) {
-        const q = qbRows[i];
-        if (isExcludedDiagnosticQuestionRow(q)) continue;
-        if (q.source_book_name && !isExcludedDiagnosticBookName(q.source_book_name)) {
-          qbNames.add(String(q.source_book_name).trim());
-        }
-        if (q.book_name && !isExcludedDiagnosticBookName(q.book_name)) {
-          qbNames.add(String(q.book_name).trim());
-        }
-      }
+      const built = buildWorkbookIndexAndDuplicates(qbRows || [], [
+        ...titles,
+        ...pendingUploadedBooks,
+      ]);
 
-      const uniqueList = Array.from(new Set([...titles, ...Array.from(qbNames)]))
-        .filter((b) => b && !isExcludedDiagnosticBookName(b))
-        .sort(taxSort);
-
-      setWorkbooks(uniqueList);
+      setWorkbooks(built.workbooks);
+      setQuestionDbBooks(built.questionDbBooks);
+      setWorkbookMetaMap(built.metaByBook);
       setWorkbookScanProgress(100);
-      const cachePayload = { list: uniqueList, updatedAt: Date.now() };
-      cachedWorkbooksMemory = cachePayload;
-      try {
-        sessionStorage.setItem(WORKBOOKS_CACHE_KEY, JSON.stringify(cachePayload));
-        sessionStorage.removeItem("logica_taxonomy_workbooks_v2");
-      } catch {}
+      persistWorkbooksCache({
+        list: built.workbooks,
+        questionDbBooks: built.questionDbBooks,
+        metaByBook: built.metaByBook,
+        updatedAt: Date.now(),
+      });
     } catch (e) {
       console.error(e);
     } finally {
@@ -492,6 +681,9 @@ export function useTaxonomy() {
     const newName = prompt(`현재 이름: ${selectedBook}\n새로운 덩어리 이름을 입력하세요:`, selectedBook);
     const trimmedNew = newName ? newName.trim() : "";
     if (!trimmedNew || trimmedNew === selectedBook) return;
+    if (isExcludedDiagnosticBookName(trimmedNew)) {
+      return alert("⛔ '진단평가' 및 '입학테스트' 명칭은 대외비 보호를 위해 사용할 수 없습니다.");
+    }
 
     setIsLoading(true);
     try {
@@ -529,16 +721,39 @@ export function useTaxonomy() {
         }
       }
 
-      // 3) 메모리·세션 캐시 및 최근 선택 교재 목록에서 예전 이름을 제거하고 새 이름으로 즉시 갱신 (불필요한 5만 건 재스캔 방지)
+      fetch("/api/gemini-twin", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "invalidate_workbooks_cache" }),
+      }).catch(() => {});
+
+      // 3) 메모리·로컬 캐시 및 최근 선택 교재 목록에서 예전 이름을 제거하고 새 이름으로 즉시 갱신
       setWorkbooks((prev) => {
         const next = prev.map((b) => (b === oldName ? trimmedNew : b));
         if (!next.includes(trimmedNew)) next.push(trimmedNew);
         const deduped = Array.from(new Set(next)).filter((b) => b && !isExcludedDiagnosticBookName(b)).sort(taxSort);
-        const payload = { list: deduped, updatedAt: Date.now() };
-        cachedWorkbooksMemory = payload;
-        try {
-          sessionStorage.setItem(WORKBOOKS_CACHE_KEY, JSON.stringify(payload));
-        } catch {}
+        const nextQdb = Array.from(
+          new Set(
+            [...(cachedWorkbooksMemory?.questionDbBooks || []).map((b) => (b === oldName ? trimmedNew : b)), trimmedNew]
+          )
+        )
+          .filter((b) => b && !isExcludedDiagnosticBookName(b))
+          .sort(taxSort);
+        const nextMeta: Record<string, WorkbookDuplicateSummary> = {
+          ...(cachedWorkbooksMemory?.metaByBook || {}),
+        };
+        if (nextMeta[oldName]) {
+          nextMeta[trimmedNew] = nextMeta[oldName];
+          delete nextMeta[oldName];
+        }
+        setQuestionDbBooks(nextQdb);
+        setWorkbookMetaMap(nextMeta);
+        persistWorkbooksCache({
+          list: deduped,
+          questionDbBooks: nextQdb,
+          metaByBook: nextMeta,
+          updatedAt: Date.now(),
+        });
         return deduped;
       });
 
@@ -646,6 +861,7 @@ export function useTaxonomy() {
         const extraResults = await Promise.all(extraPromises);
         extraResults.forEach(({ data }: any) => {
           (data || []).forEach((q: any) => {
+            if (isExcludedDiagnosticQuestionRow(q)) return;
             const k = String(q.question_id).trim().toLowerCase();
             if (!currentQids.has(k)) {
               currentQids.add(k);
@@ -672,7 +888,11 @@ export function useTaxonomy() {
         }
         const parentResults = await Promise.all(parentPromises);
         parentResults.forEach(({ data }: any) => {
-          if (data && data.length > 0) fetchedQuestions.push(...data);
+          (data || []).forEach((p: any) => {
+            if (!isExcludedDiagnosticQuestionRow(p)) {
+              fetchedQuestions.push(p);
+            }
+          });
         });
       }
 
@@ -691,6 +911,7 @@ export function useTaxonomy() {
         let addedAny = false;
         childResults.forEach(({ data }: any) => {
           (data || []).forEach((c: any) => {
+            if (isExcludedDiagnosticQuestionRow(c)) return;
             const k = String(c.question_id).trim().toLowerCase();
             if (!currentQids.has(k)) {
               currentQids.add(k);
@@ -936,7 +1157,11 @@ export function useTaxonomy() {
 
   const executeClone = async () => {
     if (!selectedQuestion) return;
-    if (!cloneForm.targetBookName.trim()) return alert("대상 교재 이름을 입력하세요.");
+    const trimmedTargetBook = cloneForm.targetBookName.trim();
+    if (!trimmedTargetBook) return alert("대상 교재 이름을 입력하세요.");
+    if (isExcludedDiagnosticBookName(trimmedTargetBook)) {
+      return alert("⛔ '진단평가' 및 '입학테스트' 명칭은 대외비 보호를 위해 사용할 수 없습니다.");
+    }
 
     setIsLoading(true);
     try {
@@ -944,7 +1169,7 @@ export function useTaxonomy() {
       const parsedSubNum = cloneForm.subNumber ? parseInt(cloneForm.subNumber) : 0;
       
       const qDbInsert = {
-        ...selectedQuestion, question_id: newUuid, source_book_name: cloneForm.targetBookName.trim(), book_name: cloneForm.targetBookName.trim(), 
+        ...selectedQuestion, question_id: newUuid, source_book_name: trimmedTargetBook, book_name: trimmedTargetBook, 
         final_printed_page: cloneForm.pageNumber ? parseInt(cloneForm.pageNumber) : null, question_number: cloneForm.questionNumber || 'NEW',
         sub_num: parsedSubNum, parent_question_id: null, derivation_type: '복제',
         created_at: new Date().toISOString(), updated_at: new Date().toISOString()
@@ -953,7 +1178,7 @@ export function useTaxonomy() {
       const { error: dbErr } = await supabase.from('question_db').insert(qDbInsert);
       if (dbErr) throw dbErr;
 
-      const { data: tb } = await supabase.from('textbook').select('book_id').eq('title', cloneForm.targetBookName.trim()).maybeSingle();
+      const { data: tb } = await supabase.from('textbook').select('book_id').eq('title', trimmedTargetBook).maybeSingle();
       if (tb) {
         await supabase.from('textbook_question').insert({
           book_id: tb.book_id, question_id: newUuid, page_number: cloneForm.pageNumber ? parseInt(cloneForm.pageNumber) : 999,
@@ -962,11 +1187,17 @@ export function useTaxonomy() {
         });
       }
 
-      alert(`✅ [${cloneForm.targetBookName.trim()}] 교재로 문항이 복제되었습니다!`);
+      fetch("/api/gemini-twin", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "invalidate_workbooks_cache" }),
+      }).catch(() => {});
+
+      alert(`✅ [${trimmedTargetBook}] 교재로 문항이 복제되었습니다!`);
       setIsCloneModalOpen(false);
       
-      if (cloneForm.targetBookName.trim() === selectedBook) fetchQuestions(); 
-      else appendWorkbooksToCache([cloneForm.targetBookName.trim()]); 
+      if (trimmedTargetBook === selectedBook) fetchQuestions(); 
+      else appendWorkbooksToCache([trimmedTargetBook], true); 
     } catch (e: any) { alert("복제 실패: " + e.message); } finally { setIsLoading(false); }
   };
 
@@ -1528,6 +1759,13 @@ export function useTaxonomy() {
     const twinCount = selectedTwinsToSave.filter(t => t.question_type !== '유사').length;
     const similarCount = selectedTwinsToSave.filter(t => t.question_type === '유사').length;
 
+    if (
+      (twinCount > 0 && isExcludedDiagnosticBookName(twinTargetBook)) ||
+      (similarCount > 0 && isExcludedDiagnosticBookName(similarTargetBook))
+    ) {
+      return alert("⛔ '진단평가' 및 '입학테스트' 명칭은 대외비 보호를 위해 사용할 수 없습니다.");
+    }
+
     let confirmMsg = `선택된 ${selectedTwinsToSave.length}개의 문항을 저장하시겠습니까?`;
     if (twinCount > 0 && similarCount > 0) {
       confirmMsg = `쌍둥이 ${twinCount}개 ➔ [${twinTargetBook}]\n유사 ${similarCount}개 ➔ [${similarTargetBook}]\n위 설정대로 마스터 DB에 저장하시겠습니까?`;
@@ -1757,10 +1995,18 @@ export function useTaxonomy() {
     return result;
   };
 
+  const questionDbBookSet = useMemo(() => new Set<string>(questionDbBooks), [questionDbBooks]);
+
+  const duplicateQuestionMap = useMemo<Map<string, QuestionDuplicateFlag>>(
+    () => analyzeBookInternalDuplicates(questions, selectedBook),
+    [questions, selectedBook]
+  );
+
   return {
     isAuthorized, perms, isTaxonomyLoading, isWorkbooksLoading, workbookScanProgress,
     isFetchingQuestions, fetchStepMessage, loadWorkbooks,
-    workbooks, selectedBook, questions, selectedQuestion, isLoading,
+    workbooks, questionDbBookSet, workbookMetaMap, duplicateQuestionMap,
+    selectedBook, questions, selectedQuestion, isLoading,
     isEditingContent, editForm, cropImageSrc, cropTargetField, hasCropArea, imgRef, selectionBoxRef,
     selD1, selD2, selD3, selD4, selD5, selD6, selD7, selD8,
     isGeneratingTwins, generatedTwins, isTwinModalOpen, isCloneModalOpen, cloneForm,

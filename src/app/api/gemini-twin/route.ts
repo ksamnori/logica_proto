@@ -1,13 +1,148 @@
 // src/app/api/gemini-twin/route.ts
 import { GoogleGenerativeAI, SchemaType } from "@google/generative-ai";
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
+import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import {
   deleteQuestionSafely,
   hideQuestionInMasterDb,
   inspectQuestionDeleteImpact,
   verifyQuestionMutationCaller,
 } from "@/lib/questionSafeDeleteServer";
+import {
+  buildWorkbookIndexAndDuplicates,
+  type WorkbookDuplicateSummary,
+} from "@/lib/questionDuplicateAnalyzer";
+
+interface ServerWorkbookCachePayload {
+  builtAt: number;
+  workbooks: string[];
+  questionDbBooks: string[];
+  metaByBook: Record<string, WorkbookDuplicateSummary>;
+}
+
+interface ServerWorkbookCacheHolder {
+  cache: ServerWorkbookCachePayload | null;
+  inflight: Promise<ServerWorkbookCachePayload> | null;
+}
+
+const WORKBOOK_SERVER_CACHE_TTL_MS = 10 * 60 * 1000;
+
+function getWorkbookServerCacheHolder(): ServerWorkbookCacheHolder {
+  const g = globalThis as unknown as {
+    __logicaTaxonomyWorkbookServerCache?: ServerWorkbookCacheHolder;
+  };
+  if (!g.__logicaTaxonomyWorkbookServerCache) {
+    g.__logicaTaxonomyWorkbookServerCache = { cache: null, inflight: null };
+  }
+  return g.__logicaTaxonomyWorkbookServerCache;
+}
+
+function invalidateWorkbookServerCache(): void {
+  const holder = getWorkbookServerCacheHolder();
+  holder.cache = null;
+}
+
+async function fetchAllServerParallel(
+  supabaseAdmin: SupabaseClient,
+  tableName: string,
+  selectCols: string,
+  orderCol: string
+): Promise<any[]> {
+  const step = 1000;
+  const concurrency = 10;
+  const { count, error: countErr } = await supabaseAdmin
+    .from(tableName)
+    .select("*", { count: "exact", head: true });
+
+  if (!countErr && count !== null) {
+    if (count === 0) return [];
+    const totalPages = Math.ceil(count / step);
+    const chunks: any[][] = new Array(totalPages);
+    for (let p = 0; p < totalPages; p += concurrency) {
+      const wave = Math.min(concurrency, totalPages - p);
+      await Promise.all(
+        Array.from({ length: wave }, (_, idx) => {
+          const pageIdx = p + idx;
+          const start = pageIdx * step;
+          return supabaseAdmin
+            .from(tableName)
+            .select(selectCols)
+            .order(orderCol, { ascending: true })
+            .range(start, start + step - 1)
+            .then(({ data }) => {
+              chunks[pageIdx] = data || [];
+            });
+        })
+      );
+    }
+    const merged: any[] = [];
+    for (const c of chunks) {
+      if (c && c.length > 0) merged.push(...c);
+    }
+    return merged;
+  }
+
+  const fallback: any[] = [];
+  let start = 0;
+  while (true) {
+    const { data, error } = await supabaseAdmin
+      .from(tableName)
+      .select(selectCols)
+      .order(orderCol, { ascending: true })
+      .range(start, start + step - 1);
+    if (error || !data || data.length === 0) break;
+    fallback.push(...data);
+    if (data.length < step) break;
+    start += step;
+  }
+  return fallback;
+}
+
+async function getServerWorkbookIndex(
+  supabaseAdmin: SupabaseClient,
+  forceRefresh: boolean = false
+): Promise<ServerWorkbookCachePayload> {
+  const holder = getWorkbookServerCacheHolder();
+  if (
+    !forceRefresh &&
+    holder.cache &&
+    Date.now() - holder.cache.builtAt < WORKBOOK_SERVER_CACHE_TTL_MS
+  ) {
+    return holder.cache;
+  }
+  if (!forceRefresh && holder.inflight) {
+    return holder.inflight;
+  }
+
+  holder.inflight = (async () => {
+    try {
+      const [tbRows, qbRows] = await Promise.all([
+        fetchAllServerParallel(supabaseAdmin, "textbook", "title", "book_id"),
+        fetchAllServerParallel(
+          supabaseAdmin,
+          "question_db",
+          "question_id, source_book_name, book_name, pdf_source, final_printed_page, detected_page_num, question_number, sub_num, question, question_2, answer, derivation_type, parent_question_id, is_hidden",
+          "question_id"
+        ),
+      ]);
+
+      const tbTitles = (tbRows || []).map((t: any) => String(t?.title || ""));
+      const built = buildWorkbookIndexAndDuplicates(qbRows || [], tbTitles);
+      const payload: ServerWorkbookCachePayload = {
+        builtAt: Date.now(),
+        workbooks: built.workbooks,
+        questionDbBooks: built.questionDbBooks,
+        metaByBook: built.metaByBook,
+      };
+      holder.cache = payload;
+      return payload;
+    } finally {
+      holder.inflight = null;
+    }
+  })();
+
+  return holder.inflight;
+}
 
 async function fetchImageAsInlinePart(url?: string | null) {
   if (!url || typeof url !== "string" || url === "null" || url === "undefined") return null;
@@ -288,6 +423,23 @@ export async function PUT(req: NextRequest) {
     const body = await req.json();
     const { action } = body;
 
+    if (action === "list_workbooks") {
+      const forceRefresh = Boolean(body?.forceRefresh);
+      const indexed = await getServerWorkbookIndex(supabaseAdmin, forceRefresh);
+      return NextResponse.json({
+        success: true,
+        workbooks: indexed.workbooks,
+        questionDbBooks: indexed.questionDbBooks,
+        metaByBook: indexed.metaByBook,
+        builtAt: indexed.builtAt,
+      });
+    }
+
+    if (action === "invalidate_workbooks_cache") {
+      invalidateWorkbookServerCache();
+      return NextResponse.json({ success: true });
+    }
+
     if (action === "inspect_delete_question") {
       const authCheck = await verifyQuestionMutationCaller(
         supabaseAdmin,
@@ -334,6 +486,7 @@ export async function PUT(req: NextRequest) {
         supabaseAdmin,
         String(questionId || "")
       );
+      invalidateWorkbookServerCache();
       return NextResponse.json(result);
     }
 
@@ -356,6 +509,7 @@ export async function PUT(req: NextRequest) {
         String(questionId || ""),
         { forceCascade: Boolean(forceCascade) }
       );
+      invalidateWorkbookServerCache();
       return NextResponse.json(result);
     }
 
@@ -446,6 +600,7 @@ export async function PUT(req: NextRequest) {
         }
       }
 
+      invalidateWorkbookServerCache();
       return NextResponse.json({ success: true });
     }
 

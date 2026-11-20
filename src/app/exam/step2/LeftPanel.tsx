@@ -2,6 +2,7 @@
 import React, { useState, useMemo, useEffect } from "react";
 import { supabase } from "../../../lib/supabase";
 import { getDiffLabelByRate, getTypeName, getDepth5Name, getDepth6Name, getSubDepth6Name, formatText, getCleanUrl, renderParentRelations, compareSubQuestions, compareQuestionsBySource, fetchMainTextbookExclusionSet, isMainTextbookQuestion, hydrateMissingQuestionImages, ensureCompleteSubQuestionBundles, matchesSourceCategoryFilter } from "./examUtils";
+import { isConfidentialQuestionObj } from "../../../lib/confidentialExamGuard";
 
 const parseId = (id: string) => {
   if (!id) return null;
@@ -523,6 +524,7 @@ export default function LeftPanel({ examData }: { examData: any }) {
           !q.is_hidden &&
           q.is_hidden !== 'Y' &&
           q.is_hidden !== 'true' &&
+          !isConfidentialQuestionObj(q) &&
           matchesSourceCategoryFilter(q, addSourceCategories, mainExclusion)
       );
       

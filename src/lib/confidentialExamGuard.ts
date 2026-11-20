@@ -2,10 +2,12 @@
 // 🌟 대외비 시험('입학테스트', '진단평가') 문항이 오답노트(student_incorrect_record),
 // [통합] 누적 오답 클리닉('누적 오답 모음'), 오답 프린트, 오답유사 클리닉으로 절대 유출되지 않도록 방어하는 공통 가드
 
+export const CONFIDENTIAL_EXAM_REGEX = /(?:입학\s*테스트|진단\s*평가)/i;
+
 export const isConfidentialExamText = (val?: any): boolean => {
   if (!val) return false;
-  const s = String(val);
-  return s.includes("입학테스트") || s.includes("진단평가");
+  const s = typeof val === "string" ? val.normalize("NFC") : JSON.stringify(val).normalize("NFC");
+  return CONFIDENTIAL_EXAM_REGEX.test(s);
 };
 
 export const isConfidentialQuestionObj = (q?: any): boolean => {
@@ -15,7 +17,8 @@ export const isConfidentialQuestionObj = (q?: any): boolean => {
   return (
     isConfidentialExamText(row.source_book_name) ||
     isConfidentialExamText(row.book_name) ||
-    isConfidentialExamText(row.pdf_source)
+    isConfidentialExamText(row.pdf_source) ||
+    isConfidentialExamText(row.raw_source_tags)
   );
 };
 

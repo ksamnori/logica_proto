@@ -4,6 +4,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
+import { isConfidentialExamText, isConfidentialQuestionObj } from "@/lib/confidentialExamGuard";
 
 const fetchAllRows = async (tableName: string, selectQuery: string = '*') => {
   let allData: any[] = [];
@@ -179,12 +180,23 @@ export default function VisualMapperPage() {
   const loadBooks = async () => {
     const tbData = await fetchAllRows('textbook', 'book_id, title');
     if (tbData) {
-      setTextbooks(tbData.sort((a, b) => a.title.localeCompare(b.title, 'ko', { numeric: true })));
+      setTextbooks(
+        tbData
+          .filter((b: any) => b?.title && !isConfidentialExamText(b.title))
+          .sort((a, b) => a.title.localeCompare(b.title, 'ko', { numeric: true }))
+      );
     }
 
-    const qbData = await fetchAllRows('question_db', 'source_book_name');
+    const qbData = await fetchAllRows('question_db', 'source_book_name, book_name, pdf_source');
     if (qbData) {
-      const uniqueList = Array.from(new Set(qbData.map(q => q.source_book_name))).filter(Boolean).sort((a, b) => a.localeCompare(b, 'ko', { numeric: true }));
+      const uniqueList = Array.from(
+        new Set(
+          qbData
+            .filter((q: any) => !isConfidentialQuestionObj(q))
+            .map((q: any) => q.source_book_name)
+            .filter((s: any) => s && !isConfidentialExamText(s))
+        )
+      ).sort((a: any, b: any) => a.localeCompare(b, 'ko', { numeric: true }));
       setWorkbooks(uniqueList as string[]);
     }
   };
@@ -225,11 +237,15 @@ export default function VisualMapperPage() {
   };
 
   const fetchWbQuestions = async (source: string, setter: React.Dispatch<React.SetStateAction<any[]>>) => {
+    if (isConfidentialExamText(source)) {
+      setter([]);
+      return;
+    }
     setIsLoading(true);
     try {
       const { data: wbData } = await supabase.from("question_db").select("*").eq("source_book_name", source);
 
-      const sortedWbData = (wbData || []).sort((a, b) => {
+      const sortedWbData = (wbData || []).filter((q: any) => !isConfidentialQuestionObj(q)).sort((a, b) => {
         const parsePage = (p1: any, p2: any) => {
           const v1 = parseInt(String(p1));
           if (!isNaN(v1) && v1 > 0) return v1;

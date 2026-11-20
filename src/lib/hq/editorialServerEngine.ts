@@ -2,6 +2,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { normalizeMasterCategories } from "@/lib/normalize";
 import { THINKING_CATEGORIES } from "@/lib/thinkingCategory";
+import { isConfidentialQuestionObj } from "@/lib/confidentialExamGuard";
 import type {
   AnalyzedCaptureProblem,
   CategoryCompetencyInfo,
@@ -383,6 +384,9 @@ function buildEditorialIndex(
     if (q.is_hidden === true || q.is_hidden === "Y" || q.is_hidden === "true") {
       continue;
     }
+    if (isConfidentialQuestionObj(q as Record<string, unknown>)) {
+      continue;
+    }
     const qid = String(q.question_id || "").trim();
     if (!qid) continue;
 
@@ -519,7 +523,7 @@ export async function getEditorialServerIndex(
           fetchAllParallel(
             supabaseAdmin,
             "question_db",
-            "question_id, item_id, parent_question_id, taxonomy_id, sub_taxonomy_id, thk_taxonomy_id, derivation_type, is_hidden, difficulty, cognitive_level, problem_type, book_name, source_book_name, final_printed_page, question_number, sub_num",
+            "question_id, item_id, parent_question_id, taxonomy_id, sub_taxonomy_id, thk_taxonomy_id, derivation_type, is_hidden, difficulty, cognitive_level, problem_type, book_name, source_book_name, pdf_source, raw_source_tags, final_printed_page, question_number, sub_num",
             "question_id"
           ),
         ]);
@@ -1003,7 +1007,7 @@ export async function queryQuestionsPayload(
 
     questions = qids
       .map((id) => rowMap.get(id))
-      .filter((r): r is DbRow => Boolean(r))
+      .filter((r): r is DbRow => Boolean(r) && !isConfidentialQuestionObj(r))
       .map((r) => {
         const rawCode = String(r.taxonomy_id || r.item_id || "").trim().toUpperCase();
         const hitItem = index.itemByUpper.get(rawCode);

@@ -5,6 +5,7 @@ import { supabase } from "../../../lib/supabase";
 import { getDiffLabelByRate, smartSplitTaxonomy, getDepth5Name, getDepth6Name, extractParentIds, parseQuestionNumberParts, compareSubQuestions, compareQuestionsBySource, buildMergedQuestionGroups, fetchMainTextbookExclusionSet, isMainTextbookQuestion, isWorkbookQuestion, hydrateMissingQuestionImages, matchesSourceCategoryFilter, ensureCompleteSubQuestionBundles } from "./examUtils";
 import { DIAGNOSTIC_SEMESTERS, QUARTERLY_SEMESTERS, getDiagnosticQuarterInfo, matchDiagnosticSemester, filterQuarterlyQuestionsByLevel } from "../step1/useStep1Data";
 import { normalizeMasterCategories, normalizeMasterCategoryRow } from "../../../lib/normalize";
+import { isConfidentialQuestionObj } from "../../../lib/confidentialExamGuard";
 
 const URL_MASTER_CAT = "https://kfwlmbwornivkrvoeqdh.supabase.co/storage/v1/object/public/system_data/Master_Category.json";
 const URL_MASTER_ITEM = "https://kfwlmbwornivkrvoeqdh.supabase.co/storage/v1/object/public/system_data/Master_Item.json";
@@ -635,6 +636,8 @@ export function useExamData() {
       const isRateFilterActive = (rateMax < 100 || rateMin > 0) && examMode !== "test";
       const filteredData = allData.filter(q => {
         if (q.is_hidden === true || q.is_hidden === 'Y' || q.is_hidden === 'true') return false;
+        // 🛡️ 진단평가 전용 모드가 아닐 때는 '진단평가'·'입학테스트' 대외비 문항 누출을 원천 차단
+        if (!isDiagnosticMode && isConfidentialQuestionObj(q)) return false;
         // 🌟 주교재 제외 / 워크북 제외 / 추가문제 / 쌍둥이·유사 필터 적용
         if (!isFixedPresetExamMode) {
           if ((sourceCategories.excludeMain ?? true) && isMainTextbookQuestion(q, mainExclusion)) return false;
@@ -1157,6 +1160,7 @@ export function useExamData() {
         const iid = toRealQId(item.question_id);
         if (existingIds.has(iid)) return false;
         if (item.is_hidden === true || item.is_hidden === "Y" || item.is_hidden === "true") return false;
+        if (isConfidentialQuestionObj(item)) return false;
         const role = getRelationRole(item);
         if (role === "PARENT" || role === "SIBLING") {
           item._relationRole = role;

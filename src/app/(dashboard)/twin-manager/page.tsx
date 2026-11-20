@@ -4,6 +4,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import { supabase } from "@/lib/supabase";
 import { executeInteractiveQuestionDelete } from "@/lib/questionSafeDeleteClient";
+import { isConfidentialExamText, isConfidentialQuestionObj } from "@/lib/confidentialExamGuard";
 
 // ==========================================
 // 1. 코어 유틸리티
@@ -149,9 +150,14 @@ export default function TwinManagerPage() {
   const loadWorkbooks = async () => {
     try {
       const tbData = await fetchAllRows('textbook', 'title');
-      const qbData = await fetchAllRows('question_db', 'source_book_name');
-      const titles = tbData.map(t => t.title);
-      const sources = qbData.map(q => q.source_book_name);
+      const qbData = await fetchAllRows('question_db', 'source_book_name, book_name, pdf_source');
+      const titles = tbData.map(t => t.title).filter((t: any) => t && !isConfidentialExamText(t));
+      const sources: string[] = [];
+      qbData.forEach((q: any) => {
+        if (isConfidentialQuestionObj(q)) return;
+        if (q.source_book_name && !isConfidentialExamText(q.source_book_name)) sources.push(q.source_book_name);
+        if (q.book_name && !isConfidentialExamText(q.book_name)) sources.push(q.book_name);
+      });
       
       const uniqueList = Array.from(new Set([...titles, ...sources])).filter(Boolean).sort(taxSort);
       setWorkbooks(uniqueList as string[]);
@@ -161,6 +167,10 @@ export default function TwinManagerPage() {
   };
 
   const fetchColumnData = async (colIndex: number, targetBookName: string) => {
+    if (isConfidentialExamText(targetBookName)) {
+      alert("⛔ '진단평가' 및 '입학테스트' 문항은 대외비 보호 대상이므로 열람할 수 없습니다.");
+      return;
+    }
     const newCols = [...columns];
     newCols[colIndex].bookName = targetBookName;
     
@@ -207,7 +217,7 @@ export default function TwinManagerPage() {
         const chunk = qidArray.slice(i, i + 500);
         const { data, error } = await supabase.from("question_db").select("*").in("question_id", chunk);
         if (error) throw error;
-        if (data) fetchedQuestions.push(...data);
+        if (data) fetchedQuestions.push(...data.filter((q: any) => !isConfidentialQuestionObj(q)));
       }
 
       newCols[colIndex].questions = sortQuestionsList(fetchedQuestions);
@@ -226,6 +236,9 @@ export default function TwinManagerPage() {
     const newName = prompt(`현재 묶음 이름: ${currentName}\n\n새로운 교재(묶음) 이름을 입력하세요:\n(이 작업은 마스터 DB의 이름을 통째로 변경합니다.)`, currentName);
     
     if (!newName || newName.trim() === "" || newName.trim() === currentName) return;
+    if (isConfidentialExamText(newName.trim())) {
+      return alert("⛔ '진단평가' 및 '입학테스트' 명칭은 대외비 보호를 위해 사용할 수 없습니다.");
+    }
 
     setIsLoading(true);
     try {
@@ -417,6 +430,9 @@ export default function TwinManagerPage() {
           const twinBookName = columns[3].bookName;
           const simBookName = columns[4].bookName;
           const targetBook = isSimilar ? (simBookName || `${parentQ.source_book_name} 유사`) : (twinBookName || `${parentQ.source_book_name} 쌍둥이`);
+          if (isConfidentialExamText(targetBook)) {
+            throw new Error("⛔ '진단평가' 및 '입학테스트' 명칭으로는 문항을 저장할 수 없습니다.");
+          }
           const suffix = isSimilar ? `S${nextS++}` : `T${nextT++}`;
 
           twinsToInsert.push({

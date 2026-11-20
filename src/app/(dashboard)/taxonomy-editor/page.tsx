@@ -4,7 +4,12 @@
 import React from "react";
 import { useTaxonomy } from "./useTaxonomy";
 import { formatQNum, getCleanUrl } from "./taxonomyUtils";
-import { supabase } from "@/lib/supabase"; 
+import { isConfidentialExamText } from "@/lib/confidentialExamGuard";
+import {
+  hasAnyDuplicateSuspect,
+  type QuestionDuplicateFlag,
+  type WorkbookDuplicateSummary,
+} from "@/lib/questionDuplicateAnalyzer";
 
 // 🌟 [핵심] 이 함수가 누락되어 에러가 났습니다. 여기에 안전하게 선언해둡니다!
 const getBoxWidth = (box: any) => {
@@ -27,7 +32,8 @@ export default function TaxonomyEditorPage() {
   const {
     isAuthorized, perms, isTaxonomyLoading, isWorkbooksLoading, workbookScanProgress,
     isFetchingQuestions, fetchStepMessage, loadWorkbooks,
-    workbooks, selectedBook, questions, selectedQuestion, isLoading,
+    workbooks, questionDbBookSet, workbookMetaMap, duplicateQuestionMap,
+    selectedBook, questions, selectedQuestion, isLoading,
     isEditingContent, editForm, cropImageSrc, cropTargetField, hasCropArea, imgRef, selectionBoxRef,
     selD1, selD2, selD3, selD4, selD5, selD6, selD7, selD8,
     isGeneratingTwins, generatedTwins, isTwinModalOpen, isCloneModalOpen, cloneForm, twinTargetBook, similarTargetBook,
@@ -40,11 +46,13 @@ export default function TaxonomyEditorPage() {
     handleQuestionClick, saveTaxonomy, createNewQuestion, deleteQuestion, executeClone, handleImageInput, handlePaste, handleDrop, handleCropMouseDown, handleCropMouseMove, handleCropMouseUp, handleCropUpload,
     handleCropExisting, handleDeleteImage,
     handleGenerateTwins, saveTwinsToDB, handleTwinChange, handleFixLatex, saveQuestionContent
-  } = useTaxonomy() as any; 
+  } = useTaxonomy() as any;
 
   const [bookFilter, setBookFilter] = React.useState("");
   const [gradeFilter, setGradeFilter] = React.useState<string>("ALL");
   const [typeFilter, setTypeFilter] = React.useState<string>("ALL");
+  const [onlyDupBundles, setOnlyDupBundles] = React.useState(false);
+  const [onlyDupQuestions, setOnlyDupQuestions] = React.useState(false);
   const [isBookPickerOpen, setIsBookPickerOpen] = React.useState(false);
   const [pickerLimit, setPickerLimit] = React.useState(500);
   const [autoFetchOnSelect, setAutoFetchOnSelect] = React.useState(true);
@@ -53,10 +61,14 @@ export default function TaxonomyEditorPage() {
   const pickerRef = React.useRef<HTMLDivElement>(null);
 
   React.useEffect(() => {
+    setOnlyDupQuestions(false);
+  }, [selectedBook]);
+
+  React.useEffect(() => {
     try {
       const saved = JSON.parse(localStorage.getItem("logica_taxonomy_recent_books") || "[]");
       if (Array.isArray(saved)) {
-        setRecentBooks(saved.filter((b: any) => typeof b === "string" && !b.includes("입학테스트") && !b.includes("진단평가")).slice(0, 6));
+        setRecentBooks(saved.filter((b: any) => typeof b === "string" && !isConfidentialExamText(b)).slice(0, 6));
       }
     } catch (e) {}
   }, []);
@@ -72,7 +84,7 @@ export default function TaxonomyEditorPage() {
   }, []);
 
   const recordRecentBook = (bookName: string) => {
-    if (!bookName || bookName.includes("입학테스트") || bookName.includes("진단평가")) return;
+    if (!bookName || isConfidentialExamText(bookName)) return;
     setRecentBooks((prev) => {
       const next = [bookName, ...prev.filter((b) => b !== bookName)].slice(0, 6);
       try {
@@ -80,6 +92,36 @@ export default function TaxonomyEditorPage() {
       } catch (e) {}
       return next;
     });
+  };
+
+  const isTwinBundle = (name: string): boolean => {
+    const s = String(name || "");
+    return s.includes("쌍둥이") || /TWIN/i.test(s);
+  };
+
+  const isSimilarBundle = (name: string): boolean => {
+    const s = String(name || "");
+    return s.includes("유사") || /SIMILAR/i.test(s);
+  };
+
+  // question_db에 존재하는 '평가' / '테스트' 묶음 판별 (진단평가·입학테스트는 원천 배제)
+  const isTestOrEvalBundle = (name: string): boolean => {
+    const s = String(name || "");
+    if (!s || isConfidentialExamText(s)) return false;
+    return /(?:평가|테스트)/i.test(s);
+  };
+
+  const isWeeklyTestBundle = (name: string): boolean => {
+    const s = String(name || "");
+    if (!s || isConfidentialExamText(s)) return false;
+    return /주간\s*(?:테스트|평가)/i.test(s);
+  };
+
+  // 정기평가: '분기 평가'(분기평가/분기테스트) 및 '중간 평가'(중간평가/중간테스트)
+  const isRegularEvalBundle = (name: string): boolean => {
+    const s = String(name || "");
+    if (!s || isConfidentialExamText(s)) return false;
+    return /(?:분기|중간)\s*(?:평가|테스트)/i.test(s);
   };
 
   const detectBookGrade = (name: string): string => {
@@ -97,24 +139,51 @@ export default function TaxonomyEditorPage() {
     return "기타";
   };
 
-  const detectBookType = (name: string): "TWIN" | "SIMILAR" | "TEST" | "MAIN" => {
-    const s = String(name || "");
-    if (s.includes("쌍둥이") || /TWIN/i.test(s)) return "TWIN";
-    if (s.includes("유사") || /SIMILAR/i.test(s)) return "SIMILAR";
-    if (s.includes("주간테스트") || s.includes("중간테스트") || s.includes("분기테스트") || s.includes("단원테스트") || s.includes("평가")) return "TEST";
-    return "MAIN";
+  const matchesBookTypeFilter = (name: string, filter: string, inQdb: boolean): boolean => {
+    if (filter === "ALL") return true;
+    if (filter === "MAIN") return !isTestOrEvalBundle(name) && !isTwinBundle(name) && !isSimilarBundle(name);
+    if (filter === "TWIN") return isTwinBundle(name);
+    if (filter === "SIMILAR") return isSimilarBundle(name);
+    if (filter === "WEEKLY_TEST") return isWeeklyTestBundle(name) && inQdb;
+    if (filter === "REGULAR_EVAL") return isRegularEvalBundle(name) && inQdb;
+    return true;
   };
+
+  const dupWorkbookCount = React.useMemo(() => {
+    const metaMap = (workbookMetaMap || {}) as Record<string, WorkbookDuplicateSummary>;
+    return (workbooks || []).filter((b: string) => b && !isConfidentialExamText(b) && hasAnyDuplicateSuspect(metaMap[b])).length;
+  }, [workbooks, workbookMetaMap]);
 
   const filteredWorkbooks = React.useMemo(() => {
     const lowerKw = bookFilter.trim().toLowerCase().replace(/\s+/g, "");
+    const qdbSet = questionDbBookSet as Set<string> | undefined;
+    const metaMap = (workbookMetaMap || {}) as Record<string, WorkbookDuplicateSummary>;
+
     return (workbooks || []).filter((b: string) => {
-      if (!b || b.includes("입학테스트") || b.includes("진단평가")) return false;
-      if (gradeFilter !== "ALL" && detectBookGrade(b) !== gradeFilter) return false;
-      if (typeFilter !== "ALL" && detectBookType(b) !== typeFilter) return false;
+      if (!b || isConfidentialExamText(b)) return false;
+      const inQdb = !qdbSet || qdbSet.size === 0 || qdbSet.has(b);
+
+      if (gradeFilter === "TEST") {
+        // 학년 빠른필터 '테스트': question_db의 book_name / source_book_name 중 '평가' 또는 '테스트'가 포함된 묶음만 표시
+        if (!inQdb || !isTestOrEvalBundle(b)) return false;
+      } else if (gradeFilter !== "ALL") {
+        // 일반 학년(초1~고등, 기타) 탭에서는 중간평가/분기평가/주간테스트 등이 섞여 나오지 않도록 차단
+        // (단, 교재 유형에서 주간테스트/정기평가를 직접 함께 누른 경우에만 해당 학년 평가를 허용)
+        const allowTestInGrade = typeFilter === "WEEKLY_TEST" || typeFilter === "REGULAR_EVAL";
+        if (!allowTestInGrade && isTestOrEvalBundle(b)) return false;
+        if (detectBookGrade(b) !== gradeFilter) return false;
+      }
+
+      if (!matchesBookTypeFilter(b, typeFilter, inQdb)) return false;
+      if (onlyDupBundles && !hasAnyDuplicateSuspect(metaMap[b])) return false;
       if (lowerKw && !b.toLowerCase().replace(/\s+/g, "").includes(lowerKw)) return false;
       return true;
     });
-  }, [workbooks, bookFilter, gradeFilter, typeFilter]);
+  }, [workbooks, bookFilter, gradeFilter, typeFilter, onlyDupBundles, questionDbBookSet, workbookMetaMap]);
+
+  const selectedBookDupMeta: WorkbookDuplicateSummary | undefined = selectedBook
+    ? (workbookMetaMap || {})[selectedBook]
+    : undefined;
 
   const handleSelectBookFast = (bookName: string, shouldFetch: boolean = autoFetchOnSelect) => {
     setSelectedBook(bookName);
@@ -159,10 +228,16 @@ export default function TaxonomyEditorPage() {
     }
 
     groups.sort((a, b) => a.repIndex - b.repIndex);
+    const dupMap = duplicateQuestionMap as Map<string, QuestionDuplicateFlag> | undefined;
     const kw = questionTextFilter.trim().toLowerCase();
-    if (!kw) return groups;
+
     return groups.filter((group: any) => {
       const family = [group.root, ...(group.descendants || [])];
+      if (onlyDupQuestions && dupMap) {
+        const hasDupInFamily = family.some((item: any) => dupMap.has(String(item.question_id)));
+        if (!hasDupInFamily) return false;
+      }
+      if (!kw) return true;
       return family.some((item: any) => {
         const qText = String(item.question || item.text_question || "").toLowerCase();
         const ans = String(item.answer || "").toLowerCase();
@@ -176,7 +251,7 @@ export default function TaxonomyEditorPage() {
         return qText.includes(kw) || ans.includes(kw) || qNum.includes(kw) || page.includes(kw) || book.includes(kw) || tax.includes(kw) || subTax.includes(kw) || taxName.includes(kw) || subTaxName.includes(kw);
       });
     });
-  }, [normalRoots, trueOrphans, selectedBook, getDescendants, questions, questionTextFilter]);
+  }, [normalRoots, trueOrphans, selectedBook, getDescendants, questions, questionTextFilter, onlyDupQuestions, duplicateQuestionMap]);
 
   const renderImageBox = (label: string, fieldKey: string, boxFieldKey: string | null, colorTheme: 'indigo' | 'emerald') => {
     const rawValue = editForm[fieldKey as keyof typeof editForm] as string;
@@ -406,7 +481,7 @@ export default function TaxonomyEditorPage() {
       {/* AI 쌍둥이/유사 문항 모달 */}
       {isTwinModalOpen && (
         <div className="fixed inset-0 z-[100] bg-slate-900/60 flex flex-col items-center justify-center p-6 sm:p-10 animate-in fade-in backdrop-blur-sm">
-          <div className="bg-white w-full max-w-6xl h-full max-h-[92vh] rounded-3xl shadow-2xl flex flex-col overflow-hidden border border-slate-200">
+          <div id="taxonomy-twin-modal" className="bg-white w-full max-w-6xl h-full max-h-[92vh] rounded-3xl shadow-2xl flex flex-col overflow-hidden border border-slate-200">
             <div className="p-5 bg-gradient-to-r from-fuchsia-600 to-indigo-600 flex flex-wrap justify-between items-center gap-3 shrink-0">
               <div>
                 <h2 className="text-xl font-bold text-white flex items-center gap-2">
@@ -647,8 +722,8 @@ export default function TaxonomyEditorPage() {
                         </option>
                       )}
                     <option value="주간테스트">주간테스트</option>
-                    <option value="중간테스트">중간테스트</option>
-                    <option value="분기테스트">분기테스트</option>
+                    <option value="중간평가">중간평가</option>
+                    <option value="분기평가">분기평가</option>
                   </select>
                 </div>
 
@@ -667,8 +742,8 @@ export default function TaxonomyEditorPage() {
                         </option>
                       )}
                     <option value="주간테스트">주간테스트</option>
-                    <option value="중간테스트">중간테스트</option>
-                    <option value="분기테스트">분기테스트</option>
+                    <option value="중간평가">중간평가</option>
+                    <option value="분기평가">분기평가</option>
                   </select>
                 </div>
 
@@ -721,7 +796,7 @@ export default function TaxonomyEditorPage() {
       </div>
 
       <div className="bg-white px-6 py-3.5 border border-slate-200 rounded-xl flex flex-col gap-2.5 mb-4 shrink-0 shadow-sm">
-        {/* 1단: 원클릭 학년 필터 + 교재 유형 필터 + 최근 작업 교재 */}
+        {/* 1단: 원클릭 학년 필터 + 교재 유형 필터 + 중복 의심 필터 */}
         <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-2.5">
           <div className="flex flex-wrap items-center gap-1">
             <span className="text-[11px] font-bold text-slate-400 mr-1">학년 빠른필터:</span>
@@ -738,14 +813,22 @@ export default function TaxonomyEditorPage() {
               { id: "중3", label: "중3" },
               { id: "고등", label: "고등" },
               { id: "기타", label: "기타" },
+              { id: "TEST", label: "테스트" },
             ].map((g) => (
               <button
                 key={g.id}
                 type="button"
                 onClick={() => { setGradeFilter(g.id); setPickerLimit(500); setIsBookPickerOpen(true); }}
+                title={
+                  g.id === "TEST"
+                    ? "question_db의 book_name / source_book_name에 '평가' 또는 '테스트'가 포함된 묶음 표시 (진단평가·입학테스트 제외)"
+                    : undefined
+                }
                 className={`px-2 py-1 rounded-md text-xs font-bold transition-all ${
                   gradeFilter === g.id
                     ? "bg-brand text-white shadow-sm"
+                    : g.id === "TEST"
+                    ? "bg-indigo-50 text-indigo-700 border border-indigo-200 hover:bg-indigo-100"
                     : "bg-slate-100 text-slate-600 hover:bg-slate-200"
                 }`}
               >
@@ -761,12 +844,20 @@ export default function TaxonomyEditorPage() {
               { id: "MAIN", label: "📘 본교재/일반" },
               { id: "TWIN", label: "👯 쌍둥이" },
               { id: "SIMILAR", label: "💡 유사" },
-              { id: "TEST", label: "📝 테스트" },
+              { id: "WEEKLY_TEST", label: "📝 주간테스트" },
+              { id: "REGULAR_EVAL", label: "📅 정기평가" },
             ].map((t) => (
               <button
                 key={t.id}
                 type="button"
-                onClick={() => { setTypeFilter(t.id); setPickerLimit(500); }}
+                onClick={() => { setTypeFilter(t.id); setPickerLimit(500); setIsBookPickerOpen(true); }}
+                title={
+                  t.id === "REGULAR_EVAL"
+                    ? "분기 평가(분기평가) 및 중간 평가(중간평가) 묶음 표시"
+                    : t.id === "WEEKLY_TEST"
+                    ? "주간테스트 묶음 표시"
+                    : undefined
+                }
                 className={`px-2.5 py-1 rounded-md text-xs font-bold transition-all ${
                   typeFilter === t.id
                     ? "bg-indigo-600 text-white shadow-sm"
@@ -776,6 +867,24 @@ export default function TaxonomyEditorPage() {
                 {t.label}
               </button>
             ))}
+            <button
+              type="button"
+              onClick={() => {
+                setOnlyDupBundles((prev) => !prev);
+                setPickerLimit(500);
+                setIsBookPickerOpen(true);
+              }}
+              className={`ml-1 px-2.5 py-1 rounded-md text-xs font-bold border transition-all ${
+                onlyDupBundles
+                  ? "bg-rose-600 text-white border-rose-600 shadow-sm"
+                  : dupWorkbookCount > 0
+                  ? "bg-rose-50 text-rose-700 border-rose-200 hover:bg-rose-100"
+                  : "bg-slate-50 text-slate-400 border-slate-200 hover:bg-slate-100"
+              }`}
+              title="묶음 내부 중복 문항, book_name≠source_book_name 별칭 중복, 또는 타 묶음과 동일 문제가 2중 적재된 의심 묶음만 모아서 봅니다."
+            >
+              ⚠️ 중복 의심 묶음 ({dupWorkbookCount})
+            </button>
           </div>
         </div>
 
@@ -847,10 +956,10 @@ export default function TaxonomyEditorPage() {
                 <div className="px-3.5 py-2 bg-slate-50 border-b border-slate-200 flex items-center justify-between text-xs font-bold text-slate-500 shrink-0">
                   <span>
                     조건 일치 교재 <strong className="text-brand">{filteredWorkbooks.length}</strong>건
-                    {(gradeFilter !== "ALL" || typeFilter !== "ALL" || bookFilter.trim()) && (
+                    {(gradeFilter !== "ALL" || typeFilter !== "ALL" || onlyDupBundles || bookFilter.trim()) && (
                       <button
                         type="button"
-                        onClick={() => { setGradeFilter("ALL"); setTypeFilter("ALL"); setBookFilter(""); }}
+                        onClick={() => { setGradeFilter("ALL"); setTypeFilter("ALL"); setOnlyDupBundles(false); setBookFilter(""); }}
                         className="ml-2 text-rose-500 hover:underline"
                       >
                         필터 초기화
@@ -877,8 +986,8 @@ export default function TaxonomyEditorPage() {
                     <>
                       {filteredWorkbooks.slice(0, pickerLimit).map((b: string) => {
                         const bGrade = detectBookGrade(b);
-                        const bType = detectBookType(b);
                         const isSel = selectedBook === b;
+                        const meta = (workbookMetaMap || {})[b] as WorkbookDuplicateSummary | undefined;
                         return (
                           <button
                             key={b}
@@ -889,24 +998,63 @@ export default function TaxonomyEditorPage() {
                             }`}
                           >
                             <span className="truncate">{b}</span>
-                            <span className="flex items-center gap-1 shrink-0">
+                            <span className="flex items-center gap-1 shrink-0 flex-wrap justify-end">
+                              {meta && meta.count > 0 && (
+                                <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-50 text-slate-500 border border-slate-200">
+                                  {meta.count}문항
+                                </span>
+                              )}
+                              {meta && meta.internalDupCount > 0 && (
+                                <span
+                                  className="text-[10px] px-1.5 py-0.5 rounded bg-rose-50 text-rose-700 border border-rose-200"
+                                  title={`묶음 내부에 동일 지문·정답(또는 동일 번호·정답) 중복 의심 문항 ${meta.internalDupCount}개`}
+                                >
+                                  ⚠️ 내부중복 {meta.internalDupCount}
+                                </span>
+                              )}
+                              {meta?.aliasBook && (meta.aliasSharedPct || 0) >= 70 && (
+                                <span
+                                  className="text-[10px] px-1.5 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-200"
+                                  title={`'${meta.aliasBook}' 묶음과 동일한 question_id를 ${meta.aliasSharedPct}% 공유 (book_name ≠ source_book_name 별칭 중복)`}
+                                >
+                                  🔗 별칭중복 {meta.aliasSharedPct}%
+                                </span>
+                              )}
+                              {meta?.crossDupBook && (meta.crossDupPct || 0) >= 60 && (
+                                <span
+                                  className="text-[10px] px-1.5 py-0.5 rounded bg-orange-50 text-orange-700 border border-orange-200"
+                                  title={`'${meta.crossDupBook}' 묶음과 동일 지문·정답 문항이 ${meta.crossDupPct}% 겹침 (타 묶음 복제 적재 의심)`}
+                                >
+                                  📑 복제중복 {meta.crossDupPct}%
+                                </span>
+                              )}
                               {bGrade !== "기타" && (
                                 <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 border border-slate-200">
                                   {bGrade}
                                 </span>
                               )}
-                              {bType === "TWIN" && (
+                              {isTwinBundle(b) && (
                                 <span className="text-[10px] px-1.5 py-0.5 rounded bg-fuchsia-50 text-fuchsia-700 border border-fuchsia-200">
                                   쌍둥이
                                 </span>
                               )}
-                              {bType === "SIMILAR" && (
+                              {isSimilarBundle(b) && (
                                 <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200">
                                   유사
                                 </span>
                               )}
-                              {bType === "TEST" && (
+                              {isWeeklyTestBundle(b) && (
+                                <span className="text-[10px] px-1.5 py-0.5 rounded bg-sky-50 text-sky-700 border border-sky-200">
+                                  주간테스트
+                                </span>
+                              )}
+                              {isRegularEvalBundle(b) && (
                                 <span className="text-[10px] px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 border border-indigo-200">
+                                  정기평가
+                                </span>
+                              )}
+                              {isTestOrEvalBundle(b) && !isWeeklyTestBundle(b) && !isRegularEvalBundle(b) && (
+                                <span className="text-[10px] px-1.5 py-0.5 rounded bg-teal-50 text-teal-700 border border-teal-200">
                                   테스트
                                 </span>
                               )}
@@ -962,6 +1110,54 @@ export default function TaxonomyEditorPage() {
             )}
           </button>
         </div>
+
+        {/* 선택한 묶음의 2중 중복 진단 안내 배너 */}
+        {selectedBook &&
+          (hasAnyDuplicateSuspect(selectedBookDupMeta) ||
+            (duplicateQuestionMap && duplicateQuestionMap.size > 0)) && (
+            <div className="flex flex-wrap items-center justify-between gap-2 px-3.5 py-2 rounded-lg bg-rose-50/70 border border-rose-200 text-xs font-bold text-rose-800">
+              <div className="flex flex-wrap items-center gap-2">
+                <span>🔎 중복 적재 진단:</span>
+                {duplicateQuestionMap && duplicateQuestionMap.size > 0 && (
+                  <span className="px-2 py-0.5 rounded bg-white border border-rose-200 text-rose-700">
+                    묶음 내 동일 문항 2중 적재 의심 <strong>{duplicateQuestionMap.size}</strong>개
+                  </span>
+                )}
+                {selectedBookDupMeta?.aliasBook && (selectedBookDupMeta.aliasSharedPct || 0) >= 70 && (
+                  <span className="px-2 py-0.5 rounded bg-white border border-amber-200 text-amber-800">
+                    🔗 별칭 중복: <strong>{selectedBookDupMeta.aliasBook}</strong> 묶음과 같은 문항 ID를{" "}
+                    {selectedBookDupMeta.aliasSharedPct}% 공유 (이름 일괄 변경 시 하나로 통합됨)
+                  </span>
+                )}
+                {selectedBookDupMeta?.crossDupBook && (selectedBookDupMeta.crossDupPct || 0) >= 60 && (
+                  <span className="px-2 py-0.5 rounded bg-white border border-orange-200 text-orange-800">
+                    📑 복제 중복: <strong>{selectedBookDupMeta.crossDupBook}</strong> 묶음과 동일 지문·정답이{" "}
+                    {selectedBookDupMeta.crossDupPct}% 겹침
+                    <button
+                      type="button"
+                      onClick={() => handleSelectBookFast(selectedBookDupMeta.crossDupBook!, true)}
+                      className="ml-1.5 underline text-brand hover:text-blue-900"
+                    >
+                      비교 묶음 열기 ↗
+                    </button>
+                  </span>
+                )}
+              </div>
+              {duplicateQuestionMap && duplicateQuestionMap.size > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setOnlyDupQuestions((prev) => !prev)}
+                  className={`px-2.5 py-1 rounded-md border transition-colors ${
+                    onlyDupQuestions
+                      ? "bg-rose-600 text-white border-rose-600"
+                      : "bg-white text-rose-700 border-rose-300 hover:bg-rose-100"
+                  }`}
+                >
+                  {onlyDupQuestions ? "전체 문항 보기" : `중복 의심 문항만 보기 (${duplicateQuestionMap.size})`}
+                </button>
+              )}
+            </div>
+          )}
       </div>
 
       <div className="flex-1 flex gap-4 overflow-hidden min-h-0">
@@ -969,13 +1165,29 @@ export default function TaxonomyEditorPage() {
         {/* 좌측: 문제 리스트 */}
         <div className="w-[400px] bg-white border border-slate-200 rounded-2xl shadow-sm flex flex-col overflow-hidden shrink-0">
           <div className="p-3 bg-slate-100/80 border-b border-slate-200 flex flex-col gap-2 shrink-0">
-            <div className="flex justify-between items-center">
+            <div className="flex justify-between items-center gap-1.5 flex-wrap">
               <h2 className="font-bold text-slate-800 text-sm">
-                📋 전체 문항 리스트 ({questionTextFilter.trim() ? `${renderGroups.length}/${questions.length}` : `${questions.length}`}개)
+                📋 전체 문항 리스트 ({questionTextFilter.trim() || onlyDupQuestions ? `${renderGroups.length}/${questions.length}` : `${questions.length}`}개)
               </h2>
-              <button onClick={createNewQuestion} disabled={!selectedBook || isLoading || !perms.add} className={`text-xs text-white px-2.5 py-1.5 rounded font-bold shadow-sm flex items-center gap-1 transition-colors ${perms.add ? 'bg-brand hover:bg-blue-800' : 'bg-slate-300 cursor-not-allowed'}`} title={!perms.add ? "새 문항 추가 권한이 없습니다." : ""}>
-                <span>➕</span> 새 문항 추가
-              </button>
+              <div className="flex items-center gap-1.5">
+                {duplicateQuestionMap && duplicateQuestionMap.size > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setOnlyDupQuestions((prev) => !prev)}
+                    className={`text-[11px] px-2 py-1 rounded font-bold border transition-colors ${
+                      onlyDupQuestions
+                        ? "bg-rose-600 text-white border-rose-600 shadow-sm"
+                        : "bg-rose-50 text-rose-700 border-rose-200 hover:bg-rose-100"
+                    }`}
+                    title="이 묶음 안에서 지문·정답 또는 번호·정답이 동일하게 2중 적재된 의심 문항만 추려 봅니다."
+                  >
+                    ⚠️ 중복만 ({duplicateQuestionMap.size})
+                  </button>
+                )}
+                <button onClick={createNewQuestion} disabled={!selectedBook || isLoading || !perms.add} className={`text-xs text-white px-2.5 py-1.5 rounded font-bold shadow-sm flex items-center gap-1 transition-colors ${perms.add ? 'bg-brand hover:bg-blue-800' : 'bg-slate-300 cursor-not-allowed'}`} title={!perms.add ? "새 문항 추가 권한이 없습니다." : ""}>
+                  <span>➕</span> 새 문항 추가
+                </button>
+              </div>
             </div>
             <div className="relative">
               <input
@@ -1047,6 +1259,9 @@ export default function TaxonomyEditorPage() {
                 {renderGroups.map((group: any, gIdx: number) => {
                   const { root, descendants } = group;
                   const isRootCurrent = root.source_book_name === selectedBook || root.book_name === selectedBook;
+                  const rootDupFlag = (duplicateQuestionMap as Map<string, QuestionDuplicateFlag> | undefined)?.get(
+                    String(root.question_id)
+                  );
 
                   return (
                     <div key={`group-${root.question_id}-${gIdx}`} className="flex flex-col relative">
@@ -1061,7 +1276,7 @@ export default function TaxonomyEditorPage() {
                               : (isRootCurrent ? 'hover:border-blue-300 hover:shadow-md bg-white' : 'hover:border-slate-400 bg-slate-50')
                           }
                           ${isRootCurrent 
-                            ? 'ml-6 rounded-xl border-2 border-slate-200' 
+                            ? `ml-6 rounded-xl border-2 ${rootDupFlag ? 'border-rose-300' : 'border-slate-200'}` 
                             : 'ml-0 rounded-lg border border-slate-300 border-dashed opacity-90' 
                           }
                         `}
@@ -1080,6 +1295,14 @@ export default function TaxonomyEditorPage() {
                                 )}
                                 <span className="text-xs font-bold text-slate-500 whitespace-nowrap">p.{root.final_printed_page || root.detected_page_num || '?'}</span>
                                 <span className="font-bold text-sm text-slate-800 whitespace-nowrap">{formatQNum(root.question_number, root.sub_num)}</span>
+                                {rootDupFlag && (
+                                  <span
+                                    className="font-bold px-1.5 py-0.5 rounded border text-[11px] text-rose-700 bg-rose-50 border-rose-300 whitespace-nowrap"
+                                    title={`묶음 내부 중복 의심 (${rootDupFlag.reason}, ${rootDupFlag.dupCount}개 중 ${rootDupFlag.dupOrder}번째)`}
+                                  >
+                                    ⚠️ 2중중복 ({rootDupFlag.dupOrder}/{rootDupFlag.dupCount})
+                                  </span>
+                                )}
                               </div>
                               <div className="shrink-0 pt-0.5">
                                  {(root.taxonomy_id && root.taxonomy_id !== '미분류') ? (
@@ -1125,6 +1348,9 @@ export default function TaxonomyEditorPage() {
                           
                           {descendants.map((desc: any) => {
                             const isDescCurrent = desc.source_book_name === selectedBook || desc.book_name === selectedBook;
+                            const descDupFlag = (duplicateQuestionMap as Map<string, QuestionDuplicateFlag> | undefined)?.get(
+                              String(desc.question_id)
+                            );
                             return (
                               <div 
                                 id={`q-list-${desc.question_id}`} 
@@ -1136,7 +1362,7 @@ export default function TaxonomyEditorPage() {
                                       : (isDescCurrent ? 'hover:border-blue-300 hover:shadow-md bg-white' : 'hover:border-slate-400 bg-slate-50')
                                   }
                                   ${isDescCurrent 
-                                    ? 'ml-6 rounded-xl border-2 border-slate-200' 
+                                    ? `ml-6 rounded-xl border-2 ${descDupFlag ? 'border-rose-300' : 'border-slate-200'}` 
                                     : 'ml-12 rounded-lg border border-slate-300 border-dashed opacity-90' 
                                   }
                                 `}
@@ -1155,6 +1381,14 @@ export default function TaxonomyEditorPage() {
                                         )}
                                         <span className="text-xs font-bold text-slate-500 whitespace-nowrap">p.{desc.final_printed_page || desc.detected_page_num || '?'}</span>
                                         <span className="font-bold text-sm text-slate-800 whitespace-nowrap">{formatQNum(desc.question_number, desc.sub_num)}</span>
+                                        {descDupFlag && (
+                                          <span
+                                            className="font-bold px-1.5 py-0.5 rounded border text-[11px] text-rose-700 bg-rose-50 border-rose-300 whitespace-nowrap"
+                                            title={`묶음 내부 중복 의심 (${descDupFlag.reason}, ${descDupFlag.dupCount}개 중 ${descDupFlag.dupOrder}번째)`}
+                                          >
+                                            ⚠️ 2중중복 ({descDupFlag.dupOrder}/{descDupFlag.dupCount})
+                                          </span>
+                                        )}
                                       </div>
                                       <div className="shrink-0 pt-0.5">
                                          {(desc.taxonomy_id && desc.taxonomy_id !== '미분류') ? (
@@ -1190,7 +1424,7 @@ export default function TaxonomyEditorPage() {
                   );
                 })}
 
-                {trueOrphans.length > 0 && (
+                {trueOrphans.length > 0 && !onlyDupQuestions && (
                   <div className="pt-4 mt-4 border-t border-slate-200">
                     <div className="text-xs font-bold text-rose-500 mb-2 px-2 bg-rose-50 py-1 rounded-md border border-rose-100 inline-block">⚠️ 원본이 완전히 유실된 문항</div>
                     <div className="flex flex-col gap-2">
@@ -1303,7 +1537,7 @@ export default function TaxonomyEditorPage() {
         </div>
 
         {/* 우측: 뷰어 & 수정 에디터 */}
-        <div className="flex-1 bg-white border border-slate-200 rounded-2xl shadow-sm flex flex-col overflow-hidden relative">
+        <div id="taxonomy-question-viewer" className="flex-1 bg-white border border-slate-200 rounded-2xl shadow-sm flex flex-col overflow-hidden relative">
           
           {isFetchingQuestions && !selectedQuestion ? (
             <div className="h-full flex flex-col items-center justify-center text-slate-600 font-bold gap-3 p-8">

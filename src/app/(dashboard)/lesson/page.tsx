@@ -8,6 +8,7 @@ import { supabase } from "@/lib/supabase";
 import EditBookModal from "@/components/lesson/EditBookModal";
 import AssignBookModal from "@/components/lesson/AssignBookModal";
 import ProgressDetailModal from "@/components/progress/ProgressDetailModal";
+import { isConfidentialExamText } from "@/lib/confidentialExamGuard";
 
 const unwrap = <T,>(obj: T | T[] | undefined | null): T | undefined => {
   if (Array.isArray(obj)) return obj[0];
@@ -904,7 +905,7 @@ export default function LessonPage() {
         break;
       }
       if (!data || data.length === 0) break;
-      allBooks.push(...data);
+      allBooks.push(...data.filter((b: any) => !isConfidentialExamText(b?.title)));
       if (data.length < 1000) break;
       from += 1000;
     }
