@@ -209,6 +209,23 @@ export default function HqHeader() {
       </div>
 
       <div className="flex items-center gap-1.5 sm:gap-2 shrink-0 whitespace-nowrap">
+        <button
+          type="button"
+          onClick={() => {
+            try {
+              localStorage.removeItem("hq_prefer_desktop");
+            } catch {
+              // ignore
+            }
+            router.push(hqHref("/hq/m"));
+          }}
+          title="모바일 최적화 화면으로 전환"
+          className="px-2.5 py-1.5 rounded-xl border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700 text-xs font-bold transition-colors flex items-center gap-1"
+        >
+          <span>📱</span>
+          <span className="hidden xl:inline">모바일</span>
+        </button>
+
         {/* 실시간 출퇴근 미니 위젯 (유령 구성원은 출퇴근 버튼 대신 스텔스 배지 표시) */}
         {me?.is_ghost ? (
           <span

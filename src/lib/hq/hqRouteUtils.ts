@@ -34,6 +34,7 @@ export function formatHqHref(href: string, isSubdomain: boolean): string {
 
 export const HQ_ROUTE_TAB_TITLES: Record<string, string> = {
   "/hq": "본부 홈 대시보드",
+  "/hq/m": "본부 모바일 워크스페이스",
   "/hq/login": "본부 로그인",
   "/hq/signup": "본부 임직원 계정 등록",
   "/hq/notices": "사내 공지사항",

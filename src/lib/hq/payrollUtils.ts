@@ -1,5 +1,6 @@
 // src/lib/hq/payrollUtils.ts
 import { calculatePayrollAmounts } from "./constants";
+import { describeExternalWithholdingRecord } from "./publishingRights";
 import type {
   HqApprovalDoc,
   HqAttendanceRecord,
@@ -1160,12 +1161,15 @@ export function buildTaxAccountantMonthlyPackageCsv(params: {
   ]);
   rows.push([
     "소득구분",
+    "홈택스 신고안내",
     "수령인 성명(상호)",
     "주민/사업자번호(메모)",
     "역할/구분",
     "대상 도서 · 프로젝트",
     "지급일자",
-    "세전 지급액(공급가액)",
+    "총지급액(세전)",
+    "필요경비(60%)",
+    "과세소득금액",
     "소득세",
     "지방소득세",
     "원천세 합계",
@@ -1177,29 +1181,146 @@ export function buildTaxAccountantMonthlyPackageCsv(params: {
     rows.push(["해당 없음 (당월 등록된 사업·기타·인세 원천징수 내역 없음)"]);
   } else {
     externalWithholding.forEach((r) => {
-      const typeLabel =
-        r.pay_type === "ROYALTY"
-          ? "저자인세(사업 3.3%)"
-          : r.pay_type === "OTHER_88"
-          ? "기타소득(8.8%)"
-          : "사업소득(3.3%)";
+      const wh = describeExternalWithholdingRecord(r);
       rows.push([
-        typeLabel,
+        wh.ledgerLabel,
+        wh.hometaxCodeHint,
         r.payee_name,
         r.calc_meta?.resident_or_biz_no || "",
         r.department_or_role || "",
         r.book_or_project || "",
         r.pay_date || "",
-        r.gross_amount,
-        r.income_tax,
-        r.local_income_tax,
-        r.income_tax + r.local_income_tax,
-        r.net_amount,
+        wh.grossAmount,
+        wh.necessaryExpense,
+        wh.taxableIncome,
+        wh.incomeTax,
+        wh.localIncomeTax,
+        wh.withholdingTotal,
+        wh.netAmount,
         r.bank_info || "",
-        r.memo || "",
+        [r.memo, wh.taxExemptionNote].filter(Boolean).join(" / "),
       ]);
     });
   }
+
+  return buildCsvContent(rows);
+}
+
+/**
+ * 사업소득(3.3%) · 기타소득(8.8%) · 저자인세 전용 원천징수 & 간이지급명세서 검증용 CSV 생성기
+ */
+export function buildExternalWithholdingStatementCsv(params: {
+  companyName: string;
+  payMonth: string;
+  payrollRecords: HqPayrollRecord[];
+}): string {
+  const { companyName, payMonth, payrollRecords } = params;
+  const ext = payrollRecords.filter((r) => r.pay_type !== "EMPLOYEE");
+  const rows: (string | number)[][] = [];
+  rows.push([
+    `[${companyName}] ${payMonth} 귀속 사업소득(A25) · 기타소득(A40) · 저자인세 원천징수 및 간이지급명세서 대장`,
+  ]);
+  rows.push([
+    "귀속연월",
+    "원천징수세목",
+    "소득구분 상세",
+    "홈택스 업종/소득코드 안내",
+    "수령인 성명(상호)",
+    "주민/사업자등록번호",
+    "대상 도서 · 프로젝트",
+    "지급일자",
+    "총지급액(공급가액)",
+    "필요경비(기타 60%)",
+    "과세소득금액",
+    "적용세율 안내",
+    "소득세",
+    "지방소득세",
+    "원천세 합계",
+    "차인 실지급액",
+    "입금계좌",
+    "비고(과세최저한·선인세 상계 등)",
+  ]);
+
+  let bizCnt = 0,
+    bizGross = 0,
+    bizItax = 0,
+    bizLtax = 0;
+  let othCnt = 0,
+    othGross = 0,
+    othExp = 0,
+    othInc = 0,
+    othItax = 0,
+    othLtax = 0;
+
+  ext.forEach((r) => {
+    const wh = describeExternalWithholdingRecord(r);
+    if (wh.mode === "OTHER_88") {
+      othCnt += 1;
+      othGross += wh.grossAmount;
+      othExp += wh.necessaryExpense;
+      othInc += wh.taxableIncome;
+      othItax += wh.incomeTax;
+      othLtax += wh.localIncomeTax;
+    } else {
+      bizCnt += 1;
+      bizGross += wh.grossAmount;
+      bizItax += wh.incomeTax;
+      bizLtax += wh.localIncomeTax;
+    }
+    rows.push([
+      r.pay_month,
+      wh.mode === "OTHER_88" ? "A40 기타소득" : "A25 거주자 사업소득",
+      wh.ledgerLabel,
+      wh.hometaxCodeHint,
+      r.payee_name,
+      r.calc_meta?.resident_or_biz_no || "미입력",
+      r.book_or_project || "",
+      r.pay_date || "",
+      wh.grossAmount,
+      wh.necessaryExpense,
+      wh.taxableIncome,
+      wh.nominalRateText,
+      wh.incomeTax,
+      wh.localIncomeTax,
+      wh.withholdingTotal,
+      wh.netAmount,
+      r.bank_info || "",
+      [r.memo, wh.taxExemptionNote].filter(Boolean).join(" / "),
+    ]);
+  });
+
+  rows.push([]);
+  rows.push(["■ 원천징수이행상황신고서 세목별 합계 요약"]);
+  rows.push([
+    "세목코드",
+    "인원(건수)",
+    "총지급액 합계",
+    "필요경비 합계",
+    "소득금액 합계",
+    "소득세 합계",
+    "지방소득세 합계",
+    "납부할 원천세 합계",
+  ]);
+  rows.push([
+    "A25 거주자 사업소득 (외주 프리랜서 · 사업자 저자 인세)",
+    bizCnt,
+    bizGross,
+    0,
+    bizGross,
+    bizItax,
+    bizLtax,
+    bizItax + bizLtax,
+  ]);
+  rows.push([
+    "A40 기타소득 (원고·검토료 · 비사업자 저자 인세)",
+    othCnt,
+    othGross,
+    othExp,
+    othInc,
+    othItax,
+    othLtax,
+    othItax + othLtax,
+  ]);
 
   return buildCsvContent(rows);
 }

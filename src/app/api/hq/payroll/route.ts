@@ -64,6 +64,7 @@ export async function GET(req: NextRequest) {
             attendanceRows: [],
             leaveDocs: [],
             publications: [],
+            externalContracts: [],
           },
         });
       }
@@ -73,6 +74,7 @@ export async function GET(req: NextRequest) {
     let attendanceRows: any[] = [];
     let leaveDocs: any[] = [];
     let publications: any[] = [];
+    let externalContracts: any[] = [];
 
     // 인사·재무 관리자용 보조 데이터 (세무사 전달용 월간 근태·휴가 집계 + 출판 도서 빠른 선택)
     if (caller.isHrManager && includeContext) {
@@ -122,10 +124,23 @@ export async function GET(req: NextRequest) {
         (async () => {
           const { data: pubData } = await supabaseAdmin
             .from("hq_publication")
-            .select("pub_id, book_code, title, author_name, list_price, print_run")
+            .select("pub_id, book_code, title, author_name, list_price, print_run, isbn")
             .order("updated_at", { ascending: false })
             .limit(100);
           publications = pubData || [];
+        })().catch(() => {})
+      );
+
+      promises.push(
+        (async () => {
+          const { data: ctrData } = await supabaseAdmin
+            .from("hq_contract")
+            .select("*")
+            .eq("target_type", "EXTERNAL")
+            .eq("status", "SIGNED")
+            .order("created_at", { ascending: false })
+            .limit(150);
+          externalContracts = ctrData || [];
         })().catch(() => {})
       );
 
@@ -141,6 +156,7 @@ export async function GET(req: NextRequest) {
         attendanceRows,
         leaveDocs,
         publications,
+        externalContracts,
       },
     });
   } catch (e: any) {
@@ -593,6 +609,7 @@ export async function POST(req: NextRequest) {
       mealAllowance,
       overtimePay,
       bonusPay: Math.max(0, bonusPay),
+      royaltyTaxMode: body?.calc_meta?.royalty_tax_mode ?? null,
     });
 
     const deductionMode =
@@ -778,6 +795,10 @@ export async function PATCH(req: NextRequest) {
       mealAllowance,
       overtimePay,
       bonusPay: Math.max(0, bonusPay),
+      royaltyTaxMode:
+        body?.calc_meta?.royalty_tax_mode ??
+        existingRow?.calc_meta?.royalty_tax_mode ??
+        null,
     });
 
     const deductionMode =

@@ -519,6 +519,54 @@ export interface HqContract {
   created_by: string | null;
   created_at: string;
   updated_at: string;
+  // ── 출판·저작권 확장 (hq_publishing_rights 패치 이후) ──
+  pub_id?: string | null;
+  rights_meta?: HqContractRightsMeta | null;
+  sign_meta?: HqContractSignMeta | null;
+  sign_token?: string | null;
+}
+
+// 출판권 · 저작권 계약의 구조화된 약정 조건 (hq_contract.rights_meta)
+export type HqRoyaltyDealType = "ROYALTY" | "FLAT_FEE";
+export type HqRoyaltyBasis = "PRINT" | "SALES";
+export type HqRoyaltySettleCycle =
+  | "PER_PRINTING"
+  | "QUARTERLY"
+  | "HALF"
+  | "YEARLY";
+export type HqRightsScope =
+  | "PRINT_PUBLISH"
+  | "EBOOK_EXCLUSIVE"
+  | "AUDIO"
+  | "DERIVATIVE"
+  | "OVERSEAS"
+  | "COPYRIGHT_TRANSFER";
+
+export interface HqContractRightsMeta {
+  deal_type?: HqRoyaltyDealType;
+  royalty_basis?: HqRoyaltyBasis;
+  settle_cycle?: HqRoyaltySettleCycle;
+  rights_scope?: HqRightsScope[];
+  term_years?: number;
+  auto_renew?: boolean;
+  author_free_copies?: number; // 저자 증정본
+  royalty_free_copies?: number; // 인세 면제 부수 (증정·홍보·납본용)
+  co_author_share_pct?: number; // 공동저작 지분율 (%, 단독저자는 100)
+  note?: string;
+}
+
+// 전자서명 감사 추적 (hq_contract.sign_meta)
+export interface HqContractSignMeta {
+  doc_hash?: string;
+  signed_via?: "IN_PERSON" | "REMOTE_LINK" | "MEMBER_ACCOUNT";
+  signer_ip?: string;
+  signer_ua?: string;
+  signed_by_user_id?: string | null;
+  signed_by_name?: string | null;
+  link_issued_at?: string;
+  link_expires_at?: string;
+  link_viewed_at?: string;
+  cancelled_reason?: string;
 }
 
 export interface HqPayrollRecord {
@@ -577,6 +625,40 @@ export interface HqPublication {
   memo: string | null;
   created_at: string;
   updated_at: string;
+  pub_meta?: HqPublicationMeta | null;
+}
+
+// 쇄(刷) · 판(版) 발행 이력
+export interface HqPrintRunItem {
+  id: string;
+  edition_no: number; // 판 (1 = 초판)
+  printing_no: number; // 쇄
+  print_date: string; // 발행일(판권면 기준)
+  copies: number;
+  vendor?: string;
+  isbn?: string;
+  memo?: string;
+}
+
+export type HqIsbnStatus = "NONE" | "APPLIED" | "ISSUED";
+export type HqLegalDepositStatus = "NONE" | "SUBMITTED" | "DONE";
+
+// ISBN · CIP · 납본 · 판권면 체크 (hq_publication.pub_meta)
+export interface HqPublicationMeta {
+  isbn_status?: HqIsbnStatus;
+  isbn_applied_at?: string;
+  isbn_issued_at?: string;
+  add_on_code?: string; // 부가기호 5자리
+  set_isbn?: string; // 시리즈·전집 세트 ISBN-13
+  ebook_isbn?: string; // 전자출판물(PDF/EPUB) ISBN-13
+  cip_no?: string;
+  colophon_checked?: boolean; // 판권면 검수
+  barcode_ready?: boolean; // 표지 바코드 반영
+  legal_deposit_status?: HqLegalDepositStatus;
+  legal_deposit_date?: string;
+  current_edition?: number;
+  current_printing?: number;
+  print_history?: HqPrintRunItem[];
 }
 
 // ============================================================================

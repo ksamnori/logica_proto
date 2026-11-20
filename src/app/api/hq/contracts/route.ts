@@ -2,8 +2,17 @@
 import { NextRequest, NextResponse } from "next/server";
 import { CONTRACT_CATEGORIES } from "@/lib/hq/constants";
 import {
+  computeContractDocHash,
+  generateSignToken,
+  getRequestIp,
+  getRequestUa,
+  signLinkExpiry,
+} from "@/lib/hq/contractSignServer";
+import { sanitizeRightsMeta } from "@/lib/hq/publishingRights";
+import {
   apiFail,
   getSupabaseAdmin,
+  isMissingHqColumnError,
   isMissingHqTableError,
   requireHqCaller,
 } from "@/lib/hq/serverAuth";
@@ -16,11 +25,70 @@ import type {
 
 export const runtime = "nodejs";
 
+// 출판권·서명감사 확장 컬럼 (hq_patch_publishing_rights.sql 실행 전에는 자동 제외하고 저장)
+const EXT_COLUMNS = ["pub_id", "rights_meta", "sign_meta", "sign_token"] as const;
+
+function stripExtColumns<T extends Record<string, any>>(row: T): T {
+  const copy: Record<string, any> = { ...row };
+  EXT_COLUMNS.forEach((k) => delete copy[k]);
+  return copy as T;
+}
+
 function generateContractNo(): string {
   const now = new Date();
   const ym = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}`;
   const rand = String(Math.floor(1000 + Math.random() * 9000));
   return `CTR-${ym}-${rand}`;
+}
+
+function cleanUuid(v: unknown): string | null {
+  const s = String(v || "").trim();
+  return /^[0-9a-f-]{36}$/i.test(s) ? s : null;
+}
+
+async function insertContractRows(
+  supabaseAdmin: ReturnType<typeof getSupabaseAdmin>,
+  rows: Record<string, any>[]
+) {
+  let res = await supabaseAdmin.from("hq_contract").insert(rows).select("*");
+  let degraded = false;
+  if (res.error && isMissingHqColumnError(res.error)) {
+    degraded = true;
+    res = await supabaseAdmin
+      .from("hq_contract")
+      .insert(rows.map(stripExtColumns))
+      .select("*");
+  }
+  return { data: res.data, error: res.error, degraded };
+}
+
+async function updateContract(
+  supabaseAdmin: ReturnType<typeof getSupabaseAdmin>,
+  contractId: string,
+  fields: Record<string, any>,
+  requireStatus?: HqContractStatus
+) {
+  const run = (f: Record<string, any>) => {
+    let q = supabaseAdmin.from("hq_contract").update(f).eq("contract_id", contractId);
+    if (requireStatus) q = q.eq("status", requireStatus);
+    return q.select("*").maybeSingle();
+  };
+  let res = await run(fields);
+  let degraded = false;
+  if (res.error && isMissingHqColumnError(res.error)) {
+    degraded = true;
+    res = await run(stripExtColumns(fields));
+  }
+  return { data: res.data, error: res.error, degraded };
+}
+
+function canManageExternal(caller: any, existing: any): boolean {
+  return (
+    existing.target_type === "EXTERNAL" &&
+    (caller.isHrManager ||
+      caller.rankLevel >= 3 ||
+      existing.created_by === caller.userId)
+  );
 }
 
 export async function GET(req: NextRequest) {
@@ -39,7 +107,7 @@ export async function GET(req: NextRequest) {
         return NextResponse.json({
           success: true,
           schemaMissing: true,
-          data: { contracts: [], myUnsignedCount: 0 },
+          data: { contracts: [], myUnsignedCount: 0, extSchemaMissing: true },
         });
       }
       return apiFail(`전자계약 목록 조회 실패: ${error.message}`, 500);
@@ -47,17 +115,37 @@ export async function GET(req: NextRequest) {
 
     const allRows = data || [];
 
+    // 확장 컬럼 존재 여부 (행이 있으면 키로 판별, 없으면 1회 probe)
+    let extSchemaMissing = false;
+    if (allRows.length > 0) {
+      extSchemaMissing = !("rights_meta" in allRows[0]);
+    } else {
+      const probe = await supabaseAdmin
+        .from("hq_contract")
+        .select("contract_id, pub_id, rights_meta")
+        .limit(1);
+      extSchemaMissing = Boolean(probe.error && isMissingHqColumnError(probe.error));
+    }
+
     // 열람 권한 필터:
     // - HR 관리자(임원·경영지원 팀장·포털관리자): 전체 계약 열람
     // - 부서 팀장/편집장(Lv.3): 외부 저자/외주 계약 전체 + 본인 내부 계약 + 본인이 발송한 계약
     // - 일반 구성원: 본인 대상 내부 계약 + 본인이 작성한 외주/저자 계약 (타 직원의 연봉·근로계약 철저 보호)
-    const visible = allRows.filter((row: any) => {
-      if (caller.isHrManager) return true;
-      if (row.target_member_id === caller.userId) return true;
-      if (row.created_by === caller.userId) return true;
-      if (caller.rankLevel >= 3 && row.target_type === "EXTERNAL") return true;
-      return false;
-    });
+    const visible = allRows
+      .filter((row: any) => {
+        if (caller.isHrManager) return true;
+        if (row.target_member_id === caller.userId) return true;
+        if (row.created_by === caller.userId) return true;
+        if (caller.rankLevel >= 3 && row.target_type === "EXTERNAL") return true;
+        return false;
+      })
+      .map((row: any) => {
+        // 원격 서명 토큰은 해당 외부 계약 관리 권한자에게만 노출
+        if (row.sign_token && !canManageExternal(caller, row)) {
+          return { ...row, sign_token: null };
+        }
+        return row;
+      });
 
     const myUnsignedCount = visible.filter((row: any) => {
       if (row.status !== "SENT") return false;
@@ -72,6 +160,7 @@ export async function GET(req: NextRequest) {
       data: {
         contracts: visible,
         myUnsignedCount,
+        extSchemaMissing,
       },
     });
   } catch (e: any) {
@@ -148,10 +237,10 @@ export async function POST(req: NextRequest) {
         };
       });
 
-      const { data: inserted, error: batchErr } = await supabaseAdmin
-        .from("hq_contract")
-        .insert(rowsToInsert)
-        .select("*");
+      const { data: inserted, error: batchErr } = await insertContractRows(
+        supabaseAdmin,
+        rowsToInsert
+      );
 
       if (batchErr) {
         return apiFail(`일괄 계약 발송 실패: ${batchErr.message}`, 500);
@@ -198,6 +287,8 @@ export async function POST(req: NextRequest) {
       body?.target_type === "EXTERNAL" ? "EXTERNAL" : "INTERNAL";
     const taxType: HqContractTaxType =
       body?.tax_type || CONTRACT_CATEGORIES[category].taxDefault;
+    const isDraft = body?.status === "DRAFT";
+    const issueLink = !isDraft && targetType === "EXTERNAL";
 
     const supabaseAdmin = getSupabaseAdmin();
     const payload = {
@@ -225,21 +316,27 @@ export async function POST(req: NextRequest) {
       tax_type: taxType,
       body_text: bodyText,
       special_terms: String(body?.special_terms || "").trim() || null,
-      status: (body?.status === "DRAFT" ? "DRAFT" : "SENT") as HqContractStatus,
+      status: (isDraft ? "DRAFT" : "SENT") as HqContractStatus,
       company_signer_name:
         String(body?.company_signer_name || "").trim() ||
         "천종현수학연구소 대표이사",
-      company_signed_at: nowIso,
+      // 임시저장은 회사 날인 전 상태 — 발송 시점에 회사 서명일시 기록
+      company_signed_at: isDraft ? null : nowIso,
       created_by: caller.userId,
       created_at: nowIso,
       updated_at: nowIso,
+      pub_id: cleanUuid(body?.pub_id),
+      rights_meta: sanitizeRightsMeta(body?.rights_meta),
+      sign_token: issueLink ? generateSignToken() : null,
+      sign_meta: issueLink
+        ? { link_issued_at: nowIso, link_expires_at: signLinkExpiry(nowIso) }
+        : {},
     };
 
-    const { data: created, error } = await supabaseAdmin
-      .from("hq_contract")
-      .insert(payload)
-      .select("*")
-      .single();
+    const { data: createdRows, error, degraded } = await insertContractRows(
+      supabaseAdmin,
+      [payload]
+    );
 
     if (error) {
       if (isMissingHqTableError(error)) {
@@ -251,7 +348,11 @@ export async function POST(req: NextRequest) {
       return apiFail(`전자계약 발송 실패: ${error.message}`, 500);
     }
 
-    return NextResponse.json({ success: true, data: created });
+    return NextResponse.json({
+      success: true,
+      data: createdRows?.[0] || null,
+      extSchemaMissing: degraded,
+    });
   } catch (e: any) {
     console.error("HQ contracts POST error:", e);
     return apiFail(String(e?.message || e), 500);
@@ -283,37 +384,52 @@ export async function PATCH(req: NextRequest) {
 
     if (action === "SIGN") {
       // 내부 임직원 계약은 당사자 본인(또는 대면 서명 시 HR 관리자)이 서명 가능
-      // 외부 저자·프리랜서 계약은 대면/전자 서명 수집으로 HR 관리자·작성자·팀장 이상 서명 처리 가능
+      // 외부 저자·프리랜서 계약은 대면(현장 태블릿) 서명 수집으로 HR 관리자·작성자·팀장 이상 처리 가능
+      // (원격 서명은 /api/hq/contract-sign 공개 링크로 상대방 본인이 직접 서명)
       const isTargetSelf =
         existing.target_member_id && existing.target_member_id === caller.userId;
-      const canSignExternal =
-        existing.target_type === "EXTERNAL" &&
-        (caller.isHrManager ||
-          caller.rankLevel >= 3 ||
-          existing.created_by === caller.userId);
 
-      if (!isTargetSelf && !canSignExternal && !caller.isHrManager) {
+      if (!isTargetSelf && !canManageExternal(caller, existing) && !caller.isHrManager) {
         return apiFail("본 계약서의 서명 권한이 없습니다.", 403);
+      }
+      if (existing.status !== "SENT") {
+        return apiFail(
+          existing.status === "SIGNED"
+            ? "이미 체결 완료된 계약입니다."
+            : "서명 요청(발송) 상태의 계약만 서명할 수 있습니다.",
+          409
+        );
       }
 
       const signatureData = String(body?.party_signature_data || "").trim();
-      if (!signatureData) {
+      if (!signatureData.startsWith("data:image/")) {
         return apiFail("전자서명 패드에 서명을 입력해 주세요.");
       }
 
-      const { data: updated, error: updErr } = await supabaseAdmin
-        .from("hq_contract")
-        .update({
+      const { data: updated, error: updErr } = await updateContract(
+        supabaseAdmin,
+        contractId,
+        {
           status: "SIGNED",
           party_signature_data: signatureData,
           party_signed_at: nowIso,
           updated_at: nowIso,
-        })
-        .eq("contract_id", contractId)
-        .select("*")
-        .single();
+          sign_token: null,
+          sign_meta: {
+            ...(existing.sign_meta || {}),
+            doc_hash: computeContractDocHash(existing),
+            signed_via: isTargetSelf ? "MEMBER_ACCOUNT" : "IN_PERSON",
+            signer_ip: getRequestIp(req),
+            signer_ua: getRequestUa(req),
+            signed_by_user_id: caller.userId,
+            signed_by_name: caller.name,
+          },
+        },
+        "SENT"
+      );
 
       if (updErr) return apiFail(`서명 처리 실패: ${updErr.message}`, 500);
+      if (!updated) return apiFail("다른 사용자가 먼저 상태를 변경했습니다. 새로고침 해주세요.", 409);
 
       // 내부 근로·연봉계약 체결 시 구성원 인사 메모에 이력 자동 반영
       if (
@@ -350,17 +466,29 @@ export async function PATCH(req: NextRequest) {
       if (!caller.isHrManager && existing.created_by !== caller.userId) {
         return apiFail("임시저장 계약 수정 권한이 없습니다.", 403);
       }
+      // 발송·체결 이후의 계약 본문은 수정 불가 (재계약은 '복제하여 재계약 작성' 사용)
+      if (existing.status !== "DRAFT") {
+        return apiFail(
+          "임시저장 상태의 계약만 수정할 수 있습니다. 발송된 계약은 회수 후 복제하여 다시 작성해 주세요.",
+          409
+        );
+      }
       const nextStatus: HqContractStatus =
         body?.next_status === "SENT" ? "SENT" : "DRAFT";
-      const { data: updated, error: updErr } = await supabaseAdmin
-        .from("hq_contract")
-        .update({
+      const nextTarget: HqContractTargetType =
+        (body?.target_type || existing.target_type) === "EXTERNAL"
+          ? "EXTERNAL"
+          : "INTERNAL";
+      const issueLink = nextStatus === "SENT" && nextTarget === "EXTERNAL";
+
+      const { data: updated, error: updErr } = await updateContract(
+        supabaseAdmin,
+        contractId,
+        {
           category: body?.category || existing.category,
-          target_type: body?.target_type || existing.target_type,
+          target_type: nextTarget,
           target_member_id:
-            body?.target_type === "INTERNAL"
-              ? body?.target_member_id || null
-              : null,
+            nextTarget === "INTERNAL" ? body?.target_member_id || null : null,
           counterparty_name:
             String(body?.counterparty_name || existing.counterparty_name).trim(),
           counterparty_role:
@@ -387,18 +515,89 @@ export async function PATCH(req: NextRequest) {
           tax_type: body?.tax_type || existing.tax_type,
           body_text: String(body?.body_text || existing.body_text).trim(),
           special_terms: String(body?.special_terms ?? "").trim() || null,
+          company_signer_name:
+            String(body?.company_signer_name || "").trim() ||
+            existing.company_signer_name,
           status: nextStatus,
-          company_signed_at:
-            nextStatus === "SENT"
-              ? nowIso
-              : existing.company_signed_at || null,
+          company_signed_at: nextStatus === "SENT" ? nowIso : null,
           updated_at: nowIso,
-        })
-        .eq("contract_id", contractId)
-        .select("*")
-        .single();
+          pub_id:
+            body?.pub_id !== undefined ? cleanUuid(body.pub_id) : existing.pub_id ?? null,
+          rights_meta:
+            body?.rights_meta !== undefined
+              ? sanitizeRightsMeta(body.rights_meta)
+              : existing.rights_meta || {},
+          sign_token: issueLink ? generateSignToken() : null,
+          sign_meta: issueLink
+            ? {
+                ...(existing.sign_meta || {}),
+                link_issued_at: nowIso,
+                link_expires_at: signLinkExpiry(nowIso),
+              }
+            : existing.sign_meta || {},
+        },
+        "DRAFT"
+      );
 
       if (updErr) return apiFail(`임시저장 수정 실패: ${updErr.message}`, 500);
+      if (!updated) return apiFail("계약 상태가 변경되어 저장하지 못했습니다.", 409);
+      return NextResponse.json({ success: true, data: updated });
+    }
+
+    // 외부 저자·프리랜서에게 보낼 원격 서명 링크 발급/재발급 (기존 링크는 즉시 무효화)
+    if (action === "ISSUE_SIGN_LINK") {
+      if (!canManageExternal(caller, existing)) {
+        return apiFail("외부 계약의 서명 링크 발급 권한이 없습니다.", 403);
+      }
+      if (existing.status !== "SENT") {
+        return apiFail("서명 대기(발송) 상태의 계약만 서명 링크를 발급할 수 있습니다.", 409);
+      }
+      const token = generateSignToken();
+      const { data: updated, error: updErr, degraded } = await updateContract(
+        supabaseAdmin,
+        contractId,
+        {
+          sign_token: token,
+          sign_meta: {
+            ...(existing.sign_meta || {}),
+            link_issued_at: nowIso,
+            link_expires_at: signLinkExpiry(nowIso),
+          },
+          updated_at: nowIso,
+        },
+        "SENT"
+      );
+      if (degraded) {
+        return apiFail(
+          "원격 서명 링크 기능을 쓰려면 supabase/hq_patch_publishing_rights.sql을 1회 실행해 주세요.",
+          400
+        );
+      }
+      if (updErr) return apiFail(`서명 링크 발급 실패: ${updErr.message}`, 500);
+      return NextResponse.json({ success: true, data: updated });
+    }
+
+    // 계약 ↔ 출판 공정 도서 연결 (계약 조건은 변경하지 않는 관리용 메타데이터)
+    if (action === "LINK_PUBLICATION") {
+      if (
+        !caller.isHrManager &&
+        caller.rankLevel < 3 &&
+        existing.created_by !== caller.userId
+      ) {
+        return apiFail("도서 연결 권한이 없습니다.", 403);
+      }
+      const { data: updated, error: updErr, degraded } = await updateContract(
+        supabaseAdmin,
+        contractId,
+        { pub_id: cleanUuid(body?.pub_id), updated_at: nowIso }
+      );
+      if (degraded) {
+        return apiFail(
+          "도서 연결 기능을 쓰려면 supabase/hq_patch_publishing_rights.sql을 1회 실행해 주세요.",
+          400
+        );
+      }
+      if (updErr) return apiFail(`도서 연결 실패: ${updErr.message}`, 500);
       return NextResponse.json({ success: true, data: updated });
     }
 
@@ -406,12 +605,22 @@ export async function PATCH(req: NextRequest) {
       if (!caller.isHrManager && existing.created_by !== caller.userId) {
         return apiFail("계약 회수/파기 권한이 없습니다.", 403);
       }
-      const { data: updated, error: updErr } = await supabaseAdmin
-        .from("hq_contract")
-        .update({ status: "CANCELLED", updated_at: nowIso })
-        .eq("contract_id", contractId)
-        .select("*")
-        .single();
+      if (existing.status === "SIGNED" && !caller.isHrManager) {
+        return apiFail("체결 완료된 계약의 해지는 인사관리자만 처리할 수 있습니다.", 403);
+      }
+      const { data: updated, error: updErr } = await updateContract(
+        supabaseAdmin,
+        contractId,
+        {
+          status: "CANCELLED",
+          updated_at: nowIso,
+          sign_token: null,
+          sign_meta: {
+            ...(existing.sign_meta || {}),
+            cancelled_reason: String(body?.reason || "").trim().slice(0, 300) || undefined,
+          },
+        }
+      );
 
       if (updErr) return apiFail(`상태 변경 실패: ${updErr.message}`, 500);
       return NextResponse.json({ success: true, data: updated });

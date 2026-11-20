@@ -2,12 +2,21 @@
 import type {
   HqApprovalDocType,
   HqContractCategory,
+  HqContractRightsMeta,
   HqContractTaxType,
   HqPayrollType,
   HqPubStage,
   HqRankCode,
   HqWorkMode,
 } from "./types";
+import {
+  calcWithholding,
+  RIGHTS_SCOPE_LABELS,
+  ROYALTY_BASIS_LABELS,
+  SETTLE_CYCLE_LABELS,
+  withRightsDefaults,
+  type WithholdingMode,
+} from "./publishingRights";
 
 export const FALLBACK_HQ_TENANT_ID = "d59395b0-8c9c-4dd3-9e25-ff569da98abc";
 
@@ -383,6 +392,8 @@ export function buildContractTemplateBody(params: {
   endDate?: string;
   amount: number;
   royaltyRate?: number | null;
+  rights?: HqContractRightsMeta | null;
+  taxType?: HqContractTaxType;
 }): string {
   const name = params.counterpartyName || "계약상대방";
   const role = params.counterpartyRole || "담당자";
@@ -462,21 +473,60 @@ export function buildContractTemplateBody(params: {
 1. 본 용역 결과물은 제3자의 저작권·초상권·폰트 라이선스를 침해하지 아니한 순수 창작물이어야 한다.
 2. 대금 완납과 동시에 본 과업 결과물에 대한 저작재산권 일체(2차적저작물작성권 및 전자책·온라인 서비스 활용권 포함)는 "갑"에게 양도된다.`;
 
-    case "ROYALTY":
-      return `제1조 (출판권 및 배타적 발행권의 설정)
-저작권자 "을" ${name}은 저작물 「${book}」에 대하여 천종현수학연구소("갑")에게 종이책 출판권 및 전자출판 배타적발행권을 설정한다.
+    case "ROYALTY": {
+      const r = withRightsDefaults(params.rights);
+      const scopeText =
+        r.rights_scope.length > 0
+          ? r.rights_scope.map((s) => RIGHTS_SCOPE_LABELS[s]).join(", ")
+          : RIGHTS_SCOPE_LABELS.PRINT_PUBLISH;
+      const taxText =
+        params.taxType === "OTHER_88"
+          ? "기타소득세(8.8%)"
+          : "사업소득세(3.3%)";
+      const termText = params.endDate
+        ? `${end}까지`
+        : `최초 발행일로부터 ${r.term_years}년${
+            r.auto_renew
+              ? " (만료 3개월 전까지 서면 해지 통보가 없으면 동일 조건으로 1년씩 자동 연장)"
+              : ""
+          }`;
+      const shareNote =
+        r.co_author_share_pct < 100
+          ? ` (공동저작 지분율 ${r.co_author_share_pct}% 반영 약정 요율)`
+          : "";
+      const isFlat = r.deal_type === "FLAT_FEE";
+      const payClause = isFlat
+        ? `제3조 (원고료 · 매절)
+1. \"갑\"은 본 저작물의 원고료로 금 ${amtStr}을 일시 지급하며, 이후 발행·판매 부수와 관계없이 별도의 인세를 지급하지 아니한다.
+2. 원고료는 완전 원고 인도 및 검수 완료 후 ${taxText}를 원천징수하고 지급한다.`
+        : `제3조 (인세 및 선인세)
+1. 인세율: 도서 정가의 ${params.royaltyRate ?? 10}%${shareNote}
+2. 산정 기준: ${ROYALTY_BASIS_LABELS[r.royalty_basis]}${
+            r.royalty_free_copies > 0
+              ? ` — 단, 증정·홍보·납본용 ${r.royalty_free_copies.toLocaleString("ko-KR")}부는 인세 대상에서 제외한다.`
+              : " — 단, 증정·홍보·납본용 부수는 인세 대상에서 제외한다."
+          }
+3. 정산 주기: ${SETTLE_CYCLE_LABELS[r.settle_cycle]} 마감 후 익월 25일까지 정산 내역서와 함께 ${taxText}를 원천징수하고 지급한다.
+4. 선인세(계약금): ${amtStr}. 선인세는 이후 발생하는 인세에서 전액 상계될 때까지 차감하며, 상계 잔액은 반환을 청구하지 아니한다.`;
 
-제2조 (원고 인도 및 출간 시기)
+      return `제1조 (출판권 및 배타적발행권의 설정)
+저작권자 \"을\" ${name}은 저작물 「${book}」에 대하여 천종현수학연구소(\"갑\")에게 다음 권리를 설정(허락)한다: ${scopeText}.
+
+제2조 (원고 인도 및 존속기간)
 1. 완전 원고 인도 기한: ${start}
-2. 계약 유효 기간: 발행일로부터 ${end === "별도 합의 시까지" ? "5년 (만료 3개월 전 별도 통보 없을 시 1년씩 자동 연장)" : `${end}까지`}
+2. 권리 존속기간: ${termText}
+3. \"갑\"은 완전 원고를 인도받은 날부터 9개월 이내에 발행하며, 계속하여 발행할 의무를 진다(저작권법 제58조).
 
-제3조 (인세 및 선인세 지급 기준)
-1. 인세율: 도서 정가의 ${params.royaltyRate ?? 10}% (발행부수 또는 실판매부수 기준은 특약에 따름)
-2. 계약금(선인세) / 약정 원고료: ${amtStr}
-3. 정산 주기: 매 분기 또는 반기 마감 후 익월 25일 원천징수세액(3.3%)을 공제하고 정산 내역서와 함께 지급한다.
+${payClause}
 
-제4조 (개정판 및 문제 DB 활용)
-교육과정 개정에 따른 개정판 발행 시 "갑"과 "을"이 상호 협의하여 진행하며, 증정본은 초판 발행 시 10부를 "을"에게 무상 증정한다.`;
+제4조 (증정본 · 개정판)
+1. \"갑\"은 초판 발행 시 ${r.author_free_copies}부를 \"을\"에게 무상 증정한다.
+2. 교육과정 개정 등으로 개정판을 발행하는 경우 \"갑\"과 \"을\"이 협의하여 수정·증보하며, 개정판은 새로운 ISBN으로 발행한다.
+
+제5조 (권리 보증 및 판매 보고)
+1. \"을\"은 본 저작물이 제3자의 저작권·초상권 등 권리를 침해하지 않음을 보증한다.
+2. \"갑\"은 \"을\"의 요청이 있을 경우 발행부수·판매부수 및 인세 정산 근거 자료를 열람하게 한다.`;
+    }
   }
 }
 
@@ -506,10 +556,10 @@ export const PAYROLL_TYPE_META: Record<
     taxSummary: "필요경비 60% 인정 · 실효 8.8%",
   },
   ROYALTY: {
-    label: "저자 인세 정산 (사업소득 3.3%)",
+    label: "저자 인세 정산 (사업소득 3.3% / 기타소득 8.8%)",
     shortLabel: "저자 인세",
     badgeClass: "bg-emerald-50 text-emerald-700 border-emerald-200",
-    taxSummary: "정가×부수×인세율 - 선인세 후 3.3%",
+    taxSummary: "정가×부수×인세율 - 선인세 후 3.3%(또는 8.8%)",
   },
 };
 
@@ -519,6 +569,8 @@ export function calculatePayrollAmounts(input: {
   mealAllowance?: number;
   overtimePay?: number;
   bonusPay?: number;
+  /** 저자 인세의 소득 구분 (사업소득 3.3% 기본 / 비업자 저자는 기타소득 8.8%) */
+  royaltyTaxMode?: WithholdingMode | string | null;
 }) {
   const base = Math.max(0, Math.round(input.basePay || 0));
   const meal = Math.max(0, Math.round(input.mealAllowance || 0));
@@ -572,42 +624,25 @@ export function calculatePayrollAmounts(input: {
     };
   }
 
-  const floor10 = (n: number) => Math.floor(n / 10) * 10;
   const gross = base + bonus;
 
-  if (input.payType === "OTHER_88") {
-    // 기타소득: 필요경비 60% 차감한 소득금액(40%)에 20% 소득세(= 총액의 8%) + 지방세 0.8%
-    // 단, 기타소득금액 5만원 이하(지급액 125,000원 이하) 과세최저한 적용
-    const incomeTax = gross <= 125_000 ? 0 : floor10(gross * 0.08);
-    const localIncomeTax = floor10(incomeTax * 0.1);
-    const deductionTotal = incomeTax + localIncomeTax;
-    return {
-      grossAmount: gross,
-      nationalPension: 0,
-      healthInsurance: 0,
-      longTermCare: 0,
-      employmentInsurance: 0,
-      incomeTax,
-      localIncomeTax,
-      deductionTotal,
-      netAmount: Math.max(0, gross - deductionTotal),
-    };
-  }
-
-  // FREELANCER_33 및 ROYALTY: 사업소득 3% + 지방소득세 0.3% = 3.3%
-  const incomeTax = floor10(gross * 0.03);
-  const localIncomeTax = floor10(incomeTax * 0.1);
-  const deductionTotal = incomeTax + localIncomeTax;
+  // 기타소득(8.8%) 또는 기타소득으로 신고하는 저자 인세(비업자 저자)
+  const withholdingMode: WithholdingMode =
+    input.payType === "OTHER_88" ||
+    (input.payType === "ROYALTY" && input.royaltyTaxMode === "OTHER_88")
+      ? "OTHER_88"
+      : "BIZ_33";
+  const wh = calcWithholding(gross, withholdingMode);
   return {
     grossAmount: gross,
     nationalPension: 0,
     healthInsurance: 0,
     longTermCare: 0,
     employmentInsurance: 0,
-    incomeTax,
-    localIncomeTax,
-    deductionTotal,
-    netAmount: Math.max(0, gross - deductionTotal),
+    incomeTax: wh.incomeTax,
+    localIncomeTax: wh.localIncomeTax,
+    deductionTotal: wh.total,
+    netAmount: Math.max(0, gross - wh.total),
   };
 }
 

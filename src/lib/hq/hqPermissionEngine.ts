@@ -748,6 +748,8 @@ export function resolveMemberPermissions(params: {
     if (
       !canonicalPath ||
       canonicalPath === "/hq" ||
+      canonicalPath === "/hq/m" ||
+      canonicalPath.startsWith("/hq/m/") ||
       canonicalPath === "/hq/login" ||
       canonicalPath === "/hq/signup"
     ) {

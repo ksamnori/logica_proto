@@ -11,6 +11,7 @@ import React, {
 import { useRouter } from "next/navigation";
 import { useHqShell } from "@/components/hq/HqShellContext";
 import ContractTemplateStudioSection from "@/components/hq/contracts/ContractTemplateStudioSection";
+import RightsRoyaltyLedgerSection from "@/components/hq/contracts/RightsRoyaltyLedgerSection";
 import {
   buildContractTemplateBody,
   CONTRACT_CATEGORIES,
@@ -22,17 +23,30 @@ import {
   resolveContractTemplatePlaceholders,
 } from "@/lib/hq/contractTemplateEngine";
 import { DEFAULT_WORK_RULES } from "@/lib/hq/defaultWorkRules";
+import { useHqHref } from "@/lib/hq/hqRoutes";
+import {
+  computeRightsExpiry,
+  contractMatchesBook,
+  DEFAULT_RIGHTS_META,
+  RIGHTS_SCOPE_LABELS,
+  ROYALTY_BASIS_LABELS,
+  SETTLE_CYCLE_LABELS,
+  withRightsDefaults,
+} from "@/lib/hq/publishingRights";
 import type {
   HqContract,
   HqContractCategory,
   HqContractCustomField,
+  HqContractRightsMeta,
   HqContractTargetType,
   HqContractTaxType,
   HqContractTemplateItem,
+  HqPublication,
+  HqRightsScope,
   HqWorkRuleItem,
 } from "@/lib/hq/types";
 
-type TopViewMode = "CONTRACTS" | "TEMPLATES" | "REFLECTION";
+type TopViewMode = "CONTRACTS" | "TEMPLATES" | "REFLECTION" | "RIGHTS";
 type ContractTab =
   | "ALL"
   | "SENT"
@@ -107,7 +121,18 @@ export default function HqContractsPage() {
   const [royaltyRate, setRoyaltyRate] = useState("10");
   const [taxType, setTaxType] = useState<HqContractTaxType>("BIZ_33");
   const [bodyText, setBodyText] = useState("");
+  const [isBodyCustomized, setIsBodyCustomized] = useState(false);
   const [specialTerms, setSpecialTerms] = useState("");
+  const [pubId, setPubId] = useState("");
+  const [rightsMeta, setRightsMeta] = useState<HqContractRightsMeta>({
+    ...DEFAULT_RIGHTS_META,
+  });
+
+  // 출판 공정 도서 목록 (계약 ↔ 도서 연결) · 확장 스키마 상태 · 인세 원장 포커스
+  const [publications, setPublications] = useState<HqPublication[]>([]);
+  const [extSchemaMissing, setExtSchemaMissing] = useState(false);
+  const [focusContractId, setFocusContractId] = useState("");
+  const hqHref = useHqHref();
 
   // 상세 열람 · 전자서명 · 인쇄 모달
   const [selected, setSelected] = useState<HqContract | null>(null);
@@ -147,13 +172,26 @@ export default function HqContractsPage() {
     try {
       const res = await hqFetch<{
         success: boolean;
-        data: { contracts: HqContract[] };
+        data: { contracts: HqContract[]; extSchemaMissing?: boolean };
       }>("/api/hq/contracts");
       setContracts(res.data?.contracts || []);
+      setExtSchemaMissing(Boolean(res.data?.extSchemaMissing));
     } catch {
       // ignore
     } finally {
       setLoading(false);
+    }
+  }, []);
+
+  const loadPublications = useCallback(async () => {
+    try {
+      const res = await hqFetch<{
+        success: boolean;
+        data: { books: HqPublication[] };
+      }>("/api/hq/publishing");
+      setPublications(res.data?.books || []);
+    } catch {
+      // ignore (출판 공정 권한이 없어도 계약 기능은 동작)
     }
   }, []);
 
@@ -187,7 +225,7 @@ export default function HqContractsPage() {
     [templates]
   );
 
-  const regenerateTemplate = useCallback(
+  const buildDraftText = useCallback(
     (
       nextCat: HqContractCategory,
       nextName: string,
@@ -200,9 +238,12 @@ export default function HqContractsPage() {
       nextRoyalty: number | null,
       explicitTplId?: string,
       explicitMemberId?: string,
-      explicitTaxType?: HqContractTaxType
-    ) => {
+      explicitTaxType?: HqContractTaxType,
+      explicitRights?: HqContractRightsMeta
+    ): { title: string; body: string } => {
       const catMeta = CONTRACT_CATEGORIES[nextCat];
+      const rightsToUse = explicitRights || rightsMeta;
+      const taxToUse = explicitTaxType || taxType;
       const tplIdToUse =
         explicitTplId !== undefined ? explicitTplId : selectedTemplateId;
       const customTpl = activeTemplateList.find((t) => t.id === tplIdToUse);
@@ -219,8 +260,6 @@ export default function HqContractsPage() {
             nextName || "구성원"
           } ${catMeta.label}`;
 
-      setTitle(autoTitle);
-
       if (customTpl) {
         const matchedMember = activeMembers.find(
           (m) => m.instructor_id === (explicitMemberId ?? targetMemberId)
@@ -229,8 +268,9 @@ export default function HqContractsPage() {
         customFields.forEach((cf) => {
           customMap[cf.token] = cf.default_value || "";
         });
-        setBodyText(
-          resolveContractTemplatePlaceholders({
+        return {
+          title: autoTitle,
+          body: resolveContractTemplatePlaceholders({
             templateBody: customTpl.body_text,
             companySettings,
             member: matchedMember || null,
@@ -243,16 +283,16 @@ export default function HqContractsPage() {
             endDate: nextEnd,
             contractAmount: nextAmt,
             royaltyRate: nextRoyalty,
-            taxLabel:
-              CONTRACT_TAX_LABELS[explicitTaxType || taxType] || "",
+            taxLabel: CONTRACT_TAX_LABELS[taxToUse] || "",
             customValues: customMap,
-          })
-        );
-        return;
+            rightsMeta: rightsToUse,
+          }),
+        };
       }
 
-      setBodyText(
-        buildContractTemplateBody({
+      return {
+        title: autoTitle,
+        body: buildContractTemplateBody({
           category: nextCat,
           counterpartyName: nextName,
           counterpartyRole: nextRole,
@@ -262,8 +302,10 @@ export default function HqContractsPage() {
           endDate: nextEnd,
           amount: nextAmt,
           royaltyRate: nextRoyalty,
-        })
-      );
+          rights: rightsToUse,
+          taxType: taxToUse,
+        }),
+      };
     },
     [
       selectedTemplateId,
@@ -274,12 +316,51 @@ export default function HqContractsPage() {
       companySettings,
       resolveMemberRule,
       taxType,
+      rightsMeta,
     ]
+  );
+
+  const regenerateTemplate = useCallback(
+    (
+      nextCat: HqContractCategory,
+      nextName: string,
+      nextRole: string,
+      nextDept: string,
+      nextBook: string,
+      nextStart: string,
+      nextEnd: string,
+      nextAmt: number,
+      nextRoyalty: number | null,
+      explicitTplId?: string,
+      explicitMemberId?: string,
+      explicitTaxType?: HqContractTaxType,
+      explicitRights?: HqContractRightsMeta
+    ) => {
+      const draft = buildDraftText(
+        nextCat,
+        nextName,
+        nextRole,
+        nextDept,
+        nextBook,
+        nextStart,
+        nextEnd,
+        nextAmt,
+        nextRoyalty,
+        explicitTplId,
+        explicitMemberId,
+        explicitTaxType,
+        explicitRights
+      );
+      setTitle(draft.title);
+      setBodyText(draft.body);
+    },
+    [buildDraftText]
   );
 
   const openNewModal = (
     presetCat?: HqContractCategory,
-    presetTemplate?: HqContractTemplateItem
+    presetTemplate?: HqContractTemplateItem,
+    presetPub?: HqPublication | null
   ) => {
     const initCat: HqContractCategory =
       presetTemplate?.mapped_category ||
@@ -313,38 +394,48 @@ export default function HqContractsPage() {
         ? 0
         : 2000000);
     const initStart = new Date().toISOString().slice(0, 10);
+    const initBook = presetPub?.title || "";
+    const presetAuthor =
+      presetPub && initCat === "ROYALTY" && presetPub.author_name
+        ? presetPub.author_name
+        : "";
+    const initRights: HqContractRightsMeta = { ...DEFAULT_RIGHTS_META };
 
     setEditingDraftId("");
     setSelectedTemplateId(presetTemplate?.id || "");
     setCategory(initCat);
     setTargetType(nextTarget);
     setTargetMemberId(defaultMember?.instructor_id || "");
-    setCounterpartyName(initName);
+    setCounterpartyName(presetAuthor || initName);
     setCounterpartyRole(initRole);
     setCounterpartyPhone(defaultMember?.phone || "");
     setCounterpartyEmail(defaultMember?.email || "");
     setDepartment(initDept);
-    setBookTitle("");
+    setBookTitle(initBook);
+    setPubId(presetPub?.pub_id || "");
+    setRightsMeta(initRights);
     setStartDate(initStart);
     setEndDate("");
     setContractAmount(String(initAmt));
     setRoyaltyRate("10");
     setTaxType(meta.taxDefault);
     setSpecialTerms("");
+    setIsBodyCustomized(false);
 
     regenerateTemplate(
       initCat,
-      initName,
+      presetAuthor || initName,
       initRole,
       initDept,
-      "",
+      initBook,
       initStart,
       "",
       initAmt,
       initCat === "ROYALTY" ? 10 : null,
       presetTemplate?.id || "",
       defaultMember?.instructor_id || "",
-      meta.taxDefault
+      meta.taxDefault,
+      initRights
     );
     setViewMode("CONTRACTS");
     setCreateOpen(true);
@@ -375,6 +466,9 @@ export default function HqContractsPage() {
     setTaxType(c.tax_type);
     setBodyText(c.body_text);
     setSpecialTerms(c.special_terms || "");
+    setPubId(c.pub_id || "");
+    setRightsMeta(withRightsDefaults(c.rights_meta));
+    setIsBodyCustomized(true);
     setSelected(null);
     setCreateOpen(true);
   };
@@ -425,6 +519,7 @@ export default function HqContractsPage() {
         ? 0
         : 2000000;
     setContractAmount(String(nextAmt));
+    setIsBodyCustomized(false);
 
     regenerateTemplate(
       nextCat,
@@ -479,12 +574,94 @@ export default function HqContractsPage() {
     );
   };
 
+  // 본문을 직접 수정하기 전까지는 상단 입력값 변경 시 조항 전문을 순수 파생값(useMemo)으로 자동 동기화
+  const autoDraft = useMemo(
+    () =>
+      buildDraftText(
+        category,
+        counterpartyName,
+        counterpartyRole,
+        department,
+        bookTitle,
+        startDate,
+        endDate,
+        Number(contractAmount || 0),
+        category === "ROYALTY" && rightsMeta.deal_type !== "FLAT_FEE"
+          ? Number(royaltyRate || 10)
+          : null,
+        selectedTemplateId,
+        targetMemberId,
+        taxType,
+        rightsMeta
+      ),
+    [
+      buildDraftText,
+      category,
+      counterpartyName,
+      counterpartyRole,
+      department,
+      bookTitle,
+      startDate,
+      endDate,
+      contractAmount,
+      royaltyRate,
+      selectedTemplateId,
+      targetMemberId,
+      taxType,
+      rightsMeta,
+    ]
+  );
+
+  const effectiveTitle = isBodyCustomized ? title : autoDraft.title;
+  const effectiveBodyText = isBodyCustomized ? bodyText : autoDraft.body;
+
   const handleSaveOrSendContract = async (
     submitStatus: "DRAFT" | "SENT"
   ) => {
-    if (!counterpartyName.trim() || !title.trim() || !bodyText.trim()) {
+    if (
+      !counterpartyName.trim() ||
+      !effectiveTitle.trim() ||
+      !effectiveBodyText.trim()
+    ) {
       alert("상대방 성명, 계약 제목, 계약 본문 조항을 입력해 주세요.");
       return;
+    }
+    if (
+      submitStatus === "SENT" &&
+      (/\{\{.+?\}\}/.test(effectiveBodyText) ||
+        effectiveBodyText.includes("계약상대방") ||
+        ((category === "ROYALTY" || category === "OUTSOURCING") &&
+          effectiveBodyText.includes("대상 도서(프로젝트)")))
+    ) {
+      if (
+        !confirm(
+          "계약 본문에 아직 치환되지 않은 기본 문구(예: 계약상대방, 대상 도서, {{변수}})가 남아 있습니다.\n[본문 플레이스홀더 다시 채우기]를 먼저 확인하는 것을 권장합니다. 그래도 그대로 발송할까요?"
+        )
+      ) {
+        return;
+      }
+    }
+    if (
+      submitStatus === "SENT" &&
+      category === "ROYALTY" &&
+      rightsMeta.deal_type !== "FLAT_FEE" &&
+      !(Number(royaltyRate) > 0)
+    ) {
+      alert("인세 계약은 인세율(%)을 입력해야 발송할 수 있습니다. 매절(원고료 일시지급)이면 [대가 방식]을 매절로 바꿔주세요.");
+      return;
+    }
+    if (
+      submitStatus === "SENT" &&
+      targetType === "EXTERNAL" &&
+      !counterpartyPhone.trim() &&
+      !counterpartyEmail.trim()
+    ) {
+      if (
+        !confirm(
+          "외부 상대방의 연락처/이메일이 없습니다. 원격 서명 링크를 전달할 수단이 없어도 발송하시겠습니까?"
+        )
+      )
+        return;
     }
     setSaving(true);
     try {
@@ -497,41 +674,62 @@ export default function HqContractsPage() {
         counterparty_phone: counterpartyPhone,
         counterparty_email: counterpartyEmail,
         department,
-        title,
+        title: effectiveTitle,
         book_title: bookTitle,
         start_date: startDate || null,
         end_date: endDate || null,
         contract_amount: Number(contractAmount || 0),
-        royalty_rate: category === "ROYALTY" ? Number(royaltyRate || 0) : null,
+        royalty_rate:
+          category === "ROYALTY" && rightsMeta.deal_type !== "FLAT_FEE"
+            ? Number(royaltyRate || 0)
+            : null,
         tax_type: taxType,
-        body_text: bodyText,
+        body_text: effectiveBodyText,
         special_terms: specialTerms,
         status: submitStatus,
+        pub_id:
+          category === "ROYALTY" || category === "OUTSOURCING" ? pubId || null : null,
+        rights_meta: category === "ROYALTY" ? rightsMeta : {},
         company_signer_name: `${
           companySettings?.company_name || "(주)천종현수학연구소"
         } 대표이사 ${companySettings?.ceo_names?.[0] || "천종현"}`,
       };
 
+      let saved: HqContract | null = null;
       if (editingDraftId) {
-        await hqFetch("/api/hq/contracts", {
-          method: "PATCH",
-          body: {
-            contract_id: editingDraftId,
-            action: "UPDATE_DRAFT",
-            next_status: submitStatus,
-            ...payload,
-          },
-        });
+        const res = await hqFetch<{ success: boolean; data: HqContract }>(
+          "/api/hq/contracts",
+          {
+            method: "PATCH",
+            body: {
+              contract_id: editingDraftId,
+              action: "UPDATE_DRAFT",
+              next_status: submitStatus,
+              ...payload,
+            },
+          }
+        );
+        saved = res.data || null;
       } else {
-        await hqFetch("/api/hq/contracts", {
-          method: "POST",
-          body: payload,
-        });
+        const res = await hqFetch<{ success: boolean; data: HqContract }>(
+          "/api/hq/contracts",
+          {
+            method: "POST",
+            body: payload,
+          }
+        );
+        saved = res.data || null;
       }
 
       setCreateOpen(false);
       await Promise.all([loadContracts(), refreshContractBadge()]);
       window.dispatchEvent(new CustomEvent("hq:contract-updated"));
+
+      // 외부 저자·프리랜서 발송 직후: 원격 서명 링크를 바로 전달할 수 있도록 상세창 오픈
+      if (saved && submitStatus === "SENT" && saved.target_type === "EXTERNAL") {
+        setSelected(saved);
+        setHasSignatureStroke(false);
+      }
     } catch (err: any) {
       alert(err?.message || "계약 저장/발송 실패");
     } finally {
@@ -666,6 +864,85 @@ export default function HqContractsPage() {
     }
   };
 
+  // 외부 저자·프리랜서 원격 서명 링크 복사 (만료/미발급 시 재발급)
+  const handleCopySignLink = async (c: HqContract, forceReissue = false) => {
+    try {
+      let row = c;
+      const expired =
+        c.sign_meta?.link_expires_at &&
+        new Date(c.sign_meta.link_expires_at).getTime() < Date.now();
+      if (!c.sign_token || expired || forceReissue) {
+        if (
+          forceReissue &&
+          !confirm("새 링크를 발급하면 이전에 보낸 링크는 즉시 사용할 수 없게 됩니다. 계속할까요?")
+        )
+          return;
+        const res = await hqFetch<{ success: boolean; data: HqContract }>(
+          "/api/hq/contracts",
+          {
+            method: "PATCH",
+            body: { contract_id: c.contract_id, action: "ISSUE_SIGN_LINK" },
+          }
+        );
+        row = res.data;
+        setSelected(res.data);
+        await loadContracts();
+      }
+      if (!row.sign_token) {
+        alert("서명 링크를 발급하지 못했습니다.");
+        return;
+      }
+      const url = `${window.location.origin}${hqHref(`/hq/sign/${row.sign_token}`)}`;
+      const companyName = companySettings?.company_name || "(주)천종현수학연구소";
+      const message = [
+        `[${companyName}] 전자계약 서명 요청`,
+        `${row.counterparty_name} 님, ${
+          row.book_title ? `「${row.book_title}」 ` : ""
+        }${CONTRACT_CATEGORIES[row.category]?.label || row.title} 전자서명을 요청드립니다.`,
+        `아래 링크에서 계약 내용을 확인하신 뒤 서명해 주세요.`,
+        url,
+        row.sign_meta?.link_expires_at
+          ? `(링크 유효기간: ${row.sign_meta.link_expires_at.slice(0, 10)}까지)`
+          : "",
+      ]
+        .filter(Boolean)
+        .join("\n");
+      await navigator.clipboard.writeText(message);
+      alert(
+        "서명 요청 문구와 링크가 복사되었습니다.\n문자·카카오톡·이메일에 붙여넣어 전달해 주세요.\n\n" +
+          url
+      );
+    } catch (err: any) {
+      alert(err?.message || "서명 링크 처리 실패");
+    }
+  };
+
+  // 출판 공정 화면 등에서 넘어온 딥링크 처리 (?new=ROYALTY&pub_id=... / ?view=RIGHTS&contract=...)
+  const deepLinkHandledRef = useRef(false);
+  const [pubsLoaded, setPubsLoaded] = useState(false);
+  useEffect(() => {
+    loadPublications().finally(() => setPubsLoaded(true));
+  }, [loadPublications]);
+  useEffect(() => {
+    if (deepLinkHandledRef.current || !pubsLoaded) return;
+    deepLinkHandledRef.current = true;
+    const sp = new URLSearchParams(window.location.search);
+    const view = sp.get("view");
+    const newCat = sp.get("new") as HqContractCategory | null;
+    const qPub = sp.get("pub_id");
+    const qContract = sp.get("contract");
+    if (!view && !newCat) return;
+    if (view === "RIGHTS") {
+      setViewMode("RIGHTS");
+      if (qContract) setFocusContractId(qContract);
+    }
+    if (newCat && newCat in CONTRACT_CATEGORIES && canCreateContract) {
+      openNewModal(newCat, undefined, publications.find((p) => p.pub_id === qPub) || null);
+    }
+    window.history.replaceState(null, "", window.location.pathname);
+    // openNewModal은 렌더마다 새로 만들어지므로 의존성에서 제외 (1회 실행 보장은 ref로 처리)
+  }, [pubsLoaded, publications, canCreateContract]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // 체결 완료된 근로/연봉계약을 구성원 프로필에 원클릭 반영
   const handleReflectToProfile = async (c: HqContract) => {
     if (!c.target_member_id) return;
@@ -709,6 +986,28 @@ export default function HqContractsPage() {
   }, [contracts]);
 
   const nowMs = Date.now();
+  const isContractExpiringSoon = useCallback(
+    (c: HqContract): boolean => {
+      if (c.status !== "SIGNED") return false;
+      if (c.category === "ROYALTY") {
+        const matchedBook =
+          (c.pub_id && publications.find((p) => p.pub_id === c.pub_id)) ||
+          publications.find((p) =>
+            contractMatchesBook({ pub_id: null, book_title: c.book_title }, p)
+          ) ||
+          null;
+        const exp = computeRightsExpiry(c, matchedBook);
+        // 출판권 계약은 만료 3개월(90일) 전 해지/갱신 통보 조항에 맞춰 90일 전부터 예고
+        return exp.daysLeft !== null && exp.daysLeft >= -14 && exp.daysLeft <= 90;
+      }
+      if (!c.end_date) return false;
+      const diffDays =
+        (new Date(c.end_date).getTime() - nowMs) / (1000 * 60 * 60 * 24);
+      return diffDays >= -7 && diffDays <= 30;
+    },
+    [publications, nowMs]
+  );
+
   const filteredContracts = useMemo(() => {
     return contracts.filter((c) => {
       if (tab === "SENT" && c.status !== "SENT") return false;
@@ -716,12 +1015,7 @@ export default function HqContractsPage() {
       if (tab === "DRAFT" && c.status !== "DRAFT") return false;
       if (tab === "INTERNAL" && c.target_type !== "INTERNAL") return false;
       if (tab === "EXTERNAL" && c.target_type !== "EXTERNAL") return false;
-      if (tab === "EXPIRING") {
-        if (!c.end_date || c.status !== "SIGNED") return false;
-        const diffDays =
-          (new Date(c.end_date).getTime() - nowMs) / (1000 * 60 * 60 * 24);
-        if (diffDays < -7 || diffDays > 30) return false;
-      }
+      if (tab === "EXPIRING" && !isContractExpiringSoon(c)) return false;
       if (yearFilter !== "ALL") {
         const yr = (c.start_date || c.created_at || "").slice(0, 4);
         if (yr !== yearFilter) return false;
@@ -735,7 +1029,7 @@ export default function HqContractsPage() {
       }
       return true;
     });
-  }, [contracts, tab, yearFilter, keyword, nowMs]);
+  }, [contracts, tab, yearFilter, keyword, isContractExpiringSoon]);
 
   const stats = useMemo(() => {
     const sent = contracts.filter((c) => c.status === "SENT").length;
@@ -744,14 +1038,9 @@ export default function HqContractsPage() {
     const externalCount = contracts.filter(
       (c) => c.target_type === "EXTERNAL"
     ).length;
-    const expiring = contracts.filter((c) => {
-      if (!c.end_date || c.status !== "SIGNED") return false;
-      const diff =
-        (new Date(c.end_date).getTime() - nowMs) / (1000 * 60 * 60 * 24);
-      return diff >= -7 && diff <= 30;
-    }).length;
+    const expiring = contracts.filter(isContractExpiringSoon).length;
     return { sent, signed, draft, externalCount, expiring };
-  }, [contracts, nowMs]);
+  }, [contracts, isContractExpiringSoon]);
 
   // 체결 완료된 내부 근로·연봉계약 중 프로필 미반영 건
   const signedHrContracts = useMemo(
@@ -868,6 +1157,21 @@ export default function HqContractsPage() {
               </span>
             </button>
 
+            {(canCreateContract || isHrManager) && (
+              <button
+                type="button"
+                onClick={() => setViewMode("RIGHTS")}
+                className={`px-4 py-2 rounded-xl text-xs font-extrabold transition-all flex items-center gap-1.5 ${
+                  viewMode === "RIGHTS"
+                    ? "bg-slate-900 text-white shadow-xs"
+                    : "text-slate-600 hover:bg-slate-100"
+                }`}
+              >
+                <span>📜</span>
+                <span>저작권 · 인세 대장</span>
+              </button>
+            )}
+
             {(isHrManager || isHqAdmin) && (
               <button
                 type="button"
@@ -911,6 +1215,12 @@ export default function HqContractsPage() {
            =================================================================== */}
         {viewMode === "CONTRACTS" && (
           <>
+            {extSchemaMissing && canCreateContract && (
+              <div className="rounded-2xl border border-amber-300 bg-amber-50 px-4 py-3 text-xs font-bold text-amber-900">
+                ⚠️ 원격 서명 링크 · 서명 감사추적 · 도서 연결 · 출판권 약정 조건 저장을 위해 Supabase SQL Editor에서{" "}
+                <code className="px-1 bg-white rounded">supabase/hq_patch_publishing_rights.sql</code>을 1회 실행해 주세요.
+              </div>
+            )}
             {/* 상단 KPI 4개 카드 */}
             <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
               <div className="rounded-2xl bg-white border border-slate-200 p-5 shadow-xs">
@@ -951,13 +1261,13 @@ export default function HqContractsPage() {
 
               <div className="rounded-2xl bg-white border border-slate-200 p-5 shadow-xs">
                 <div className="text-xs font-bold text-slate-500">
-                  30일 내 만료·갱신 도래
+                  만료·갱신 예고 도래
                 </div>
                 <div className="text-2xl font-black text-rose-600 mt-1">
                   {stats.expiring}건
                 </div>
                 <div className="text-[11px] text-slate-400 mt-1">
-                  출판권 연장 및 외주 납기 마감 사전 점검
+                  출판권 존속기간(90일 전) · 근로/외주 납기(30일 전)
                 </div>
               </div>
             </div>
@@ -1237,6 +1547,27 @@ export default function HqContractsPage() {
               await Promise.all([loadContracts(), refreshContractBadge()]);
               setViewMode("CONTRACTS");
             }}
+          />
+        )}
+
+        {/* ===================================================================
+            뷰 4: [저작권 · 출판권 관리대장 + 저자 인세 정산 원장]
+           =================================================================== */}
+        {viewMode === "RIGHTS" && (
+          <RightsRoyaltyLedgerSection
+            contracts={contracts}
+            publications={publications}
+            isHrManager={isHrManager}
+            canManage={canCreateContract}
+            companyName={companySettings?.company_name || "(주)천종현수학연구소"}
+            extSchemaMissing={extSchemaMissing}
+            focusContractId={focusContractId}
+            onOpenContract={(c) => {
+              setSelected(c);
+              setHasSignatureStroke(false);
+            }}
+            onCreateRoyaltyContract={(pub) => openNewModal("ROYALTY", undefined, pub || null)}
+            onReloadContracts={loadContracts}
           />
         )}
 
@@ -1554,8 +1885,38 @@ export default function HqContractsPage() {
                 </div>
                 <div>
                   <label className="block font-bold text-slate-700 mb-1">
-                    대상 도서명 / 시리즈 (출판 계약용)
+                    대상 도서 (출판 공정 연결)
                   </label>
+                  {(category === "ROYALTY" || category === "OUTSOURCING") &&
+                    publications.length > 0 && (
+                      <select
+                        value={pubId}
+                        onChange={(e) => {
+                          const id = e.target.value;
+                          setPubId(id);
+                          const p = publications.find((x) => x.pub_id === id);
+                          if (p) {
+                            setBookTitle(p.title);
+                            if (
+                              category === "ROYALTY" &&
+                              !counterpartyName.trim() &&
+                              p.author_name
+                            ) {
+                              setCounterpartyName(p.author_name);
+                            }
+                          }
+                        }}
+                        className="w-full mb-1.5 px-3 py-2 rounded-xl border border-slate-300 font-bold bg-white"
+                      >
+                        <option value="">공정 도서 미연결 (직접 입력)</option>
+                        {publications.map((p) => (
+                          <option key={p.pub_id} value={p.pub_id}>
+                            {p.title} · {p.edition_info || "초판"}
+                            {p.isbn ? ` · ${p.isbn}` : ""}
+                          </option>
+                        ))}
+                      </select>
+                    )}
                   <input
                     value={bookTitle}
                     onChange={(e) => setBookTitle(e.target.value)}
@@ -1612,7 +1973,9 @@ export default function HqContractsPage() {
                     {category === "LABOR" || category === "SALARY"
                       ? "연봉 총액 (원)"
                       : category === "ROYALTY"
-                      ? "선인세 / 계약금 (원)"
+                      ? rightsMeta.deal_type === "FLAT_FEE"
+                        ? "매절 원고료 (원)"
+                        : "선인세 / 계약금 (원)"
                       : "계약 대금 (원)"}
                   </label>
                   <input
@@ -1624,7 +1987,7 @@ export default function HqContractsPage() {
                     className="w-full px-3 py-2 rounded-xl border border-slate-300 font-extrabold text-brand"
                   />
                 </div>
-                {category === "ROYALTY" && (
+                {category === "ROYALTY" && rightsMeta.deal_type !== "FLAT_FEE" && (
                   <div>
                     <label className="block font-bold text-slate-700 mb-1">
                       약정 인세율 (%)
@@ -1641,6 +2004,213 @@ export default function HqContractsPage() {
                   </div>
                 )}
               </div>
+
+              {/* 출판권 설정 계약: 구조화된 약정 조건 (인세 정산·존속기간 관리의 기준 데이터) */}
+              {category === "ROYALTY" && (
+                <div className="p-3.5 rounded-xl bg-emerald-50/60 border border-emerald-200 space-y-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="font-extrabold text-emerald-900">
+                      📖 출판권 · 인세 약정 조건
+                    </span>
+                    <span className="text-[11px] text-emerald-800">
+                      변경 후 아래 [본문 플레이스홀더 다시 채우기]를 누르면 조항에 반영됩니다
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                    <div>
+                      <label className="block text-[11px] font-bold text-emerald-900 mb-1">
+                        대가 방식
+                      </label>
+                      <select
+                        value={rightsMeta.deal_type || "ROYALTY"}
+                        onChange={(e) =>
+                          setRightsMeta((r) => ({
+                            ...r,
+                            deal_type: e.target.value as "ROYALTY" | "FLAT_FEE",
+                          }))
+                        }
+                        className="w-full px-2.5 py-1.5 rounded-lg border border-emerald-300 bg-white font-bold"
+                      >
+                        <option value="ROYALTY">인세 (정가 × 부수 × %)</option>
+                        <option value="FLAT_FEE">매절 (원고료 일시지급)</option>
+                      </select>
+                    </div>
+                    {rightsMeta.deal_type !== "FLAT_FEE" && (
+                      <>
+                        <div>
+                          <label className="block text-[11px] font-bold text-emerald-900 mb-1">
+                            인세 산정 기준
+                          </label>
+                          <select
+                            value={rightsMeta.royalty_basis || "PRINT"}
+                            onChange={(e) =>
+                              setRightsMeta((r) => ({
+                                ...r,
+                                royalty_basis: e.target.value as "PRINT" | "SALES",
+                                settle_cycle:
+                                  e.target.value === "PRINT"
+                                    ? "PER_PRINTING"
+                                    : r.settle_cycle === "PER_PRINTING"
+                                    ? "HALF"
+                                    : r.settle_cycle,
+                              }))
+                            }
+                            className="w-full px-2.5 py-1.5 rounded-lg border border-emerald-300 bg-white font-bold"
+                          >
+                            {Object.entries(ROYALTY_BASIS_LABELS).map(([k, v]) => (
+                              <option key={k} value={k}>
+                                {v}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        <div>
+                          <label className="block text-[11px] font-bold text-emerald-900 mb-1">
+                            정산 주기
+                          </label>
+                          <select
+                            value={rightsMeta.settle_cycle || "PER_PRINTING"}
+                            onChange={(e) =>
+                              setRightsMeta((r) => ({
+                                ...r,
+                                settle_cycle: e.target.value as typeof r.settle_cycle,
+                              }))
+                            }
+                            className="w-full px-2.5 py-1.5 rounded-lg border border-emerald-300 bg-white font-bold"
+                          >
+                            {Object.entries(SETTLE_CYCLE_LABELS).map(([k, v]) => (
+                              <option key={k} value={k}>
+                                {v}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        <div>
+                          <label className="block text-[11px] font-bold text-emerald-900 mb-1">
+                            인세 면제 부수
+                          </label>
+                          <input
+                            type="number"
+                            min={0}
+                            value={rightsMeta.royalty_free_copies ?? 0}
+                            onChange={(e) =>
+                              setRightsMeta((r) => ({
+                                ...r,
+                                royalty_free_copies: Math.max(0, Number(e.target.value || 0)),
+                              }))
+                            }
+                            title="증정·홍보·납본용으로 인세를 지급하지 않는 부수"
+                            className="w-full px-2.5 py-1.5 rounded-lg border border-emerald-300 bg-white font-bold"
+                          />
+                        </div>
+                      </>
+                    )}
+                    <div>
+                      <label className="block text-[11px] font-bold text-emerald-900 mb-1">
+                        존속기간 (년)
+                      </label>
+                      <input
+                        type="number"
+                        min={1}
+                        max={70}
+                        value={rightsMeta.term_years ?? 5}
+                        onChange={(e) =>
+                          setRightsMeta((r) => ({
+                            ...r,
+                            term_years: Math.max(1, Number(e.target.value || 0)),
+                          }))
+                        }
+                        className="w-full px-2.5 py-1.5 rounded-lg border border-emerald-300 bg-white font-bold"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-bold text-emerald-900 mb-1">
+                        저자 증정본 (부)
+                      </label>
+                      <input
+                        type="number"
+                        min={0}
+                        value={rightsMeta.author_free_copies ?? 10}
+                        onChange={(e) =>
+                          setRightsMeta((r) => ({
+                            ...r,
+                            author_free_copies: Math.max(0, Number(e.target.value || 0)),
+                          }))
+                        }
+                        className="w-full px-2.5 py-1.5 rounded-lg border border-emerald-300 bg-white font-bold"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-bold text-emerald-900 mb-1">
+                        공동저작 지분율 (%)
+                      </label>
+                      <input
+                        type="number"
+                        min={1}
+                        max={100}
+                        step="0.5"
+                        value={rightsMeta.co_author_share_pct ?? 100}
+                        onChange={(e) =>
+                          setRightsMeta((r) => ({
+                            ...r,
+                            co_author_share_pct: Math.min(
+                              100,
+                              Math.max(1, Number(e.target.value || 100))
+                            ),
+                          }))
+                        }
+                        title="단독 저자는 100%, 2인 공동저자는 각자 지분율(예: 50%)을 입력하고 각 저자별로 계약을 체결하세요"
+                        className="w-full px-2.5 py-1.5 rounded-lg border border-emerald-300 bg-white font-bold"
+                      />
+                    </div>
+                    <label className="flex items-end gap-1.5 text-[11px] font-bold text-emerald-900 pb-2">
+                      <input
+                        type="checkbox"
+                        checked={rightsMeta.auto_renew !== false}
+                        onChange={(e) =>
+                          setRightsMeta((r) => ({ ...r, auto_renew: e.target.checked }))
+                        }
+                      />
+                      만료 시 1년 자동연장
+                    </label>
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {(Object.keys(RIGHTS_SCOPE_LABELS) as HqRightsScope[]).map((s) => {
+                      const on = (rightsMeta.rights_scope || []).includes(s);
+                      return (
+                        <button
+                          key={s}
+                          type="button"
+                          onClick={() =>
+                            setRightsMeta((r) => {
+                              const cur = r.rights_scope || [];
+                              return {
+                                ...r,
+                                rights_scope: on
+                                  ? cur.filter((x) => x !== s)
+                                  : [...cur, s],
+                              };
+                            })
+                          }
+                          className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border ${
+                            on
+                              ? "bg-emerald-600 border-emerald-600 text-white"
+                              : "bg-white border-emerald-300 text-emerald-800"
+                          }`}
+                        >
+                          {on ? "✓ " : ""}
+                          {RIGHTS_SCOPE_LABELS[s]}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <p className="text-[11px] text-emerald-800 leading-relaxed">
+                    · 종료일을 비우면 존속기간은 <b>최초 발행일 + {rightsMeta.term_years ?? 5}년</b>으로
+                    관리됩니다 (특약이 없으면 법정 3년, 저작권법 제59조). · 저자가 사업자가 아닌 교사·연구원이면
+                    소득 구분을 <b>기타소득 8.8%</b>로 선택하세요.
+                  </p>
+                </div>
+              )}
 
               {/* 원천세 · 실수령액 즉시 계산 프리뷰 */}
               {Number(contractAmount || 0) > 0 &&
@@ -1673,7 +2243,8 @@ export default function HqContractsPage() {
                   <label className="font-bold text-slate-700">계약서 제목</label>
                   <button
                     type="button"
-                    onClick={() =>
+                    onClick={() => {
+                      setIsBodyCustomized(false);
                       regenerateTemplate(
                         category,
                         counterpartyName,
@@ -1683,11 +2254,12 @@ export default function HqContractsPage() {
                         startDate,
                         endDate,
                         Number(contractAmount || 0),
-                        category === "ROYALTY"
+                        category === "ROYALTY" &&
+                          rightsMeta.deal_type !== "FLAT_FEE"
                           ? Number(royaltyRate || 10)
                           : null
-                      )
-                    }
+                      );
+                    }}
                     className="text-brand font-extrabold hover:underline"
                   >
                     🔄 입력한 정보로 본문 플레이스홀더 다시 채우기
@@ -1695,21 +2267,36 @@ export default function HqContractsPage() {
                 </div>
                 <input
                   required
-                  value={title}
-                  onChange={(e) => setTitle(e.target.value)}
+                  value={effectiveTitle}
+                  onChange={(e) => {
+                    if (!isBodyCustomized) setBodyText(autoDraft.body);
+                    setTitle(e.target.value);
+                    setIsBodyCustomized(true);
+                  }}
                   className="w-full px-3.5 py-2 rounded-xl border border-slate-300 font-extrabold text-slate-900"
                 />
               </div>
 
               <div>
-                <label className="block font-bold text-slate-700 mb-1">
-                  계약 본문 조항 (자유 편집 가능)
-                </label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="font-bold text-slate-700">
+                    계약 본문 조항 (자유 편집 가능)
+                  </label>
+                  <span className="text-[11px] text-slate-400">
+                    {isBodyCustomized
+                      ? "수동 편집 중 (상단 값 반영 시 [다시 채우기] 클릭)"
+                      : "상단 입력값과 자동 동기화 중"}
+                  </span>
+                </div>
                 <textarea
                   rows={10}
                   required
-                  value={bodyText}
-                  onChange={(e) => setBodyText(e.target.value)}
+                  value={effectiveBodyText}
+                  onChange={(e) => {
+                    if (!isBodyCustomized) setTitle(autoDraft.title);
+                    setBodyText(e.target.value);
+                    setIsBodyCustomized(true);
+                  }}
                   className="w-full p-3.5 rounded-xl border border-slate-300 font-medium leading-relaxed text-slate-800"
                 />
               </div>
@@ -1784,14 +2371,56 @@ export default function HqContractsPage() {
                     📋 복제하여 재계약 작성
                   </button>
                 )}
+                {selected.status === "SENT" &&
+                  selected.target_type === "EXTERNAL" &&
+                  canCreateContract && (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => handleCopySignLink(selected)}
+                        className="px-3 py-1.5 rounded-lg bg-blue-500/30 hover:bg-blue-500/40 text-blue-100 text-xs font-bold"
+                        title="외부 저자·프리랜서가 로그인 없이 본인 휴대폰/PC에서 서명하는 1회용 링크"
+                      >
+                        🔗 원격 서명 링크 복사
+                      </button>
+                      {selected.sign_token && (
+                        <button
+                          type="button"
+                          onClick={() => handleCopySignLink(selected, true)}
+                          className="px-2.5 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-xs font-bold"
+                        >
+                          재발급
+                        </button>
+                      )}
+                    </>
+                  )}
+                {selected.status === "SIGNED" && selected.category === "ROYALTY" && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const id = selected.contract_id;
+                      setSelected(null);
+                      setFocusContractId(id);
+                      setViewMode("RIGHTS");
+                    }}
+                    className="px-3 py-1.5 rounded-lg bg-emerald-500/25 hover:bg-emerald-500/35 text-emerald-200 text-xs font-bold"
+                  >
+                    💰 인세 정산 원장
+                  </button>
+                )}
                 {selected.status === "SIGNED" &&
-                  selected.target_type === "EXTERNAL" && (
+                  selected.target_type === "EXTERNAL" &&
+                  selected.category !== "ROYALTY" && (
                     <button
                       type="button"
-                      onClick={() => router.push("/hq/payroll")}
+                      onClick={() =>
+                        router.push(
+                          hqHref(`/hq/payroll?from_contract=${selected.contract_id}`)
+                        )
+                      }
                       className="px-3 py-1.5 rounded-lg bg-emerald-500/25 hover:bg-emerald-500/35 text-emerald-200 text-xs font-bold"
                     >
-                      💸 원천세·인세 정산 이동
+                      💸 용역비 지급 · 원천세
                     </button>
                   )}
                 <button
@@ -1801,7 +2430,8 @@ export default function HqContractsPage() {
                 >
                   🖨️ A4 인쇄 / PDF 저장
                 </button>
-                {selected.status === "SENT" && isHrManager && (
+                {selected.status === "SENT" &&
+                  (isHrManager || selected.created_by === me?.instructor_id) && (
                   <button
                     type="button"
                     onClick={() => handleCancelContract(selected.contract_id)}
@@ -1952,6 +2582,43 @@ export default function HqContractsPage() {
                 </div>
               </div>
 
+              {/* 전자서명 감사 추적 (인쇄본에도 표기 — 분쟁 시 진정성립 입증 자료) */}
+              {selected.status === "SIGNED" && selected.sign_meta?.doc_hash && (
+                <div className="rounded-xl border border-slate-200 bg-slate-50/60 px-4 py-3 text-[10.5px] text-slate-600 leading-relaxed">
+                  <div className="font-bold text-slate-700 mb-0.5">전자서명 감사 추적</div>
+                  <div>
+                    서명 방식:{" "}
+                    {selected.sign_meta.signed_via === "REMOTE_LINK"
+                      ? "원격 서명 링크 (상대방 본인 기기)"
+                      : selected.sign_meta.signed_via === "MEMBER_ACCOUNT"
+                      ? "구성원 본인 계정 로그인 서명"
+                      : `대면 서명 (처리자: ${selected.sign_meta.signed_by_name || "-"})`}
+                    {" · "}체결일시 {selected.party_signed_at?.replace("T", " ").slice(0, 19)}
+                    {selected.sign_meta.signer_ip ? ` · 접속 IP ${selected.sign_meta.signer_ip}` : ""}
+                  </div>
+                  {selected.sign_meta.link_viewed_at && (
+                    <div>
+                      링크 최초 열람 {selected.sign_meta.link_viewed_at.replace("T", " ").slice(0, 19)}
+                    </div>
+                  )}
+                  <div className="font-mono break-all">
+                    문서 지문(SHA-256): {selected.sign_meta.doc_hash}
+                  </div>
+                </div>
+              )}
+
+              {selected.status === "SENT" &&
+                selected.target_type === "EXTERNAL" &&
+                selected.sign_meta?.link_issued_at && (
+                  <div className="rounded-xl border border-blue-200 bg-blue-50/60 px-4 py-2.5 text-[11px] text-blue-900 print:hidden">
+                    🔗 원격 서명 링크 발급 {selected.sign_meta.link_issued_at.slice(0, 10)} · 유효기간{" "}
+                    {selected.sign_meta.link_expires_at?.slice(0, 10) || "-"}
+                    {selected.sign_meta.link_viewed_at
+                      ? ` · 상대방 열람 ${selected.sign_meta.link_viewed_at.replace("T", " ").slice(0, 16)}`
+                      : " · 아직 열람 전"}
+                  </div>
+                )}
+
               {/* 서명 대기 상태일 때 전자서명 캔버스 노출 */}
               {selected.status === "SENT" &&
                 (selected.target_member_id === me?.instructor_id ||
@@ -1962,22 +2629,30 @@ export default function HqContractsPage() {
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <div>
                         <h4 className="text-sm font-extrabold text-slate-900">
-                          ✍️ 을({selected.counterparty_name}) 자필 전자서명 패드
+                          ✍️ 을({selected.counterparty_name}){" "}
+                          {selected.target_type === "EXTERNAL" &&
+                          selected.target_member_id !== me?.instructor_id
+                            ? "대면 서명 (상대방이 이 기기에서 직접 서명)"
+                            : "자필 전자서명 패드"}
                         </h4>
                         <p className="text-xs text-slate-600">
-                          마우스나 터치로 아래 흰색 영역에 서명한 뒤 [서명 완료 및 계약 체결]을 눌러주세요.
+                          {selected.target_type === "EXTERNAL"
+                            ? "상대방이 사무실에 방문한 경우에만 사용하세요. 원격지에 있다면 상단 [원격 서명 링크 복사]로 본인이 직접 서명하게 해야 합니다."
+                            : "마우스나 터치로 아래 흰색 영역에 서명한 뒤 [서명 완료 및 계약 체결]을 눌러주세요."}
                         </p>
                       </div>
                       <div className="flex gap-2">
-                        <button
-                          type="button"
-                          onClick={() =>
-                            stampNameSeal(selected.counterparty_name)
-                          }
-                          className="px-3 py-1.5 rounded-lg bg-white border border-slate-300 text-xs font-bold text-slate-700 hover:bg-slate-50"
-                        >
-                          성명 서명 자동생성
-                        </button>
+                        {selected.target_type !== "EXTERNAL" && (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              stampNameSeal(selected.counterparty_name)
+                            }
+                            className="px-3 py-1.5 rounded-lg bg-white border border-slate-300 text-xs font-bold text-slate-700 hover:bg-slate-50"
+                          >
+                            성명 서명 자동생성
+                          </button>
+                        )}
                         <button
                           type="button"
                           onClick={clearSignature}

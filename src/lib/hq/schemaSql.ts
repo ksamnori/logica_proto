@@ -256,6 +256,16 @@ CREATE TABLE IF NOT EXISTS public.hq_publication (
 
 CREATE INDEX IF NOT EXISTS idx_hq_publication_stage ON public.hq_publication(stage, press_deadline);
 
+-- 출판권 · 저작권 · 인세 · ISBN 확장 (도서 연결 / 약정 조건 / 서명 감사추적 / 원격서명 / 납본·쇄 이력)
+ALTER TABLE public.hq_contract ADD COLUMN IF NOT EXISTS pub_id uuid REFERENCES public.hq_publication(pub_id) ON DELETE SET NULL;
+ALTER TABLE public.hq_contract ADD COLUMN IF NOT EXISTS rights_meta jsonb NOT NULL DEFAULT '{}'::jsonb;
+ALTER TABLE public.hq_contract ADD COLUMN IF NOT EXISTS sign_meta jsonb NOT NULL DEFAULT '{}'::jsonb;
+ALTER TABLE public.hq_contract ADD COLUMN IF NOT EXISTS sign_token text;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_hq_contract_sign_token ON public.hq_contract(sign_token) WHERE sign_token IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_hq_contract_pub ON public.hq_contract(pub_id);
+ALTER TABLE public.hq_publication ADD COLUMN IF NOT EXISTS pub_meta jsonb NOT NULL DEFAULT '{}'::jsonb;
+CREATE INDEX IF NOT EXISTS idx_hq_publication_isbn ON public.hq_publication(isbn) WHERE isbn IS NOT NULL;
+
 CREATE TABLE IF NOT EXISTS public.hq_company_settings (
   setting_key text PRIMARY KEY DEFAULT 'MAIN',
   company_name text NOT NULL DEFAULT '(주)천종현수학연구소',

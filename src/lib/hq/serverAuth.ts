@@ -38,6 +38,18 @@ export function isMissingHqTableError(err: any): boolean {
   );
 }
 
+/**
+ * 테이블은 있으나 확장 컬럼(예: hq_contract.pub_id, hq_publication.pub_meta)이 아직 없는 경우.
+ * (isMissingHqTableError 정규식과 메시지가 겹치므로 반드시 이 함수를 먼저 검사)
+ */
+export function isMissingHqColumnError(err: any): boolean {
+  if (!err) return false;
+  const code = String(err.code || "");
+  const msg = String(err.message || err.details || "");
+  if (code === "42703" || code === "PGRST204") return true;
+  return /column .* does not exist|Could not find the '.+' column/i.test(msg);
+}
+
 export function extractBearerOrCookieToken(req: NextRequest): string | undefined {
   let token = req.headers.get("authorization")?.replace(/^Bearer\s+/i, "").trim();
   if (!token) token = req.cookies.get("sb-access-token")?.value;

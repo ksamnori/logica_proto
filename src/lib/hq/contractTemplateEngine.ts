@@ -7,11 +7,19 @@ import {
 import type {
   HqCompanySettings,
   HqContractCategory,
+  HqContractRightsMeta,
   HqContractTaxType,
   HqContractTemplateItem,
   HqMember,
   HqWorkRuleItem,
 } from "./types";
+import {
+  calcWithholding,
+  RIGHTS_SCOPE_LABELS,
+  ROYALTY_BASIS_LABELS,
+  SETTLE_CYCLE_LABELS,
+  withRightsDefaults,
+} from "./publishingRights";
 
 export interface PlaceholderFieldItem {
   label: string;
@@ -168,6 +176,13 @@ export const CONTRACT_PLACEHOLDER_GROUPS: PlaceholderGroupDef[] = [
       { label: "대상 도서명", token: "{{도서명}}" },
       { label: "약정 인세율", token: "{{인세율}}" },
       { label: "소득 원천징수 구분", token: "{{세무구분}}" },
+      { label: "인세 산정 기준", token: "{{인세 산정기준}}" },
+      { label: "인세 정산 주기", token: "{{인세 정산주기}}" },
+      { label: "설정 권리 범위", token: "{{설정 권리범위}}" },
+      { label: "권리 존속기간(년)", token: "{{권리 존속기간}}" },
+      { label: "저자 증정본 부수", token: "{{저자 증정부수}}" },
+      { label: "인세 면제 부수", token: "{{인세 면제부수}}" },
+      { label: "공동저작 지분율(%)", token: "{{공동저작 지분율}}" },
     ],
   },
 ];
@@ -381,17 +396,21 @@ export const STARTER_TEMPLATE_PRESETS: StarterTemplatePreset[] = [
       "저작권자 {{구성원 이름}}(이하 '저작권자')과 출판권자 {{회사명}}(이하 '출판사')은 저작물 「{{도서명}}」에 관하여 다음과 같이 출판권 및 배타적발행권 설정계약을 체결한다.",
       "",
       "제1조 [권리의 설정]",
-      "'저작권자'는 본 저작물에 대하여 종이책 출판권 및 전자책 배타적발행권을 '출판사'에게 독점 설정한다.",
+      "'저작권자'는 본 저작물에 대하여 다음 권리를 '출판사'에게 독점 설정한다: {{설정 권리범위}}.",
       "",
       "제2조 [원고의 인도 및 교정]",
       "'저작권자'는 {{근로계약 시작일}}까지 완전 원고를 인도하며, 출판 편집 과정의 교열·검수에 성실히 협력한다.",
       "",
       "제3조 [출판 사용료(인세) 및 정산]",
-      "1. 선인세(계약금): 금 {{계약금액}}원 ({{세무구분}} 원천징수 후 지급)",
-      "2. 발행 인세율: 도서 정가의 {{인세율}}% × 실판매부수로 산정하여 매 분기 익월 정산 지급한다.",
+      "1. 선인세(계약금): 금 {{계약금액}}원 ({{세무구분}} 원천징수 후 지급, 이후 발생 인세에서 상계)",
+      "2. 발행 인세율: 도서 정가의 {{인세율}}% · {{인세 산정기준}}으로 산정하며, 증정·홍보·납본용 {{인세 면제부수}}부는 제외한다.",
+      "3. 정산 주기: {{인세 정산주기}} 마감 후 익월 25일까지 정산 내역서와 함께 지급한다.",
       "",
       "제4조 [존속기간]",
-      "본 계약은 {{근로계약 시작일}}부터 {{근로계약 종료일}}(미기재 시 초판 발행일로부터 5년)까지 유효하다.",
+      "본 계약은 {{근로계약 시작일}}부터 {{근로계약 종료일}}(미기재 시 최초 발행일로부터 {{권리 존속기간}}년)까지 유효하다.",
+      "",
+      "제5조 [증정본]",
+      "'출판사'는 초판 발행 시 {{저자 증정부수}}부를 '저작권자'에게 무상 증정한다.",
       "",
       "계약일: {{계약일}}",
       "[출판사] {{회사명}} ({{회사주소}}) 대표이사 {{대표자명}} {{회사 직인}}",
@@ -527,6 +546,7 @@ export function resolveContractTemplatePlaceholders(params: {
   royaltyRate?: number | null;
   taxLabel?: string;
   customValues?: Record<string, string>;
+  rightsMeta?: HqContractRightsMeta | null;
 }): string {
   const {
     templateBody,
@@ -545,6 +565,7 @@ export function resolveContractTemplatePlaceholders(params: {
     taxLabel,
     customValues,
   } = params;
+  const rights = withRightsDefaults(params.rightsMeta);
 
   const todayYmd = new Date().toISOString().slice(0, 10);
   const rule = workRule || DEFAULT_WORK_RULES[3] || DEFAULT_WORK_RULES[0];
@@ -669,6 +690,15 @@ export function resolveContractTemplatePlaceholders(params: {
     "{{도서명}}": bookTitle || "신간 수학교재",
     "{{인세율}}": String(royaltyRate ?? 10),
     "{{세무구분}}": taxLabel || "사업소득 원천징수 (3.3%)",
+    "{{인세 산정기준}}": ROYALTY_BASIS_LABELS[rights.royalty_basis],
+    "{{인세 정산주기}}": SETTLE_CYCLE_LABELS[rights.settle_cycle],
+    "{{설정 권리범위}}":
+      rights.rights_scope.map((s) => RIGHTS_SCOPE_LABELS[s]).join(", ") ||
+      RIGHTS_SCOPE_LABELS.PRINT_PUBLISH,
+    "{{권리 존속기간}}": String(rights.term_years),
+    "{{저자 증정부수}}": String(rights.author_free_copies),
+    "{{인세 면제부수}}": String(rights.royalty_free_copies),
+    "{{공동저작 지분율}}": String(rights.co_author_share_pct),
   };
 
   if (customValues) {
@@ -706,31 +736,16 @@ export function calcContractTaxBreakdown(
     };
   }
 
-  if (taxType === "BIZ_33") {
-    // 소득세 3% + 지방소득세 0.3% (원 단위 절사)
-    const incomeTax = Math.floor((gross * 0.03) / 10) * 10;
-    const localTax = Math.floor((incomeTax * 0.1) / 10) * 10;
-    const withholdingTax = incomeTax + localTax;
+  if (taxType === "BIZ_33" || taxType === "OTHER_88") {
+    // 급여·정산 화면(calculatePayrollAmounts)과 동일한 원천세 규칙 사용
+    // (기타소득 과세최저한 · 소득세 1,000원 미만 소액부징수 포함)
+    const wh = calcWithholding(gross, taxType);
     return {
       gross,
-      withholdingTax,
+      withholdingTax: wh.total,
       vatAdd: 0,
-      netPayout: gross - withholdingTax,
-      formulaNote: "프리랜서 사업소득 3.3% (소득세 3% + 지방세 0.3%) 공제",
-    };
-  }
-
-  if (taxType === "OTHER_88") {
-    // 기타소득 필요경비 60% 인정 -> 과세표준 40% × 22%(지방세 포함) = 총액의 8.8%
-    const incomeTax = Math.floor((gross * 0.4 * 0.2) / 10) * 10;
-    const localTax = Math.floor((incomeTax * 0.1) / 10) * 10;
-    const withholdingTax = incomeTax + localTax;
-    return {
-      gross,
-      withholdingTax,
-      vatAdd: 0,
-      netPayout: gross - withholdingTax,
-      formulaNote: "기타소득 8.8% (필요경비 60% 공제 후 22% 원천징수)",
+      netPayout: gross - wh.total,
+      formulaNote: wh.note,
     };
   }
 

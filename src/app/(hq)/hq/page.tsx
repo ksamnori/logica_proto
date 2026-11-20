@@ -18,6 +18,11 @@ import {
 } from "@/lib/hq/constants";
 import { hqFetch, resolveStoragePublicUrl } from "@/lib/hq/clientApi";
 import { useHqHref } from "@/lib/hq/hqRoutes";
+import {
+  getLegalDepositInfo,
+  stageIndex,
+  validateIsbn13,
+} from "@/lib/hq/publishingRights";
 import type {
   HqApprovalDoc,
   HqApprovalDocType,
@@ -318,6 +323,40 @@ export default function HqHomeDashboardPage() {
       });
     }
 
+    if (canAccessMenu("/hq/publishing")) {
+      const isbnMissingBooks = books.filter(
+        (b) =>
+          b.stage !== "PUBLISHED" &&
+          stageIndex(b.stage) >= stageIndex("PROOF_FINAL") &&
+          !validateIsbn13(b.isbn).ok
+      );
+      if (isbnMissingBooks.length > 0) {
+        items.push({
+          id: "isbn-missing",
+          tone: "warn",
+          badge: `ISBN 미발급 ${isbnMissingBooks.length}종`,
+          text: `최종교열·인쇄 단계인데 유효한 ISBN이 등록되지 않은 도서가 ${isbnMissingBooks.length}종(「${isbnMissingBooks[0].title}」 등) 있습니다.`,
+          actionLabel: "ISBN 확인 →",
+          onClick: () => goHq("/hq/publishing"),
+        });
+      }
+
+      const depositDueBooks = books.filter((b) => {
+        const d = getLegalDepositInfo(b);
+        return d.required && !d.done && (d.daysLeft ?? 99) <= 10;
+      });
+      if (depositDueBooks.length > 0) {
+        items.push({
+          id: "legal-deposit-due",
+          tone: "warn",
+          badge: `납본 기한 ${depositDueBooks.length}종`,
+          text: `출간 후 국립중앙도서관 납본 기한(30일)이 임박·경과한 도서가 ${depositDueBooks.length}종(「${depositDueBooks[0].title}」 등) 있습니다.`,
+          actionLabel: "납본 상태 처리 →",
+          onClick: () => goHq("/hq/publishing"),
+        });
+      }
+    }
+
     if (unreadChatCount > 0 && canAccessMenu("/hq/messenger")) {
       items.push({
         id: "unread-chat",
@@ -416,7 +455,6 @@ export default function HqHomeDashboardPage() {
               )}
               {(
                 [
-                  { type: "LEAVE", label: "🌴 휴가신청" },
                   { type: "EXPENSE", label: "💳 지출품의" },
                   { type: "PURCHASE", label: "🛒 인쇄·구매품의" },
                 ] as const
@@ -457,6 +495,13 @@ export default function HqHomeDashboardPage() {
                   📈 인사이트
                 </button>
               )}
+              <button
+                type="button"
+                onClick={() => openQuickDraft("LEAVE")}
+                className="px-3.5 py-2.5 rounded-xl bg-white/10 hover:bg-white/20 border border-white/15 text-white text-xs font-bold transition-colors whitespace-nowrap"
+              >
+                🌴 휴가신청
+              </button>
               {me && (
                 <button
                   type="button"

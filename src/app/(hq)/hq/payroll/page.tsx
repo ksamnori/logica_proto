@@ -1,7 +1,7 @@
 // src/app/(hq)/hq/payroll/page.tsx
 "use client";
 
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useHqShell } from "@/components/hq/HqShellContext";
 import BankTransferModal from "@/components/hq/payroll/BankTransferModal";
 import SeveranceCalculatorPanel from "@/components/hq/payroll/SeveranceCalculatorPanel";
@@ -13,14 +13,22 @@ import {
 } from "@/lib/hq/clientApi";
 import {
   calculatePayrollAmounts,
+  CONTRACT_CATEGORIES,
   PAYROLL_TYPE_META,
 } from "@/lib/hq/constants";
+import {
+  contractMatchesBook,
+  describeExternalWithholdingRecord,
+  ROYALTY_BASIS_LABELS,
+} from "@/lib/hq/publishingRights";
 import type {
   HqApprovalDoc,
   HqAttendanceRecord,
+  HqContract,
   HqPayrollRecord,
   HqPayrollStatus,
   HqPayrollType,
+  HqRoyaltyBasis,
 } from "@/lib/hq/types";
 
 type MainWorkspaceTab = "LEDGER" | "TAX_PREP" | "SEVERANCE";
@@ -64,6 +72,7 @@ export default function HqPayrollPage() {
   const [attendanceRows, setAttendanceRows] = useState<HqAttendanceRecord[]>([]);
   const [leaveDocs, setLeaveDocs] = useState<HqApprovalDoc[]>([]);
   const [publications, setPublications] = useState<PubQuickItem[]>([]);
+  const [externalContracts, setExternalContracts] = useState<HqContract[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
@@ -104,6 +113,11 @@ export default function HqPayrollPage() {
   const [salesCopies, setSalesCopies] = useState("2000");
   const [royaltyPct, setRoyaltyPct] = useState("10");
   const [advanceDeduct, setAdvanceDeduct] = useState("0");
+  const [royaltyTaxMode, setRoyaltyTaxMode] = useState<"BIZ_33" | "OTHER_88">(
+    "BIZ_33"
+  );
+  const [linkedContractId, setLinkedContractId] = useState("");
+  const fromContractHandledRef = useRef(false);
 
   // A4 급여명세서 / 지급명세서 모달
   const [statementModal, setStatementModal] =
@@ -128,12 +142,15 @@ export default function HqPayrollPage() {
           attendanceRows?: HqAttendanceRecord[];
           leaveDocs?: HqApprovalDoc[];
           publications?: PubQuickItem[];
+          externalContracts?: HqContract[];
         };
       }>(`/api/hq/payroll?month=${month}${ctxFlag}`);
       setRecords(res.data?.records || []);
       if (res.data?.attendanceRows) setAttendanceRows(res.data.attendanceRows);
       if (res.data?.leaveDocs) setLeaveDocs(res.data.leaveDocs);
       if (res.data?.publications) setPublications(res.data.publications);
+      if (res.data?.externalContracts)
+        setExternalContracts(res.data.externalContracts);
       setSelectedIds(new Set());
     } catch {
       // ignore
@@ -160,8 +177,9 @@ export default function HqPayrollPage() {
         mealAllowance: Number(mealAllowance || 0),
         overtimePay: Number(overtimePay || 0),
         bonusPay: Math.max(0, Number(bonusPay || 0)),
+        royaltyTaxMode,
       }),
-    [payType, basePay, mealAllowance, overtimePay, bonusPay]
+    [payType, basePay, mealAllowance, overtimePay, bonusPay, royaltyTaxMode]
   );
 
   const previewCalc = useMemo(() => {
@@ -265,6 +283,8 @@ export default function HqPayrollPage() {
     setResidentOrBizNo("");
     setDeductionMode("AUTO");
     setExactOtherDeduct("0");
+    setRoyaltyTaxMode("BIZ_33");
+    setLinkedContractId("");
 
     if (presetType === "EMPLOYEE" && activeMembers.length > 0) {
       applyMemberDefaults(activeMembers[0]);
@@ -310,6 +330,10 @@ export default function HqPayrollPage() {
       if (r.calc_meta.advanceDeduct !== undefined)
         setAdvanceDeduct(String(r.calc_meta.advanceDeduct));
     }
+    setRoyaltyTaxMode(
+      r.calc_meta?.royalty_tax_mode === "OTHER_88" ? "OTHER_88" : "BIZ_33"
+    );
+    setLinkedContractId(String(r.calc_meta?.contract_id || ""));
 
     const mode = r.calc_meta?.deduction_mode === "EXACT" ? "EXACT" : "AUTO";
     setDeductionMode(mode);
@@ -341,6 +365,84 @@ export default function HqPayrollPage() {
     }
   };
 
+  // 체결 완료된 외부 저자·프리랜서 계약에서 지급정보 자동 세팅
+  const applyExternalContract = useCallback(
+    (c: HqContract) => {
+      const nextPayType: HqPayrollType =
+        c.category === "ROYALTY"
+          ? "ROYALTY"
+          : c.tax_type === "OTHER_88"
+          ? "OTHER_88"
+          : "FREELANCER_33";
+      setLinkedContractId(c.contract_id);
+      setPayType(nextPayType);
+      setMemberId("");
+      setPayeeName(c.counterparty_name);
+      setDeptOrRole(c.counterparty_role || CONTRACT_CATEGORIES[c.category]?.shortLabel || "외부 파트너");
+      setBookOrProject(c.book_title || "");
+      setMealAllowance("0");
+      setOvertimePay("0");
+      setBonusPay("0");
+      setDeductionMode("AUTO");
+
+      const matchedPub = publications.find((p) =>
+        contractMatchesBook({ pub_id: c.pub_id, book_title: c.book_title }, p)
+      );
+      if (matchedPub) {
+        if (!c.book_title) setBookOrProject(matchedPub.title);
+        if (matchedPub.list_price > 0) setBookPrice(String(matchedPub.list_price));
+        if (matchedPub.print_run > 0) setSalesCopies(String(matchedPub.print_run));
+      }
+
+      if (nextPayType === "ROYALTY") {
+        setRoyaltyTaxMode(c.tax_type === "OTHER_88" ? "OTHER_88" : "BIZ_33");
+        if (c.royalty_rate) setRoyaltyPct(String(c.royalty_rate));
+        if (c.contract_amount > 0) {
+          setBasePay(String(c.contract_amount));
+          setAdvanceDeduct(String(c.contract_amount));
+        }
+      } else {
+        setBasePay(String(c.contract_amount || 0));
+      }
+
+      // 동일 수령인의 직전 정산 계좌·식별번호가 있으면 자동 재사용
+      const prev = records.find(
+        (r) => r.pay_type !== "EMPLOYEE" && r.payee_name === c.counterparty_name
+      );
+      if (prev) {
+        if (prev.bank_info) setBankInfo(prev.bank_info);
+        if (prev.calc_meta?.resident_or_biz_no)
+          setResidentOrBizNo(prev.calc_meta.resident_or_biz_no);
+      }
+      setMemo(`계약 ${c.contract_no} (${c.title})`);
+    },
+    [publications, records]
+  );
+
+  // /hq/contracts 상세 모달에서 ?from_contract=<id> 로 이동한 경우 단건 정산 모달 즉시 오픈
+  useEffect(() => {
+    if (fromContractHandledRef.current || loading || !isHrManager) return;
+    const sp = new URLSearchParams(window.location.search);
+    const cid = sp.get("from_contract");
+    if (!cid) {
+      fromContractHandledRef.current = true;
+      return;
+    }
+    if (externalContracts.length === 0) return;
+    fromContractHandledRef.current = true;
+    const found = externalContracts.find((c) => c.contract_id === cid);
+    if (found) {
+      setEditingId(null);
+      const effMonth = month === "ALL" ? currentYm : month;
+      setPayDate(`${effMonth}-25`);
+      setBankInfo("");
+      setResidentOrBizNo("");
+      applyExternalContract(found);
+      setFormOpen(true);
+    }
+    window.history.replaceState(null, "", window.location.pathname);
+  }, [loading, isHrManager, externalContracts, month, currentYm, applyExternalContract]);
+
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     setSaving(true);
@@ -368,7 +470,11 @@ export default function HqPayrollPage() {
               salesCopies: Number(salesCopies || 0),
               royaltyPct: Number(royaltyPct || 0),
               advanceDeduct: Number(advanceDeduct || 0),
+              royalty_tax_mode: royaltyTaxMode,
+              ...(linkedContractId ? { contract_id: linkedContractId } : {}),
             }
+          : linkedContractId
+          ? { contract_id: linkedContractId }
           : {};
 
       if (editingId) {
@@ -972,6 +1078,14 @@ export default function HqPayrollPage() {
                       filtered.map((r) => {
                         const meta = PAYROLL_TYPE_META[r.pay_type];
                         const isExact = r.calc_meta?.deduction_mode === "EXACT";
+                        const extWh =
+                          r.pay_type !== "EMPLOYEE"
+                            ? describeExternalWithholdingRecord(r)
+                            : null;
+                        const badgeClass =
+                          r.pay_type === "ROYALTY" && extWh?.mode === "OTHER_88"
+                            ? "bg-purple-50 text-purple-700 border-purple-200"
+                            : meta.badgeClass;
                         return (
                           <tr key={r.payroll_id} className="hover:bg-slate-50">
                             {isHrManager && (
@@ -990,9 +1104,9 @@ export default function HqPayrollPage() {
                               </div>
                               <div className="flex items-center gap-1 mt-1">
                                 <span
-                                  className={`inline-block px-2 py-0.5 rounded border text-[10px] font-bold ${meta.badgeClass}`}
+                                  className={`inline-block px-2 py-0.5 rounded border text-[10px] font-bold ${badgeClass}`}
                                 >
-                                  {meta.shortLabel}
+                                  {extWh ? extWh.shortBadge : meta.shortLabel}
                                 </span>
                                 {isExact && (
                                   <span className="inline-block px-1.5 py-0.5 rounded bg-slate-800 text-white text-[9px] font-bold">
@@ -1179,6 +1293,36 @@ export default function HqPayrollPage() {
                 </div>
               )}
 
+              {payType !== "EMPLOYEE" && externalContracts.length > 0 && (
+                <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 flex flex-wrap items-center justify-between gap-2">
+                  <span className="font-bold text-slate-700">
+                    📑 체결된 저자·외주 전자계약에서 불러오기
+                  </span>
+                  <select
+                    value={linkedContractId}
+                    onChange={(e) => {
+                      const cid = e.target.value;
+                      setLinkedContractId(cid);
+                      const found = externalContracts.find(
+                        (c) => c.contract_id === cid
+                      );
+                      if (found) applyExternalContract(found);
+                    }}
+                    className="px-3 py-1.5 rounded-lg border border-slate-300 font-bold text-slate-800 bg-white min-w-[260px] max-w-full"
+                  >
+                    <option value="">직접 입력 (계약 미연결)</option>
+                    {externalContracts.map((c) => (
+                      <option key={c.contract_id} value={c.contract_id}>
+                        [{CONTRACT_CATEGORIES[c.category]?.shortLabel || c.category}]{" "}
+                        {c.counterparty_name}
+                        {c.book_title ? ` · ${c.book_title}` : ""}
+                        {c.royalty_rate ? ` (${c.royalty_rate}%)` : ""}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="block font-bold text-slate-700 mb-1">
@@ -1343,6 +1487,30 @@ export default function HqPayrollPage() {
                         className="w-full px-2.5 py-1.5 rounded-lg border border-emerald-300 bg-white font-bold"
                       />
                     </div>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2 pt-1">
+                    <span className="text-[11px] font-bold text-emerald-800">
+                      인세 소득 구분
+                    </span>
+                    {(
+                      [
+                        ["BIZ_33", "사업소득 3.3% (전업 작가·사업자)"],
+                        ["OTHER_88", "기타소득 8.8% (교사·연구원 등 일시 집필)"],
+                      ] as const
+                    ).map(([k, label]) => (
+                      <button
+                        key={k}
+                        type="button"
+                        onClick={() => setRoyaltyTaxMode(k)}
+                        className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border ${
+                          royaltyTaxMode === k
+                            ? "bg-emerald-600 border-emerald-600 text-white"
+                            : "bg-white border-emerald-300 text-emerald-800"
+                        }`}
+                      >
+                        {label}
+                      </button>
+                    ))}
                   </div>
                 </div>
               )}
@@ -1698,7 +1866,103 @@ export default function HqPayrollPage() {
                     </strong>
                   </div>
                 )}
+                {statementModal.pay_type !== "EMPLOYEE" && (
+                  <div className="col-span-2 pt-2 mt-1 border-t border-slate-200 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-slate-600">
+                    <span>
+                      원천징수의무자: <strong className="text-slate-800">{companyName}</strong>
+                    </span>
+                    {companySettings?.business_reg_no && (
+                      <span>사업자등록번호: {companySettings.business_reg_no}</span>
+                    )}
+                    {companySettings?.ceo_names?.[0] && (
+                      <span>대표자: {companySettings.ceo_names[0]}</span>
+                    )}
+                  </div>
+                )}
               </div>
+
+              {/* 저자 인세 산출 근거 표 (정가 · 부수 · 인세율 · 선인세 상계 내역이 있을 때 표시) */}
+              {statementModal.pay_type === "ROYALTY" &&
+                (Number(statementModal.calc_meta?.bookPrice || 0) > 0 ||
+                  statementModal.calc_meta?.period_label) && (
+                  <div className="border border-emerald-200 bg-emerald-50/50 rounded-xl p-4 text-xs space-y-1.5">
+                    <div className="font-extrabold text-emerald-900">
+                      📖 인세 산출 근거
+                      {statementModal.calc_meta?.period_label
+                        ? ` (${statementModal.calc_meta.period_label})`
+                        : ""}
+                    </div>
+                    {statementModal.calc_meta?.royalty_kind !== "ADVANCE" &&
+                      Number(statementModal.calc_meta?.bookPrice || 0) > 0 && (
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px] pt-1">
+                          <div>
+                            <span className="text-slate-500">산정기준:</span>{" "}
+                            <strong>
+                              {statementModal.calc_meta?.basis
+                                ? ROYALTY_BASIS_LABELS[
+                                    statementModal.calc_meta.basis as HqRoyaltyBasis
+                                  ]
+                                : "정가 × 부수"}
+                            </strong>
+                          </div>
+                          <div>
+                            <span className="text-slate-500">정가 × 인세율:</span>{" "}
+                            <strong>
+                              {Number(
+                                statementModal.calc_meta.bookPrice
+                              ).toLocaleString()}
+                              원 × {statementModal.calc_meta.royaltyPct ?? "-"}%
+                            </strong>
+                          </div>
+                          <div>
+                            <span className="text-slate-500">인세대상 부수:</span>{" "}
+                            <strong>
+                              {Number(
+                                statementModal.calc_meta.royalty_copies ??
+                                  statementModal.calc_meta.salesCopies ??
+                                  0
+                              ).toLocaleString()}
+                              부
+                            </strong>
+                          </div>
+                          <div>
+                            <span className="text-slate-500">선인세 차감:</span>{" "}
+                            <strong className="text-amber-700">
+                              -
+                              {Number(
+                                statementModal.calc_meta.advance_recouped ??
+                                  statementModal.calc_meta.advanceDeduct ??
+                                  0
+                              ).toLocaleString()}
+                              원
+                            </strong>
+                          </div>
+                        </div>
+                      )}
+                  </div>
+                )}
+
+              {/* 기타소득(8.8%) 필요경비 60% 공제 및 과세소득금액 명세 */}
+              {statementModal.pay_type !== "EMPLOYEE" &&
+                (() => {
+                  const wh = describeExternalWithholdingRecord(statementModal);
+                  if (wh.mode !== "OTHER_88") return null;
+                  return (
+                    <div className="border border-purple-200 bg-purple-50/50 rounded-xl p-3.5 text-xs flex flex-wrap items-center justify-between gap-2">
+                      <span className="font-bold text-purple-900">
+                        🧾 기타소득 과세표준 산출 (필요경비 60% 의제 공제)
+                      </span>
+                      <span className="tabular-nums text-[11px] text-slate-700">
+                        총지급액 <b>{wh.grossAmount.toLocaleString()}원</b> − 필요경비(60%){" "}
+                        <b>{wh.necessaryExpense.toLocaleString()}원</b> = 과세소득금액{" "}
+                        <strong className="text-purple-800">
+                          {wh.taxableIncome.toLocaleString()}원
+                        </strong>{" "}
+                        × 22%(지방세 포함)
+                      </span>
+                    </div>
+                  );
+                })()}
 
               <div className="grid grid-cols-2 gap-4 text-xs">
                 {/* 지급 내역 */}
@@ -1843,9 +2107,18 @@ export default function HqPayrollPage() {
                 </span>
               </div>
 
-              {statementModal.pay_type === "EMPLOYEE" && (
+              {statementModal.pay_type === "EMPLOYEE" ? (
                 <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 text-[11px] text-slate-500 leading-relaxed">
                   • 산출기준 안내 (근로기준법 제48조 제2항): 기본급·정액수당은 근로계약 기준 월급여액이며, 연장·휴일·야간근로 발생 시 통상시급(월 통상임금÷209h)×가산율(1.5배) 기준으로 산정합니다. 4대보험 및 소득·지방소득세는 관련 법령·고지내역 및 간이세액표에 의거 원천공제됩니다.
+                </div>
+              ) : (
+                <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 text-[11px] text-slate-500 leading-relaxed">
+                  • 원천징수 안내 (소득세법 제127조·제129조):{" "}
+                  {describeExternalWithholdingRecord(statementModal).ledgerLabel} —{" "}
+                  {describeExternalWithholdingRecord(statementModal).nominalRateText}.{" "}
+                  {describeExternalWithholdingRecord(statementModal).taxExemptionNote
+                    ? `(${describeExternalWithholdingRecord(statementModal).taxExemptionNote})`
+                    : "원천징수한 세액은 익월 10일 관할 세무서 및 지자체에 신고·납부됩니다."}
                 </div>
               )}
 

@@ -4,10 +4,12 @@
 import React, { useMemo, useState } from "react";
 import { PAYROLL_TYPE_META } from "@/lib/hq/constants";
 import {
+  buildExternalWithholdingStatementCsv,
   buildTaxAccountantMonthlyPackageCsv,
   summarizeMonthlyPrepByMember,
   triggerCsvDownload,
 } from "@/lib/hq/payrollUtils";
+import { describeExternalWithholdingRecord } from "@/lib/hq/publishingRights";
 import type {
   HqApprovalDoc,
   HqAttendanceRecord,
@@ -82,6 +84,71 @@ export default function TaxAccountantPrepPanel({
     [payrollRecords]
   );
 
+  // 원천징수이행상황신고서 세목별(근로 A01 / 사업 A25 / 기타 A40) 요약 및 다음달 법정 신고기한 계산
+  const withholdingBreakdown = useMemo(() => {
+    const empRows = payrollRecords.filter((r) => r.pay_type === "EMPLOYEE");
+    const empGross = empRows.reduce((s, r) => s + Number(r.gross_amount || 0), 0);
+    const empTax = empRows.reduce(
+      (s, r) => s + Number(r.income_tax || 0) + Number(r.local_income_tax || 0),
+      0
+    );
+
+    let bizCount = 0,
+      bizGross = 0,
+      bizTax = 0;
+    let othCount = 0,
+      othGross = 0,
+      othExpense = 0,
+      othTaxable = 0,
+      othTax = 0;
+    let missingIdCount = 0;
+
+    externalWithholding.forEach((r) => {
+      const wh = describeExternalWithholdingRecord(r);
+      if (!r.calc_meta?.resident_or_biz_no?.trim()) missingIdCount += 1;
+      if (wh.mode === "OTHER_88") {
+        othCount += 1;
+        othGross += wh.grossAmount;
+        othExpense += wh.necessaryExpense;
+        othTaxable += wh.taxableIncome;
+        othTax += wh.withholdingTotal;
+      } else {
+        bizCount += 1;
+        bizGross += wh.grossAmount;
+        bizTax += wh.withholdingTotal;
+      }
+    });
+
+    let taxDueYmd = "";
+    let simpleStmtDueYmd = "";
+    if (/^\d{4}-\d{2}$/.test(payMonth)) {
+      const [y, m] = payMonth.split("-").map(Number);
+      const nextY = m === 12 ? y + 1 : y;
+      const nextM = m === 12 ? 1 : m + 1;
+      const nextYm = `${nextY}-${String(nextM).padStart(2, "0")}`;
+      const lastDay = new Date(nextY, nextM, 0).getDate();
+      taxDueYmd = `${nextYm}-10`;
+      simpleStmtDueYmd = `${nextYm}-${String(lastDay).padStart(2, "0")}`;
+    }
+
+    return {
+      empCount: empRows.length,
+      empGross,
+      empTax,
+      bizCount,
+      bizGross,
+      bizTax,
+      othCount,
+      othGross,
+      othExpense,
+      othTaxable,
+      othTax,
+      missingIdCount,
+      taxDueYmd,
+      simpleStmtDueYmd,
+    };
+  }, [payrollRecords, externalWithholding, payMonth]);
+
   if (payMonth === "ALL") {
     return (
       <div className="rounded-2xl bg-white border border-slate-200 p-10 text-center space-y-3">
@@ -113,6 +180,22 @@ export default function TaxAccountantPrepPanel({
     });
     triggerCsvDownload(
       `${companyName.replace(/[\\/:*?"<>|]/g, "")}_세무사전달_기초자료_${payMonth}.csv`,
+      csv
+    );
+  };
+
+  const handleDownloadWithholdingCsv = () => {
+    if (externalWithholding.length === 0) {
+      alert("당월 등록된 사업소득(3.3%) · 기타소득(8.8%) · 저자 인세 내역이 없습니다.");
+      return;
+    }
+    const csv = buildExternalWithholdingStatementCsv({
+      companyName,
+      payMonth,
+      payrollRecords,
+    });
+    triggerCsvDownload(
+      `${companyName.replace(/[\\/:*?"<>|]/g, "")}_원천세_간이지급명세서_${payMonth}.csv`,
       csv
     );
   };
@@ -179,7 +262,17 @@ export default function TaxAccountantPrepPanel({
       `3. 외주 프리랜서(3.3%) · 기타소득(8.8%) · 저자 인세 지급내역`,
       externalWithholding.length === 0
         ? `- 당월 사업·기타소득 지급 내역 없습니다.`
-        : `- 총 ${externalWithholding.length}건 / 세전 합계 ${extSumGross.toLocaleString()}원 (원천세 예수금 합계 ${extSumTax.toLocaleString()}원) — 상세 내역 첨부 엑셀 참조`,
+        : [
+            `- 총 ${externalWithholding.length}건 / 세전 합계 ${extSumGross.toLocaleString()}원 (원천세 예수금 합계 ${extSumTax.toLocaleString()}원)`,
+            withholdingBreakdown.bizCount > 0
+              ? `  · 거주자 사업소득(3.3%, 외주·사업자 인세): ${withholdingBreakdown.bizCount}건 / 지급액 ${withholdingBreakdown.bizGross.toLocaleString()}원 / 원천세 ${withholdingBreakdown.bizTax.toLocaleString()}원`
+              : "",
+            withholdingBreakdown.othCount > 0
+              ? `  · 기타소득(8.8%, 원고검토·비사업자 인세): ${withholdingBreakdown.othCount}건 / 총지급액 ${withholdingBreakdown.othGross.toLocaleString()}원 (필요경비 60% 공제 후 소득금액 ${withholdingBreakdown.othTaxable.toLocaleString()}원) / 원천세 ${withholdingBreakdown.othTax.toLocaleString()}원`
+              : "",
+          ]
+            .filter(Boolean)
+            .join("\n"),
       ``,
       `첨부해 드린 기초자료 엑셀 확인 부탁드리며, 급여대장 확정본 회신 주시면 시스템에 업로드하여 급여명세서 배부 진행하겠습니다. 감사합니다.`,
     ].join("\n");
@@ -420,10 +513,20 @@ export default function TaxAccountantPrepPanel({
               3️⃣ 당월 외주(3.3%) · 원고검토(8.8%) · 저자 인세 원천징수 신고 대상 ({externalWithholding.length}건)
             </h4>
             <p className="text-[11px] text-slate-500 mt-0.5">
-              익월 10일 원천세 신고 및 매월 사업·기타소득 간이지급명세서 제출 대상 내역입니다.
+              원천세 신고·납부 기한: <b>{withholdingBreakdown.taxDueYmd || "익월 10일"}</b> · 거주자 사업소득 간이지급명세서 제출 기한:{" "}
+              <b>{withholdingBreakdown.simpleStmtDueYmd || "익월 말일"}</b>
             </p>
           </div>
           <div className="flex flex-wrap gap-1.5 text-xs">
+            {externalWithholding.length > 0 && (
+              <button
+                type="button"
+                onClick={handleDownloadWithholdingCsv}
+                className="px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-100 text-slate-800 font-extrabold"
+              >
+                ⤓ 원천세·간이지급명세서 CSV
+              </button>
+            )}
             <button
               type="button"
               onClick={() => onQuickCreate("FREELANCER_33")}
@@ -448,6 +551,49 @@ export default function TaxAccountantPrepPanel({
           </div>
         </div>
 
+        {/* 원천징수이행상황신고서 세목별(A01 / A25 / A40) 미니 요약 */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-2.5 p-4 bg-slate-50/40 border-b border-slate-100 text-xs">
+          <div className="rounded-xl bg-white border border-slate-200 p-3">
+            <div className="text-[11px] font-bold text-slate-500">A01 근로소득 (임직원 급여)</div>
+            <div className="text-sm font-black text-slate-900 mt-0.5 tabular-nums">
+              {withholdingBreakdown.empCount}명 · 세전 {withholdingBreakdown.empGross.toLocaleString()}원
+            </div>
+            <div className="text-[11px] text-rose-600 font-semibold mt-0.5 tabular-nums">
+              원천세 예수금 {withholdingBreakdown.empTax.toLocaleString()}원
+            </div>
+          </div>
+          <div className="rounded-xl bg-white border border-amber-200 p-3">
+            <div className="text-[11px] font-bold text-amber-800">
+              A25 거주자 사업소득 3.3% (외주 · 전업작가 인세)
+            </div>
+            <div className="text-sm font-black text-slate-900 mt-0.5 tabular-nums">
+              {withholdingBreakdown.bizCount}건 · 지급액 {withholdingBreakdown.bizGross.toLocaleString()}원
+            </div>
+            <div className="text-[11px] text-rose-600 font-semibold mt-0.5 tabular-nums">
+              원천세 예수금 {withholdingBreakdown.bizTax.toLocaleString()}원 · 매월 간이지급명세서 제출
+            </div>
+          </div>
+          <div className="rounded-xl bg-white border border-purple-200 p-3">
+            <div className="text-[11px] font-bold text-purple-800">
+              A40 기타소득 8.8% (원고·검토 · 비사업자 인세)
+            </div>
+            <div className="text-sm font-black text-slate-900 mt-0.5 tabular-nums">
+              {withholdingBreakdown.othCount}건 · 총지급 {withholdingBreakdown.othGross.toLocaleString()}원
+            </div>
+            <div className="text-[11px] text-slate-600 mt-0.5 tabular-nums">
+              필요경비(60%) {withholdingBreakdown.othExpense.toLocaleString()}원 → 과세소득{" "}
+              <b>{withholdingBreakdown.othTaxable.toLocaleString()}원</b> · 원천세{" "}
+              <span className="text-rose-600 font-bold">{withholdingBreakdown.othTax.toLocaleString()}원</span>
+            </div>
+          </div>
+        </div>
+
+        {withholdingBreakdown.missingIdCount > 0 && (
+          <div className="px-5 py-2.5 bg-amber-50 border-b border-amber-200 text-[11px] font-bold text-amber-900">
+            ⚠️ 주민등록번호 또는 사업자등록번호가 미입력된 지급 건이 {withholdingBreakdown.missingIdCount}건 있습니다. 홈택스 원천세 및 간이지급명세서 제출 전 식별번호를 확인해 주세요.
+          </div>
+        )}
+
         {externalWithholding.length === 0 ? (
           <div className="p-6 text-xs text-slate-400 text-center">
             {payMonth} 귀속월에 등록된 사업소득(3.3%) · 기타소득(8.8%) · 저자 인세 지급 건이 없습니다.
@@ -457,11 +603,12 @@ export default function TaxAccountantPrepPanel({
             <table className="w-full text-left border-collapse text-xs whitespace-nowrap">
               <thead className="bg-slate-50 border-b border-slate-200 text-[11px] font-extrabold text-slate-500">
                 <tr>
-                  <th className="py-2.5 px-4">구분</th>
+                  <th className="py-2.5 px-4">신고 세목 · 구분</th>
                   <th className="py-2.5 px-4">수령인 · 주민/사업자번호</th>
                   <th className="py-2.5 px-4">도서명 · 프로젝트</th>
                   <th className="py-2.5 px-4">지급일</th>
-                  <th className="py-2.5 px-4 text-right">세전 지급액</th>
+                  <th className="py-2.5 px-4 text-right">총지급액(세전)</th>
+                  <th className="py-2.5 px-4 text-right">필요경비 / 소득금액</th>
                   <th className="py-2.5 px-4 text-right">원천세(소득+지방세)</th>
                   <th className="py-2.5 px-4 text-right">차인 실지급액</th>
                 </tr>
@@ -469,14 +616,22 @@ export default function TaxAccountantPrepPanel({
               <tbody className="divide-y divide-slate-100">
                 {externalWithholding.map((r) => {
                   const meta = PAYROLL_TYPE_META[r.pay_type];
+                  const wh = describeExternalWithholdingRecord(r);
+                  const badgeCls =
+                    r.pay_type === "ROYALTY" && wh.mode === "OTHER_88"
+                      ? "bg-purple-50 text-purple-700 border-purple-200"
+                      : meta.badgeClass;
                   return (
                     <tr key={r.payroll_id} className="hover:bg-slate-50">
                       <td className="py-2.5 px-4">
                         <span
-                          className={`px-2 py-0.5 rounded border text-[10px] font-bold ${meta.badgeClass}`}
+                          className={`px-2 py-0.5 rounded border text-[10px] font-bold ${badgeCls}`}
                         >
-                          {meta.shortLabel}
+                          {wh.shortBadge}
                         </span>
+                        <div className="text-[10px] text-slate-400 mt-0.5">
+                          {wh.mode === "OTHER_88" ? "A40 기타소득" : "A25 사업소득"}
+                        </div>
                       </td>
                       <td className="py-2.5 px-4">
                         <div className="font-extrabold text-slate-900">
@@ -485,9 +640,13 @@ export default function TaxAccountantPrepPanel({
                             ({r.department_or_role})
                           </span>
                         </div>
-                        {r.calc_meta?.resident_or_biz_no && (
+                        {r.calc_meta?.resident_or_biz_no ? (
                           <div className="text-[11px] text-slate-500 font-mono">
                             식별번호: {r.calc_meta.resident_or_biz_no}
+                          </div>
+                        ) : (
+                          <div className="text-[10.5px] text-amber-700 font-bold">
+                            ⚠ 주민/사업자번호 미기재
                           </div>
                         )}
                       </td>
@@ -498,13 +657,30 @@ export default function TaxAccountantPrepPanel({
                         {r.pay_date || "-"}
                       </td>
                       <td className="py-2.5 px-4 text-right font-bold tabular-nums">
-                        {r.gross_amount.toLocaleString()}원
+                        {wh.grossAmount.toLocaleString()}원
+                      </td>
+                      <td className="py-2.5 px-4 text-right tabular-nums text-[11px] text-slate-600">
+                        {wh.mode === "OTHER_88" ? (
+                          <>
+                            <div>경비 -{wh.necessaryExpense.toLocaleString()}원</div>
+                            <div className="font-bold text-slate-800">
+                              소득 {wh.taxableIncome.toLocaleString()}원
+                            </div>
+                          </>
+                        ) : (
+                          <span className="text-slate-400">전액 소득금액</span>
+                        )}
                       </td>
                       <td className="py-2.5 px-4 text-right text-rose-600 font-bold tabular-nums">
-                        -{(r.income_tax + r.local_income_tax).toLocaleString()}원
+                        -{wh.withholdingTotal.toLocaleString()}원
+                        {wh.taxExemptionNote && (
+                          <div className="text-[10px] text-emerald-700 font-semibold">
+                            {wh.taxExemptionNote}
+                          </div>
+                        )}
                       </td>
                       <td className="py-2.5 px-4 text-right font-black text-brand tabular-nums">
-                        {r.net_amount.toLocaleString()}원
+                        {wh.netAmount.toLocaleString()}원
                       </td>
                     </tr>
                   );

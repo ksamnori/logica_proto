@@ -50,6 +50,37 @@ function HqWorkspaceFrame({
   );
 
   const routeAllowed = !me || canAccessMenu(canonicalPath);
+  const isMobilePortalRoute =
+    canonicalPath === "/hq/m" || canonicalPath.startsWith("/hq/m/");
+
+  if (isMobilePortalRoute) {
+    return (
+      <div className="h-[100dvh] w-full flex flex-col overflow-hidden bg-[#F5F7FA] text-slate-800 break-keep overscroll-none">
+        {isBooting ? (
+          <div className="flex-1 flex flex-col items-center justify-center gap-3 text-slate-400 px-6 text-center">
+            <div className="w-9 h-9 rounded-full border-3 border-slate-300 border-t-brand animate-spin" />
+            <p className="text-xs font-bold text-slate-500">
+              본부 모바일 워크스페이스를 불러오는 중입니다...
+            </p>
+          </div>
+        ) : (
+          children
+        )}
+
+        {/* 내 프로필 모달 (모바일에서도 동일 공유) */}
+        <HqMemberProfileModal
+          isOpen={isProfileOpen}
+          member={me}
+          meId={instId}
+          isHrManager={isHrManager}
+          existingDepartments={existingDepts}
+          initialSubModal={profileInitialSubModal}
+          onClose={onCloseProfile}
+          onSaved={refreshMembers}
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="h-screen flex overflow-hidden bg-[#F5F7FA] text-slate-800 break-keep print:h-auto print:overflow-visible print:bg-white">
@@ -138,8 +169,12 @@ export default function HqLayout({ children }: { children: React.ReactNode }) {
       : "HQ | 천종현수학연구소 본부";
   }, [canonicalPath]);
 
-  // 로그인·가입 화면은 쉘(사이드바·헤더·세션 가드) 없이 단독 렌더링
-  if (canonicalPath === "/hq/login" || canonicalPath === "/hq/signup") {
+  // 로그인·가입 화면 및 외부 저자 원격 서명 화면은 쉘(사이드바·헤더·세션 가드) 없이 단독 렌더링
+  if (
+    canonicalPath === "/hq/login" ||
+    canonicalPath === "/hq/signup" ||
+    canonicalPath.startsWith("/hq/sign/")
+  ) {
     return <>{children}</>;
   }
 

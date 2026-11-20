@@ -269,7 +269,12 @@ export default function HqLoginPage() {
         }),
       }).catch(() => {});
 
-      router.replace(hqHref("/hq"));
+      const preferDesktop =
+        typeof window !== "undefined" &&
+        localStorage.getItem("hq_prefer_desktop") === "1";
+      router.replace(
+        isMobileUa && !preferDesktop ? hqHref("/hq/m") : hqHref("/hq")
+      );
     } catch (error: unknown) {
       const msg =
         error instanceof Error ? error.message : "오류가 발생했습니다.";
