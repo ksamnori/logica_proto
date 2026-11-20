@@ -1035,6 +1035,74 @@ const getTwinVariantSuffix = (qNumRaw: any): string => {
   return m ? m[1].toUpperCase() : "";
 };
 
+const cleanBookField = (val: any): string => {
+  const s = String(val || "").normalize("NFC").trim();
+  if (!s || s === "null" || s === "undefined") return "";
+  return s;
+};
+
+const normalizeBookForMerge = (val: any, stripDerivativeSuffix: boolean): string => {
+  let s = cleanBookField(val);
+  if (!s) return "";
+  if (stripDerivativeSuffix) {
+    s = s.replace(/\s*(?:쌍둥이|유사|TWIN|SIMILAR)\s*$/i, "").trim();
+  }
+  return s;
+};
+
+const hasConflictingBookSource = (a: any, b: any, allowDerivativeSuffix: boolean): boolean => {
+  const b1 = normalizeBookForMerge(a?.book_name, allowDerivativeSuffix);
+  const b2 = normalizeBookForMerge(b?.book_name, allowDerivativeSuffix);
+  if (b1 && b2 && b1 !== b2) return true;
+
+  const s1 = normalizeBookForMerge(a?.source_book_name, allowDerivativeSuffix);
+  const s2 = normalizeBookForMerge(b?.source_book_name, allowDerivativeSuffix);
+  if (s1 && s2 && s1 !== s2) return true;
+
+  const p1 = normalizeBookForMerge(a?.pdf_source, allowDerivativeSuffix);
+  const p2 = normalizeBookForMerge(b?.pdf_source, allowDerivativeSuffix);
+  if (!b1 && !b2 && (!s1 || /^(?:분기\s*평가|분기\s*테스트|진단\s*평가|입학\s*테스트)$/i.test(s1))) {
+    if (p1 && p2 && p1 !== p2) return true;
+  } else if (!allowDerivativeSuffix && p1 && p2 && p1 !== p2) {
+    return true;
+  }
+
+  const rep1 = s1 || b1 || p1;
+  const rep2 = s2 || b2 || p2;
+  if (rep1 && rep2 && rep1 !== rep2 && !(b1 && b2) && !(s1 && s2)) {
+    return true;
+  }
+
+  return false;
+};
+
+const isSameSourceBookStrict = (a: any, b: any): boolean => {
+  if (!a || !b) return false;
+  const gid1 = cleanBookField(a.group_id);
+  const gid2 = cleanBookField(b.group_id);
+  if (gid1 && gid1 === gid2) return true;
+
+  const b1 = cleanBookField(a.book_name);
+  const b2 = cleanBookField(b.book_name);
+  if (b1 && b2 && b1 !== b2) return false;
+
+  const s1 = cleanBookField(a.source_book_name);
+  const s2 = cleanBookField(b.source_book_name);
+  if (s1 && s2 && s1 !== s2) return false;
+
+  const p1 = cleanBookField(a.pdf_source);
+  const p2 = cleanBookField(b.pdf_source);
+  if (p1 && p2 && p1 !== p2) return false;
+
+  if (b1 && b2 && b1 === b2) return true;
+  if (s1 && s2 && s1 === s2) return true;
+  if (p1 && p2 && p1 === p2) return true;
+
+  const primary1 = b1 || s1 || p1;
+  const primary2 = b2 || s2 || p2;
+  return Boolean(primary1 && primary2 && primary1 === primary2);
+};
+
 export const shouldMergeAdjacentQuestions = (lastItem: any, nextItem: any, isDiagnosticMode: boolean = false): boolean => {
   if (!lastItem || !nextItem) return false;
   const qid1 = String(lastItem.question_id || "").trim();
@@ -1050,9 +1118,7 @@ export const shouldMergeAdjacentQuestions = (lastItem: any, nextItem: any, isDia
   const gid2 = String(nextItem.group_id || "").trim();
   if (gid1 && gid1 !== "null" && gid1 === gid2) return true;
 
-  const book1 = String(lastItem.source_book_name || lastItem.book_name || lastItem.pdf_source || "").trim();
-  const book2 = String(nextItem.source_book_name || nextItem.book_name || nextItem.pdf_source || "").trim();
-  if (!isDiagnosticMode && book1 && book2 && book1 !== book2) return false;
+  if (hasConflictingBookSource(lastItem, nextItem, isDiagnosticMode)) return false;
 
   const page1 = parseInt(String(lastItem.page_number || lastItem.final_printed_page || lastItem.detected_page_num || "0").replace(/[^0-9]/g, ""), 10) || 0;
   const page2 = parseInt(String(nextItem.page_number || nextItem.final_printed_page || nextItem.detected_page_num || "0").replace(/[^0-9]/g, ""), 10) || 0;
@@ -1135,7 +1201,22 @@ export const shouldMergeAdjacentQuestions = (lastItem: any, nextItem: any, isDia
     num1.main === num2.main &&
     (samePage || num1.dash > 0 || num2.dash > 0 || num1.paren > 0 || num2.paren > 0)
   ) {
-    return true;
+    const hasDiagnosticSubIndicator =
+      sub1 !== sub2 ||
+      ss1 !== ss2 ||
+      num1.dash !== num2.dash ||
+      num1.paren !== num2.paren ||
+      (m1 > 0 && m2 > 0 && m1 !== m2) ||
+      textOnlyCommon.length >= 6 ||
+      sub1 > 0 ||
+      sub2 > 0 ||
+      num1.dash > 0 ||
+      num2.dash > 0 ||
+      num1.paren > 0 ||
+      num2.paren > 0;
+    if (hasDiagnosticSubIndicator) {
+      return true;
+    }
   }
 
   if (samePage && sameBaseQuestion && sub2 > 1 && (sub2 === sub1 + 1 || sub1 >= 1)) {
@@ -1170,14 +1251,20 @@ export const ensureCompleteSubQuestionBundles = async (
     if (q && q.question_id) resultMap.set(String(q.question_id), q);
   });
 
-  // 1) 이미 메모리에 로드된 allFetchedData 내에서 같은 묶음(서브문항)인 행이 있으면 즉시 포함
+  // 1) 이미 메모리에 로드된 allFetchedData 내에서 같은 교재·같은 묶음(서브문항)인 행이 있으면 즉시 포함
   const currentList = Array.from(resultMap.values());
   (allFetchedData || []).forEach((cand: any) => {
     if (!cand || !cand.question_id) return;
     if (cand.is_hidden === true || cand.is_hidden === "Y" || cand.is_hidden === "true") return;
     const cid = String(cand.question_id);
     if (resultMap.has(cid)) return;
-    if (currentList.some((existing) => shouldMergeAdjacentQuestions(existing, cand, isDiagnosticMode))) {
+    if (
+      currentList.some(
+        (existing) =>
+          isSameSourceBookStrict(existing, cand) &&
+          shouldMergeAdjacentQuestions(existing, cand, isDiagnosticMode)
+      )
+    ) {
       resultMap.set(cid, cand);
     }
   });
@@ -1221,7 +1308,13 @@ export const ensureCompleteSubQuestionBundles = async (
             if (row.is_hidden === true || row.is_hidden === "Y" || row.is_hidden === "true") return;
             const rid = String(row.question_id);
             if (resultMap.has(rid)) return;
-            if (snapshot.some((existing) => shouldMergeAdjacentQuestions(existing, row, isDiagnosticMode))) {
+            if (
+              snapshot.some(
+                (existing) =>
+                  isSameSourceBookStrict(existing, row) &&
+                  shouldMergeAdjacentQuestions(existing, row, isDiagnosticMode)
+              )
+            ) {
               resultMap.set(rid, row);
             }
           });

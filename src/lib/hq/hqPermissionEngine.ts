@@ -184,6 +184,16 @@ export const HQ_SIDEBAR_MENU_PERM_ITEMS: HqSidebarMenuPermDef[] = [
     defaultForOrgHead: true,
   },
   {
+    permKey: "menu.editorial",
+    route: "/hq/editorial",
+    icon: "🧭",
+    label: "집필 · 문항 분류 스튜디오",
+    sectionLabel: "출판 제작 · 연구 DB",
+    description: "출판 집필팀 참고용 8단계 교과·사고력 계통 탐색 및 캡처 문항 역분류 스튜디오 접근을 허용합니다.",
+    defaultForMember: true,
+    defaultForOrgHead: true,
+  },
+  {
     permKey: "menu.analytics",
     route: "/hq/analytics",
     icon: "📊",
@@ -313,6 +323,8 @@ export function normalizeHqPermissionSettings(
   const overrides = base.member_overrides || {};
 
   if (base.menu_linked_v2) {
+    const rawOrgHeadPerms = base.org_head_permissions || {};
+    const rawDefaultMemberPerms = base.default_member_permissions || {};
     return {
       ...DEFAULT_PERMISSION_SETTINGS,
       ...base,
@@ -321,9 +333,19 @@ export function normalizeHqPermissionSettings(
       super_admin_ids: superIds,
       super_admin_permissions: normalizedSuperPerms,
       super_admin_scopes: normalizedSuperScopes,
-      org_head_permissions: base.org_head_permissions || {},
+      org_head_permissions: {
+        ...rawOrgHeadPerms,
+        ...(rawOrgHeadPerms["menu.editorial"] === undefined
+          ? { "menu.editorial": true }
+          : {}),
+      },
       org_head_scopes: base.org_head_scopes || {},
-      default_member_permissions: base.default_member_permissions || {},
+      default_member_permissions: {
+        ...rawDefaultMemberPerms,
+        ...(rawDefaultMemberPerms["menu.editorial"] === undefined
+          ? { "menu.editorial": true }
+          : {}),
+      },
       default_member_scopes: {
         ...(DEFAULT_PERMISSION_SETTINGS.default_member_scopes || {}),
         ...(base.default_member_scopes || {}),

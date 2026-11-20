@@ -81,7 +81,7 @@ const STATUS_STYLE: Record<string, string> = {
 
 const purgeOldSession = () => {
   const keysToRemove = [
-    'restoreExamQuestions', 'examQuestions', 'examTitle', 'examSubTitle', 'examType', 'examMode', 'testCategory', 'testSourceFilter', 'diagnosticQuestionIds',
+    'restoreExamQuestions', 'examQuestions', 'examTitle', 'examSubTitle', 'examType', 'examMode', 'testCategory', 'testSourceFilter', 'diagnosticQuestionIds', 'quarterlyQuestionIds',
     'editOriginalType', 'editOriginalId', 'editStudentId', 'editClassId', 'editMasterId',
     'examUserMergedTextQuestions', 'examHiddenImageQuestions', 'clinicTargetStudentId', 'clinicTargetClassId',
     'editHomeworkId', 'editExamId', 'duplicateExamId'

@@ -81,6 +81,7 @@ export default function HqSidebar() {
 
   const showPubSection =
     canAccessMenu("/hq/publishing") ||
+    canAccessMenu("/hq/editorial") ||
     canAccessMenu("/hq/analytics") ||
     canAccessMenu("/hq/contest-db");
 
@@ -107,6 +108,7 @@ export default function HqSidebar() {
       { href: "/hq/year-end-tax", icon: "🧾", label: "연말정산" },
       { href: "/hq/insights", icon: "📈", label: "인사이트" },
       { href: "/hq/publishing", icon: "📚", label: "출판 공정 · ISBN 보드" },
+      { href: "/hq/editorial", icon: "🧭", label: "집필 · 문항 분류 스튜디오" },
       { href: "/hq/analytics", icon: "📊", label: "진단평가 분석" },
       { href: "/hq/contest-db", icon: "📐", label: "사고력·문장제 문제 DB" },
       { href: "/hq/messenger", icon: "💬", label: "사내 메신저" },
@@ -511,6 +513,18 @@ export default function HqSidebar() {
                   <span className="flex items-center gap-2.5 truncate">
                     <span>📚</span>
                     <span>출판 공정 · ISBN 보드</span>
+                  </span>
+                </Link>
+              )}
+
+              {canAccessMenu("/hq/editorial") && (
+                <Link
+                  href={hqHref("/hq/editorial")}
+                  className={navItemClass("/hq/editorial")}
+                >
+                  <span className="flex items-center gap-2.5 truncate">
+                    <span>🧭</span>
+                    <span className="truncate">집필 · 문항 분류 스튜디오</span>
                   </span>
                 </Link>
               )}

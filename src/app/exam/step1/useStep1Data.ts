@@ -1,5 +1,5 @@
 // src/app/exam/step1/useStep1Data.ts
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "../../../lib/supabase";
 import { normalizeMasterCategories } from "../../../lib/normalize";
@@ -243,8 +243,127 @@ let cachedStep1Diag: {
   timestamp: number;
 } | null = null;
 
+let inflightStep1DiagPromise: Promise<{
+  diagTree: Record<string, any>;
+  qIdsByItemId: Record<string, string[]>;
+  timestamp: number;
+} | null> | null = null;
+
+const ensureStep1DiagData = async () => {
+  if (cachedStep1Diag && Date.now() - cachedStep1Diag.timestamp < 5 * 60 * 1000) {
+    return cachedStep1Diag;
+  }
+  if (inflightStep1DiagPromise) {
+    return inflightStep1DiagPromise;
+  }
+
+  inflightStep1DiagPromise = (async () => {
+    try {
+      const fetchAllPaged = async (orFilter: string) => {
+        let rows: any[] = [];
+        let from = 0;
+        const step = 1000;
+        while (true) {
+          const { data, error } = await supabase
+            .from("question_db")
+            .select("question_id, pdf_source, source_book_name, book_name, created_at, is_hidden, derivation_type")
+            .or(orFilter)
+            .order("question_id", { ascending: true })
+            .range(from, from + step - 1);
+          if (error || !data || data.length === 0) break;
+          rows = rows.concat(data);
+          if (data.length < step) break;
+          from += step;
+        }
+        return rows.filter(
+          (q) => q.is_hidden !== true && q.is_hidden !== "Y" && q.is_hidden !== "true"
+        );
+      };
+
+      const [diagRows, quarterlyRows] = await Promise.all([
+        fetchAllPaged(
+          "pdf_source.ilike.%입학테스트%,pdf_source.ilike.%진단평가%,source_book_name.ilike.%입학테스트%,source_book_name.ilike.%진단평가%,book_name.ilike.%입학테스트%,book_name.ilike.%진단평가%"
+        ),
+        fetchAllPaged(
+          "book_name.ilike.%분기%평가%,source_book_name.ilike.%분기%평가%,pdf_source.ilike.%분기%평가%"
+        ),
+      ]);
+
+      const diagTree: Record<string, any> = {};
+      const qIdsMap: Record<string, string[]> = {};
+
+      DIAGNOSTIC_SEMESTERS.forEach((sem) => {
+        if (!diagTree[sem.group]) {
+          diagTree[sem.group] = { sortOrder: sem.groupOrder, children: {} };
+        }
+        const matched = (diagRows || []).filter((q: any) => matchDiagnosticSemester(q, sem));
+        const quarterMap = new Map<string, { key: string; label: string; sortOrder: number; qIds: string[] }>();
+
+        matched.forEach((q: any) => {
+          const qInfo = getDiagnosticQuarterInfo(q.created_at);
+          if (!quarterMap.has(qInfo.key)) {
+            quarterMap.set(qInfo.key, { ...qInfo, qIds: [] });
+          }
+          if (q.question_id) {
+            quarterMap.get(qInfo.key)!.qIds.push(String(q.question_id));
+          }
+        });
+
+        qIdsMap[sem.baseSource] = matched.map((q: any) => String(q.question_id)).filter(Boolean);
+
+        const quarters = Array.from(quarterMap.values()).sort((a, b) => a.sortOrder - b.sortOrder);
+
+        if (quarters.length > 0) {
+          const versionChildren: Record<string, any> = {};
+          quarters.forEach((qtr) => {
+            const versionItemId = `${sem.baseSource}__QTR__${qtr.key}`;
+            qIdsMap[versionItemId] = qtr.qIds;
+            versionChildren[qtr.label] = {
+              itemId: versionItemId,
+              sortOrder: qtr.sortOrder,
+            };
+          });
+          diagTree[sem.group].children[sem.label] = {
+            sortOrder: sem.order,
+            defaultOpen: true,
+            children: versionChildren,
+          };
+        } else {
+          diagTree[sem.group].children[sem.label] = {
+            itemId: sem.baseSource,
+            sortOrder: sem.order,
+          };
+        }
+      });
+
+      QUARTERLY_SEMESTERS.forEach((sem) => {
+        (["MAX", "PRO"] as const).forEach((lvl) => {
+          const itemId = `분기평가__${sem.gradeCode}__${lvl}`;
+          const matched = filterQuarterlyQuestionsByLevel(quarterlyRows || [], sem, lvl);
+          qIdsMap[itemId] = matched.map((q: any) => String(q.question_id)).filter(Boolean);
+        });
+      });
+
+      cachedStep1Diag = {
+        diagTree,
+        qIdsByItemId: qIdsMap,
+        timestamp: Date.now(),
+      };
+      return cachedStep1Diag;
+    } catch (e) {
+      console.error(e);
+      return null;
+    } finally {
+      inflightStep1DiagPromise = null;
+    }
+  })();
+
+  return inflightStep1DiagPromise;
+};
+
 export function useStep1Data() {
   const router = useRouter();
+  const isGeneratingRef = useRef(false);
   const [isLoading, setIsLoading] = useState(!cachedStep1Taxonomy);
   const [masterData, setMasterData] = useState<any>(cachedStep1Taxonomy?.mData || {});
   const [thinkingData, setThinkingData] = useState<any>(cachedStep1Taxonomy?.tData || {});
@@ -283,6 +402,9 @@ export function useStep1Data() {
   });
 
   useEffect(() => {
+    // 마운트 즉시 진단평가·분기평가 문항 매핑 프리페치 시작 (단원 JSON 로딩과 병렬 실행)
+    const preloadedDiagPromise = ensureStep1DiagData();
+
     const traverseAndFlatten = (obj: any, currentPath: string, mode: string, out: any[]) => {
       if (!obj) return;
       if ((obj.itemId || obj.itemIds) && !obj.children) {
@@ -305,6 +427,8 @@ export function useStep1Data() {
             k !== "categoryId" &&
             k !== "sortOrder" &&
             k !== "defaultOpen" &&
+            k !== "hideCheckbox" &&
+            k !== "showBranchMark" &&
             k !== "_allIds" &&
             k !== "_repId" &&
             typeof obj[k] === "object"
@@ -319,111 +443,14 @@ export function useStep1Data() {
     const loadDiagInBackground = async (baseFlatIndex: any[]) => {
       try {
         const quarterlyTree = buildDefaultQuarterlyTree();
-        if (cachedStep1Diag && Date.now() - cachedStep1Diag.timestamp < 5 * 60 * 1000) {
-          setDiagQuestionIdsMap(cachedStep1Diag.qIdsByItemId);
-          setTestData({
-            ...TEST_DATA,
-            "분기평가": quarterlyTree,
-            "진단평가": cachedStep1Diag.diagTree,
-          });
-          return;
-        }
+        const loaded = await preloadedDiagPromise;
+        if (!loaded) return;
 
-        const fetchAllPaged = async (orFilter: string) => {
-          let rows: any[] = [];
-          let from = 0;
-          const step = 1000;
-          while (true) {
-            const { data, error } = await supabase
-              .from("question_db")
-              .select("question_id, pdf_source, source_book_name, book_name, created_at, is_hidden, derivation_type")
-              .or(orFilter)
-              .order("question_id", { ascending: true })
-              .range(from, from + step - 1);
-            if (error || !data || data.length === 0) break;
-            rows = rows.concat(data);
-            if (data.length < step) break;
-            from += step;
-          }
-          return rows.filter(
-            (q) => q.is_hidden !== true && q.is_hidden !== "Y" && q.is_hidden !== "true"
-          );
-        };
-
-        const [diagRows, quarterlyRows] = await Promise.all([
-          fetchAllPaged(
-            "pdf_source.ilike.%입학테스트%,pdf_source.ilike.%진단평가%,source_book_name.ilike.%입학테스트%,source_book_name.ilike.%진단평가%,book_name.ilike.%입학테스트%,book_name.ilike.%진단평가%"
-          ),
-          fetchAllPaged(
-            "book_name.ilike.%분기%평가%,source_book_name.ilike.%분기%평가%,pdf_source.ilike.%분기%평가%"
-          ),
-        ]);
-
-        const diagTree: Record<string, any> = {};
-        const qIdsMap: Record<string, string[]> = {};
-
-        DIAGNOSTIC_SEMESTERS.forEach((sem) => {
-          if (!diagTree[sem.group]) {
-            diagTree[sem.group] = { sortOrder: sem.groupOrder, children: {} };
-          }
-          const matched = (diagRows || []).filter((q: any) => matchDiagnosticSemester(q, sem));
-          const quarterMap = new Map<string, { key: string; label: string; sortOrder: number; qIds: string[] }>();
-
-          matched.forEach((q: any) => {
-            const qInfo = getDiagnosticQuarterInfo(q.created_at);
-            if (!quarterMap.has(qInfo.key)) {
-              quarterMap.set(qInfo.key, { ...qInfo, qIds: [] });
-            }
-            if (q.question_id) {
-              quarterMap.get(qInfo.key)!.qIds.push(String(q.question_id));
-            }
-          });
-
-          qIdsMap[sem.baseSource] = matched.map((q: any) => String(q.question_id)).filter(Boolean);
-
-          const quarters = Array.from(quarterMap.values()).sort((a, b) => a.sortOrder - b.sortOrder);
-
-          if (quarters.length > 0) {
-            const versionChildren: Record<string, any> = {};
-            quarters.forEach((qtr) => {
-              const versionItemId = `${sem.baseSource}__QTR__${qtr.key}`;
-              qIdsMap[versionItemId] = qtr.qIds;
-              versionChildren[qtr.label] = {
-                itemId: versionItemId,
-                sortOrder: qtr.sortOrder,
-              };
-            });
-            diagTree[sem.group].children[sem.label] = {
-              sortOrder: sem.order,
-              defaultOpen: true,
-              children: versionChildren,
-            };
-          } else {
-            diagTree[sem.group].children[sem.label] = {
-              itemId: sem.baseSource,
-              sortOrder: sem.order,
-            };
-          }
-        });
-
-        QUARTERLY_SEMESTERS.forEach((sem) => {
-          (["MAX", "PRO"] as const).forEach((lvl) => {
-            const itemId = `분기평가__${sem.gradeCode}__${lvl}`;
-            const matched = filterQuarterlyQuestionsByLevel(quarterlyRows || [], sem, lvl);
-            qIdsMap[itemId] = matched.map((q: any) => String(q.question_id)).filter(Boolean);
-          });
-        });
-
-        cachedStep1Diag = {
-          diagTree,
-          qIdsByItemId: qIdsMap,
-          timestamp: Date.now(),
-        };
-        setDiagQuestionIdsMap(qIdsMap);
+        setDiagQuestionIdsMap(loaded.qIdsByItemId);
         const builtTestData: Record<string, any> = {
           ...TEST_DATA,
           "분기평가": quarterlyTree,
-          "진단평가": diagTree,
+          "진단평가": loaded.diagTree,
         };
         setTestData(builtTestData);
 
@@ -636,7 +663,8 @@ export function useStep1Data() {
     return flatSearchIndex.filter(item => item.path.toLowerCase().includes(lowerKw));
   }, [searchKeyword, flatSearchIndex]);
 
-  const generateExam = () => {
+  const generateExam = async () => {
+    if (isGeneratingRef.current) return;
     if (selectedItemIds.size === 0) return alert("출제할 단원(유형)이나 테스트를 최소 1개 이상 왼쪽 트리에서 선택해주세요!");
     const hasAnySourceTarget =
       sourceCategories.extra ||
@@ -647,119 +675,152 @@ export function useStep1Data() {
       return alert("출처 교재 및 페이지 필터에서 '추가문제' 또는 '쌍둥이/유사'를 체크하거나, '주교재 제외'/'워크북 제외' 중 최소 1개 이상을 해제해주세요!");
     }
 
-    sessionStorage.removeItem("isClinicMode");
-    sessionStorage.removeItem("examTitle");
-    sessionStorage.removeItem("examSubTitle");
-    sessionStorage.removeItem("editExamId");
-    sessionStorage.removeItem("duplicateExamId");
-    sessionStorage.removeItem("examHiddenImageQuestions");
+    isGeneratingRef.current = true;
+    try {
+      sessionStorage.removeItem("restoreExamQuestions");
+      sessionStorage.removeItem("examQuestions");
+      sessionStorage.removeItem("examUserMergedTextQuestions");
+      sessionStorage.removeItem("isClinicMode");
+      sessionStorage.removeItem("examTitle");
+      sessionStorage.removeItem("examSubTitle");
+      sessionStorage.removeItem("editExamId");
+      sessionStorage.removeItem("duplicateExamId");
+      sessionStorage.removeItem("examHiddenImageQuestions");
 
-    const finalDistributions = isSettingsDisabled 
-      ? [10, 20, 40, 20, 10] 
-      : [diffBounds[0], diffBounds[1]-diffBounds[0], diffBounds[2]-diffBounds[1], diffBounds[3]-diffBounds[2], 100-diffBounds[3]];
-    
-    const finalTypes = isSettingsDisabled ? { obj: true, subj: true, essay: true } : types;
-    const finalRateRange = isSettingsDisabled ? [100, 0] : [rateMax, rateMin];
-    
-    sessionStorage.setItem("examMode", currentMode);
-    
-    if (currentMode === 'test') {
-      sessionStorage.setItem("testCategory", currentTestGroup);
-      if (['주간테스트', '중간평가', '중간테스트'].includes(currentTestGroup)) {
-        sessionStorage.setItem("testSourceFilter", currentTestGroup);
+      const finalDistributions = isSettingsDisabled 
+        ? [10, 20, 40, 20, 10] 
+        : [diffBounds[0], diffBounds[1]-diffBounds[0], diffBounds[2]-diffBounds[1], diffBounds[3]-diffBounds[2], 100-diffBounds[3]];
+      
+      const finalTypes = isSettingsDisabled ? { obj: true, subj: true, essay: true } : types;
+      const finalRateRange = isSettingsDisabled ? [100, 0] : [rateMax, rateMin];
+      
+      sessionStorage.setItem("examMode", currentMode);
+      
+      if (currentMode === 'test') {
+        sessionStorage.setItem("testCategory", currentTestGroup);
+        if (['주간테스트', '중간평가', '중간테스트'].includes(currentTestGroup)) {
+          sessionStorage.setItem("testSourceFilter", currentTestGroup);
+        } else {
+          sessionStorage.removeItem("testSourceFilter");
+        }
+        if (currentTestGroup === '진단평가' || currentTestGroup === '입학테스트') {
+          sessionStorage.setItem("examType", "입학테스트");
+        } else if (currentTestGroup === '주간테스트') {
+          sessionStorage.setItem("examType", "주간테스트");
+        } else if (currentTestGroup === '중간평가' || currentTestGroup === '중간테스트') {
+          sessionStorage.setItem("examType", "중간평가");
+        } else if (currentTestGroup === '분기평가' || currentTestGroup === '분기테스트') {
+          sessionStorage.setItem("examType", "분기평가");
+        } else if (currentTestGroup === '단원테스트') {
+          sessionStorage.setItem("examType", "단원평가");
+        } else {
+          sessionStorage.removeItem("examType");
+        }
       } else {
+        sessionStorage.setItem("testCategory", currentD1);
         sessionStorage.removeItem("testSourceFilter");
-      }
-      if (currentTestGroup === '진단평가' || currentTestGroup === '입학테스트') {
-        sessionStorage.setItem("examType", "입학테스트");
-      } else if (currentTestGroup === '주간테스트') {
-        sessionStorage.setItem("examType", "주간테스트");
-      } else if (currentTestGroup === '중간평가' || currentTestGroup === '중간테스트') {
-        sessionStorage.setItem("examType", "중간평가");
-      } else if (currentTestGroup === '분기평가' || currentTestGroup === '분기테스트') {
-        sessionStorage.setItem("examType", "분기평가");
-      } else if (currentTestGroup === '단원테스트') {
-        sessionStorage.setItem("examType", "단원평가");
-      } else {
         sessionStorage.removeItem("examType");
       }
-    } else {
-      sessionStorage.setItem("testCategory", currentD1);
-      sessionStorage.removeItem("testSourceFilter");
-      sessionStorage.removeItem("examType");
-    }
 
-    const selectedArr = Array.from(selectedItemIds);
-    sessionStorage.setItem("selectedItemIds", JSON.stringify(selectedArr));
+      const selectedArr = Array.from(selectedItemIds);
+      sessionStorage.setItem("selectedItemIds", JSON.stringify(selectedArr));
 
-    // 진단평가 선택 시 해당 버전(분기)의 정확한 question_id 목록과 학년/학기(예: 초등 5-2)를 함께 전달
-    if (currentMode === "test" && (currentTestGroup === "진단평가" || currentTestGroup === "입학테스트")) {
-      const diagQIds = new Set<string>();
-      const diagBadges = new Set<string>();
-      selectedArr.forEach((itemId) => {
-        const mapped = diagQuestionIdsMap[itemId];
-        if (Array.isArray(mapped)) {
-          mapped.forEach((qid) => diagQIds.add(String(qid)));
+      // 진단평가·분기평가 선택 시 백그라운드 매핑이 아직 완료되지 않았다면 완료될 때까지 대기하여 정확한 question_id 목록 보장
+      let activeDiagMap: Record<string, string[]> = {
+        ...(cachedStep1Diag?.qIdsByItemId || {}),
+        ...diagQuestionIdsMap,
+      };
+      if (
+        currentMode === "test" &&
+        (currentTestGroup === "진단평가" ||
+          currentTestGroup === "입학테스트" ||
+          currentTestGroup === "분기평가" ||
+          currentTestGroup === "분기테스트")
+      ) {
+        const needsLoad = selectedArr.some((itemId) => !Array.isArray(activeDiagMap[itemId]));
+        if (needsLoad) {
+          const loaded = await ensureStep1DiagData();
+          if (loaded?.qIdsByItemId) {
+            setDiagQuestionIdsMap(loaded.qIdsByItemId);
+            activeDiagMap = {
+              ...loaded.qIdsByItemId,
+              ...activeDiagMap,
+            };
+          }
         }
-        const baseSrc = String(itemId).split("__QTR__")[0];
-        const sem = DIAGNOSTIC_SEMESTERS.find((s) => s.baseSource === baseSrc);
-        if (sem) {
-          const badgeLabel = sem.isMiddle ? `중등 1-${sem.gradeCode.split("-")[1]}` : `초등 ${sem.gradeCode}`;
-          diagBadges.add(badgeLabel);
-        }
-      });
-      sessionStorage.setItem("diagnosticQuestionIds", JSON.stringify(Array.from(diagQIds)));
-      sessionStorage.removeItem("quarterlyQuestionIds");
-      if (diagBadges.size > 0) {
-        sessionStorage.setItem("examSubTitle", Array.from(diagBadges)[0]);
       }
-      sessionStorage.setItem("examTitle", "진단평가");
-    } else if (currentMode === "test" && (currentTestGroup === "분기평가" || currentTestGroup === "분기테스트")) {
-      const quarterlyQIds = new Set<string>();
-      const quarterlyBadges = new Set<string>();
-      selectedArr.forEach((itemId) => {
-        const mapped = diagQuestionIdsMap[itemId];
-        if (Array.isArray(mapped)) {
-          mapped.forEach((qid) => quarterlyQIds.add(String(qid)));
+
+      // 진단평가 선택 시 해당 버전(분기)의 정확한 question_id 목록과 학년/학기(예: 초등 5-2)를 함께 전달
+      if (currentMode === "test" && (currentTestGroup === "진단평가" || currentTestGroup === "입학테스트")) {
+        const diagQIds = new Set<string>();
+        const diagBadges = new Set<string>();
+        selectedArr.forEach((itemId) => {
+          const mapped = activeDiagMap[itemId];
+          if (Array.isArray(mapped)) {
+            mapped.forEach((qid) => diagQIds.add(String(qid)));
+          }
+          const baseSrc = String(itemId).split("__QTR__")[0];
+          const sem = DIAGNOSTIC_SEMESTERS.find((s) => s.baseSource === baseSrc);
+          if (sem) {
+            const badgeLabel = sem.isMiddle ? `중등 1-${sem.gradeCode.split("-")[1]}` : `초등 ${sem.gradeCode}`;
+            diagBadges.add(badgeLabel);
+          }
+        });
+        sessionStorage.setItem("diagnosticQuestionIds", JSON.stringify(Array.from(diagQIds)));
+        sessionStorage.removeItem("quarterlyQuestionIds");
+        if (diagBadges.size > 0) {
+          sessionStorage.setItem("examSubTitle", Array.from(diagBadges)[0]);
         }
-        const parts = String(itemId).split("__");
-        if (parts[0] === "분기평가" && parts[1]) {
-          const gradeCode = parts[1];
-          const lvl = parts[2] || "";
-          const badgeLabel = lvl ? `초등 ${gradeCode} ${lvl}` : `초등 ${gradeCode}`;
-          quarterlyBadges.add(badgeLabel);
+        sessionStorage.setItem("examTitle", "진단평가");
+      } else if (currentMode === "test" && (currentTestGroup === "분기평가" || currentTestGroup === "분기테스트")) {
+        const quarterlyQIds = new Set<string>();
+        const quarterlyBadges = new Set<string>();
+        selectedArr.forEach((itemId) => {
+          const mapped = activeDiagMap[itemId];
+          if (Array.isArray(mapped)) {
+            mapped.forEach((qid) => quarterlyQIds.add(String(qid)));
+          }
+          const parts = String(itemId).split("__");
+          if (parts[0] === "분기평가" && parts[1]) {
+            const gradeCode = parts[1];
+            const lvl = parts[2] || "";
+            const badgeLabel = lvl ? `초등 ${gradeCode} ${lvl}` : `초등 ${gradeCode}`;
+            quarterlyBadges.add(badgeLabel);
+          }
+        });
+        sessionStorage.setItem("quarterlyQuestionIds", JSON.stringify(Array.from(quarterlyQIds)));
+        sessionStorage.removeItem("diagnosticQuestionIds");
+        if (quarterlyBadges.size > 0) {
+          sessionStorage.setItem("examSubTitle", Array.from(quarterlyBadges)[0]);
         }
-      });
-      sessionStorage.setItem("quarterlyQuestionIds", JSON.stringify(Array.from(quarterlyQIds)));
-      sessionStorage.removeItem("diagnosticQuestionIds");
-      if (quarterlyBadges.size > 0) {
-        sessionStorage.setItem("examSubTitle", Array.from(quarterlyBadges)[0]);
+        sessionStorage.setItem("examTitle", "분기평가");
+      } else {
+        sessionStorage.removeItem("diagnosticQuestionIds");
+        sessionStorage.removeItem("quarterlyQuestionIds");
       }
-      sessionStorage.setItem("examTitle", "분기평가");
-    } else {
-      sessionStorage.removeItem("diagnosticQuestionIds");
-      sessionStorage.removeItem("quarterlyQuestionIds");
+
+      sessionStorage.setItem("qCount", String(qCount));
+      sessionStorage.setItem("distributions", JSON.stringify(finalDistributions));
+      sessionStorage.setItem("problemTypes", JSON.stringify(finalTypes));
+      sessionStorage.setItem("correctRateRange", JSON.stringify(finalRateRange));
+
+      sessionStorage.setItem("bookName1", isSettingsDisabled ? "" : bookName1.trim());
+      sessionStorage.setItem("bookName2", isSettingsDisabled ? "" : bookName2.trim());
+      sessionStorage.setItem("pageStart", isSettingsDisabled ? "" : pageStart.trim());
+      sessionStorage.setItem("pageEnd", isSettingsDisabled ? "" : pageEnd.trim());
+      sessionStorage.setItem(
+        "sourceCategories",
+        JSON.stringify(
+          isSettingsDisabled
+            ? { extra: true, twinSimilar: true, excludeMain: true, excludeWorkbook: true }
+            : sourceCategories
+        )
+      );
+
+      router.push("/exam/step2");
+    } finally {
+      isGeneratingRef.current = false;
     }
-
-    sessionStorage.setItem("qCount", String(qCount));
-    sessionStorage.setItem("distributions", JSON.stringify(finalDistributions));
-    sessionStorage.setItem("problemTypes", JSON.stringify(finalTypes));
-    sessionStorage.setItem("correctRateRange", JSON.stringify(finalRateRange));
-
-    sessionStorage.setItem("bookName1", isSettingsDisabled ? "" : bookName1.trim());
-    sessionStorage.setItem("bookName2", isSettingsDisabled ? "" : bookName2.trim());
-    sessionStorage.setItem("pageStart", isSettingsDisabled ? "" : pageStart.trim());
-    sessionStorage.setItem("pageEnd", isSettingsDisabled ? "" : pageEnd.trim());
-    sessionStorage.setItem(
-      "sourceCategories",
-      JSON.stringify(
-        isSettingsDisabled
-          ? { extra: true, twinSimilar: true, excludeMain: true, excludeWorkbook: true }
-          : sourceCategories
-      )
-    );
-
-    router.push("/exam/step2"); 
   };
 
   return {

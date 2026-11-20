@@ -877,7 +877,7 @@ export default function ExamListPage() {
 
   const clearSessionStorageForExam = () => {
     const keysToRemove = [
-      'restoreExamQuestions', 'examQuestions', 'examTitle', 'examSubTitle', 'examType', 'examMode', 'testCategory', 'testSourceFilter', 'diagnosticQuestionIds',
+      'restoreExamQuestions', 'examQuestions', 'examTitle', 'examSubTitle', 'examType', 'examMode', 'testCategory', 'testSourceFilter', 'diagnosticQuestionIds', 'quarterlyQuestionIds',
       'editOriginalType', 'editOriginalId', 'editStudentId', 'editClassId', 'editMasterId',
       'examUserMergedTextQuestions', 'examHiddenImageQuestions', 'clinicTargetStudentId', 'clinicTargetClassId', 'clinicTargetStudentIds',
       'editHomeworkId', 'editExamId', 'duplicateExamId', 'splitHomeworkIds', 'splitCommonTqIds',

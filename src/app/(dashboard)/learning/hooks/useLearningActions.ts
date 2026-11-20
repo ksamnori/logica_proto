@@ -41,7 +41,7 @@ const safeParseIds = (raw: any): number[] => {
 
 const purgeOldSession = () => {
   const keysToRemove = [
-    'restoreExamQuestions', 'examQuestions', 'examTitle', 'examSubTitle', 'examType', 'examMode', 'testCategory', 'testSourceFilter', 'diagnosticQuestionIds',
+    'restoreExamQuestions', 'examQuestions', 'examTitle', 'examSubTitle', 'examType', 'examMode', 'testCategory', 'testSourceFilter', 'diagnosticQuestionIds', 'quarterlyQuestionIds',
     'editOriginalType', 'editOriginalId', 'editStudentId', 'editClassId', 'editMasterId',
     'examUserMergedTextQuestions', 'examHiddenImageQuestions', 'clinicTargetStudentId', 'clinicTargetClassId', 'clinicTargetStudentIds',
     'editHomeworkId', 'editExamId', 'duplicateExamId', 'splitHomeworkIds', 'splitCommonTqIds',

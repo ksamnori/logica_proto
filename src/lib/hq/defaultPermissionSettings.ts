@@ -182,6 +182,12 @@ export const PERMISSION_CATEGORIES: HqPermissionCatalogCategory[] = [
           "좌측 사이드바에 [출판 공정 · ISBN 보드] 메뉴를 표시해요.",
       },
       {
+        key: "menu.editorial",
+        title: "🧭 집필 · 문항 분류 스튜디오 메뉴 표시",
+        description:
+          "좌측 사이드바에 [집필 · 문항 분류 스튜디오] (단원·계통별 보유 문항 분포 도식화 및 캡처 이미지 8단계 역분류) 메뉴를 표시해요.",
+      },
+      {
         key: "menu.analytics",
         title: "📊 진단평가 분석 메뉴 표시",
         description:
@@ -1406,6 +1412,7 @@ export const DEFAULT_PERMISSION_SETTINGS: HqPermissionSettings = {
     "menu.work_management": true,
     "menu.leave_management": true,
     "menu.publishing": true,
+    "menu.editorial": true,
     "member.directory_access": true,
     "hr.employment_view": true,
     "work.record_view": true,
@@ -1437,6 +1444,7 @@ export const DEFAULT_PERMISSION_SETTINGS: HqPermissionSettings = {
     "menu.expenses": true,
     "menu.payroll": true,
     "menu.year_end_tax": true,
+    "menu.editorial": true,
     "menu.messenger": true,
     "work.record_edit": true,
     "approval.substitute_manage": true,

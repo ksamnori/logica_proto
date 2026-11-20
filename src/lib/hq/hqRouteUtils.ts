@@ -52,6 +52,7 @@ export const HQ_ROUTE_TAB_TITLES: Record<string, string> = {
   "/hq/year-end-tax": "연말정산",
   "/hq/insights": "인사이트",
   "/hq/publishing": "출판 공정 · ISBN 보드",
+  "/hq/editorial": "집필 · 문항 분류 스튜디오",
   "/hq/messenger": "사내 메신저",
   "/hq/analytics": "진단평가 분석",
   "/hq/contest-db": "사고력 · 문장제 문제 DB",

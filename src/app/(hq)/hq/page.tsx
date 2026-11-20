@@ -486,6 +486,15 @@ export default function HqHomeDashboardPage() {
                   📚 출판 공정 보드
                 </button>
               )}
+              {canAccessMenu("/hq/editorial") && (
+                <button
+                  type="button"
+                  onClick={() => goHq("/hq/editorial")}
+                  className="px-3.5 py-2.5 rounded-xl bg-white/10 hover:bg-white/20 border border-white/15 text-white text-xs font-bold transition-colors whitespace-nowrap"
+                >
+                  🧭 집필·문항 스튜디오
+                </button>
+              )}
               {canAccessMenu("/hq/insights") && (
                 <button
                   type="button"

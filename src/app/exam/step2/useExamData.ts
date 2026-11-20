@@ -690,12 +690,16 @@ export function useExamData() {
       }
 
       // 🌟 1) 서브문항이 있는 문항이 불려왔을 때 같은 묶음의 모든 서브문항((1), (2) 등)을 빠짐없이 함께 확보
-      const completeFilteredData = await ensureCompleteSubQuestionBundles(
-        supabase,
-        filteredData,
-        allData,
-        isFixedPresetExamMode
-      );
+      // 진단평가·분기평가 고정 시험지 모드에서는 이미 해당 학기·레벨·버전의 전체 문항이 filteredData에 모두 포함되어 있으므로,
+      // 폴백 조회 시 allData에 담긴 타 학기·타 레벨 문항이 섞여 들어오지 않도록 filteredData로 엄격히 제한합니다.
+      const completeFilteredData = isFixedPresetExamMode
+        ? filteredData
+        : await ensureCompleteSubQuestionBundles(
+            supabase,
+            filteredData,
+            allData,
+            false
+          );
 
       // 🌟 2) 서브문항 자동 병합: 동일 묶음의 서브문항들은 하나의 그룹(g.items)으로 함께 유지
       let allGroups = buildMergedQuestionGroups(completeFilteredData, isFixedPresetExamMode);
