@@ -126,7 +126,7 @@ export default function RightPreview({ examData }: { examData: any }) {
   const [generatedTwins, setGeneratedTwins] = useState<any[]>([]);
   const [aiTargetInfo, setAiTargetInfo] = useState<{ idx: number, subIdx: number, q: any } | null>(null);
   const [isSavingTwin, setIsSavingTwin] = useState(false);
-  const [twinAiModel, setTwinAiModel] = useState<"gemini-3.8-flash" | "gemini-4-argon">("gemini-3.8-flash");
+  const [twinAiModel, setTwinAiModel] = useState<"gemini-3.8-flash" | "gemini-4-neon" | "gemini-4-argon" | "gemini-4-carbon">("gemini-3.8-flash");
   const [twinTargetBook, setTwinTargetBook] = useState<string>("");
   const [similarTargetBook, setSimilarTargetBook] = useState<string>("");
   const [parentBookName, setParentBookName] = useState<string>("");
@@ -505,14 +505,15 @@ export default function RightPreview({ examData }: { examData: any }) {
   };
 
   const handleTriggerAIGeneration = async (
-    modelOverride?: "gemini-3.8-flash" | "gemini-4-argon",
+    modelOverride?: "gemini-3.8-flash" | "gemini-4-neon" | "gemini-4-argon" | "gemini-4-carbon",
     targetOverride?: { idx: number; subIdx: number; q: any }
   ) => {
     const activeTarget = targetOverride || aiTargetInfo;
     if (!activeTarget) return;
 
-    const targetModel: "gemini-3.8-flash" | "gemini-4-argon" =
-      modelOverride === "gemini-4-argon" ? "gemini-4-argon" : "gemini-3.8-flash";
+    const allowedTwinModels = ["gemini-3.8-flash", "gemini-4-neon", "gemini-4-argon", "gemini-4-carbon"] as const;
+    const targetModel: (typeof allowedTwinModels)[number] =
+      modelOverride && allowedTwinModels.includes(modelOverride) ? modelOverride : "gemini-3.8-flash";
 
     setTwinAiModel(targetModel);
     setIsGeneratingTwins(true);
@@ -845,35 +846,36 @@ export default function RightPreview({ examData }: { examData: any }) {
 
   return (
     <section className="flex-1 flex flex-col relative bg-slate-100 min-w-0">
-      <div className="bg-white px-6 py-4 border-b border-slate-200 shrink-0 flex justify-between items-center shadow-sm z-10">
-        <div>
-          <h2 className="font-extrabold text-xl text-slate-800 flex items-center"><span className="mr-2">📝</span> 시험지 미리보기</h2>
+      <div className="bg-white px-3.5 py-2.5 border-b border-slate-200 shrink-0 flex justify-between items-center gap-2 shadow-sm z-10 overflow-x-auto custom-scroll">
+        <div className="min-w-0 shrink-0">
+          <h2 className="font-extrabold text-[14px] xl:text-[15px] text-slate-800 flex items-center whitespace-nowrap leading-tight">
+            <span className="mr-1.5 text-sm">📝</span>시험지 미리보기
+          </h2>
           {(previewTitle || previewBadge) && (
-             <div className="flex items-center gap-2 mt-1.5 animate-[fadeIn_0.3s_ease-out]">
-               {previewBadge && <span className="text-[11px] font-bold text-indigo-600 bg-indigo-50 border border-indigo-200 px-1.5 py-0.5 rounded shadow-sm">{previewBadge}</span>}
-               {previewTitle && <span className="text-[13px] font-bold text-slate-600">{previewTitle}</span>}
+             <div className="flex items-center gap-1.5 mt-1 whitespace-nowrap animate-[fadeIn_0.3s_ease-out]">
+               {previewBadge && <span className="text-[10px] font-bold text-indigo-600 bg-indigo-50 border border-indigo-200 px-1.5 py-[1px] rounded shadow-sm shrink-0 whitespace-nowrap">{previewBadge}</span>}
+               {previewTitle && <span className="text-[11px] font-bold text-slate-600 truncate max-w-[140px] xl:max-w-[220px]">{previewTitle}</span>}
              </div>
           )}
         </div>
-        <div className="flex space-x-2 items-center">
-          
+        <div className="flex items-center gap-1.5 shrink-0 flex-nowrap">
           <button 
             onClick={toggleHideSubNumber} 
-            className={`flex items-center gap-1.5 px-4 py-2 font-bold text-[13px] rounded-lg transition-colors border shadow-sm ${hideSubNumber ? 'bg-rose-50 text-rose-600 border-rose-200 hover:bg-rose-100' : 'bg-indigo-50 text-indigo-700 border-indigo-200 hover:bg-indigo-100'}`}
+            className={`flex items-center gap-1 px-2.5 py-1.5 font-bold text-[11px] xl:text-[12px] rounded-md transition-colors border shadow-sm whitespace-nowrap shrink-0 ${hideSubNumber ? 'bg-rose-50 text-rose-600 border-rose-200 hover:bg-rose-100' : 'bg-indigo-50 text-indigo-700 border-indigo-200 hover:bg-indigo-100'}`}
             title="병합된 서브문항 앞에 (1), (2) 꼬리번호를 자동으로 붙여서 표시하거나 숨깁니다."
           >
             {hideSubNumber ? '🙈 (1) 서브번호 숨김 중' : '🔢 (1) 서브번호 표시 중'}
           </button>
 
-          <button onClick={forceMathRefresh} className="flex items-center gap-1.5 px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold rounded-lg transition-colors border border-slate-300">
+          <button onClick={forceMathRefresh} className="flex items-center gap-1 px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold text-[11px] xl:text-[12px] rounded-md transition-colors border border-slate-300 whitespace-nowrap shrink-0">
             <span>🔄</span> 수식 깨짐 해결
           </button>
           
           {!isClinicMode && !isRestoredMode && (
-             <button onClick={() => router.push('/exam/step1')} className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold rounded-lg transition-colors border border-slate-300">⟵ Step 1 가기</button>
+             <button onClick={() => router.push('/exam/step1')} className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold text-[11px] xl:text-[12px] rounded-md transition-colors border border-slate-300 whitespace-nowrap shrink-0">⟵ Step 1 가기</button>
           )}
-          <button onClick={() => setShowAnswer(!showAnswer)} className="px-4 py-2 bg-blue-50 hover:bg-blue-100 text-blue-700 font-bold rounded-lg transition-colors border border-blue-200">정답/해설 보기</button>
-          <button onClick={goToStep3} className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-lg shadow-md">Step 3. 배포 ➔</button>
+          <button onClick={() => setShowAnswer(!showAnswer)} className="px-2.5 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 font-bold text-[11px] xl:text-[12px] rounded-md transition-colors border border-blue-200 whitespace-nowrap shrink-0">정답/해설 보기</button>
+          <button onClick={goToStep3} className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[11.5px] xl:text-[12px] rounded-md shadow-sm whitespace-nowrap shrink-0">Step 3. 배포 ➔</button>
         </div>
       </div>
 
@@ -988,10 +990,10 @@ export default function RightPreview({ examData }: { examData: any }) {
                  {(repQ.is_new_trend === true || repQ.is_new_trend === 'Y') && <span className="text-[10px] font-bold text-rose-500 bg-white border border-rose-200 px-1 py-0.5 rounded w-[45px] text-center tracking-tighter">신경향</span>}
                </div>
                
-               <div className="flex-1 flex flex-col relative p-5 min-w-0">
+               <div className="flex-1 flex flex-col relative p-4 min-w-0">
                  <div className="flex justify-between items-center mb-1.5 pointer-events-none">
                    <div className="flex items-center gap-2 flex-wrap">
-                     <span className={`text-[14px] font-bold ${isDragOverTarget ? 'text-emerald-700' : 'text-slate-600'}`}>{depth6Name}</span>
+                     <span className={`text-[13px] font-bold ${isDragOverTarget ? 'text-emerald-700' : 'text-slate-600'}`}>{depth6Name}</span>
                      {subDepth6Name && (
                        <span className="text-[11px] font-bold text-violet-600 bg-violet-50 border border-violet-200 px-1.5 py-0.5 rounded">🧭 서브: {subDepth6Name}</span>
                      )}
@@ -999,7 +1001,7 @@ export default function RightPreview({ examData }: { examData: any }) {
                  </div>
                  
                  {isGroupMerged && common && !isEditingMode && (
-                   <div className="font-myungjo font-semibold text-[16px] text-slate-800 leading-[2.2] tracking-wide break-keep pointer-events-none mb-4" dangerouslySetInnerHTML={{ __html: formatText(common) }} />
+                   <div className="font-myungjo font-semibold text-[14px] text-slate-800 leading-[1.95] tracking-wide break-keep pointer-events-none mb-3.5" dangerouslySetInnerHTML={{ __html: formatText(common) }} />
                  )}
 
                  {g.items.map((q: any, subIdx: number) => {
@@ -1123,7 +1125,7 @@ export default function RightPreview({ examData }: { examData: any }) {
                                {isNumberOnlySub ? (
                                  <div className="flex flex-col gap-3 w-full">
                                    {splitSubInfo.introText && (
-                                     <div className="font-myungjo font-semibold text-[16px] text-slate-800 leading-[2.2] tracking-wide break-keep pointer-events-none" dangerouslySetInnerHTML={{ __html: formatText(splitSubInfo.introText) }} />
+                                     <div className="font-myungjo font-semibold text-[14px] text-slate-800 leading-[1.95] tracking-wide break-keep pointer-events-none" dangerouslySetInnerHTML={{ __html: formatText(splitSubInfo.introText) }} />
                                    )}
                                    {showImg1 && showImg2 && (
                                      <div className="w-full flex justify-center my-1">
@@ -1132,8 +1134,8 @@ export default function RightPreview({ examData }: { examData: any }) {
                                             style={{ width: getBoxWidth(q.image_box), maxHeight: isDiagPreview ? 'none' : '400px' }} alt="" draggable="false" />
                                      </div>
                                    )}
-                                   <div className="flex items-start gap-3 w-full mt-1">
-                                     <div className="font-myungjo font-semibold text-[16px] text-slate-800 leading-[1.6] tracking-wide shrink-0 pointer-events-none pt-0.5" dangerouslySetInnerHTML={{ __html: formatText(splitSubInfo.subMarkerText) }} />
+                                   <div className="flex items-start gap-2.5 w-full mt-1">
+                                     <div className="font-myungjo font-semibold text-[14px] text-slate-800 leading-[1.6] tracking-wide shrink-0 pointer-events-none pt-0.5" dangerouslySetInnerHTML={{ __html: formatText(splitSubInfo.subMarkerText) }} />
                                      <div className="flex-1 min-w-0 flex flex-col gap-3 items-start">
                                        {showImg1 && !showImg2 && (
                                          <img src={getCleanUrl(q.image_url)} 
@@ -1150,7 +1152,7 @@ export default function RightPreview({ examData }: { examData: any }) {
                                  </div>
                                ) : (
                                  <>
-                                   {textToRender && <div className="font-myungjo font-semibold text-[16px] text-slate-800 leading-[2.2] tracking-wide break-keep pointer-events-none" dangerouslySetInnerHTML={{ __html: formatText(textToRender) }} />}
+                                   {textToRender && <div className="font-myungjo font-semibold text-[14px] text-slate-800 leading-[1.95] tracking-wide break-keep pointer-events-none" dangerouslySetInnerHTML={{ __html: formatText(textToRender) }} />}
                                    
                                    {/* 🌟 [핵심 변경] 거인증 해결! width: auto 기본 적용 및 설정된 width % 반영 */}
                                    {hasVisibleImg && (
@@ -1176,7 +1178,7 @@ export default function RightPreview({ examData }: { examData: any }) {
 
                                {q2ToRender && (
                                  <div
-                                   className="font-myungjo font-semibold text-[16px] text-slate-800 leading-[2.2] tracking-wide break-keep pointer-events-none mt-3"
+                                   className="font-myungjo font-semibold text-[14px] text-slate-800 leading-[1.95] tracking-wide break-keep pointer-events-none mt-2.5"
                                    dangerouslySetInnerHTML={{
                                      __html: formatText(q2ToRender)
                                    }}
@@ -1184,15 +1186,15 @@ export default function RightPreview({ examData }: { examData: any }) {
                                )}
                                
                                {q.options && q.options !== 'null' && typeof q.options === 'string' && (
-                                  <div className="pl-2 pt-2">
+                                  <div className="pl-2 pt-1.5">
                                     {(() => {
                                       try {
                                         const opts = JSON.parse(q.options);
                                         if (Array.isArray(opts) && opts.length > 0) {
                                           return (
-                                            <ul className="space-y-1.5 list-none">
+                                            <ul className="space-y-1 list-none">
                                               {opts.map((opt: string, oi: number) => (
-                                                <li key={oi} className="flex gap-2 text-[15px]">
+                                                <li key={oi} className="flex gap-2 text-[13.5px] leading-[1.8]">
                                                   <span className="shrink-0 text-slate-500 w-5">①②③④⑤⑥⑦⑧⑨⑩[oi]</span>
                                                   <span dangerouslySetInnerHTML={{ __html: formatText(opt) }} />
                                                 </li>
@@ -1209,8 +1211,8 @@ export default function RightPreview({ examData }: { examData: any }) {
                            </div>
                            
                            {showAnswer && (
-                             <div className="mt-6 pt-5 border-t border-dashed border-slate-200 bg-white/50 p-4 rounded-lg pointer-events-none">
-                               <div className="flex items-center gap-2 mb-2"><span className="text-xs font-bold text-rose-500 bg-rose-100 px-2 py-0.5 rounded">정답</span><span className="font-myungjo font-bold text-slate-700" dangerouslySetInnerHTML={{ __html: formatText(q.answer) }}></span></div>
+                             <div className="mt-5 pt-4 border-t border-dashed border-slate-200 bg-white/50 p-3.5 rounded-lg pointer-events-none">
+                               <div className="flex items-center gap-2 mb-2"><span className="text-xs font-bold text-rose-500 bg-rose-100 px-2 py-0.5 rounded">정답</span><span className="font-myungjo font-bold text-[14px] text-slate-700" dangerouslySetInnerHTML={{ __html: formatText(q.answer) }}></span></div>
                                
                                {/* 🌟 정답 이미지도 배율 완벽 적용 */}
                                {(q.answer_image_url || q.answer_image_2_url) && (
@@ -1232,7 +1234,7 @@ export default function RightPreview({ examData }: { examData: any }) {
                                  </div>
                                )}
                                
-                               <div className="mt-4 pt-3 border-t border-dashed border-slate-300 text-slate-600 text-[15px] font-myungjo leading-[2.0]">
+                               <div className="mt-3.5 pt-3 border-t border-dashed border-slate-300 text-slate-600 text-[13.5px] font-myungjo leading-[1.9]">
                                  {q.explanation && <div className="mb-2"><b className="text-blue-700">[해설]</b> <span dangerouslySetInnerHTML={{ __html: formatText(q.explanation) }} /></div>}
                                  {q.solution && <div className="mb-2"><b className="text-blue-700">[풀이]</b> <span dangerouslySetInnerHTML={{ __html: formatText(q.solution) }} /></div>}
                                  {q.step_1_concept && <div className="mb-2"><b className="text-blue-700">[개념]</b> <span dangerouslySetInnerHTML={{ __html: formatText(q.step_1_concept) }} /></div>}
@@ -1450,12 +1452,12 @@ export default function RightPreview({ examData }: { examData: any }) {
                 )}
               </div>
               <div className="flex items-center gap-2 flex-wrap">
-                <div className="flex items-center bg-black/20 p-1 rounded-xl border border-white/20">
+                <div className="flex items-center bg-black/20 p-1 rounded-xl border border-white/20 flex-wrap gap-0.5">
                   <button
                     type="button"
                     disabled={isGeneratingTwins}
                     onClick={() => handleTriggerAIGeneration("gemini-3.8-flash")}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                    className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all whitespace-nowrap cursor-pointer ${
                       twinAiModel === "gemini-3.8-flash"
                         ? "bg-white text-indigo-700 shadow-sm"
                         : "text-white/80 hover:text-white"
@@ -1467,8 +1469,21 @@ export default function RightPreview({ examData }: { examData: any }) {
                   <button
                     type="button"
                     disabled={isGeneratingTwins}
+                    onClick={() => handleTriggerAIGeneration("gemini-4-neon")}
+                    className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all whitespace-nowrap cursor-pointer ${
+                      twinAiModel === "gemini-4-neon"
+                        ? "bg-cyan-300 text-slate-900 shadow-sm"
+                        : "text-white/80 hover:text-white"
+                    }`}
+                    title="균형 잡힌 추론 및 깔끔한 변형 문항 생성용 상위 모델"
+                  >
+                    ✨ Gemini 4 Neon
+                  </button>
+                  <button
+                    type="button"
+                    disabled={isGeneratingTwins}
                     onClick={() => handleTriggerAIGeneration("gemini-4-argon")}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                    className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all whitespace-nowrap cursor-pointer ${
                       twinAiModel === "gemini-4-argon"
                         ? "bg-amber-300 text-slate-900 shadow-sm"
                         : "text-white/80 hover:text-white"
@@ -1476,6 +1491,19 @@ export default function RightPreview({ examData }: { examData: any }) {
                     title="고난도 복합 도형·퍼즐·좌표 검증 특화 상위 모델"
                   >
                     🧠 Gemini 4 Argon
+                  </button>
+                  <button
+                    type="button"
+                    disabled={isGeneratingTwins}
+                    onClick={() => handleTriggerAIGeneration("gemini-4-carbon")}
+                    className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all whitespace-nowrap cursor-pointer ${
+                      twinAiModel === "gemini-4-carbon"
+                        ? "bg-emerald-300 text-slate-900 shadow-sm"
+                        : "text-white/80 hover:text-white"
+                    }`}
+                    title="최상위 심화 추론·정밀 수학 논리 및 복합 조건 변형 모델"
+                  >
+                    💎 Gemini 4 Carbon
                   </button>
                 </div>
                 <button

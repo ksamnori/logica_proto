@@ -516,13 +516,13 @@ export default function TaxonomyEditorPage() {
                   </div>
                 )}
               </div>
-              <div className="flex items-center gap-2">
-                <div className="flex items-center bg-black/20 p-1 rounded-xl border border-white/20">
+              <div className="flex items-center gap-2 flex-wrap">
+                <div className="flex items-center bg-black/20 p-1 rounded-xl border border-white/20 flex-wrap gap-0.5">
                   <button
                     type="button"
                     disabled={isGeneratingTwins}
                     onClick={() => handleGenerateTwins("gemini-3.8-flash")}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                    className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all whitespace-nowrap cursor-pointer ${
                       twinAiModel === "gemini-3.8-flash"
                         ? "bg-white text-indigo-700 shadow-sm"
                         : "text-white/80 hover:text-white"
@@ -534,8 +534,21 @@ export default function TaxonomyEditorPage() {
                   <button
                     type="button"
                     disabled={isGeneratingTwins}
+                    onClick={() => handleGenerateTwins("gemini-4-neon")}
+                    className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all whitespace-nowrap cursor-pointer ${
+                      twinAiModel === "gemini-4-neon"
+                        ? "bg-cyan-300 text-slate-900 shadow-sm"
+                        : "text-white/80 hover:text-white"
+                    }`}
+                    title="균형 잡힌 추론 및 깔끔한 변형 문항 생성용 상위 모델"
+                  >
+                    ✨ Gemini 4 Neon
+                  </button>
+                  <button
+                    type="button"
+                    disabled={isGeneratingTwins}
                     onClick={() => handleGenerateTwins("gemini-4-argon")}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                    className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all whitespace-nowrap cursor-pointer ${
                       twinAiModel === "gemini-4-argon"
                         ? "bg-amber-300 text-slate-900 shadow-sm"
                         : "text-white/80 hover:text-white"
@@ -544,16 +557,29 @@ export default function TaxonomyEditorPage() {
                   >
                     🧠 Gemini 4 Argon
                   </button>
+                  <button
+                    type="button"
+                    disabled={isGeneratingTwins}
+                    onClick={() => handleGenerateTwins("gemini-4-carbon")}
+                    className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all whitespace-nowrap cursor-pointer ${
+                      twinAiModel === "gemini-4-carbon"
+                        ? "bg-emerald-300 text-slate-900 shadow-sm"
+                        : "text-white/80 hover:text-white"
+                    }`}
+                    title="최상위 심화 추론·정밀 수학 논리 및 복합 조건 변형 모델"
+                  >
+                    💎 Gemini 4 Carbon
+                  </button>
                 </div>
                 <button
                   type="button"
                   disabled={isGeneratingTwins}
                   onClick={() => handleGenerateTwins(twinAiModel)}
-                  className="text-white bg-white/15 hover:bg-white/25 border border-white/25 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors disabled:opacity-50"
+                  className="text-white bg-white/15 hover:bg-white/25 border border-white/25 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors disabled:opacity-50 whitespace-nowrap cursor-pointer"
                 >
                   🔄 다시 생성
                 </button>
-                <button onClick={() => { setIsTwinModalOpen(false); setTwinAiModel("gemini-3.8-flash"); }} className="text-white hover:text-fuchsia-200 bg-white/10 hover:bg-white/20 px-3 py-1.5 rounded-lg text-sm font-bold transition-colors">
+                <button onClick={() => { setIsTwinModalOpen(false); setTwinAiModel("gemini-3.8-flash"); }} className="text-white hover:text-fuchsia-200 bg-white/10 hover:bg-white/20 px-3 py-1.5 rounded-lg text-sm font-bold transition-colors whitespace-nowrap cursor-pointer">
                   닫기 ✕
                 </button>
               </div>

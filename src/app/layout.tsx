@@ -1,9 +1,12 @@
 // src/app/layout.tsx
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+import Script from "next/script";
 import { ToastContainer } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css";
 import "./globals.css";
+import { MATHJAX_FONT_INIT_SCRIPT } from "../lib/mathJaxFontConfig";
+import MathJaxFontBridge from "../components/MathJaxFontBridge";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -39,6 +42,12 @@ export default function RootLayout({
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col">
+        <Script
+          id="logica-mathjax-font-init"
+          strategy="beforeInteractive"
+          dangerouslySetInnerHTML={{ __html: MATHJAX_FONT_INIT_SCRIPT }}
+        />
+        <MathJaxFontBridge />
         {children}
         <ToastContainer position="bottom-right" autoClose={3000} />
       </body>

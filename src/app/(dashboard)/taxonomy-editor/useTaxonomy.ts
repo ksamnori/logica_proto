@@ -301,7 +301,7 @@ export function useTaxonomy() {
   const [isGeneratingTwins, setIsGeneratingTwins] = useState(false);
   const [generatedTwins, setGeneratedTwins] = useState<any[]>([]);
   const [isTwinModalOpen, setIsTwinModalOpen] = useState(false);
-  const [twinAiModel, setTwinAiModel] = useState<"gemini-3.8-flash" | "gemini-4-argon">("gemini-3.8-flash");
+  const [twinAiModel, setTwinAiModel] = useState<"gemini-3.8-flash" | "gemini-4-neon" | "gemini-4-argon" | "gemini-4-carbon">("gemini-3.8-flash");
 
   const [isCloneModalOpen, setIsCloneModalOpen] = useState(false);
   const [cloneForm, setCloneForm] = useState({ targetBookName: '', pageNumber: '', questionNumber: '', subNumber: '' });
@@ -1773,10 +1773,11 @@ export function useTaxonomy() {
   const handleGenerateTwins = async (modelOverride?: any) => {
     if (!selectedQuestion) return alert("원본 문항을 먼저 왼쪽 리스트에서 선택해주세요.");
     
-    // 🌟 항상 기본적으로 gemini-3.8-flash로 동작하며, 모달 안에서 명시적으로 Argon을 눌렀을 때만 1회성으로 Argon 사용
-    const targetModel: "gemini-3.8-flash" | "gemini-4-argon" =
-      isTwinModalOpen && modelOverride === "gemini-4-argon"
-        ? "gemini-4-argon"
+    // 🌟 기본적으로 gemini-3.8-flash로 시작하며, 모달 안에서 상위 모델(Neon/Argon/Carbon)을 선택하면 해당 모델로 생성
+    const allowedTwinModels = ["gemini-3.8-flash", "gemini-4-neon", "gemini-4-argon", "gemini-4-carbon"] as const;
+    const targetModel: (typeof allowedTwinModels)[number] =
+      isTwinModalOpen && allowedTwinModels.includes(modelOverride)
+        ? modelOverride
         : "gemini-3.8-flash";
 
     setTwinAiModel(targetModel);

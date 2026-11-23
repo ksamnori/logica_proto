@@ -557,8 +557,15 @@ export async function POST(req: NextRequest) {
     const hasProblemImage = Boolean(problemImgPart);
     const hasAnswerImage = Boolean(answerImgPart);
 
-    const requestedModel =
-      modelName === "gemini-4-argon" ? "gemini-4-argon" : "gemini-3.8-flash";
+    const ALLOWED_TWIN_MODELS = new Set([
+      "gemini-3.8-flash",
+      "gemini-4-neon",
+      "gemini-4-argon",
+      "gemini-4-carbon",
+    ]);
+    const requestedModel = ALLOWED_TWIN_MODELS.has(modelName)
+      ? String(modelName)
+      : "gemini-3.8-flash";
 
     const genAI = new GoogleGenerativeAI(apiKey);
 

@@ -11,6 +11,7 @@ import { ensureInstructorSession } from "@/lib/session";
 import PublishModal from "@/components/exam/PublishModal";
 import GradingModal from "@/components/exam/GradingModal";
 import { compareSubQuestions, buildMergedQuestionGroups, getCleanUrl } from "@/app/exam/step2/examUtils";
+import { MATHJAX_FONT_INIT_SCRIPT } from "@/lib/mathJaxFontConfig";
 
 type MainTabType = 'ALL' | 'EXAM' | 'WEEKLY' | 'HOMEWORK' | 'OVERDUE' | 'INCORRECT' | 'SIMILAR';
 type ExamBucket = 'EXAM' | 'WEEKLY' | 'HOMEWORK' | 'OVERDUE' | 'INCORRECT' | 'SIMILAR' | 'OTHER';
@@ -612,20 +613,31 @@ export default function ExamListPage() {
       <html>
         <head>
           <title>${answerModal.title} - 정답지</title>
+          <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css" />
           <style>
-            body { font-family: 'Malgun Gothic', 'Apple SD Gothic Neo', sans-serif; padding: 30px; background-color: #f8fafc; }
+            body { font-family: 'Pretendard', 'Nanum Gothic', 'Apple SD Gothic Neo', sans-serif; padding: 30px; background-color: #f8fafc; }
             h2 { text-align: center; color: #002864; margin-bottom: 30px; font-size: 24px; border-bottom: 2px solid #e2e8f0; padding-bottom: 15px; }
             .grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; }
-            /* 인쇄 시 MathJax 줄바꿈 강제 설정 */
-            mjx-container { white-space: normal !important; word-wrap: break-word !important; }
+            /* 인쇄 시 MathJax 줄바꿈 강제 설정 및 본문 폰트 1:1 상속 */
+            mjx-container { white-space: normal !important; word-wrap: break-word !important; font-weight: inherit; }
+            mjx-container[jax="CHTML"] mjx-math { font-weight: inherit; }
+            mjx-container[jax="CHTML"] mjx-utext { font-family: 'Pretendard', 'Nanum Gothic', sans-serif !important; font-weight: inherit; line-height: 0 !important; padding-top: 0.72em !important; padding-bottom: 0.01em !important; }
+            mjx-container[jax="CHTML"] .logica-mjx-script { display: inline-block !important; transform: scale(0.70); transform-origin: 0 100%; }
+            mjx-container[jax="CHTML"] .logica-mjx-script-sm { display: inline-block !important; transform: scale(0.54); transform-origin: 0 100%; }
+            mjx-container[jax="CHTML"] mjx-msup > mjx-script, mjx-container[jax="CHTML"] mjx-msubsup > mjx-script { padding-right: 0.18em !important; }
+            mjx-container[jax="CHTML"] mjx-c::before { font-weight: normal; }
+            mjx-container[jax="CHTML"] mjx-line { border-bottom-width: 0.08em !important; }
+            mjx-container[jax="CHTML"] :is(mjx-mo > mjx-c, mjx-c.TEX-A, mjx-c.TEX-I)::before { -webkit-text-stroke: 0.02em currentColor; }
             @media print { 
               .no-print { display: none; } 
               body { background-color: white; padding: 10px; }
             }
           </style>
+          <script>${MATHJAX_FONT_INIT_SCRIPT}</script>
           <script>
             MathJax = {
               tex: { inlineMath: [['$', '$'], ['\\\\(', '\\\\)']] },
+              chtml: { mtextInheritFont: true, merrorInheritFont: true },
               svg: { fontCache: 'global' }
             };
           </script>
