@@ -255,7 +255,11 @@ export default function HqMessengerLeftHub({
   const hqMemberById = useMemo(() => {
     const map = new Map<string, HqMember>();
     hqMembers.forEach((m) => {
-      if (m.work_status !== "퇴직" && !m.is_ghost) {
+      if (
+        m.work_status !== "퇴직" &&
+        m.work_status !== "휴직" &&
+        !m.is_ghost
+      ) {
         map.set(String(m.instructor_id), m);
       }
     });

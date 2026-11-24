@@ -6,7 +6,10 @@ import type { RealtimeChannel } from "@supabase/supabase-js";
 import { useHqShell } from "@/components/hq/HqShellContext";
 import HqOrgAccordionTree from "@/components/hq/messenger/HqOrgAccordionTree";
 import { resolveStoragePublicUrl } from "@/lib/hq/clientApi";
-import { FALLBACK_TENANT_NAMES } from "@/lib/hq/constants";
+import {
+  type DirectoryInstructorRow,
+  fetchHqMessengerDirectory,
+} from "@/lib/hq/messengerDirectoryClient";
 import { subscribePostgresChanges } from "@/lib/postgresRealtimeHub";
 import { supabase } from "@/lib/supabase";
 
@@ -51,15 +54,7 @@ interface ChatRoomMemberItem {
   instructor?: ChatSenderInfo | ChatSenderInfo[] | null;
 }
 
-interface DirectoryInstructorItem {
-  instructor_id: string;
-  name: string;
-  position?: string;
-  chat_position?: string;
-  tenant_id?: string | null;
-  profile_image_url?: string | null;
-  academy_tenant?: { name: string };
-}
+type DirectoryInstructorItem = DirectoryInstructorRow;
 
 function formatShortTime(iso?: string | null): string {
   if (!iso) return "";
@@ -115,6 +110,9 @@ export default function HqMobileMessengerTab({ onChatRoomOpenChange }: Props) {
   const [allInstructors, setAllInstructors] = useState<
     DirectoryInstructorItem[]
   >([]);
+  const [viewerIsItStrategy, setViewerIsItStrategy] = useState<
+    boolean | undefined
+  >(undefined);
   const [searchKeyword, setSearchKeyword] = useState("");
   const [selectedInstIds, setSelectedInstIds] = useState<string[]>([]);
 
@@ -252,46 +250,18 @@ export default function HqMobileMessengerTab({ onChatRoomOpenChange }: Props) {
   }, [instId, refreshChatUnread]);
 
   const fetchDirectory = useCallback(async () => {
+    if (!instId) return;
     try {
-      const safeTenantMap: Record<string, string> = {
-        ...FALLBACK_TENANT_NAMES,
-      };
-      try {
-        const { data: tenantData } = await supabase
-          .from("academy_tenant")
-          .select("*");
-        if (tenantData) {
-          (
-            tenantData as Array<{ tenant_id: string; name: string }>
-          ).forEach((t) => {
-            safeTenantMap[String(t.tenant_id)] = t.name;
-          });
-        }
-      } catch {
-        // ignore
-      }
-
-      const { data: instData } = await supabase
-        .from("instructor")
-        .select("*")
-        .eq("status", "재직")
-        .order("name");
-
-      if (instData) {
-        const enriched = (instData as DirectoryInstructorItem[]).map(
-          (inst) => ({
-            ...inst,
-            academy_tenant: {
-              name: safeTenantMap[String(inst.tenant_id)] || "소속 미지정",
-            },
-          })
-        );
-        setAllInstructors(enriched);
-      }
+      const res = await fetchHqMessengerDirectory({
+        myInstId: instId,
+        myMember: me,
+      });
+      setAllInstructors(res.instructors);
+      setViewerIsItStrategy(res.callerIsItStrategy);
     } catch {
       // ignore
     }
-  }, []);
+  }, [instId, me]);
 
   useEffect(() => {
     if (!instId) return;
@@ -922,6 +892,7 @@ export default function HqMobileMessengerTab({ onChatRoomOpenChange }: Props) {
               orgNodes={companySettings?.extra_settings?.org_chart_nodes}
               myInstId={instId}
               myMember={me}
+              viewerIsItStrategy={viewerIsItStrategy}
               searchKeyword={searchKeyword}
               selectedInstIds={selectedInstIds}
               onToggleSelect={(id) =>

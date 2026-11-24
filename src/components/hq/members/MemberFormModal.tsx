@@ -47,6 +47,7 @@ export default function MemberFormModal({
   const [isDeptHead, setIsDeptHead] = useState(false);
   const [employmentType, setEmploymentType] = useState("정규직");
   const [workStatus, setWorkStatus] = useState<HqWorkStatus>("재직");
+  const [isGhost, setIsGhost] = useState(false);
   const [hireDate, setHireDate] = useState("");
   const [resignDate, setResignDate] = useState("");
   const [annualTotal, setAnnualTotal] = useState("15");
@@ -119,6 +120,7 @@ export default function MemberFormModal({
       setIsDeptHead(false);
       setEmploymentType("정규직");
       setWorkStatus("재직");
+      setIsGhost(false);
       setHireDate(today);
       setResignDate("");
       setAnnualTotal("15");
@@ -147,6 +149,7 @@ export default function MemberFormModal({
       setIsDeptHead(member.is_dept_head);
       setEmploymentType(member.employment_type || "정규직");
       setWorkStatus(member.work_status || "재직");
+      setIsGhost(Boolean(member.is_ghost));
       setHireDate(member.hire_date || "");
       setResignDate(member.resign_date || "");
       setAnnualTotal(String(member.annual_leave_total ?? 15));
@@ -204,6 +207,9 @@ export default function MemberFormModal({
             address,
             job_description: jobDescription,
             hr_memo: hrMemo,
+            ...(isHrManager
+              ? { profile_extra: { is_ghost: isGhost } }
+              : {}),
           },
         });
         alert(`✅ [${name}] 구성원이 본부 HR 시스템에 등록되었습니다.`);
@@ -234,6 +240,9 @@ export default function MemberFormModal({
             address,
             job_description: jobDescription,
             hr_memo: hrMemo,
+            ...(isHrManager
+              ? { profile_extra: { is_ghost: isGhost } }
+              : {}),
           },
         });
         alert("✅ 인사 정보가 저장되었습니다.");
@@ -486,6 +495,28 @@ export default function MemberFormModal({
                       <option value="휴직">휴직</option>
                       <option value="퇴직">퇴직</option>
                     </select>
+                  </div>
+                )}
+
+                {mode === "edit" && isHrManager && (
+                  <div className="sm:col-span-2">
+                    <label className="flex items-start gap-2.5 p-3 rounded-xl border border-slate-200 bg-slate-50 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={isGhost}
+                        onChange={(e) => setIsGhost(e.target.checked)}
+                        className="mt-0.5 rounded border-slate-300"
+                      />
+                      <span className="text-xs leading-relaxed">
+                        <b className="font-bold text-slate-800">
+                          👻 목록·조직도 숨김 계정 (유령 모드)
+                        </b>
+                        <span className="block text-[11px] text-slate-500 mt-0.5">
+                          체크 시 일반 구성원 디렉토리·조직도·메신저 명단에서 숨겨지며,
+                          구성원 관리(관리자)에서만 조회됩니다.
+                        </span>
+                      </span>
+                    </label>
                   </div>
                 )}
 

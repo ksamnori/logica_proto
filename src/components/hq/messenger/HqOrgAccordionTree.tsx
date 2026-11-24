@@ -4,6 +4,12 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { resolveStoragePublicUrl } from "@/lib/hq/clientApi";
 import {
+  isHqTenantName,
+  isInactiveForMessengerOrg,
+  isItStrategyMember,
+  shouldHideAcademyItStrategyInOrg,
+} from "@/lib/hq/messengerOrgFilter";
+import {
   normalizeOrgNodes,
   resolveMemberDisplayPosition,
 } from "@/lib/hq/orgTreeHelper";
@@ -45,6 +51,7 @@ interface Props {
   onDirectChat?: (inst: any) => void;
   preferredTenantName?: string;
   expandAllMyTenantBranches?: boolean;
+  viewerIsItStrategy?: boolean;
 }
 
 const ACADEMY_POS_ORDER: Record<string, number> = {
@@ -111,6 +118,7 @@ export default function HqOrgAccordionTree({
   onDirectChat,
   preferredTenantName,
   expandAllMyTenantBranches = false,
+  viewerIsItStrategy,
 }: Props) {
   const [expandedTenants, setExpandedTenants] = useState<string[]>([]);
   const [expandedBranchKeys, setExpandedBranchKeys] = useState<string[]>([]);
@@ -119,7 +127,12 @@ export default function HqOrgAccordionTree({
   const hqMemberById = useMemo(() => {
     const map = new Map<string, HqMember>();
     hqMembers.forEach((m) => {
-      if (m.work_status !== "퇴직" && !m.is_ghost) {
+      if (
+        !isInactiveForMessengerOrg({
+          workStatus: m.work_status,
+          isGhost: m.is_ghost,
+        })
+      ) {
         map.set(String(m.instructor_id), m);
       }
     });
@@ -134,6 +147,15 @@ export default function HqOrgAccordionTree({
     [instructors, myInstId]
   );
 
+  const resolvedViewerIsItStrategy = useMemo(() => {
+    if (typeof viewerIsItStrategy === "boolean") return viewerIsItStrategy;
+    return isItStrategyMember({
+      instDept: meInst?.department,
+      hqDept: myMember?.department,
+      orgAssignments: myMember?.profile_extra?.org_assignments,
+    });
+  }, [viewerIsItStrategy, meInst, myMember]);
+
   const activeMyTenantName = (
     preferredTenantName?.trim() ||
     meInst?.academy_tenant?.name ||
@@ -147,11 +169,7 @@ export default function HqOrgAccordionTree({
     }
     if (!meInst) return "부서 미지정";
     const meTName = (meInst.academy_tenant?.name || "").trim();
-    const isMeHq =
-      Boolean(meInst.is_hq_tenant) ||
-      meTName.includes("천종현") ||
-      meTName === "본사" ||
-      meTName.includes("본부");
+    const isMeHq = Boolean(meInst.is_hq_tenant) || isHqTenantName(meTName);
     return isMeHq
       ? (meInst.department || "부서 미지정").trim()
       : resolveAcademyMemberDept(meInst);
@@ -163,17 +181,48 @@ export default function HqOrgAccordionTree({
 
     const byTenant = new Map<string, any[]>();
     instructors.forEach((rawInst: any) => {
-      if (rawInst?.is_explicit_ghost || rawInst?.is_ghost) return;
-
       const tName = (rawInst.academy_tenant?.name || "소속 미지정").trim();
-      const isInstHq =
-        Boolean(rawInst.is_hq_tenant) ||
-        tName.includes("천종현") ||
-        tName === "본사" ||
-        tName.includes("본부");
+      const isInstHq = Boolean(rawInst.is_hq_tenant) || isHqTenantName(tName);
       const hm = isInstHq
         ? hqMemberById.get(String(rawInst.instructor_id))
         : undefined;
+
+      // 본부 구성원 목록이 로드되어 있는데 hqMemberById에 없다면(유령·휴직·퇴직 제외 대상),
+      // rawInst 폴백으로 본부 조직도에 노출되지 않도록 차단
+      if (isInstHq && hqMembers.length > 0 && !hm) return;
+
+      const isTargetItStrategy = isItStrategyMember({
+        instDept: rawInst?.department,
+        hqDept: hm?.department,
+        orgAssignments: hm?.profile_extra?.org_assignments,
+      });
+
+      const isExplicitGhost = isInstHq
+        ? Boolean(rawInst?.is_explicit_ghost || rawInst?.is_ghost)
+        : !isTargetItStrategy &&
+          Boolean(rawInst?.is_explicit_ghost || rawInst?.is_ghost);
+
+      if (
+        isInactiveForMessengerOrg({
+          instStatus: rawInst?.status,
+          workStatus: hm?.work_status || rawInst?.work_status,
+          isGhost: hm?.is_ghost,
+          isExplicitGhost,
+        })
+      ) {
+        return;
+      }
+
+      if (
+        shouldHideAcademyItStrategyInOrg({
+          isHqTenant: isInstHq,
+          isTargetItStrategy,
+          viewerIsItStrategy: resolvedViewerIsItStrategy,
+        })
+      ) {
+        return;
+      }
+
       const enrichedPos = hm
         ? resolveMemberDisplayPosition(hm)
         : rawInst.chat_position || rawInst.position || "구성원";
@@ -505,6 +554,7 @@ export default function HqOrgAccordionTree({
     return groups;
   }, [
     instructors,
+    hqMembers.length,
     hqMemberById,
     orgNodes,
     searchKeyword,
@@ -512,6 +562,7 @@ export default function HqOrgAccordionTree({
     activeMyDeptName,
     myInstId,
     expandAllMyTenantBranches,
+    resolvedViewerIsItStrategy,
   ]);
 
   // 최초 로드 시 내 소속 테넌트 + 기본 오픈 경로만 깔끔하게 자동 펼침 (타 지점·본사는 접힌 상태 유지)

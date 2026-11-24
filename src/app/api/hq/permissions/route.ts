@@ -9,6 +9,7 @@ import {
   HQ_RANKS,
   inferRankFromPosition,
 } from "@/lib/hq/constants";
+import { isHqTenantName } from "@/lib/hq/messengerOrgFilter";
 import { resolveMemberDisplayPosition } from "@/lib/hq/orgTreeHelper";
 import {
   apiFail,
@@ -76,7 +77,7 @@ export async function GET(req: NextRequest) {
       tenantNames[String(t.tenant_id)] = t.name;
       if (
         String(t.tenant_type || "").toUpperCase() === "HQ" ||
-        String(t.name || "").includes("본사")
+        isHqTenantName(t.name)
       ) {
         hqTenantIds.add(String(t.tenant_id));
       }

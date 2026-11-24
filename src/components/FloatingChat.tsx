@@ -6,6 +6,13 @@ import { supabase } from "@/lib/supabase";
 import { subscribePostgresChanges } from "@/lib/postgresRealtimeHub";
 import { RealtimeChannel } from "@supabase/supabase-js";
 import HqOrgAccordionTree from "@/components/hq/messenger/HqOrgAccordionTree";
+import {
+  isHqTenantName,
+  isInactiveForMessengerOrg,
+  isItStrategyDept,
+  isItStrategyMember,
+  shouldHideAcademyItStrategyInOrg,
+} from "@/lib/hq/messengerOrgFilter";
 import type { HqMember, HqOrgChartNode } from "@/lib/hq/types";
 
 export interface ChatMessage {
@@ -56,7 +63,11 @@ export interface InstructorRecord {
   role?: string;
   is_hq_tenant?: boolean;
   is_explicit_ghost?: boolean;
+  is_ghost?: boolean;
   is_dev_super_admin?: boolean;
+  is_it_strategy?: boolean;
+  work_status?: string;
+  status?: string;
 }
 
 export interface StaffRoomMember {
@@ -163,6 +174,9 @@ export default function FloatingChat({ instId: propInstId, onMicClick }: { instI
   const [staffChatInput, setStaffChatInput] = useState("");
   const [staffUnreadCount, setStaffUnreadCount] = useState(0);
   const [allInstructors, setAllInstructors] = useState<InstructorRecord[]>([]);
+  const [viewerIsItStrategy, setViewerIsItStrategy] = useState<
+    boolean | undefined
+  >(undefined);
   const [staffSearchKeyword, setStaffSearchKeyword] = useState("");
   const [selectedInstIds, setSelectedInstIds] = useState<string[]>([]);
   const [staffRoomMembers, setStaffRoomMembers] = useState<StaffRoomMember[]>([]);
@@ -730,20 +744,51 @@ export default function FloatingChat({ instId: propInstId, onMicClick }: { instI
     }
   };
 
-  const isHiddenInAcademyFloatingChat = (inst: any): boolean => {
+  const isHiddenInAcademyFloatingChat = (
+    inst: InstructorRecord,
+    callerIsIt: boolean
+  ): boolean => {
     if (!inst) return false;
-    if (inst.is_dev_super_admin || inst.is_explicit_ghost || inst.is_ghost) {
+    const tName = (unwrap(inst.academy_tenant)?.name || "").trim();
+    const isHqT = Boolean(inst.is_hq_tenant) || isHqTenantName(tName);
+    const targetIsIt =
+      Boolean(inst.is_it_strategy) || isItStrategyDept(inst.department);
+
+    const isExplicitGhost = isHqT
+      ? Boolean(inst.is_explicit_ghost || inst.is_ghost)
+      : !targetIsIt && Boolean(inst.is_explicit_ghost || inst.is_ghost);
+
+    if (
+      isInactiveForMessengerOrg({
+        instStatus: inst.status,
+        workStatus: inst.work_status,
+        isExplicitGhost,
+      })
+    ) {
+      return true;
+    }
+
+    if (
+      shouldHideAcademyItStrategyInOrg({
+        isHqTenant: isHqT,
+        isTargetItStrategy: targetIsIt,
+        viewerIsItStrategy: callerIsIt,
+      })
+    ) {
+      return true;
+    }
+
+    // IT전략팀 본인이 접속한 경우 모든(본부·학원) IT전략팀 동료 계정을 볼 수 있도록 허용
+    if (callerIsIt && targetIsIt) {
+      return false;
+    }
+
+    if (inst.is_dev_super_admin) {
       return true;
     }
     const posCombined = `${inst.position || ""} ${inst.chat_position || ""}`;
     if (/최고관리자|수퍼어드민|개발자|대장/.test(posCombined)) return true;
     const roleUpper = String(inst.role || "").toUpperCase();
-    const tName = (unwrap(inst.academy_tenant)?.name || "").trim();
-    const isHqT =
-      Boolean(inst.is_hq_tenant) ||
-      tName === "본사" ||
-      tName.includes("천종현") ||
-      tName.includes("본부");
     if (
       !isHqT &&
       roleUpper === "SUPER_ADMIN" &&
@@ -785,18 +830,42 @@ export default function FloatingChat({ instId: propInstId, onMicClick }: { instI
           const rawOrgNodes: HqOrgChartNode[] | null =
             json.data.orgNodes || null;
 
-          // 학원 플로팅 챗에서는 개발자 수퍼어드민 및 유령 계정 미노출
-          const visibleInstructors = rawInstructors.filter(
-            (inst) => !isHiddenInAcademyFloatingChat(inst)
-          );
-          const visibleHqMembers = rawHqMembers.filter(
-            (m) => m.rank_code !== "SUPER_ADMIN" && !m.is_ghost
-          );
-
-          // 현재 학원 지점명 판별 (내 학원은 자동 펼침, 타 지점·본사는 접힘)
           const rawMe = rawInstructors.find(
             (i) => String(i.instructor_id) === String(instId)
           );
+          const callerIsIt =
+            typeof json.data.callerIsItStrategy === "boolean"
+              ? json.data.callerIsItStrategy
+              : Boolean(
+                  rawMe?.is_it_strategy || isItStrategyDept(rawMe?.department)
+                );
+
+          // 학원 플로팅 챗에서는 비활성(휴직·퇴직·유령) 및 권한 외 학원 IT전략팀·개발자 수퍼어드민 미노출
+          const visibleInstructors = rawInstructors.filter(
+            (inst) => !isHiddenInAcademyFloatingChat(inst, callerIsIt)
+          );
+          const visibleHqMembers = rawHqMembers.filter((m) => {
+            if (
+              isInactiveForMessengerOrg({
+                workStatus: m.work_status,
+                isGhost: m.is_ghost,
+              })
+            ) {
+              return false;
+            }
+            if (
+              callerIsIt &&
+              isItStrategyMember({
+                hqDept: m.department,
+                orgAssignments: m.profile_extra?.org_assignments,
+              })
+            ) {
+              return true;
+            }
+            return m.rank_code !== "SUPER_ADMIN";
+          });
+
+          // 현재 학원 지점명 판별 (내 학원은 자동 펼침, 타 지점·본사는 접힘)
           const localTenantObj = tenantsList.find(
             (t) => String(t.tenant_id) === localTenantId
           );
@@ -823,6 +892,7 @@ export default function FloatingChat({ instId: propInstId, onMicClick }: { instI
           if (rawMe?.department) {
             setMyDeptName(rawMe.department.trim());
           }
+          setViewerIsItStrategy(callerIsIt);
           setHqMembersForTree(visibleHqMembers);
           setOrgNodesForTree(rawOrgNodes);
           setAllInstructors(visibleInstructors);
@@ -863,7 +933,8 @@ export default function FloatingChat({ instId: propInstId, onMicClick }: { instI
             return {
               ...inst,
               academy_tenant: { name: tName },
-              is_hq_tenant: tName === "본사" || tName.includes("천종현"),
+              is_hq_tenant: isHqTenantName(tName),
+              is_it_strategy: isItStrategyDept(inst.department),
             };
           }
         );
@@ -871,19 +942,25 @@ export default function FloatingChat({ instId: propInstId, onMicClick }: { instI
         const me = enrichedData.find(
           (i: InstructorRecord) => String(i.instructor_id) === String(instId)
         );
+        const fallbackCallerIsIt = Boolean(
+          me?.is_it_strategy || isItStrategyDept(me?.department)
+        );
         const localTName = localTenantId ? safeTenantMap[localTenantId] : "";
         const meTName = unwrap(me?.academy_tenant)?.name?.trim() || "";
         const fallbackAcademyName =
-          localTName && localTName !== "본사"
+          localTName && !isHqTenantName(localTName)
             ? localTName
-            : meTName && meTName !== "본사"
+            : meTName && !isHqTenantName(meTName)
               ? meTName
               : "대치 본원";
 
         setMyTenantName(fallbackAcademyName);
         if (me?.department) setMyDeptName(me.department.trim());
+        setViewerIsItStrategy(fallbackCallerIsIt);
         setAllInstructors(
-          enrichedData.filter((inst) => !isHiddenInAcademyFloatingChat(inst))
+          enrichedData.filter(
+            (inst) => !isHiddenInAcademyFloatingChat(inst, fallbackCallerIsIt)
+          )
         );
       }
     } catch (e) {
@@ -1420,6 +1497,7 @@ export default function FloatingChat({ instId: propInstId, onMicClick }: { instI
                       orgNodes={orgNodesForTree}
                       myInstId={instId}
                       myMember={null}
+                      viewerIsItStrategy={viewerIsItStrategy}
                       searchKeyword={staffSearchKeyword}
                       selectedInstIds={selectedInstIds}
                       onToggleSelect={toggleInstSelection}

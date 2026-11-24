@@ -3,6 +3,7 @@
 
 import React, { useState, useEffect, useRef, useMemo } from "react";
 import { supabase } from "@/lib/supabase";
+import { isItStrategyDept } from "@/lib/hq/messengerOrgFilter";
 import { createClient } from "@supabase/supabase-js";
 
 const ENDED_ENROLLMENT_STATUSES = ["수강종료", "종료", "퇴원", "취소"];
@@ -145,7 +146,13 @@ export default function ChatWidget({ parentId, authToken }: { parentId: string, 
         .in("tenant_id", Array.from(tenantIds))
         .or(orQuery);
         
-      let filteredList = data || [];
+      // 학원쪽 IT전략팀 계정은 자녀의 실제 수강 담당반(class.instructor_id) 선생님으로 배정된 경우에만 일반 선생님으로 노출
+      let filteredList = (data || []).filter((inst: any) => {
+        if (isItStrategyDept(inst.department)) {
+          return instructorIds.has(String(inst.instructor_id));
+        }
+        return true;
+      });
       
       filteredList.sort((a, b) => {
         const aIsManager = (a.position || "").includes("실장") ? -1 : 1;

@@ -217,7 +217,11 @@ export async function GET(req: NextRequest) {
               ? new Date(inst.created_at).getFullYear()
               : new Date().getFullYear();
             const workStatus: HqWorkStatus =
-              inst.status === "퇴사" || inst.status === "퇴직" ? "퇴직" : "재직";
+              inst.status === "퇴사" || inst.status === "퇴직"
+                ? "퇴직"
+                : inst.status === "휴직"
+                  ? "휴직"
+                  : "재직";
             const isInstHqTenant = Boolean(
               inst.tenant_id && caller.hqTenantIds.has(String(inst.tenant_id))
             );
@@ -331,7 +335,11 @@ export async function GET(req: NextRequest) {
 
       const workStatus: HqWorkStatus =
         (prof?.work_status as HqWorkStatus) ||
-        (inst.status === "퇴사" || inst.status === "퇴직" ? "퇴직" : "재직");
+        (inst.status === "퇴사" || inst.status === "퇴직"
+          ? "퇴직"
+          : inst.status === "휴직"
+            ? "휴직"
+            : "재직");
 
       const tId = inst.tenant_id ? String(inst.tenant_id) : null;
       const isHqTenant = Boolean(tId && caller.hqTenantIds.has(tId));
@@ -410,8 +418,13 @@ export async function GET(req: NextRequest) {
 
     const meProfile =
       allMembers.find((m) => m.instructor_id === caller.userId) || null;
-    // 유령 구성원(is_ghost)은 구성원 디렉토리·조직도·대시보드·메신저 명단에서 완전 제외
+    // 유령 구성원(is_ghost)은 일반 구성원 디렉토리·조직도·대시보드·메신저 명단에서 완전 제외하되,
+    // 최고관리자·인사관리자의 '구성원 관리' 탭에서는 상태 확인 및 숨김 해제가 가능하도록 별도 전달
     const visibleMembers = allMembers.filter((m) => !m.is_ghost);
+    const ghostMembers =
+      caller.isDevSuperAdmin || caller.isHrManager
+        ? allMembers.filter((m) => m.is_ghost && m.is_hq_tenant)
+        : [];
 
     return NextResponse.json({
       success: true,
@@ -424,6 +437,7 @@ export async function GET(req: NextRequest) {
         isHrManager: caller.isHrManager,
         isHqAdmin: caller.isHqAdmin,
         members: visibleMembers,
+        ghostMembers,
       },
     });
   } catch (e: any) {
@@ -884,6 +898,7 @@ export async function PATCH(req: NextRequest) {
           "pay_payment_infos",
           "leave_histories",
           "disciplines",
+          "is_ghost",
         ];
         for (const key of hrOnlyKeys) {
           if (incomingExtra[key] !== undefined) {

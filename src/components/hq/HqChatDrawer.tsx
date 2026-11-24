@@ -7,8 +7,8 @@ import { supabase } from "@/lib/supabase";
 import { subscribePostgresChanges } from "@/lib/postgresRealtimeHub";
 import { useHqShell } from "./HqShellContext";
 import HqOrgAccordionTree from "./messenger/HqOrgAccordionTree";
-import { FALLBACK_TENANT_NAMES } from "@/lib/hq/constants";
 import { resolveStoragePublicUrl } from "@/lib/hq/clientApi";
+import { fetchHqMessengerDirectory } from "@/lib/hq/messengerDirectoryClient";
 import { useHqHref } from "@/lib/hq/hqRoutes";
 import { toCanonicalHqPath } from "@/lib/hq/hqRouteUtils";
 
@@ -72,6 +72,9 @@ export default function HqChatDrawer() {
   const [typingStaffName, setTypingStaffName] = useState<string | null>(null);
 
   const [allInstructors, setAllInstructors] = useState<any[]>([]);
+  const [viewerIsItStrategy, setViewerIsItStrategy] = useState<
+    boolean | undefined
+  >(undefined);
   const [searchKeyword, setSearchKeyword] = useState("");
   const [selectedInstIds, setSelectedInstIds] = useState<string[]>([]);
 
@@ -209,42 +212,18 @@ export default function HqChatDrawer() {
   }, [instId, refreshChatUnread]);
 
   const loadDirectory = useCallback(async () => {
+    if (!instId) return;
     try {
-      const safeTenantMap: Record<string, string> = {
-        ...FALLBACK_TENANT_NAMES,
-      };
-      try {
-        const { data: tenantData } = await supabase
-          .from("academy_tenant")
-          .select("*");
-        if (tenantData) {
-          tenantData.forEach((t: any) => {
-            safeTenantMap[String(t.tenant_id)] = t.name;
-          });
-        }
-      } catch {
-        // ignore
-      }
-
-      const { data: instData } = await supabase
-        .from("instructor")
-        .select("*")
-        .eq("status", "재직")
-        .order("name");
-
-      if (instData) {
-        const enriched = instData.map((inst: any) => ({
-          ...inst,
-          academy_tenant: {
-            name: safeTenantMap[String(inst.tenant_id)] || "소속 미지정",
-          },
-        }));
-        setAllInstructors(enriched);
-      }
+      const res = await fetchHqMessengerDirectory({
+        myInstId: instId,
+        myMember: me,
+      });
+      setAllInstructors(res.instructors);
+      setViewerIsItStrategy(res.callerIsItStrategy);
     } catch {
       // ignore
     }
-  }, [instId]);
+  }, [instId, me]);
 
   useEffect(() => {
     if (!chatDrawerOpen || !instId) return;
@@ -987,6 +966,7 @@ export default function HqChatDrawer() {
                   orgNodes={companySettings?.extra_settings?.org_chart_nodes}
                   myInstId={instId}
                   myMember={me}
+                  viewerIsItStrategy={viewerIsItStrategy}
                   searchKeyword={searchKeyword}
                   selectedInstIds={selectedInstIds}
                   onToggleSelect={(id) =>

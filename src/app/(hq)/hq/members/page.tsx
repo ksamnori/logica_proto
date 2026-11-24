@@ -124,7 +124,9 @@ export default function HqMembersPage() {
     instId,
     me,
     members,
+    ghostMembers,
     companySettings,
+    isDevSuperAdmin,
     isHrManager,
     isHqAdmin,
     refreshMembers,
@@ -161,6 +163,7 @@ export default function HqMembersPage() {
   ]);
   const [statusFilterOpen, setStatusFilterOpen] = useState(false);
   const [manageDeptFilter, setManageDeptFilter] = useState("ALL");
+  const [showGhostMembers, setShowGhostMembers] = useState(true);
   const [selectedRowIds, setSelectedRowIds] = useState<string[]>([]);
   const [addDropdownOpen, setAddDropdownOpen] = useState(false);
 
@@ -264,9 +267,14 @@ export default function HqMembersPage() {
     [companySettings?.extra_settings?.org_chart_nodes]
   );
 
+  const allAdminMembers = useMemo(
+    () => [...members, ...ghostMembers],
+    [members, ghostMembers]
+  );
+
   const activeProfileMember = useMemo(
-    () => members.find((m) => m.instructor_id === profileTargetId) || null,
-    [members, profileTargetId]
+    () => allAdminMembers.find((m) => m.instructor_id === profileTargetId) || null,
+    [allAdminMembers, profileTargetId]
   );
 
   // 1) 디렉토리 목록 필터·정렬
@@ -302,12 +310,33 @@ export default function HqMembersPage() {
     });
   }, [members, dirDeptFilter, dirKeyword, dirSort]);
 
+  const manageSourceMembers = useMemo(
+    () => (showGhostMembers ? allAdminMembers : members),
+    [showGhostMembers, allAdminMembers, members]
+  );
+
+  const manageStatusCounts = useMemo(() => {
+    const counts: Record<HqWorkStatus, number> = {
+      재직: 0,
+      휴직: 0,
+      퇴직: 0,
+    };
+    manageSourceMembers.forEach((m) => {
+      if (m.work_status in counts) {
+        counts[m.work_status] += 1;
+      }
+    });
+    return counts;
+  }, [manageSourceMembers]);
+
   // 2) 구성원 관리 > 전체 테이블 목록
   const managedMembers = useMemo(() => {
     const kw = manageKeyword.trim().toLowerCase();
-    return members
+    return manageSourceMembers
       .filter((m) => {
-        if (m.hire_date && m.hire_date > asOfDate) return false;
+        if (asOfDate < todayIso && m.hire_date && m.hire_date > asOfDate) {
+          return false;
+        }
         if (
           selectedStatuses.length > 0 &&
           !selectedStatuses.includes(m.work_status)
@@ -324,7 +353,14 @@ export default function HqMembersPage() {
         return true;
       })
       .sort((a, b) => a.name.localeCompare(b.name, "ko"));
-  }, [members, asOfDate, selectedStatuses, manageDeptFilter, manageKeyword]);
+  }, [
+    manageSourceMembers,
+    asOfDate,
+    todayIso,
+    selectedStatuses,
+    manageDeptFilter,
+    manageKeyword,
+  ]);
 
   // 온보딩 중 vs 온보딩 완료 분류 (최근 120일 이내 입사 & 미완료 체크항목 존재 시 온보딩 중)
   const onboardingSplit = useMemo(() => {
@@ -979,6 +1015,11 @@ export default function HqMembersPage() {
                         {m.rank_code === "CEO" && (
                           <span className="text-amber-500 text-xs">✪</span>
                         )}
+                        {m.work_status === "휴직" && (
+                          <span className="px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200 text-[10.5px] font-bold">
+                            휴직중
+                          </span>
+                        )}
                       </div>
                       {m.job_description && (
                         <div className="text-xs text-slate-400 truncate mt-0.5">
@@ -1107,27 +1148,32 @@ export default function HqMembersPage() {
                       </button>
 
                       {statusFilterOpen && (
-                        <div className="absolute left-0 top-full mt-1 w-[140px] bg-white rounded-xl shadow-xl border border-slate-200 py-1.5 z-30">
+                        <div className="absolute left-0 top-full mt-1 w-[164px] bg-white rounded-xl shadow-xl border border-slate-200 py-1.5 z-30">
                           {(["재직", "휴직", "퇴직"] as HqWorkStatus[]).map(
                             (st) => (
                               <label
                                 key={st}
-                                className="px-3 py-1.5 hover:bg-slate-50 flex items-center gap-2 cursor-pointer"
+                                className="px-3 py-1.5 hover:bg-slate-50 flex items-center justify-between gap-2 cursor-pointer"
                               >
-                                <input
-                                  type="checkbox"
-                                  checked={selectedStatuses.includes(st)}
-                                  onChange={() =>
-                                    setSelectedStatuses((prev) =>
-                                      prev.includes(st)
-                                        ? prev.filter((x) => x !== st)
-                                        : [...prev, st]
-                                    )
-                                  }
-                                  className="rounded border-slate-300"
-                                />
-                                <span className="font-semibold text-slate-700">
-                                  {st}
+                                <span className="flex items-center gap-2">
+                                  <input
+                                    type="checkbox"
+                                    checked={selectedStatuses.includes(st)}
+                                    onChange={() =>
+                                      setSelectedStatuses((prev) =>
+                                        prev.includes(st)
+                                          ? prev.filter((x) => x !== st)
+                                          : [...prev, st]
+                                      )
+                                    }
+                                    className="rounded border-slate-300"
+                                  />
+                                  <span className="font-semibold text-slate-700">
+                                    {st}
+                                  </span>
+                                </span>
+                                <span className="text-[11px] font-bold text-slate-400">
+                                  {manageStatusCounts[st]}명
                                 </span>
                               </label>
                             )
@@ -1148,6 +1194,23 @@ export default function HqMembersPage() {
                         </option>
                       ))}
                     </select>
+
+                    {(isDevSuperAdmin || isHrManager) &&
+                      ghostMembers.length > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => setShowGhostMembers((v) => !v)}
+                          className={`px-2.5 py-1 rounded-lg border text-[11px] font-bold transition-colors ${
+                            showGhostMembers
+                              ? "border-purple-200 bg-purple-50 text-purple-700"
+                              : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50"
+                          }`}
+                          title="일반 조직도·메신저에서 숨겨진 유령 계정을 구성원 관리 목록에 포함할지 전환합니다."
+                        >
+                          👻 목록숨김 {ghostMembers.length}명{" "}
+                          {showGhostMembers ? "표시 중" : "보기"}
+                        </button>
+                      )}
                   </div>
 
                   <div className="flex items-center gap-2 text-[11px]">
@@ -1289,17 +1352,27 @@ export default function HqMembersPage() {
                             </td>
 
                             <td className="py-3 px-3 border-r border-slate-100 whitespace-nowrap">
-                              <span
-                                className={`px-2 py-0.5 rounded text-[11px] font-bold ${
-                                  m.work_status === "재직"
-                                    ? "bg-emerald-50 text-[#00a84b]"
-                                    : m.work_status === "휴직"
-                                      ? "bg-amber-50 text-amber-700"
-                                      : "bg-slate-100 text-slate-500"
-                                }`}
-                              >
-                                {m.work_status}
-                              </span>
+                              <div className="flex items-center gap-1">
+                                <span
+                                  className={`px-2 py-0.5 rounded text-[11px] font-bold ${
+                                    m.work_status === "재직"
+                                      ? "bg-emerald-50 text-[#00a84b]"
+                                      : m.work_status === "휴직"
+                                        ? "bg-amber-50 text-amber-700"
+                                        : "bg-slate-100 text-slate-500"
+                                  }`}
+                                >
+                                  {m.work_status}
+                                </span>
+                                {m.is_ghost && (
+                                  <span
+                                    className="px-1.5 py-0.5 rounded bg-purple-50 text-purple-700 border border-purple-200 text-[10.5px] font-bold"
+                                    title="목록·조직도·메신저 숨김(유령) 계정"
+                                  >
+                                    👻 숨김
+                                  </span>
+                                )}
+                              </div>
                             </td>
 
                             <td className="py-3 px-3 border-r border-slate-100 font-mono text-slate-600 whitespace-nowrap">

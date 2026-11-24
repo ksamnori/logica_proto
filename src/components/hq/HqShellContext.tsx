@@ -37,6 +37,7 @@ interface HqShellState {
   instId: string;
   me: HqMember | null;
   members: HqMember[];
+  ghostMembers: HqMember[];
   companySettings: HqCompanySettings;
   isDevSuperAdmin: boolean;
   isHrManager: boolean;
@@ -112,6 +113,7 @@ export function HqShellProvider({
   const [instId, setInstId] = useState("");
   const [me, setMe] = useState<HqMember | null>(null);
   const [members, setMembers] = useState<HqMember[]>([]);
+  const [ghostMembers, setGhostMembers] = useState<HqMember[]>([]);
   const [companySettings, setCompanySettings] = useState<HqCompanySettings>(
     DEFAULT_HQ_COMPANY_SETTINGS
   );
@@ -188,6 +190,7 @@ export function HqShellProvider({
           isHrManager: boolean;
           isHqAdmin: boolean;
           members: HqMember[];
+          ghostMembers?: HqMember[];
         };
       }>("/api/hq/members");
 
@@ -196,6 +199,7 @@ export function HqShellProvider({
       setIsHrManager(Boolean(res.data.isHrManager));
       setIsHqAdmin(Boolean(res.data.isHqAdmin));
       setMembers(res.data.members || []);
+      setGhostMembers(res.data.ghostMembers || []);
 
       const myRow =
         res.data.meProfile ||
@@ -650,6 +654,7 @@ export function HqShellProvider({
         instId,
         me,
         members,
+        ghostMembers,
         companySettings,
         isDevSuperAdmin: effectiveIsDevSuperAdmin,
         isHrManager: effectiveIsHrManager,

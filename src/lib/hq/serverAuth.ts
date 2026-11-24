@@ -9,6 +9,7 @@ import {
   getRankLevel,
   inferRankFromPosition,
 } from "./constants";
+import { isHqTenantName } from "./messengerOrgFilter";
 import { isIpMatchedByRule } from "./defaultSecuritySettings";
 import { resolveMemberPermissions } from "./hqPermissionEngine";
 import { resolveMemberDisplayPosition } from "./orgTreeHelper";
@@ -150,7 +151,7 @@ export async function requireHqCaller(
     tenantNames[String(t.tenant_id)] = t.name;
     if (
       String(t.tenant_type || "").toUpperCase() === "HQ" ||
-      String(t.name || "").includes("본사")
+      isHqTenantName(t.name)
     ) {
       hqTenantIds.add(String(t.tenant_id));
     }
