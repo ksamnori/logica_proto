@@ -35,104 +35,165 @@ export interface TextbookExclusionInfo {
   workbookQuestionIds: Set<string>;
 }
 
+const MAIN_EXCLUSION_CACHE_TTL_MS = 5 * 60 * 1000; // 5분 캐시
 let cachedMainExclusion: TextbookExclusionInfo | null = null;
+let inFlightMainExclusion: Promise<TextbookExclusionInfo> | null = null;
 
 const NON_MAIN_BOOK_KEYWORDS_REGEX = /(?:추가\s*문제|추가\s*문항|_추가|추가_|추가|쌍둥이|TWIN|유사|SIMILAR|워크북|WORKBOOK|부교재|연산|주간\s*테스트|중간\s*테스트|분기\s*테스트|단원\s*테스트|단원\s*평가|입학\s*테스트|진단\s*평가|테스트|평가|보충|클리닉|프린트|모의고사|기출)/i;
 const DERIVATIVE_OR_EXTRA_KEYWORDS_REGEX = /(?:추가\s*문제|추가\s*문항|_추가|추가_|추가|쌍둥이|TWIN|유사|SIMILAR)/i;
 
 export const fetchMainTextbookExclusionSet = async (supabaseClient: any): Promise<TextbookExclusionInfo> => {
-  if (cachedMainExclusion && Date.now() - cachedMainExclusion.timestamp < 60000) {
+  if (cachedMainExclusion && Date.now() - cachedMainExclusion.timestamp < MAIN_EXCLUSION_CACHE_TTL_MS) {
     return cachedMainExclusion;
   }
-  const mainBookTitles = new Set<string>();
-  const mainQuestionIds = new Set<string>();
-  const workbookBookTitles = new Set<string>();
-  const workbookQuestionIds = new Set<string>();
-
-  try {
-    let tbRows: any[] = [];
-    let tbFrom = 0;
-    while (true) {
-      const { data, error } = await supabaseClient
-        .from('textbook')
-        .select('book_id, title, book_type')
-        .range(tbFrom, tbFrom + 999);
-      if (error || !data || data.length === 0) break;
-      tbRows = tbRows.concat(data);
-      if (data.length < 1000) break;
-      tbFrom += 1000;
-    }
-
-    const mainBookIds: string[] = [];
-    const workbookBookIds: string[] = [];
-
-    if (Array.isArray(tbRows)) {
-      tbRows.forEach((tb: any) => {
-        const bType = String(tb.book_type || '').trim();
-        const bTitle = String(tb.title || '').trim();
-        if (!bTitle) return;
-
-        // 1) 워크북: textbook.book_type 이 '워크북'(또는 '과제')이거나 제목에 워크북이 포함된 교재
-        if (
-          (bType === '워크북' || bType === '과제' || /(?:워크북|WORKBOOK)/i.test(bTitle)) &&
-          !DERIVATIVE_OR_EXTRA_KEYWORDS_REGEX.test(bTitle)
-        ) {
-          workbookBookTitles.add(bTitle);
-          if (tb.book_id) workbookBookIds.push(String(tb.book_id).trim());
-          return;
-        }
-
-        // 2) 주교재: textbook.book_type 이 '주교재'/'본교재'이거나 비-메인 키워드가 없는 교재
-        if (
-          (bType === '주교재' || bType === '본교재' || !bType) &&
-          !NON_MAIN_BOOK_KEYWORDS_REGEX.test(bTitle)
-        ) {
-          mainBookTitles.add(bTitle);
-          if (tb.book_id) mainBookIds.push(String(tb.book_id).trim());
-        }
-      });
-    }
-
-    const mainBookIdSet = new Set(mainBookIds);
-    const workbookBookIdSet = new Set(workbookBookIds);
-    const allTargetBookIds = Array.from(new Set([...mainBookIds, ...workbookBookIds]));
-
-    if (allTargetBookIds.length > 0) {
-      let from = 0;
-      const step = 1000;
-      while (true) {
-        const { data: tqRows, error } = await supabaseClient
-          .from('textbook_question')
-          .select('book_id, question_id')
-          .in('book_id', allTargetBookIds)
-          .range(from, from + step - 1);
-        if (error || !tqRows || tqRows.length === 0) break;
-        tqRows.forEach((r: any) => {
-          if (!r.question_id) return;
-          const qid = String(r.question_id).trim();
-          const bid = String(r.book_id || '').trim();
-          if (workbookBookIdSet.has(bid)) {
-            workbookQuestionIds.add(qid);
-          } else if (mainBookIdSet.has(bid)) {
-            mainQuestionIds.add(qid);
-          }
-        });
-        if (tqRows.length < step) break;
-        from += step;
-      }
-    }
-  } catch (e) {
-    console.error('주교재/워크북 제외 목록 조회 실패:', e);
+  if (inFlightMainExclusion) {
+    return inFlightMainExclusion;
   }
 
-  cachedMainExclusion = {
-    timestamp: Date.now(),
-    mainBookTitles,
-    mainQuestionIds,
-    workbookBookTitles,
-    workbookQuestionIds,
-  };
-  return cachedMainExclusion;
+  inFlightMainExclusion = (async () => {
+    const mainBookTitles = new Set<string>();
+    const mainQuestionIds = new Set<string>();
+    const workbookBookTitles = new Set<string>();
+    const workbookQuestionIds = new Set<string>();
+    let hadError = false;
+
+    try {
+      let tbRows: any[] = [];
+      let tbFrom = 0;
+      while (true) {
+        const { data, error } = await supabaseClient
+          .from('textbook')
+          .select('book_id, title, book_type')
+          .range(tbFrom, tbFrom + 999);
+        if (error) {
+          hadError = true;
+          console.error('textbook 목록 조회 실패:', error);
+          break;
+        }
+        if (!data || data.length === 0) break;
+        tbRows = tbRows.concat(data);
+        if (data.length < 1000) break;
+        tbFrom += 1000;
+      }
+
+      const mainBookIds: string[] = [];
+      const workbookBookIds: string[] = [];
+
+      if (Array.isArray(tbRows)) {
+        tbRows.forEach((tb: any) => {
+          const bType = String(tb.book_type || '').trim();
+          const bTitle = String(tb.title || '').trim();
+          if (!bTitle) return;
+
+          // 1) 워크북: textbook.book_type 이 '워크북'(또는 '과제')이거나 제목에 워크북이 포함된 교재
+          if (
+            (bType === '워크북' || bType === '과제' || /(?:워크북|WORKBOOK)/i.test(bTitle)) &&
+            !DERIVATIVE_OR_EXTRA_KEYWORDS_REGEX.test(bTitle)
+          ) {
+            workbookBookTitles.add(bTitle);
+            if (tb.book_id) workbookBookIds.push(String(tb.book_id).trim());
+            return;
+          }
+
+          // 2) 주교재: textbook.book_type 이 '주교재'/'본교재'이거나 비-메인 키워드가 없는 교재
+          if (
+            (bType === '주교재' || bType === '본교재' || !bType) &&
+            !NON_MAIN_BOOK_KEYWORDS_REGEX.test(bTitle)
+          ) {
+            mainBookTitles.add(bTitle);
+            if (tb.book_id) mainBookIds.push(String(tb.book_id).trim());
+          }
+        });
+      }
+
+      const mainBookIdSet = new Set(mainBookIds);
+      const workbookBookIdSet = new Set(workbookBookIds);
+      const allTargetBookIds = Array.from(new Set([...mainBookIds, ...workbookBookIds]));
+
+      // 🌟 book_id를 소규모 청크로 나누고 tq_id 커서(키셋) 페이징 + 제한 병렬 조회로
+      // 대용량 OFFSET 스캔으로 인한 PostgREST 57014 statement_timeout 원천 방지
+      if (allTargetBookIds.length > 0) {
+        const BOOK_CHUNK_SIZE = 10;
+        const PAGE_LIMIT = 1000;
+        const CONCURRENCY = 4;
+
+        const bookChunks: string[][] = [];
+        for (let i = 0; i < allTargetBookIds.length; i += BOOK_CHUNK_SIZE) {
+          bookChunks.push(allTargetBookIds.slice(i, i + BOOK_CHUNK_SIZE));
+        }
+
+        const fetchChunk = async (chunk: string[]) => {
+          let lastTqId: string | number | null = null;
+          while (true) {
+            let query = supabaseClient
+              .from('textbook_question')
+              .select('tq_id, book_id, question_id')
+              .in('book_id', chunk)
+              .not('question_id', 'is', null)
+              .order('tq_id', { ascending: true })
+              .limit(PAGE_LIMIT);
+
+            if (lastTqId !== null) {
+              query = query.gt('tq_id', lastTqId);
+            }
+
+            const { data: tqRows, error } = await query;
+            if (error) {
+              hadError = true;
+              console.error('textbook_question 청크 조회 실패:', error);
+              break;
+            }
+            if (!tqRows || tqRows.length === 0) break;
+
+            for (const r of tqRows) {
+              if (!r.question_id) continue;
+              const qid = String(r.question_id).trim();
+              const bid = String(r.book_id || '').trim();
+              if (workbookBookIdSet.has(bid)) {
+                workbookQuestionIds.add(qid);
+              } else if (mainBookIdSet.has(bid)) {
+                mainQuestionIds.add(qid);
+              }
+            }
+
+            if (tqRows.length < PAGE_LIMIT) break;
+            const nextCursor = tqRows[tqRows.length - 1]?.tq_id;
+            if (nextCursor === undefined || nextCursor === null || nextCursor === lastTqId) break;
+            lastTqId = nextCursor;
+          }
+        };
+
+        let cursorIdx = 0;
+        const workers = Array.from({ length: Math.min(CONCURRENCY, bookChunks.length) }, async () => {
+          while (cursorIdx < bookChunks.length) {
+            const idx = cursorIdx++;
+            await fetchChunk(bookChunks[idx]);
+          }
+        });
+        await Promise.all(workers);
+      }
+    } catch (e) {
+      hadError = true;
+      console.error('주교재/워크북 제외 목록 조회 실패:', e);
+    }
+
+    const result: TextbookExclusionInfo = {
+      timestamp: Date.now(),
+      mainBookTitles,
+      mainQuestionIds,
+      workbookBookTitles,
+      workbookQuestionIds,
+    };
+
+    if (!hadError) {
+      cachedMainExclusion = result;
+    }
+    return result;
+  })().finally(() => {
+    inFlightMainExclusion = null;
+  });
+
+  return inFlightMainExclusion;
 };
 
 // 🌟 문항이 '워크북' 문항인지 판별하는 헬퍼 (/lesson의 워크북 DB 및 교재명 연동)
