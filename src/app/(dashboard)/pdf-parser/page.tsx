@@ -3234,7 +3234,12 @@ export default function PdfParserPage() {
                 thk_taxonomy_id: safeThkId,
                 thk_taxonomy_name: safeThkId ? item.thk_taxonomy_name || null : null,
                 difficulty: safeDiff,
-                solving_probability: item.solving_probability ?? 50,
+                solving_probability:
+                  item.solving_probability != null &&
+                  String(item.solving_probability).trim() !== "" &&
+                  Number.isFinite(Number(item.solving_probability))
+                    ? Math.round(Number(item.solving_probability))
+                    : 50,
                 cognitive_level: safeCogLevel,
                 problem_type: safeProbType,
                 ...newlyUploadedPatch,
@@ -3296,7 +3301,12 @@ export default function PdfParserPage() {
             sub_sub_num: Number(item.sub_sub_num) || 0,
             problem_type: safeProbType,
             difficulty: safeDiff,
-            solving_probability: item.solving_probability ?? 50,
+            solving_probability:
+              item.solving_probability != null &&
+              String(item.solving_probability).trim() !== "" &&
+              Number.isFinite(Number(item.solving_probability))
+                ? Math.round(Number(item.solving_probability))
+                : 50,
             cognitive_level: safeCogLevel,
             taxonomy_id: safeTaxId,
             taxonomy_name: item.taxonomy_name || null,

@@ -305,7 +305,9 @@ export async function POST(req: NextRequest) {
             ? diffStr
             : "중",
           solving_probability:
-            typeof p.solving_probability === "number" ? p.solving_probability : 60,
+            typeof p.solving_probability === "number" && Number.isFinite(p.solving_probability)
+              ? Math.round(p.solving_probability)
+              : 60,
           cognitive_level: ["이해 및 연산", "적용 및 응용", "추론 및 문제 해결"].includes(
             cogStr
           )

@@ -494,7 +494,12 @@ export default function TwinManagerPage() {
         question_number: editingQ.question_number,
         sub_num: editingQ.sub_num ? parseInt(editingQ.sub_num) : null,
         difficulty: editingQ.difficulty,
-        solving_probability: editingQ.solving_probability ? parseFloat(editingQ.solving_probability) : null,
+        solving_probability: (() => {
+          const raw = String(editingQ.solving_probability ?? '').trim();
+          if (raw === '') return null;
+          const num = Number(raw);
+          return Number.isFinite(num) ? Math.round(num) : null;
+        })(),
         step_1_concept: editingQ.step_1_concept,
         step_2_approach: editingQ.step_2_approach,
         step_3_process: editingQ.step_3_process,

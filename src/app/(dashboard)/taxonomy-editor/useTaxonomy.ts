@@ -1605,7 +1605,9 @@ export function useTaxonomy() {
     try {
       const parsedPage = parseInt(editForm.page_number) || null;
       const parsedSubNum = parseInt(editForm.sub_num) || 0;
-      const parsedProbability = editForm.solving_probability.trim() === '' ? null : parseFloat(editForm.solving_probability);
+      const rawProbStr = String(editForm.solving_probability ?? '').trim();
+      const rawProbNum = rawProbStr === '' ? null : Number(rawProbStr);
+      const parsedProbability = rawProbNum !== null && Number.isFinite(rawProbNum) ? Math.round(rawProbNum) : null;
 
       const normalizeBoxForDb = (raw: any) => {
         if (!raw || raw === 'null' || raw === 'undefined') return null;
