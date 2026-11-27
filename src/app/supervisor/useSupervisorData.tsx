@@ -870,7 +870,7 @@ export function useSupervisorData() {
                     const dbRechecks = dbRecord.active_rechecks || {};
 
                     const isSystemCallKey = (k: string) =>
-                        !k || k === 'REFRESH' || k.startsWith('__') || (k !== 'general' && isNaN(Number(k)));
+                        !k || k === 'REFRESH' || k === 'FORCE_RESET' || k.startsWith('__') || (k !== 'general' && isNaN(Number(k)));
 
                     Object.keys(dbCalls).forEach(qNumKey => {
                         if (isSystemCallKey(qNumKey)) return;
@@ -1107,6 +1107,18 @@ export function useSupervisorData() {
                 offlineLogSentRef.current.delete(seat);
                 pendingDeletesRef.current[seat] = Date.now() + PENDING_GUARD_MS;
             }
+        } else if (action === 'force_reset') {
+            if (currentStudents[seat]) {
+                if (currentStudents[seat].status !== 'offline') currentStudents[seat].status = 'idle';
+                currentStudents[seat].awaySince = null;
+                currentStudents[seat].calls = {};
+                currentStudents[seat].rechecks = {};
+                currentStudents[seat].endRequestPending = false;
+            }
+            removeLogsByTypeAndSeat('call', seat);
+            removeLogsByTypeAndSeat('away', seat);
+            removeLogsByTypeAndSeat('recheck', seat);
+            removeLogsByTypeAndSeat('end_request', seat);
         } else if (action === 'resolve_recheck') {
             if (currentStudents[seat] && currentStudents[seat].rechecks) {
                 delete currentStudents[seat].rechecks[uid];
@@ -1670,6 +1682,7 @@ export function useSupervisorData() {
                     !qNumStr ||
                     qNumStr === 'NaN' ||
                     qNumStr === 'REFRESH' ||
+                    qNumStr === 'FORCE_RESET' ||
                     qNumStr.startsWith('__') ||
                     (qNumStr !== 'general' && isNaN(Number(qNumStr)));
 
@@ -1734,6 +1747,7 @@ export function useSupervisorData() {
         } else if (type === 'force_reset') {
             if (currentStudents[seat]) {
                 const st = currentStudents[seat];
+                const resetAt = Date.now();
                 if (st.status !== 'offline') st.status = 'idle';
                 st.awaySince = null;
                 st.calls = {};
@@ -1743,18 +1757,44 @@ export function useSupervisorData() {
                 removeLogsByTypeAndSeat('away', seat);
                 removeLogsByTypeAndSeat('recheck', seat);
                 removeLogsByTypeAndSeat('end_request', seat);
-                
-                if (st.sessionId) {
-                    supabaseClient.from('clinic_session_state').update({
-                        active_calls: { REFRESH: Date.now() },
-                        active_rechecks: {},
-                        away_since: null,
-                        end_request_status: 'idle'
-                    }).eq('id', st.sessionId).then();
+                updateStudents(currentStudents);
+
+                let targetSessionId = st.sessionId;
+                if (!targetSessionId && st.studentId) {
+                    const { data: latestRow } = await supabaseClient
+                        .from('clinic_session_state')
+                        .select('id')
+                        .eq('student_id', st.studentId)
+                        .eq('session_date', getKSTDateString())
+                        .is('ended_at', null)
+                        .order('session_no', { ascending: false })
+                        .limit(1)
+                        .maybeSingle();
+                    targetSessionId = latestRow?.id;
                 }
 
-                sendToStudent(seat, 'force_refresh');
-                appendLog('border-fuchsia-500', 'bg-fuchsia-100 text-fuchsia-700', '강제초기화', `[${seat}] ${st.name} 상태 리셋`, `프리징된 모든 상태를 강제로 해제하고 기기를 새로고침했습니다.`);
+                if (targetSessionId) {
+                    const { data: prevSess } = await supabaseClient
+                        .from('clinic_session_state')
+                        .select('active_calls')
+                        .eq('id', targetSessionId)
+                        .maybeSingle();
+                    const preservedVerified = prevSess?.active_calls?.['__last_verified'];
+                    const nextCalls: Record<string, any> = { FORCE_RESET: resetAt };
+                    if (preservedVerified) nextCalls['__last_verified'] = preservedVerified;
+
+                    const { error: resetErr } = await supabaseClient.from('clinic_session_state').update({
+                        active_calls: nextCalls,
+                        active_rechecks: {},
+                        away_since: null,
+                        end_request_status: null,
+                    }).eq('id', targetSessionId);
+                    if (resetErr) console.error('좌석 강제 리셋 DB 업데이트 오류:', resetErr);
+                }
+
+                sendToStudent(seat, 'force_reset', { resetAt });
+                appendLog('border-fuchsia-500', 'bg-fuchsia-100 text-fuchsia-700', '강제초기화', `[${seat}] ${st.name} 상태 리셋`, `프리징된 모든 상태를 강제로 해제하고 학생 화면을 새로고침했습니다.`);
+                return;
             }
         }
         updateStudents(currentStudents);

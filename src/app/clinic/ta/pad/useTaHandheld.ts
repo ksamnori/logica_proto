@@ -435,7 +435,7 @@ export function useTaHandheld() {
 
       const dbCalls = row.active_calls || {};
       Object.keys(dbCalls).forEach(qNumKey => {
-        if (!qNumKey || qNumKey === 'REFRESH' || qNumKey.startsWith('__') || dbCalls[qNumKey]?.verdict || (qNumKey !== 'general' && isNaN(Number(qNumKey)))) return;
+        if (!qNumKey || qNumKey === 'REFRESH' || qNumKey === 'FORCE_RESET' || qNumKey.startsWith('__') || dbCalls[qNumKey]?.verdict || (qNumKey !== 'general' && isNaN(Number(qNumKey)))) return;
         const key = `${row.seat}::${qNumKey}`;
         if (!callsRef.current[key]) {
           const c = dbCalls[qNumKey] || {};
@@ -633,6 +633,26 @@ export function useTaHandheld() {
       flushState();
     } else if (action === 'force_return_to_seat') {
       if (activeStudentsRef.current[seat]) activeStudentsRef.current[seat].status = 'idle';
+      flushState();
+    } else if (action === 'force_reset') {
+      Object.keys(callsRef.current).forEach(key => {
+        if (callsRef.current[key].seat === seat) {
+          delete callsRef.current[key];
+          setMarkState(prev => { const n = { ...prev }; delete n[key]; return n; });
+          setSelectedCallKey(prev => prev === key ? null : prev);
+        }
+      });
+      Object.keys(rechecksRef.current).forEach(key => {
+        if (rechecksRef.current[key].seat === seat) {
+          delete rechecksRef.current[key];
+          setMarkState(prev => { const n = { ...prev }; delete n[key]; return n; });
+          setSelectedCallKey(prev => prev === key ? null : prev);
+        }
+      });
+      if (activeStudentsRef.current[seat]) {
+        activeStudentsRef.current[seat].calls = {};
+        activeStudentsRef.current[seat].status = 'idle';
+      }
       flushState();
     } else if (action === 'resolve_recheck') {
       const { uid } = payload;

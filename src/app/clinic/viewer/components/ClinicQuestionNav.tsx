@@ -22,7 +22,7 @@ interface ClinicQuestionNavProps {
 export function ClinicQuestionNav({
   questions, currentQIndex, setCurrentQIndex, bookFilter, switchBookFilter,
   availableBooks, visibleIndices, qBoxStatus, studentAnswers, callState,
-  setCanvasClearTrigger, isTimedRound, timeIsUp, setSubmitConfirmModal
+  isTimedRound, timeIsUp, setSubmitConfirmModal
 }: ClinicQuestionNavProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -71,7 +71,7 @@ export function ClinicQuestionNav({
             else cls = 'border-slate-200 text-slate-500 hover:bg-slate-50';
 
             return (
-              <button key={i} onClick={() => { setCurrentQIndex(i); setCanvasClearTrigger(p=>p+1); }} className={`relative w-16 h-16 shrink-0 border-[3px] rounded-xl font-bold text-2xl shadow-sm transition-colors flex items-center justify-center ${cls}`}>
+              <button key={i} onClick={() => { if (i !== currentQIndex) setCurrentQIndex(i); }} className={`relative w-16 h-16 shrink-0 border-[3px] rounded-xl font-bold text-2xl shadow-sm transition-colors flex items-center justify-center ${cls}`}>
                 {!isCalled && symbol ? symbol : i + 1}
                 {!isCalled && !status && hasAnswer && <span className="absolute top-1.5 right-1.5 w-3 h-3 rounded-full bg-emerald-500 shadow-sm border-2 border-white"></span>}
                 {!isCalled && symbol && <span className={`absolute -bottom-1 -right-1 rounded px-1.5 py-0.5 text-xs font-bold leading-none ${isCurrent ? 'bg-white/90 text-slate-700' : 'bg-white/80 text-slate-500 opacity-80'}`}>{i + 1}</span>}

@@ -46,13 +46,20 @@ export const ClinicCanvas: React.FC<ClinicCanvasProps> = ({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const ctxRef = useRef<CanvasRenderingContext2D | null>(null);
   const logicalSizeRef = useRef<{ w: number; h: number }>({ w: 0, h: 0 });
+  const backingScaleRef = useRef<number>(CANVAS_BACKING_SCALE);
 
   const isDrawing = useRef(false);
   const activePointerId = useRef<number | null>(null);
   const activePointerType = useRef<string>('');
-  const penSeenInSession = useRef<boolean>(false);
+  const lastPenActiveAtRef = useRef<number>(0);
+  const lastPointerMoveAtRef = useRef<number>(0);
   const hasUnsavedStrokeRef = useRef(false);
   const hasAnyInkRef = useRef(false);
+  const isEncodingBlobRef = useRef(false);
+  const strokeVersionRef = useRef(0);
+  const initRafRef = useRef<number | null>(null);
+  const latestClearTriggerRef = useRef<number>(clearTrigger);
+  latestClearTriggerRef.current = clearTrigger;
 
   const lastPos = useRef<{ x: number; y: number } | null>(null);
   const lastMid = useRef<{ x: number; y: number } | null>(null);
@@ -74,6 +81,30 @@ export const ClinicCanvas: React.FC<ClinicCanvasProps> = ({
   const qIndexRef = useRef(qIndex);
   qIndexRef.current = qIndex;
 
+  // 태블릿/iOS Safari의 최대 캔버스 픽셀 제한(16.7M px) 초과로 인한 그리기 먹통 방지
+  const resolveSafeBackingScale = (cssW: number, cssH: number): number => {
+    const MAX_CANVAS_PIXELS = 12_000_000;
+    const areaAtDefault = cssW * cssH * CANVAS_BACKING_SCALE * CANVAS_BACKING_SCALE;
+    if (areaAtDefault <= MAX_CANVAS_PIXELS) return CANVAS_BACKING_SCALE;
+    return Math.max(1, Math.min(CANVAS_BACKING_SCALE, Math.sqrt(MAX_CANVAS_PIXELS / Math.max(1, cssW * cssH))));
+  };
+
+  const resetActiveStrokeState = useCallback(() => {
+    const canvas = canvasRef.current;
+    if (activePointerId.current != null && canvas) {
+      try {
+        if (canvas.hasPointerCapture?.(activePointerId.current)) {
+          canvas.releasePointerCapture(activePointerId.current);
+        }
+      } catch {}
+    }
+    isDrawing.current = false;
+    activePointerId.current = null;
+    activePointerType.current = '';
+    lastPos.current = null;
+    lastMid.current = null;
+  }, []);
+
   const applyContextStyles = useCallback((ctx: CanvasRenderingContext2D) => {
     const { penColor, penWidth, eraser } = styleRef.current;
     ctx.lineCap = 'round';
@@ -85,6 +116,8 @@ export const ClinicCanvas: React.FC<ClinicCanvasProps> = ({
   }, []);
 
   const stampMetadataPixel = (ctx: CanvasRenderingContext2D) => {
+    // 2배수 기본 스케일일 때만 2x 메타데이터 시그니처를 기록 (축소 폴백 시 오판 방지)
+    if (backingScaleRef.current !== CANVAS_BACKING_SCALE) return;
     try {
       const px = ctx.createImageData(1, 1);
       px.data[0] = CANVAS_META_SIGNATURE.r;
@@ -133,18 +166,35 @@ export const ClinicCanvas: React.FC<ClinicCanvasProps> = ({
         }
       }
 
+      // 이전 비동기 PNG 인코딩이 진행 중이면 중복 인코딩 폭주를 막고 완료 후 재시도
+      if (isEncodingBlobRef.current) return studentDrawings.current[targetIdx] || null;
+      isEncodingBlobRef.current = true;
+      const versionSnapshot = strokeVersionRef.current;
+
       canvas.toBlob((blob) => {
-        if (!blob) return;
+        if (!blob) {
+          isEncodingBlobRef.current = false;
+          return;
+        }
         const reader = new FileReader();
         reader.onloadend = () => {
+          isEncodingBlobRef.current = false;
           const dataUrl = reader.result as string;
-          // 비동기 변환 도중 문항이 바뀌었더라도 targetIdx에 정확히 기록하되, 지우기 이후 레이스 방지
+          // 비동기 변환 도중 지우기/초기화나 더 최신 획이 발생했으면 구버전 결과로 덮어쓰지 않음
           if (!hasAnyInkRef.current && targetIdx === qIndexRef.current) return;
+          if (targetIdx === qIndexRef.current && strokeVersionRef.current !== versionSnapshot) {
+            return;
+          }
           studentDrawings.current[targetIdx] = dataUrl;
           studentAnswers.current[targetIdx] = dataUrl;
-          hasUnsavedStrokeRef.current = false;
+          if (strokeVersionRef.current === versionSnapshot) {
+            hasUnsavedStrokeRef.current = false;
+          }
           onStrokeSavedRef.current?.(targetIdx);
           forceUpdate();
+        };
+        reader.onerror = () => {
+          isEncodingBlobRef.current = false;
         };
         reader.readAsDataURL(blob);
       }, 'image/png');
@@ -175,69 +225,123 @@ export const ClinicCanvas: React.FC<ClinicCanvasProps> = ({
   }, [saveCanvasData, studentDrawings]);
 
   const initCanvas = useCallback(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const rect = canvas.getBoundingClientRect();
-    if (rect.width === 0 || rect.height === 0) {
-      requestAnimationFrame(initCanvas);
-      return;
-    }
+    const attemptInit = () => {
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      const rect = canvas.getBoundingClientRect();
+      if (rect.width === 0 || rect.height === 0) {
+        initRafRef.current = requestAnimationFrame(attemptInit);
+        return;
+      }
+      initRafRef.current = null;
 
-    const cssW = Math.max(1, Math.round(rect.width));
-    const cssH = Math.max(1, Math.round(rect.height));
-    logicalSizeRef.current = { w: cssW, h: cssH };
+      // 문항 전환/지우기 시 남아있던 포인터 잠금 상태를 완전히 초기화
+      resetActiveStrokeState();
+      hasUnsavedStrokeRef.current = false;
+      strokeVersionRef.current += 1;
 
-    canvas.width = cssW * CANVAS_BACKING_SCALE;
-    canvas.height = cssH * CANVAS_BACKING_SCALE;
+      const cssW = Math.max(1, Math.round(rect.width));
+      const cssH = Math.max(1, Math.round(rect.height));
+      const safeScale = resolveSafeBackingScale(cssW, cssH);
+      logicalSizeRef.current = { w: cssW, h: cssH };
+      backingScaleRef.current = safeScale;
 
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
+      canvas.width = Math.max(1, Math.round(cssW * safeScale));
+      canvas.height = Math.max(1, Math.round(cssH * safeScale));
 
-    ctxRef.current = ctx;
-    ctx.setTransform(CANVAS_BACKING_SCALE, 0, 0, CANVAS_BACKING_SCALE, 0, 0);
-    applyContextStyles(ctx);
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
 
-    const saved = studentDrawings.current[qIndex];
-    hasAnyInkRef.current = Boolean(saved);
-    if (saved) {
-      const img = new Image();
-      img.onload = () => {
-        if (!ctxRef.current || qIndexRef.current !== qIndex) return;
-        const drawW = Math.round(img.naturalWidth / CANVAS_BACKING_SCALE) || cssW;
-        const drawH = Math.round(img.naturalHeight / CANVAS_BACKING_SCALE) || cssH;
-        ctxRef.current.save();
-        ctxRef.current.globalCompositeOperation = 'source-over';
-        // 기존 필기를 늘리거나 찌그러뜨리지 않고 원본 논리 좌표 크기 그대로 복원
-        ctxRef.current.drawImage(
-          img,
-          0,
-          0,
-          img.naturalWidth > 1000 ? drawW : cssW,
-          img.naturalWidth > 1000 ? drawH : cssH
-        );
-        ctxRef.current.restore();
-      };
-      img.src = saved;
-    }
-  }, [qIndex, applyContextStyles, studentDrawings]);
+      ctxRef.current = ctx;
+      ctx.setTransform(safeScale, 0, 0, safeScale, 0, 0);
+      applyContextStyles(ctx);
+
+      const saved = studentDrawings.current[qIndex];
+      hasAnyInkRef.current = Boolean(saved);
+      if (saved) {
+        const img = new Image();
+        img.onload = () => {
+          if (!ctxRef.current || qIndexRef.current !== qIndex) return;
+          const drawW = Math.round(img.naturalWidth / CANVAS_BACKING_SCALE) || cssW;
+          const drawH = Math.round(img.naturalHeight / CANVAS_BACKING_SCALE) || cssH;
+          ctxRef.current.save();
+          ctxRef.current.globalCompositeOperation = 'source-over';
+          // 기존 필기를 늘리거나 찌그러뜨리지 않고 원본 논리 좌표 크기 그대로 복원
+          ctxRef.current.drawImage(
+            img,
+            0,
+            0,
+            img.naturalWidth > 1000 ? drawW : cssW,
+            img.naturalWidth > 1000 ? drawH : cssH
+          );
+          ctxRef.current.restore();
+        };
+        img.src = saved;
+      }
+    };
+    attemptInit();
+  }, [qIndex, applyContextStyles, resetActiveStrokeState, studentDrawings]);
 
   // 문항 변경 또는 지우기(clearTrigger) 시에만 캔버스 초기화 (색상/굵기 변경 시에는 절대 초기화하지 않음)
   useEffect(() => {
     const currentIdx = qIndex;
-    const raf = requestAnimationFrame(() => initCanvas());
+    const effectClearTrigger = clearTrigger;
+    initRafRef.current = requestAnimationFrame(() => initCanvas());
     return () => {
-      cancelAnimationFrame(raf);
+      if (initRafRef.current != null) {
+        cancelAnimationFrame(initRafRef.current);
+        initRafRef.current = null;
+      }
       if (saveTimeoutRef.current) {
         clearTimeout(saveTimeoutRef.current);
         saveTimeoutRef.current = null;
       }
-      if (hasUnsavedStrokeRef.current || isDrawing.current) {
+      // 같은 문항에서 '모두 지우기'나 '다시 풀기'로 clearTrigger만 증가한 경우에는 지운 필기를 재저장하지 않음
+      const isSameQuestionClear =
+        latestClearTriggerRef.current !== effectClearTrigger && qIndexRef.current === currentIdx;
+      if (!isSameQuestionClear && (hasUnsavedStrokeRef.current || isDrawing.current)) {
         saveCanvasData(currentIdx, true);
       }
+      resetActiveStrokeState();
     };
-  }, [qIndex, clearTrigger, initCanvas, saveCanvasData]);
+  }, [qIndex, clearTrigger, initCanvas, resetActiveStrokeState, saveCanvasData]);
 
-  // 문제 이미지(<img>) 지연 로드나 수식 렌더링으로 스테이지 크기가 커질 때 기존 필기를 보존한 채 캔버스 버퍼 확장
+  // 윈도우 포커스 이탈/탭 전환 시 pointerup 누락으로 isDrawing이 영구 고정되는 현상 방지
+  useEffect(() => {
+    const finishStaleStroke = () => {
+      if (!isDrawing.current) return;
+      const ctx = ctxRef.current;
+      if (ctx && lastPos.current && lastMid.current) {
+        ctx.save();
+        applyContextStyles(ctx);
+        ctx.beginPath();
+        ctx.moveTo(lastMid.current.x, lastMid.current.y);
+        ctx.lineTo(lastPos.current.x, lastPos.current.y);
+        ctx.stroke();
+        ctx.restore();
+      }
+      resetActiveStrokeState();
+      if (hasAnyInkRef.current) {
+        if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
+        const idxSnapshot = qIndexRef.current;
+        saveTimeoutRef.current = setTimeout(() => {
+          saveCanvasData(idxSnapshot, false);
+          saveTimeoutRef.current = null;
+        }, 300);
+      }
+    };
+    const handleVisibility = () => {
+      if (document.visibilityState !== 'visible') finishStaleStroke();
+    };
+    window.addEventListener('blur', finishStaleStroke);
+    document.addEventListener('visibilitychange', handleVisibility);
+    return () => {
+      window.removeEventListener('blur', finishStaleStroke);
+      document.removeEventListener('visibilitychange', handleVisibility);
+    };
+  }, [applyContextStyles, resetActiveStrokeState, saveCanvasData]);
+
+  // 문제 이미지(<img>) 지연 로드나 수식 렌더링으로 스테이지 크기가 바뀔 때 기존 필기를 보존한 채 캔버스 버퍼 동기화
   useEffect(() => {
     const canvas = canvasRef.current;
     const targetEl = canvas?.parentElement || canvas;
@@ -255,10 +359,8 @@ export const ClinicCanvas: React.FC<ClinicCanvasProps> = ({
       if (prev.w === 0 || prev.h === 0) return;
       if (Math.abs(nextW - prev.w) < 2 && Math.abs(nextH - prev.h) < 2) return;
 
-      // 높이가 줄어들 때 기존 아래쪽 필기가 잘리지 않도록 확장 위주(가로는 동기화, 세로는 max 유지 또는 안전 복사)
-      const targetW = nextW;
-      const targetH = Math.max(nextH, hasAnyInkRef.current ? prev.h : nextH);
-      if (targetW === prev.w && targetH === prev.h) return;
+      const nextScale = resolveSafeBackingScale(nextW, nextH);
+      const prevScale = backingScaleRef.current;
 
       const backup = document.createElement('canvas');
       backup.width = c.width;
@@ -268,16 +370,16 @@ export const ClinicCanvas: React.FC<ClinicCanvasProps> = ({
         bCtx.drawImage(c, 0, 0);
       }
 
-      logicalSizeRef.current = { w: targetW, h: targetH };
-      c.width = targetW * CANVAS_BACKING_SCALE;
-      c.height = targetH * CANVAS_BACKING_SCALE;
+      logicalSizeRef.current = { w: nextW, h: nextH };
+      backingScaleRef.current = nextScale;
+      c.width = Math.max(1, Math.round(nextW * nextScale));
+      c.height = Math.max(1, Math.round(nextH * nextScale));
 
-      ctx.setTransform(CANVAS_BACKING_SCALE, 0, 0, CANVAS_BACKING_SCALE, 0, 0);
+      ctx.setTransform(nextScale, 0, 0, nextScale, 0, 0);
       if (bCtx) {
         ctx.save();
-        ctx.setTransform(1, 0, 0, 1, 0, 0);
         ctx.globalCompositeOperation = 'source-over';
-        ctx.drawImage(backup, 0, 0);
+        ctx.drawImage(backup, 0, 0, backup.width / prevScale, backup.height / prevScale);
         ctx.restore();
       }
       applyContextStyles(ctx);
@@ -289,7 +391,7 @@ export const ClinicCanvas: React.FC<ClinicCanvasProps> = ({
         saveTimeoutRef.current = setTimeout(() => {
           saveCanvasData(idxSnapshot, false);
           saveTimeoutRef.current = null;
-        }, 120);
+        }, 500);
       }
     });
 
@@ -315,12 +417,18 @@ export const ClinicCanvas: React.FC<ClinicCanvasProps> = ({
   };
 
   const startDraw = (e: any) => {
+    const now = Date.now();
     const pType = String(e.pointerType || '');
     if (pType === 'pen') {
-      penSeenInSession.current = true;
-    } else if (pType === 'touch' && penSeenInSession.current) {
-      // 스타일러스 사용 중인 패드에서 손바닥(touch)이 먼저 닿아 펜 획을 가로막는 현상 원천 차단
-      return;
+      lastPenActiveAtRef.current = now;
+    } else if (pType === 'touch') {
+      // 펜을 사용 중인 동안·직후(2.5초 이내)나 손바닥 크기 접촉은 팜 리젝션으로 무시하되,
+      // 펜을 내려놓고 손가락으로 필기할 때는 영구 차단되지 않도록 자동 허용
+      const isRecentPen = lastPenActiveAtRef.current > 0 && now - lastPenActiveAtRef.current < 2500;
+      const isPalmSized = lastPenActiveAtRef.current > 0 && ((Number(e.width) || 0) > 28 || (Number(e.height) || 0) > 28);
+      if ((isDrawing.current && activePointerType.current === 'pen') || isRecentPen || isPalmSized) {
+        return;
+      }
     }
 
     if (saveTimeoutRef.current) {
@@ -328,28 +436,36 @@ export const ClinicCanvas: React.FC<ClinicCanvasProps> = ({
       saveTimeoutRef.current = null;
     }
 
-    // 만약 손바닥(touch)이 먼저 인식된 직후 스타일러스(pen)가 들어오면 즉시 펜으로 주도권 전환
+    // 이전 스트로크의 pointerup이 누락되어 isDrawing이 고착된 경우(펜/마우스 재입력, 또는 1.2초 이상 정지된 stale 터치) 즉시 복구
     if (isDrawing.current) {
-      if (pType === 'pen' && activePointerType.current !== 'pen') {
-        try {
-          if (activePointerId.current != null && canvasRef.current) {
-            canvasRef.current.releasePointerCapture(activePointerId.current);
-          }
-        } catch {}
-        isDrawing.current = false;
+      const isPenTakeover = pType === 'pen';
+      const isMouseTakeover = pType === 'mouse' && activePointerId.current !== e.pointerId;
+      const isStaleTouch =
+        pType === 'touch' &&
+        (activePointerId.current === e.pointerId ||
+          (Boolean(e.isPrimary) && now - lastPointerMoveAtRef.current > 1200));
+
+      if (isPenTakeover || isMouseTakeover || isStaleTouch) {
+        resetActiveStrokeState();
       } else {
         return;
       }
     }
 
     const canvas = canvasRef.current;
-    if (!canvas || !ctxRef.current) return;
+    if (!canvas) return;
+    if (!ctxRef.current) {
+      initCanvas();
+    }
+    if (!ctxRef.current) return;
 
     isDrawing.current = true;
     hasUnsavedStrokeRef.current = true;
     hasAnyInkRef.current = true;
+    strokeVersionRef.current += 1;
     activePointerId.current = e.pointerId;
     activePointerType.current = pType;
+    lastPointerMoveAtRef.current = now;
 
     try {
       canvas.setPointerCapture(e.pointerId);
@@ -387,6 +503,12 @@ export const ClinicCanvas: React.FC<ClinicCanvasProps> = ({
       return;
     }
 
+    const now = Date.now();
+    lastPointerMoveAtRef.current = now;
+    if (activePointerType.current === 'pen') {
+      lastPenActiveAtRef.current = now;
+    }
+
     const events = e.getCoalescedEvents ? e.getCoalescedEvents() : [e];
     if (!events || events.length === 0) return;
 
@@ -410,11 +532,15 @@ export const ClinicCanvas: React.FC<ClinicCanvasProps> = ({
   const stopDraw = (e: any) => {
     if (
       !isDrawing.current ||
-      e.pointerId !== activePointerId.current ||
+      (e?.pointerId != null && activePointerId.current != null && e.pointerId !== activePointerId.current) ||
       !canvasRef.current ||
       !ctxRef.current
     ) {
       return;
+    }
+
+    if (activePointerType.current === 'pen') {
+      lastPenActiveAtRef.current = Date.now();
     }
 
     if (lastPos.current && lastMid.current) {
@@ -424,25 +550,18 @@ export const ClinicCanvas: React.FC<ClinicCanvasProps> = ({
       ctxRef.current.stroke();
     }
 
-    isDrawing.current = false;
-    activePointerId.current = null;
-    activePointerType.current = '';
-    lastPos.current = null;
-    lastMid.current = null;
-
-    try {
-      if (e?.pointerId != null) canvasRef.current.releasePointerCapture(e.pointerId);
-    } catch {}
+    resetActiveStrokeState();
 
     if (saveTimeoutRef.current) {
       clearTimeout(saveTimeoutRef.current);
     }
-    const targetIdx = qIndex;
-    // 유휴 디바운스를 400ms -> 120ms로 단축하고, 제출 시에는 flushActiveClinicCanvas()가 0ms 동기 플러시 수행
+    const targetIdx = qIndexRef.current;
+    // 제출·문항이동 시 flushActiveClinicCanvas()가 0ms 동기 플러시를 보장하므로,
+    // 평상시 유휴 디바운스는 500ms로 두어 연속 필기 중 PNG 인코딩 프리징 방지
     saveTimeoutRef.current = setTimeout(() => {
       saveCanvasData(targetIdx, false);
       saveTimeoutRef.current = null;
-    }, 120);
+    }, 500);
   };
 
   return (
@@ -453,11 +572,12 @@ export const ClinicCanvas: React.FC<ClinicCanvasProps> = ({
         backgroundSize: '32px 32px',
         backgroundPosition: '16px 16px',
       }}
-      className="absolute inset-0 w-full h-full cursor-crosshair touch-none"
+      className="absolute inset-0 z-10 w-full h-full cursor-crosshair touch-none"
       onPointerDown={startDraw}
       onPointerMove={draw}
       onPointerUp={stopDraw}
       onPointerCancel={stopDraw}
+      onLostPointerCapture={stopDraw}
     />
   );
 };

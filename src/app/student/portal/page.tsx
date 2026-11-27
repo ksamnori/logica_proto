@@ -99,6 +99,63 @@ export default function StudentPortal() {
     }, []);
 
     const portalPresenceLimiterRef = useRef(createPresenceRateLimiter({ minGapMs: 8500 }));
+    const forceResetInProgressRef = useRef(false);
+
+    // 🌟 관리자(/supervisor) 강제 좌석 리셋 신호 처리 (채점 확정 REFRESH와 완전 분리)
+    const executePortalForceReset = useCallback(async (resetTsRaw?: any) => {
+        const resetTs = Number(resetTsRaw) || Date.now();
+        const LAST_RESET_KEY = 'logica_last_handled_force_reset_ts';
+        const sid = clinicSessionRef.current?.id;
+
+        try {
+            const lastHandled = Number(sessionStorage.getItem(LAST_RESET_KEY) || '0');
+            if (resetTsRaw && lastHandled > 0 && resetTs <= lastHandled) {
+                if (sid) {
+                    const { data: row } = await supabaseClient.from('clinic_session_state').select('active_calls').eq('id', sid).maybeSingle();
+                    if (row?.active_calls && row.active_calls['FORCE_RESET']) {
+                        const cleaned = { ...row.active_calls };
+                        delete cleaned['FORCE_RESET'];
+                        await supabaseClient.from('clinic_session_state').update({ active_calls: cleaned }).eq('id', sid);
+                    }
+                }
+                return;
+            }
+        } catch {}
+
+        if (forceResetInProgressRef.current) return;
+        forceResetInProgressRef.current = true;
+
+        try {
+            sessionStorage.setItem(LAST_RESET_KEY, String(resetTs));
+        } catch {}
+
+        setIsPortalCalling(false);
+        setIsPortalAway(false);
+        setEditorLocked(false);
+        setRecheckToast('🔄 관리자가 좌석 상태를 리셋했습니다. 잠시 후 화면을 새로고침합니다...');
+
+        if (sid) {
+            try {
+                await Promise.race([
+                    (async () => {
+                        const { data: row } = await supabaseClient.from('clinic_session_state').select('active_calls').eq('id', sid).maybeSingle();
+                        if (row?.active_calls && (row.active_calls['FORCE_RESET'] || row.active_calls['REFRESH'])) {
+                            const cleaned = { ...row.active_calls };
+                            delete cleaned['FORCE_RESET'];
+                            delete cleaned['REFRESH'];
+                            await supabaseClient.from('clinic_session_state').update({ active_calls: cleaned }).eq('id', sid);
+                        }
+                    })(),
+                    new Promise((resolve) => setTimeout(resolve, 2000)),
+                ]);
+            } catch {}
+        }
+
+        (window as any).__isForceRefreshing = true;
+        setTimeout(() => {
+            window.location.reload();
+        }, 900);
+    }, []);
 
     // 좀비 채널 재연결 원천 차단용 클린업 헬퍼 (removeChannel 시 서버 Presence가 자동 해제되므로 중복 untrack 제거)
     const disposePortalChannel = useCallback(async (_withUntrack = false) => {
@@ -256,6 +313,8 @@ export default function StudentPortal() {
                     if (endRequestRef.current) {
                         endRequestRef.current.handleResolved({ approved: !!payload.approved, cooldownUntil: payload.cooldownUntil });
                     }
+                } else if (payload.action === 'force_reset') {
+                    executePortalForceReset(payload.resetAt || payload.timestamp || Date.now());
                 } else if (payload.action === 'force_refresh') {
                     setRecheckToast('🎉 채점이 확정되어 학습 현황을 새로고침합니다!');
                     setTimeout(() => setRecheckToast(""), 4000);
@@ -275,7 +334,7 @@ export default function StudentPortal() {
                     }, 3000);
                 }
             });
-    }, [router, trackPortalPresence, disposePortalChannel]);
+    }, [router, trackPortalPresence, disposePortalChannel, executePortalForceReset]);
 
     useEffect(() => {
         const sid = localStorage.getItem('logica_student_id');
@@ -367,6 +426,11 @@ export default function StudentPortal() {
             let needsDbUpdate = false;
             const updatePayload: any = {};
             
+            if (data.active_calls && data.active_calls['FORCE_RESET']) {
+                await executePortalForceReset(data.active_calls['FORCE_RESET']);
+                return;
+            }
+
             if (data.active_calls && data.active_calls['REFRESH']) {
                 const newCalls = { ...data.active_calls };
                 delete newCalls['REFRESH'];
@@ -450,7 +514,7 @@ export default function StudentPortal() {
                 }
             }
         }
-    }, [manualSeat]);
+    }, [manualSeat, executePortalForceReset]);
 
     const runDbSyncRef = useRef<any>(null);
     useEffect(() => { runDbSyncRef.current = runDbSync; }, [runDbSync]);

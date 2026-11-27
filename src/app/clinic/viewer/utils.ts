@@ -285,7 +285,8 @@ export const measureStageDimensions = async (
  */
 export const captureCompositeQuestionImage = async (
   stageEl: HTMLElement | null,
-  rawInkDataUrl: string | null
+  rawInkDataUrl: string | null,
+  precomputedCropHeight?: number
 ): Promise<string> => {
   if (!rawInkDataUrl) return '';
   if (typeof window === 'undefined' || !stageEl) return rawInkDataUrl;
@@ -304,11 +305,19 @@ export const captureCompositeQuestionImage = async (
       new Promise((resolve) => {
         if (!src) return resolve(null);
         const im = new Image();
+        let settled = false;
+        const done = (val: HTMLImageElement | null) => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+          resolve(val);
+        };
+        const timer = setTimeout(() => done(null), 5000);
         if (useCors && !src.startsWith('data:') && !src.startsWith('blob:')) {
           im.crossOrigin = 'anonymous';
         }
-        im.onload = () => resolve(im);
-        im.onerror = () => resolve(null);
+        im.onload = () => done(im);
+        im.onerror = () => done(null);
         im.src = src;
       });
 
@@ -318,21 +327,32 @@ export const captureCompositeQuestionImage = async (
       if (src.startsWith('data:') || src.startsWith('blob:')) {
         return loadImg(src, false);
       }
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 5000);
       try {
-        const res = await fetch(src, { mode: 'cors', credentials: 'omit' });
+        const res = await fetch(src, { mode: 'cors', credentials: 'omit', signal: controller.signal });
         if (res.ok) {
           const blob = await res.blob();
           const objUrl = URL.createObjectURL(blob);
-          return await loadImg(objUrl, false);
+          try {
+            return await loadImg(objUrl, false);
+          } finally {
+            URL.revokeObjectURL(objUrl);
+          }
         }
-      } catch (e) {}
+      } catch (e) {} finally {
+        clearTimeout(timeoutId);
+      }
       return loadImg(src, true);
     };
 
     const inkImg = await loadImg(rawInkDataUrl, false);
     if (!inkImg) return rawInkDataUrl;
 
-    const { cropHeight } = await measureStageDimensions(stageEl, rawInkDataUrl);
+    const cropHeight =
+      precomputedCropHeight && precomputedCropHeight > 0
+        ? precomputedCropHeight
+        : (await measureStageDimensions(stageEl, rawInkDataUrl)).cropHeight;
     const exportH = Math.max(cropHeight, stageH);
     const scale = CANVAS_BACKING_SCALE;
     const outCanvas = document.createElement('canvas');

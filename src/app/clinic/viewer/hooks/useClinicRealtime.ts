@@ -38,6 +38,7 @@ interface UseClinicRealtimeProps {
   processCorrectAnswer: (qItem: any, idx: number, fromRecheck: boolean) => Promise<void>;
   handleTimeUp: (forceAction?: string, sessionExpired?: boolean) => Promise<void>;
   persistExamAnswersToDB: () => Promise<number>;
+  onForceReset: () => void;
   getAnswerMode: (idx: number, qItem: any) => 'pen' | 'keypad';
   router: any;
   callCooldown: any;
@@ -57,7 +58,7 @@ export function useClinicRealtime({
   mySeatRef, seatKeysRef, clinicSessionStateRef, callState, recheckState, taHintState, qBoxStatus,
   studentAnswers, studentDrawings, keypadAnswers, keypadCursor, correctSolvedCountRef,
   setEditorLocked, setRecheckToast, setMyAwayActive, setPendingRecheckReview, setSessionInfo, setPoints, setCanvasClearTrigger,
-  forceUpdate, processCorrectAnswer, handleTimeUp, persistExamAnswersToDB, getAnswerMode, router, callCooldown, awayCooldown
+  forceUpdate, processCorrectAnswer, handleTimeUp, persistExamAnswersToDB, onForceReset, getAnswerMode, router, callCooldown, awayCooldown
 }: UseClinicRealtimeProps) {
   
   const clinicChannelRef = useRef<any>(null);
@@ -69,6 +70,9 @@ export function useClinicRealtime({
   const handleTaActionRef = useRef<any>(null);
   const trackPresenceRef = useRef<any>(null);
   const presenceLimiterRef = useRef(createPresenceRateLimiter({ minGapMs: 8500 }));
+  const recheckPendingObservedAtRef = useRef<Record<number, number>>({});
+  const forceResetInProgressRef = useRef(false);
+  const lastRefreshToastAtRef = useRef<number>(0);
 
   // 🌟 questions 배열 참조가 바뀔 때마다 실시간 채널이 해체·재구독되지 않도록 최신 참조를 Ref로 유지
   const questionsRef = useRef<any[]>(questions);
@@ -77,27 +81,87 @@ export function useClinicRealtime({
 
   const callbacksRef = useRef({ 
       processCorrectAnswer, handleTimeUp, forceUpdate, setRecheckToast, 
-      setCanvasClearTrigger, setMyAwayActive, setPendingRecheckReview, persistExamAnswersToDB
+      setCanvasClearTrigger, setMyAwayActive, setPendingRecheckReview, persistExamAnswersToDB, onForceReset
   });
   
   useEffect(() => {
     callbacksRef.current = { 
         processCorrectAnswer, handleTimeUp, forceUpdate, setRecheckToast, 
-        setCanvasClearTrigger, setMyAwayActive, setPendingRecheckReview, persistExamAnswersToDB
+        setCanvasClearTrigger, setMyAwayActive, setPendingRecheckReview, persistExamAnswersToDB, onForceReset
     };
   });
 
   const runSelfCorrectionRef = useRef<any>(null);
   const checkoutHandledRef = useRef(false);
 
+  const executeForceReset = async (resetTsRaw?: any) => {
+    const resetTs = Number(resetTsRaw) || Date.now();
+    const LAST_RESET_KEY = 'logica_last_handled_force_reset_ts';
+    const sid = clinicSessionStateRef.current?.id;
+
+    // 이미 처리한 동일/이전 타임스탬프의 리셋 신호는 DB 플래그만 정리하고 재리로드하지 않음 (무한 새로고침 원천 차단)
+    try {
+      const lastHandled = Number(sessionStorage.getItem(LAST_RESET_KEY) || '0');
+      if (resetTsRaw && lastHandled > 0 && resetTs <= lastHandled) {
+        if (sid) {
+          const { data: row } = await supabaseClient.from('clinic_session_state').select('active_calls').eq('id', sid).maybeSingle();
+          if (row?.active_calls && row.active_calls['FORCE_RESET']) {
+            const cleaned = { ...row.active_calls };
+            delete cleaned['FORCE_RESET'];
+            await supabaseClient.from('clinic_session_state').update({ active_calls: cleaned }).eq('id', sid);
+          }
+        }
+        return;
+      }
+    } catch {}
+
+    if (forceResetInProgressRef.current) return;
+    forceResetInProgressRef.current = true;
+
+    try {
+      sessionStorage.setItem(LAST_RESET_KEY, String(resetTs));
+    } catch {}
+
+    // 1. 뷰어의 모든 로컬 잠금/프리징 상태 해제 + 풀이 스냅샷 백업 + 안내 토스트 표시
+    try {
+      callbacksRef.current.onForceReset();
+    } catch (e) {
+      console.error('force_reset 로컬 상태 초기화 오류:', e);
+    }
+
+    // 2. 새로고침 후 재실행되지 않도록 DB의 FORCE_RESET 플래그를 우선 제거 (네트워크 지연 대비 2초 타임아웃)
+    if (sid) {
+      try {
+        await Promise.race([
+          (async () => {
+            const { data: row } = await supabaseClient.from('clinic_session_state').select('active_calls').eq('id', sid).maybeSingle();
+            if (row?.active_calls && (row.active_calls['FORCE_RESET'] || row.active_calls['REFRESH'])) {
+              const cleaned = { ...row.active_calls };
+              delete cleaned['FORCE_RESET'];
+              delete cleaned['REFRESH'];
+              await supabaseClient.from('clinic_session_state').update({ active_calls: cleaned }).eq('id', sid);
+            }
+          })(),
+          new Promise((resolve) => setTimeout(resolve, 2000)),
+        ]);
+      } catch {}
+    }
+
+    // 3. beforeunload 가드를 우회하고 깨끗하게 화면 새로고침
+    (window as any).__isForceRefreshing = true;
+    setTimeout(() => {
+      window.location.reload();
+    }, 900);
+  };
+
   useEffect(() => {
-    if (!studentInfo.id || !hasQuestions) return;
+    if (!studentInfo.id) return;
     let cancelled = false;
     let isRunningCorrection = false;
 
     const runSelfCorrection = async () => {
       const sid = clinicSessionStateRef.current?.id;
-      if (!sid || cancelled || checkoutHandledRef.current || isRunningCorrection) return;
+      if (!sid || cancelled || checkoutHandledRef.current || isRunningCorrection || forceResetInProgressRef.current) return;
       isRunningCorrection = true;
       try {
 
@@ -113,16 +177,24 @@ export function useClinicRealtime({
       let hasChanges = false;
       const { processCorrectAnswer, handleTimeUp, forceUpdate, setRecheckToast, setCanvasClearTrigger, setMyAwayActive, setPendingRecheckReview } = callbacksRef.current;
 
+      // 🌟 관리자(/supervisor) 강제 좌석 리셋 신호 (채점 확정 REFRESH와 완전 분리)
+      if (data.active_calls && data.active_calls['FORCE_RESET']) {
+          const resetTs = data.active_calls['FORCE_RESET'];
+          await executeForceReset(resetTs);
+          return;
+      }
+
       if (data.active_calls && data.active_calls['REFRESH']) {
           const newCalls = { ...data.active_calls };
           delete newCalls['REFRESH'];
           await supabaseClient.from('clinic_session_state').update({ active_calls: newCalls }).eq('id', sid);
           
-          if (setRecheckToast) {
+          const nowMs = Date.now();
+          if (setRecheckToast && nowMs - lastRefreshToastAtRef.current > 8000) {
+              lastRefreshToastAtRef.current = nowMs;
               setRecheckToast('🎉 밖에서 채점이 확정되었습니다! (학습 종료 후 포탈에서 확인 가능)');
               setTimeout(() => setRecheckToast(""), 4000);
           }
-          return;
       }
 
       if (data.ended_at) {
@@ -224,6 +296,33 @@ export function useClinicRealtime({
         }
       });
 
+      // 🌟 로컬 recheckState가 pending인데 DB active_rechecks에서 이미 사라진 경우(리셋/유실 등) 영구 잠금 자동 복구
+      const nowForRecheck = Date.now();
+      Object.keys(recheckState.current).forEach((qIdxStr) => {
+          const qIdx = Number(qIdxStr);
+          if (recheckState.current[qIdx] !== 'pending') return;
+          const qNum = qIdx + 1;
+          const qUid = currentQuestions[qIdx]?.uid;
+          const hasActiveDbRecheck = Object.entries(dbRechecks).some(([uid, rec]: [string, any]) => {
+              if (!rec || rec.verdict) return false;
+              return (qUid && uid === qUid) || (rec.qNum != null && Number(rec.qNum) === qNum);
+          });
+          if (hasActiveDbRecheck) {
+              recheckPendingObservedAtRef.current[qIdx] = nowForRecheck;
+              return;
+          }
+          const observedAt = recheckPendingObservedAtRef.current[qIdx] || 0;
+          if (!observedAt) {
+              recheckPendingObservedAtRef.current[qIdx] = nowForRecheck;
+              return;
+          }
+          if (nowForRecheck - observedAt >= 10000) {
+              recheckState.current[qIdx] = null;
+              delete recheckPendingObservedAtRef.current[qIdx];
+              hasChanges = true;
+          }
+      });
+
       if (callsToDelete.length > 0 || rechecksToDelete.length > 0) {
           const updatePayload: any = {};
           if (callsToDelete.length > 0) {
@@ -264,7 +363,7 @@ export function useClinicRealtime({
         window.removeEventListener('focus', handleFocus);
         document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [studentInfo.id, hasQuestions]); 
+  }, [studentInfo.id]); 
 
   useEffect(() => {
     if (!studentInfo.id || !hasQuestions) return;
@@ -600,10 +699,24 @@ export function useClinicRealtime({
              }
          });
       }
+    } else if (payload.action === 'force_reset') {
+      executeForceReset(payload.resetAt || payload.timestamp || Date.now());
     } else if (payload.action === 'force_refresh') {
-      if (callbacksRef.current.setRecheckToast) {
+      const nowMs = Date.now();
+      if (callbacksRef.current.setRecheckToast && nowMs - lastRefreshToastAtRef.current > 8000) {
+          lastRefreshToastAtRef.current = nowMs;
           callbacksRef.current.setRecheckToast('🎉 밖에서 채점이 확정되었습니다! (학습 종료 후 포탈에서 확인 가능)');
           setTimeout(() => callbacksRef.current.setRecheckToast(""), 4000);
+      }
+      const sid = clinicSessionStateRef.current?.id;
+      if (sid) {
+          supabaseClient.from('clinic_session_state').select('active_calls').eq('id', sid).maybeSingle().then(({ data }) => {
+              if (data?.active_calls?.['REFRESH']) {
+                  const nextCalls = { ...data.active_calls };
+                  delete nextCalls['REFRESH'];
+                  supabaseClient.from('clinic_session_state').update({ active_calls: nextCalls }).eq('id', sid).then();
+              }
+          });
       }
     }
   };
@@ -782,6 +895,13 @@ export function useClinicRealtime({
   }, [supabaseClient]);
 
   const sendAction = async (action: string, extra: any = {}) => {
+    if (action === 'recheck_request') {
+      const qIdx = extra?.qNum != null ? Number(extra.qNum) - 1 : -1;
+      if (qIdx >= 0 && !isNaN(qIdx)) {
+        recheckPendingObservedAtRef.current[qIdx] = Date.now();
+      }
+    }
+
     if (clinicChannelRef.current && mySeatRef.current) {
       clinicChannelRef.current.send({ type: 'broadcast', event: 'student_action', payload: { seat: mySeatRef.current, action, data: { name: studentInfo.name, studentId: studentInfo.id, ...extra } } });
 
@@ -793,34 +913,11 @@ export function useClinicRealtime({
     const sid = clinicSessionStateRef.current?.id;
     if (!sid) return;
 
+    // call / cancel_call / recheck_request / away / cancel_away 의 DB 저장은 page.tsx에서
+    // clinicSession.ts의 전용 헬퍼(setActiveCall / setActiveRecheck / setAway 등)가 단일 경로로 처리하여
+    // 동일 행 동시 덮어쓰기 경합을 원천 차단합니다.
     try {
-        if (action === 'call' || action === 'cancel_call') {
-            const { data } = await supabaseClient.from('clinic_session_state').select('active_calls').eq('id', sid).maybeSingle();
-            let calls = data?.active_calls || {};
-            if (action === 'call') {
-                calls[extra.qNum] = { requestedAt: Date.now(), qNum: extra.qNum };
-            } else {
-                delete calls[extra.qNum];
-            }
-            await supabaseClient.from('clinic_session_state').update({ active_calls: calls }).eq('id', sid);
-        }
-        else if (action === 'recheck_request') {
-            const { data } = await supabaseClient.from('clinic_session_state').select('active_rechecks').eq('id', sid).maybeSingle();
-            let rechecks = data?.active_rechecks || {};
-            
-            let safeQNum = extra.qNum;
-            if (!safeQNum && extra.uid) {
-                const fIdx = questionsRef.current.findIndex(q => q.uid === extra.uid);
-                if (fIdx !== -1) safeQNum = fIdx + 1;
-            }
-
-            rechecks[extra.uid] = { ...extra, requestedAt: Date.now(), qNum: safeQNum };
-            await supabaseClient.from('clinic_session_state').update({ active_rechecks: rechecks }).eq('id', sid);
-        }
-        else if (action === 'away' || action === 'cancel_away') {
-            await supabaseClient.from('clinic_session_state').update({ away_since: action === 'away' ? new Date().toISOString() : null, last_seen_at: new Date().toISOString() }).eq('id', sid);
-        }
-        else if (action === 'submit' || action === 'depart') {
+        if (action === 'submit' || action === 'depart' || action === 'away' || action === 'cancel_away') {
             await supabaseClient.from('clinic_session_state').update({ last_seen_at: new Date().toISOString() }).eq('id', sid);
         }
     } catch(e) { console.error(e); }

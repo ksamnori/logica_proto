@@ -28,6 +28,10 @@ export function useClinicTimer({
 
   const sessionExpiredHandledRef = useRef(false);
   const roundExpiredHandledRef = useRef(false);
+  const handleTimeUpRef = useRef(handleTimeUp);
+  useEffect(() => {
+    handleTimeUpRef.current = handleTimeUp;
+  }, [handleTimeUp]);
 
   useEffect(() => {
     // 1. 우측 상단 전체 세션 타이머
@@ -44,7 +48,7 @@ export function useClinicTimer({
           if (clinicSessionStateRef.current.id) {
             closeSessionAtLimit(supabaseClient, clinicSessionStateRef.current.id, clinicSessionStateRef.current.started_at, clinicSessionStateRef.current.duration_ms);
           }
-          handleTimeUp(undefined, true);
+          handleTimeUpRef.current(undefined, true);
         }
       } else {
         const ts = Math.floor(rem / 1000);
@@ -55,14 +59,24 @@ export function useClinicTimer({
       }
     }, 1000);
 
-    // 2. 우측 상단 문항 풀이 타이머 (20분 or 60분 동적 설정)
+    // 2. 우측 상단 문항 풀이 타이머 (20분 or 60분 동적 설정, 리셋 복원 시 남은 시간 이어받기)
     let roundTimer: NodeJS.Timeout | null = null;
 
     if (isStarted && isTimedRound && !timeIsUp) {
       if (!isTimerInitialized) {
-         const dynamicLimit = (typeof window !== 'undefined' && (window as any).__dynamicTimeLimit) 
-                              ? (window as any).__dynamicTimeLimit 
-                              : ROUND1_TIME_LIMIT_SECONDS;
+         const restoredLimit =
+           typeof window !== 'undefined' && typeof (window as any).__restoredRoundRemainingSec === 'number'
+             ? (window as any).__restoredRoundRemainingSec
+             : null;
+         if (typeof window !== 'undefined' && restoredLimit !== null) {
+           delete (window as any).__restoredRoundRemainingSec;
+         }
+         const dynamicLimit =
+           restoredLimit !== null && restoredLimit > 0
+             ? restoredLimit
+             : (typeof window !== 'undefined' && (window as any).__dynamicTimeLimit)
+               ? (window as any).__dynamicTimeLimit
+               : ROUND1_TIME_LIMIT_SECONDS;
          setRoundRemainingSec(dynamicLimit);
          setIsTimerInitialized(true);
          return () => { clearInterval(sessionTimer); };
@@ -74,7 +88,7 @@ export function useClinicTimer({
             if (roundTimer) clearInterval(roundTimer); 
             if (!roundExpiredHandledRef.current) {
               roundExpiredHandledRef.current = true;
-              handleTimeUp();
+              handleTimeUpRef.current();
             }
             return 0; 
           }
@@ -87,7 +101,7 @@ export function useClinicTimer({
       clearInterval(sessionTimer); 
       if (roundTimer) clearInterval(roundTimer); 
     };
-  }, [isStarted, isTimedRound, timeIsUp, clinicSessionStateRef, supabaseClient, handleTimeUp, isTimerInitialized]);
+  }, [isStarted, isTimedRound, timeIsUp, clinicSessionStateRef, supabaseClient, isTimerInitialized]);
 
   return { clinicRemainingStr, isClinicUrgent, roundRemainingSec };
 }

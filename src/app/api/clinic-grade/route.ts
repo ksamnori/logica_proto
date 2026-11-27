@@ -30,32 +30,52 @@ export async function POST(req: Request) {
 - 글씨가 불명확해서 여러 숫자/기호로 읽힐 수 있으면, 가장 가능성 높은 해석을 recognized_text에 적고 confidence를 낮게 주세요.
 - 반드시 아래 JSON 스키마의 필드명을 정확히 그대로 사용해 응답하세요.`;
 
-    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
-      method: 'POST', 
-      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
-      body: JSON.stringify({
-        contents: [{ role: 'user', parts: [{ text: prompt }, { inline_data: { mime_type: mimeType, data: base64 } }] }],
-        generationConfig: {
-          responseMimeType: 'application/json',
-          responseSchema: {
-            type: 'OBJECT',
-            properties: {
-              recognized_text: { type: 'STRING' },
-              is_correct: { type: 'BOOLEAN' },
-              confidence: { type: 'NUMBER' },
-              explanation: { type: 'STRING' }
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 25000);
+    let res: Response;
+    try {
+      res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
+        method: 'POST', 
+        headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
+        signal: controller.signal,
+        body: JSON.stringify({
+          contents: [{ role: 'user', parts: [{ text: prompt }, { inline_data: { mime_type: mimeType, data: base64 } }] }],
+          generationConfig: {
+            responseMimeType: 'application/json',
+            responseSchema: {
+              type: 'OBJECT',
+              properties: {
+                recognized_text: { type: 'STRING' },
+                is_correct: { type: 'BOOLEAN' },
+                confidence: { type: 'NUMBER' },
+                explanation: { type: 'STRING' }
+              },
+              required: ['recognized_text', 'is_correct', 'confidence', 'explanation']
             },
-            required: ['recognized_text', 'is_correct', 'confidence', 'explanation']
-          },
-          temperature: 0
-        }
-      })
-    });
+            temperature: 0
+          }
+        })
+      });
+    } catch (fetchErr: unknown) {
+      if (fetchErr instanceof Error && fetchErr.name === 'AbortError') {
+        return NextResponse.json({ error: 'AI 채점 응답 시간이 초과되었습니다. 잠시 후 다시 시도해주세요.' }, { status: 504 });
+      }
+      throw fetchErr;
+    } finally {
+      clearTimeout(timeoutId);
+    }
 
-    if (!res.ok) throw new Error('Google API 호출 실패');
+    if (!res.ok) {
+      const errText = await res.text().catch(() => '');
+      console.error('[clinic-grade] Gemini API error:', res.status, errText.slice(0, 300));
+      return NextResponse.json({ error: `AI 채점 서버 응답 오류 (${res.status})` }, { status: 502 });
+    }
     
     const data = await res.json();
     const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+    if (!text) {
+      return NextResponse.json({ error: 'AI 채점 결과를 해석할 수 없습니다. 다시 시도해주세요.' }, { status: 502 });
+    }
     
     return NextResponse.json(JSON.parse(text.replace(/```json|```/g, '').trim()));
   } catch (error: any) {
