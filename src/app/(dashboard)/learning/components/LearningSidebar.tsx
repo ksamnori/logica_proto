@@ -26,6 +26,26 @@ export default function LearningSidebar({
   const [expandedLevels, setExpandedLevels] = useState<string[]>([]);
   const [expandedClasses, setExpandedClasses] = useState<string[]>([]);
   const [isAllExpanded, setIsAllExpanded] = useState(false);
+  const [classSearchQuery, setClassSearchQuery] = useState("");
+  const [studentSearchQuery, setStudentSearchQuery] = useState("");
+  const [searchCollapsedLevels, setSearchCollapsedLevels] = useState<string[]>([]);
+  const [searchCollapsedClasses, setSearchCollapsedClasses] = useState<string[]>([]);
+
+  const normClassQuery = classSearchQuery.trim().toLowerCase();
+  const normStudentQuery = studentSearchQuery.trim().toLowerCase();
+  const isSearching = normClassQuery.length > 0 || normStudentQuery.length > 0;
+
+  const updateClassSearch = (val: string) => {
+    setClassSearchQuery(val);
+    setSearchCollapsedLevels([]);
+    setSearchCollapsedClasses([]);
+  };
+
+  const updateStudentSearch = (val: string) => {
+    setStudentSearchQuery(val);
+    setSearchCollapsedLevels([]);
+    setSearchCollapsedClasses([]);
+  };
 
   useEffect(() => {
     if (currentView.type === 'STUDENT' || currentView.type === 'CLASS') {
@@ -64,12 +84,48 @@ export default function LearningSidebar({
     setIsAllExpanded(!isAllExpanded);
   };
 
-  const handleLevelClick = (lvl: string) => setExpandedLevels(prev => prev.includes(lvl) ? prev.filter(l => l !== lvl) : [...prev, lvl]);
+  const handleLevelClick = (lvl: string) => {
+    if (isSearching) {
+      setSearchCollapsedLevels(prev => prev.includes(lvl) ? prev.filter(l => l !== lvl) : [...prev, lvl]);
+      return;
+    }
+    setExpandedLevels(prev => prev.includes(lvl) ? prev.filter(l => l !== lvl) : [...prev, lvl]);
+  };
   
   const handleClassClick = (classId: string, className: string) => {
-    setExpandedClasses(prev => prev.includes(classId) ? prev.filter(c => c !== classId) : [...prev, classId]);
+    if (isSearching) {
+      setSearchCollapsedClasses(prev => prev.includes(classId) ? prev.filter(c => c !== classId) : [...prev, classId]);
+    } else {
+      setExpandedClasses(prev => prev.includes(classId) ? prev.filter(c => c !== classId) : [...prev, classId]);
+    }
     handleViewChange({ type: 'CLASS', classId, className, studentId: '', studentName: '' });
   };
+
+  const filteredLevels = LEVEL_ORDER.map(lvl => {
+    const classList = groupedClasses[lvl];
+    if (!classList || classList.length === 0) return null;
+
+    const matchedClasses = classList
+      .map(c => {
+        if (!c) return null;
+        if (normClassQuery && !(c.name || "").toLowerCase().includes(normClassQuery)) {
+          return null;
+        }
+        const rawStudents = Array.isArray(c.students) ? c.students : [];
+        const matchedStudents = normStudentQuery
+          ? rawStudents.filter(s => s && (s.name || "").toLowerCase().includes(normStudentQuery))
+          : rawStudents;
+
+        if (normStudentQuery && matchedStudents.length === 0) {
+          return null;
+        }
+        return { ...c, students: matchedStudents };
+      })
+      .filter(Boolean) as ClassInfo[];
+
+    if (matchedClasses.length === 0) return null;
+    return { lvl, classList: matchedClasses };
+  }).filter(Boolean) as { lvl: string; classList: ClassInfo[] }[];
 
   return (
     <div className="w-[230px] bg-white rounded-xl border border-slate-200 flex flex-col shrink-0 z-10 shadow-sm overflow-hidden">
@@ -81,14 +137,71 @@ export default function LearningSidebar({
           {isAllExpanded ? "접기" : "펼치기"}
         </button>
       </div>
+
+      <div className="px-2.5 py-2 border-b border-slate-200 bg-white shrink-0 flex flex-col gap-1.5">
+        <div className="relative flex items-center">
+          <span className="absolute left-2 text-[11px] text-slate-400 pointer-events-none">🏷️</span>
+          <input
+            type="text"
+            value={classSearchQuery}
+            onChange={e => updateClassSearch(e.target.value)}
+            placeholder="반 검색"
+            className="w-full pl-6 pr-6 py-1.5 text-xs font-semibold text-slate-700 placeholder:text-slate-400 bg-slate-50 border border-slate-200 rounded-md focus:outline-none focus:bg-white focus:border-brand transition-colors"
+          />
+          {classSearchQuery && (
+            <button
+              type="button"
+              onClick={() => updateClassSearch("")}
+              className="absolute right-1.5 text-[11px] text-slate-400 hover:text-slate-600 px-1"
+              title="반 검색어 지우기"
+            >
+              ✕
+            </button>
+          )}
+        </div>
+        <div className="relative flex items-center">
+          <span className="absolute left-2 text-[11px] text-slate-400 pointer-events-none">🔍</span>
+          <input
+            type="text"
+            value={studentSearchQuery}
+            onChange={e => updateStudentSearch(e.target.value)}
+            placeholder="학생 이름 검색"
+            className="w-full pl-6 pr-6 py-1.5 text-xs font-semibold text-slate-700 placeholder:text-slate-400 bg-slate-50 border border-slate-200 rounded-md focus:outline-none focus:bg-white focus:border-brand transition-colors"
+          />
+          {studentSearchQuery && (
+            <button
+              type="button"
+              onClick={() => updateStudentSearch("")}
+              className="absolute right-1.5 text-[11px] text-slate-400 hover:text-slate-600 px-1"
+              title="학생 검색어 지우기"
+            >
+              ✕
+            </button>
+          )}
+        </div>
+      </div>
       
       <div className="flex-1 overflow-y-auto custom-scroll">
-        {isLoading ? <div className="p-8 text-center text-slate-400 font-bold text-[12px]">로딩 중...</div> : (
-          LEVEL_ORDER.map(lvl => {
-            const classList = groupedClasses[lvl];
-            if (!classList || classList.length === 0) return null;
-            
-            const isLvlExpanded = expandedLevels.includes(lvl);
+        {isLoading ? <div className="p-8 text-center text-slate-400 font-bold text-[12px]">로딩 중...</div> : filteredLevels.length === 0 ? (
+          <div className="p-6 text-center flex flex-col items-center gap-2">
+            <span className="text-slate-400 font-bold text-[12px]">
+              {isSearching ? "검색 결과가 없습니다." : "등록된 반이 없습니다."}
+            </span>
+            {isSearching && (
+              <button
+                type="button"
+                onClick={() => { updateClassSearch(""); updateStudentSearch(""); }}
+                className="text-[11px] font-bold text-brand bg-blue-50 hover:bg-blue-100 border border-blue-200 px-2.5 py-1 rounded transition-colors"
+              >
+                검색 초기화
+              </button>
+            )}
+          </div>
+        ) : (
+          filteredLevels.map(({ lvl, classList }) => {
+            const isLvlExpanded = isSearching
+              ? !searchCollapsedLevels.includes(lvl)
+              : expandedLevels.includes(lvl);
             const isLevelHighlighted = isLvlExpanded;
             
             return (
@@ -101,7 +214,9 @@ export default function LearningSidebar({
                   <div className="flex flex-col bg-slate-50 border-t border-slate-100">
                     {classList.map(c => {
                       if (!c) return null;
-                      const isClassExpanded = expandedClasses.includes(c.class_id);
+                      const isClassExpanded = isSearching
+                        ? !searchCollapsedClasses.includes(c.class_id)
+                        : expandedClasses.includes(c.class_id);
                       const isClassActive = currentView.classId === c.class_id && currentView.type !== 'ALL';
                       
                       return (
