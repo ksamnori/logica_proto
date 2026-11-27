@@ -11,20 +11,6 @@ const getAdminClient = () =>
     { auth: { persistSession: false, autoRefreshToken: false } }
   );
 
-// 런타임 스키마 캐시: homework_assignment / student_homework_result 에 tenant_id 컬럼이 존재하는지 자동 감지
-let hwAssignmentHasTenantCol: boolean | null = null;
-let hwResultHasTenantCol: boolean | null = null;
-
-function isMissingTenantColumnError(err: any): boolean {
-  if (!err) return false;
-  const code = String(err.code || "");
-  const msg = String(err.message || err.details || "");
-  if ((code === "PGRST204" || code === "42703") && /tenant_id/i.test(msg)) {
-    return true;
-  }
-  return /tenant_id/i.test(msg) && /(column|schema cache|does not exist)/i.test(msg);
-}
-
 const safeParseIds = (raw: any): number[] => {
   if (!raw) return [];
   try {
@@ -96,29 +82,14 @@ async function verifyClassAndResolveTenant(
   return { ok: true, resolvedTenantId };
 }
 
+// homework_assignment / student_homework_result 테이블은 별도 tenant_id 컬럼 없이
+// class_id(→ class.tenant_id) 및 student_id(→ student.tenant_id)로 소속 지점을 식별합니다.
 async function insertHomeworkAssignmentSafe(
   supabaseAdmin: SupabaseClient,
   payload: Record<string, any>,
-  resolvedTenantId: string | null
+  _resolvedTenantId?: string | null
 ): Promise<{ homework_id: number }> {
-  if (resolvedTenantId && hwAssignmentHasTenantCol !== false) {
-    const { data, error } = await supabaseAdmin
-      .from("homework_assignment")
-      .insert({ ...payload, tenant_id: resolvedTenantId })
-      .select("homework_id")
-      .single();
-
-    if (!error && data) {
-      hwAssignmentHasTenantCol = true;
-      return data as { homework_id: number };
-    }
-    if (isMissingTenantColumnError(error)) {
-      hwAssignmentHasTenantCol = false;
-    } else if (error) {
-      throw error;
-    }
-  }
-
+  void _resolvedTenantId;
   const { data, error } = await supabaseAdmin
     .from("homework_assignment")
     .insert(payload)
@@ -132,24 +103,9 @@ async function insertHomeworkAssignmentSafe(
 async function insertStudentHomeworkResultSafe(
   supabaseAdmin: SupabaseClient,
   payload: Record<string, any>,
-  resolvedTenantId: string | null
+  _resolvedTenantId?: string | null
 ): Promise<void> {
-  if (resolvedTenantId && hwResultHasTenantCol !== false) {
-    const { error } = await supabaseAdmin
-      .from("student_homework_result")
-      .insert({ ...payload, tenant_id: resolvedTenantId });
-
-    if (!error) {
-      hwResultHasTenantCol = true;
-      return;
-    }
-    if (isMissingTenantColumnError(error)) {
-      hwResultHasTenantCol = false;
-    } else {
-      throw error;
-    }
-  }
-
+  void _resolvedTenantId;
   const { error } = await supabaseAdmin.from("student_homework_result").insert(payload);
   if (error) throw error;
 }

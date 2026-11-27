@@ -54,6 +54,9 @@ const TEXTBOOK_GRADE_OPTIONS: {
 
 const ENDED_ENROLLMENT_STATUSES = ['수강종료', '종료', '퇴원', '취소'];
 
+const TIMELINE_CATEGORY_CACHE_TTL_MS = 10 * 60 * 1000;
+let cachedTimelineCategoryMap: { map: Record<string, string>; updatedAt: number } | null = null;
+
 const parseQuestionNumParts = (raw: any) => {
   const s = String(raw ?? '').trim();
   const m = s.match(/^(\d+)(?:-(\d+))?(?:\((\d+)\))?/);
@@ -273,6 +276,14 @@ export default function StudentTimeline({
   useEffect(() => {
     const fetchMasterCategory = async () => {
       try {
+        if (
+          cachedTimelineCategoryMap &&
+          Date.now() - cachedTimelineCategoryMap.updatedAt < TIMELINE_CATEGORY_CACHE_TTL_MS
+        ) {
+          setCategoryMap(cachedTimelineCategoryMap.map);
+          return;
+        }
+
         const buildMap = (dataArray: any[]) => {
           const map: Record<string, string> = {};
           dataArray.forEach(item => {
@@ -297,25 +308,22 @@ export default function StudentTimeline({
           return map;
         };
 
-        let finalMap: Record<string, string> = {};
-        const { data: fileData, error: fileError } = await supabaseClient.storage.from('system_data').download('master_category.json');
-        if (!fileError && fileData) {
-          const text = await fileData.text();
-          const json = JSON.parse(text);
-          finalMap = buildMap(Array.isArray(json) ? json : Object.values(json));
+        let allData: any[] = [];
+        let from = 0;
+        while (true) {
+          const { data, error } = await supabaseClient
+            .from('master_category')
+            .select('category_id, full_path')
+            .range(from, from + 999);
+          if (error || !data || data.length === 0) break;
+          allData = allData.concat(data);
+          if (data.length < 1000) break;
+          from += 1000;
         }
 
-        if (Object.keys(finalMap).length === 0) {
-          let allData: any[] = [];
-          let from = 0;
-          while (true) {
-            const { data, error } = await supabaseClient.from('master_category').select('category_id, full_path').range(from, from + 999);
-            if (error || !data || data.length === 0) break;
-            allData = allData.concat(data);
-            if (data.length < 1000) break;
-            from += 1000;
-          }
-          finalMap = buildMap(allData);
+        const finalMap = buildMap(allData);
+        if (Object.keys(finalMap).length > 0) {
+          cachedTimelineCategoryMap = { map: finalMap, updatedAt: Date.now() };
         }
 
         setCategoryMap(finalMap);
