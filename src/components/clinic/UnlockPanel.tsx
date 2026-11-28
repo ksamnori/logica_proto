@@ -4,6 +4,7 @@ import React, { useEffect, useState, useCallback, useRef } from "react";
 import { supabase, CLINIC_ROOM } from "@/lib/supabase";
 import { getInstructorName } from "@/app/clinic/ta/taAccess";
 import HandwritingOverlayPreview from "@/components/clinic/HandwritingOverlayPreview";
+import { triggerRealtimeQuestionCalibration } from "@/lib/questionRateCalibrationClient";
 let mathJaxInitStarted = false;
 
 const initMathJax = () => {
@@ -692,6 +693,11 @@ export default function UnlockPanel({
           .eq("exam_assignment_id", assignmentId),
       ]);
       if (error) throw error;
+
+      triggerRealtimeQuestionCalibration({
+        assignmentIds: [assignmentId],
+        studentIds: studentId ? [studentId] : [],
+      });
 
       let studentSeat: string | null = null;
       if (studentId) {

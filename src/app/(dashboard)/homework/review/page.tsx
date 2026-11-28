@@ -4,6 +4,7 @@
 import React, { useEffect, useState, useRef, Suspense, memo } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
+import { triggerRealtimeQuestionCalibration } from "@/lib/questionRateCalibrationClient";
 // 대문항(그룹) 기준 균등 배점 + 서브문항((1),(2) 등) 분할 배점 및 TO/RO 부분점수(score_ratio) 계산 유틸리티
 
 /**
@@ -920,6 +921,13 @@ function HomeworkReviewContent() {
       }
 
       await updateHomeworkResult(newMap);
+      if (!isAdm) {
+        triggerRealtimeQuestionCalibration({
+          questionIds: isExamHw ? [tqId] : [targetQ?.question_id],
+          tqIds: isExamHw ? [] : [tqId],
+          studentIds: [studentId],
+        });
+      }
 
       setSaveStatus("✅ 자동 저장됨");
       setTimeout(() => setSaveStatus(""), 2000);
@@ -1032,6 +1040,13 @@ function HomeworkReviewContent() {
       }
 
       await updateHomeworkResult(newMap);
+      if (!isAdm) {
+        triggerRealtimeQuestionCalibration({
+          questionIds: isExamHw ? targets.map((q: any) => q.tq_id) : targets.map((q: any) => q.question_id),
+          tqIds: isExamHw ? [] : targets.map((q: any) => q.tq_id),
+          studentIds: [studentId],
+        });
+      }
 
       setSaveStatus("✅ 일괄 저장 완료");
       setTimeout(() => setSaveStatus(""), 2000);
@@ -1043,6 +1058,14 @@ function HomeworkReviewContent() {
   const handleGoBack = () => {
     try {
       const fromParam = searchParams.get("from");
+      if (fromParam === "student_exam" && studentId) {
+        const returnSub = searchParams.get("return_sub") || "weekly";
+        router.push(
+          `/student/${encodeURIComponent(String(studentId))}?tab=exam&sub=${encodeURIComponent(returnSub)}`
+        );
+        return;
+      }
+
       const fromStorage = sessionStorage.getItem("logica_exam_list_from_grading_modal") === "1";
       const savedModalRaw = sessionStorage.getItem("logica_exam_list_grading_modal");
       let savedModal: any = null;

@@ -3,6 +3,7 @@
 
 import { createClient, SupabaseClient } from "@supabase/supabase-js";
 import { resolveServerTenantId } from "@/lib/serverTenant";
+import { runRealtimeQuestionCalibration } from "@/lib/questionRateCalibrationServer";
 
 const getAdminClient = () =>
   createClient(
@@ -874,7 +875,7 @@ export async function deleteHomeworkAssignmentAction(params: {
 
     const { data: hwRow } = await supabaseAdmin
       .from("homework_assignment")
-      .select("homework_id, class_id")
+      .select("homework_id, class_id, target_questions")
       .eq("homework_id", hwId)
       .maybeSingle();
 
@@ -883,6 +884,16 @@ export async function deleteHomeworkAssignmentAction(params: {
       const authCheck = await verifyClassAndResolveTenant(supabaseAdmin, hwRow.class_id, params.clientTenantId);
       if (!authCheck.ok) return { success: false, message: authCheck.message };
     }
+
+    let rawTargetQs: any = hwRow.target_questions;
+    if (typeof rawTargetQs === "string") {
+      try {
+        rawTargetQs = JSON.parse(rawTargetQs);
+      } catch {
+        rawTargetQs = [];
+      }
+    }
+    const deletedTqOrQids: Array<string | number> = Array.isArray(rawTargetQs) ? rawTargetQs : [];
 
     if (params.deleteAllStudents || !params.studentId) {
       await supabaseAdmin.from("student_homework_answer").delete().eq("homework_id", hwId);
@@ -909,6 +920,13 @@ export async function deleteHomeworkAssignmentAction(params: {
       if (count === 0) {
         await supabaseAdmin.from("homework_assignment").delete().eq("homework_id", hwId);
       }
+    }
+
+    if (deletedTqOrQids.length > 0) {
+      void runRealtimeQuestionCalibration(supabaseAdmin, {
+        tqIds: deletedTqOrQids,
+        studentIds: params.studentId ? [params.studentId] : [],
+      }).catch(() => {});
     }
 
     return { success: true };

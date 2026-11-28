@@ -7,6 +7,7 @@ import {
   deleteHomeworkAssignmentAction,
   forceCompleteHomeworkBatchAction,
 } from "@/app/actions/auth"; 
+import { triggerRealtimeQuestionCalibration } from "@/lib/questionRateCalibrationClient";
 
 interface ActionProps {
   currentView: ViewState;
@@ -422,8 +423,12 @@ export function useLearningActions({
   const handleDeleteExam = async (assignmentId: string, studentId: string) => {
     if (!confirm("해당 출제를 완전히 취소 및 삭제하시겠습니까?")) return;
     try {
+      const { data: asgRow } = await supabase.from('exam_assignment').select('exam_id').eq('assignment_id', assignmentId).maybeSingle();
       await supabase.from('student_answer').delete().eq('exam_assignment_id', assignmentId);
       await supabase.from('exam_assignment').delete().eq('assignment_id', assignmentId);
+      if (asgRow?.exam_id) {
+        triggerRealtimeQuestionCalibration({ examIds: [asgRow.exam_id], studentIds: [studentId] });
+      }
       
       toast.success("🗑️ 삭제되었습니다.");
       if (currentView.type === 'STUDENT') fetchStudentTimeline(studentId, currentView.classId, allStudentsList);

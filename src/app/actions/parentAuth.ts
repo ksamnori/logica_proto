@@ -4,8 +4,15 @@
 import { createClient } from "@supabase/supabase-js";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
-import { phoneVariants } from "@/lib/normalize";
+import { phoneVariants, normalizeMasterCategoryRow } from "@/lib/normalize";
 import { sendGeneralMessage } from "@/app/actions/alimtalk";
+import {
+  buildExamQuestionScoreMap,
+  calcScoreRatio,
+  extractMergedQuestionGroups,
+  roundScore,
+} from "@/lib/examScore";
+import { THINKING_CATEGORIES, type ThinkingCategoryItem } from "@/app/(dashboard)/pdf-parser/thinkingcategories";
 
 type ParentPwCol = "password_hash" | "password_hash_2" | "password_hash_3";
 type ParentNameCol = "name" | "name_2" | "name_3";
@@ -775,8 +782,187 @@ export async function getStudentPortalExtraDataAction({
 }
 
 // =========================================================================
-// 📊 학부모 포털: 자녀의 주간테스트 성적, 반 평균, 단원별 성취도, 학교 시험 성적 조회 (RLS 우회 + 초고속 병렬 조회)
+// 📊 학부모 포털: 자녀의 4종 테스트 성적(주간테스트·주차별 오답·중간평가·분기평가),
+//    주교재 구분선 정보, 단원별 성취도(최근 2개월 최대 8개), 정기평가 상세 분석 리포트 조회
 // =========================================================================
+
+type PortalTestSubTabId = "weekly" | "weekly_incorrect" | "midterm" | "quarterly";
+const PORTAL_COMPETENCY_ORDER = ["문제해결", "추론", "의사소통", "연결", "정보처리"] as const;
+type PortalCompetencyKey = (typeof PORTAL_COMPETENCY_ORDER)[number];
+type PortalDiffTierKey = "BASIC" | "MID" | "KILLER";
+
+function classifyPortalTestSubTab(master: any): PortalTestSubTabId | null {
+  if (!master) return null;
+  const typeStr = String(master.exam_type || "").normalize("NFC").trim();
+  const titleStr = String(master.title || "").normalize("NFC").trim();
+  const subTitleStr = String(master.sub_title || "").normalize("NFC").trim();
+  const tagsStr = String(master.exam_tags || "").normalize("NFC").trim();
+
+  if (
+    typeStr === "미완료과제" ||
+    /^\[미완료\s*과제\]/.test(titleStr) ||
+    /미완료\s*프린트/.test(titleStr)
+  ) {
+    return null;
+  }
+  if (["과제", "과제프린트", "과제오답유사"].includes(typeStr)) {
+    return null;
+  }
+  if (
+    ["입학테스트", "진단평가"].some(
+      (kw) =>
+        typeStr.includes(kw) ||
+        titleStr.includes(kw) ||
+        subTitleStr.includes(kw) ||
+        tagsStr.includes(kw)
+    )
+  ) {
+    return null;
+  }
+  if (titleStr.includes("[통합]") || subTitleStr === "누적 오답 모음") {
+    return null;
+  }
+
+  const combinedText = `${titleStr} ${subTitleStr} ${typeStr}`;
+  const hasWeekKeyword = /([0-9xX]+\s*주차|[0-9]+\s*주|주차|주간)/.test(combinedText);
+  const hasWrongKeyword = /오답\s*(?:프린트|클리닉|노트|유사)?/.test(combinedText);
+  if (
+    (hasWeekKeyword && hasWrongKeyword) ||
+    (["오답프린트", "오답"].includes(typeStr) && !/과제|중간평가|분기평가|단원평가/.test(titleStr))
+  ) {
+    return "weekly_incorrect";
+  }
+
+  const isQuarterly =
+    !/오답/.test(titleStr) &&
+    (typeStr === "분기평가" ||
+      typeStr === "분기테스트" ||
+      typeStr.includes("분기평가") ||
+      typeStr.includes("분기테스트") ||
+      (!["주간테스트", "중간평가", "중간테스트", "단원평가"].includes(typeStr) &&
+        (titleStr.includes("분기평가") ||
+          titleStr.includes("분기테스트") ||
+          subTitleStr.includes("분기평가") ||
+          tagsStr.includes("분기평가"))));
+  if (isQuarterly) return "quarterly";
+
+  const isMidterm =
+    !/오답/.test(titleStr) &&
+    (typeStr === "중간평가" ||
+      typeStr === "중간테스트" ||
+      typeStr.includes("중간평가") ||
+      typeStr.includes("중간테스트") ||
+      (!["주간테스트", "분기평가", "분기테스트", "단원평가"].includes(typeStr) &&
+        (titleStr.includes("중간평가") ||
+          titleStr.includes("중간테스트") ||
+          subTitleStr.includes("중간평가") ||
+          tagsStr.includes("중간평가"))));
+  if (isMidterm) return "midterm";
+
+  const isWeekly =
+    !/오답/.test(titleStr) &&
+    (typeStr === "주간테스트" ||
+      /[0-9xX]+\s*주차\s*(?:평가|테스트)/.test(titleStr) ||
+      /[0-9xX]+\s*주차\s*(?:평가|테스트)/.test(subTitleStr));
+  if (isWeekly) return "weekly";
+
+  return null;
+}
+
+function stripPortalStudentPrefix(rawTitle: string, studentName?: string): string {
+  let t = String(rawTitle || "").trim();
+  if (!t) return "";
+  if (studentName) {
+    const escaped = studentName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    t = t.replace(new RegExp(`^\\[${escaped}\\]\\s*`), "").trim();
+  }
+  if (!t.startsWith("[통합]") && !t.startsWith("[미완료")) {
+    t = t.replace(/^\[[^\]]{1,12}\]\s*/, "").trim();
+  }
+  return t;
+}
+
+function extractPortalWeekNumber(title?: string, subTitle?: string): number | null {
+  const src = `${title || ""} ${subTitle || ""}`;
+  const mSpecific = src.match(/(\d+)\s*주차\s*(?:평가|테스트|주간|오답)/);
+  if (mSpecific) return parseInt(mSpecific[1], 10);
+  const mAny = src.match(/(\d+)\s*주차/);
+  if (mAny) return parseInt(mAny[1], 10);
+  return null;
+}
+
+function stripPortalLeadingIndex(raw: string): string {
+  return String(raw || "")
+    .trim()
+    .replace(/^(?:[ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩIVX]+|\d+)\s*[.\-)\]]\s*/i, "")
+    .replace(/^\(\d+\)\s*/, "")
+    .trim();
+}
+
+function isValidPortalCompetency(val: any): val is PortalCompetencyKey {
+  return (
+    typeof val === "string" &&
+    (PORTAL_COMPETENCY_ORDER as readonly string[]).includes(val.trim())
+  );
+}
+
+function extractPortalCompetencyPair(row: any): {
+  primary: PortalCompetencyKey | null;
+  secondary: PortalCompetencyKey | null;
+} {
+  if (!row) return { primary: null, secondary: null };
+  const hasConfirmedPrimary = Boolean(String(row.final_primary || "").trim());
+  const pRaw = String(hasConfirmedPrimary ? row.final_primary : row.ai_primary || "").trim();
+  const sRaw = String(
+    hasConfirmedPrimary ? row.final_secondary || "" : row.ai_secondary || ""
+  ).trim();
+  const primary = isValidPortalCompetency(pRaw) ? pRaw : null;
+  const secondary = isValidPortalCompetency(sRaw) && sRaw !== primary ? sRaw : null;
+  return { primary, secondary };
+}
+
+function inferPortalFallbackCompetencies(hintText: string): PortalCompetencyKey[] {
+  const s = String(hintText || "");
+  const matched: PortalCompetencyKey[] = [];
+  if (/표|그래프|통계|자료|경우의\s*수|확률|평균|가능성|분류|정리/.test(s)) {
+    matched.push("정보처리");
+  }
+  if (/새\s*연산|기호|정의|식\s*세우|서술|설명|나타내기|표현/.test(s)) {
+    matched.push("의사소통");
+  }
+  if (/규칙|수열|논리|추리|추론|복면산|벌레먹은|마방진|스도쿠|퍼즐|배열|참.*거짓/.test(s)) {
+    matched.push("추론");
+  }
+  if (/실생활|활용|측정|시계|시간|달력|길이|들이|무게|이동|전개도|쌓기나무|닮음/.test(s)) {
+    matched.push("연결");
+  }
+  if (matched.length === 0) return ["문제해결"];
+  if (
+    matched.length === 1 &&
+    matched[0] !== "문제해결" &&
+    /조건|구하|만들기|해결|최대|최소/.test(s)
+  ) {
+    matched.push("문제해결");
+  }
+  return matched.slice(0, 2);
+}
+
+async function fetchAllAdminRows(
+  buildQuery: (from: number, to: number) => any,
+  pageSize = 1000
+) {
+  let all: any[] = [];
+  let from = 0;
+  while (true) {
+    const { data, error } = await buildQuery(from, from + pageSize - 1);
+    if (error) throw error;
+    if (!data || data.length === 0) break;
+    all = all.concat(data);
+    if (data.length < pageSize) break;
+    from += pageSize;
+  }
+  return all;
+}
 
 export async function getStudentPortalExamDataAction({
   parentId,
@@ -787,51 +973,53 @@ export async function getStudentPortalExamDataAction({
   authToken?: string | null;
   studentId: string;
 }) {
+  const emptyPayload = {
+    success: false,
+    examResultsBySubTab: {
+      weekly: [] as any[],
+      weekly_incorrect: [] as any[],
+      midterm: [] as any[],
+      quarterly: [] as any[],
+    },
+    categoryAnalysisBySubTab: {
+      weekly: [] as any[],
+      weekly_incorrect: [] as any[],
+    },
+    periodicReportsBySubTab: {
+      midterm: [] as any[],
+      quarterly: [] as any[],
+    },
+    mainTextbooks: [] as any[],
+    schoolExams: [] as any[],
+  };
+
   try {
-    if (!studentId) {
-      return {
-        success: false,
-        validAssignments: [],
-        allAssignmentsForExams: [],
-        examItems: [],
-        gcData: [],
-        allAnswers: [],
-        studentAnswersForCategory: [],
-        questions: [],
-        catMapEntries: [],
-        schoolExams: [],
-      };
-    }
+    if (!studentId) return emptyPayload;
 
     if (authToken && process.env.SUPABASE_JWT_SECRET) {
       try {
         const decoded: any = jwt.verify(authToken, process.env.SUPABASE_JWT_SECRET);
         if (parentId && decoded?.sub && decoded.sub !== parentId) {
-          return {
-            success: false,
-            validAssignments: [],
-            allAssignmentsForExams: [],
-            examItems: [],
-            gcData: [],
-            allAnswers: [],
-            studentAnswersForCategory: [],
-            questions: [],
-            catMapEntries: [],
-            schoolExams: [],
-          };
+          return emptyPayload;
         }
       } catch {
         // 토큰 검증 예외 시에도 studentId 기준 최소 조회 허용
       }
     }
 
-    // 1단계: 학생 시험 배정 목록 + 학교 시험 성적 + 채점 기준표를 한 번에 병렬 조회
-    const [{ data: assignments }, { data: schoolExams }, { data: gcData }] = await Promise.all([
+    // 1단계: 학생 기본정보·수강이력·배정 시험·학교 내신·채점 기준표 병렬 조회
+    const [
+      { data: stuRow },
+      { data: enrollRows },
+      { data: assignments },
+      { data: schoolExams },
+      { data: gcData },
+    ] = await Promise.all([
+      supabaseAdmin.from("student").select("name").eq("student_id", studentId).maybeSingle(),
+      supabaseAdmin.from("enrollment").select("class_id").eq("student_id", studentId),
       supabaseAdmin
         .from("exam_assignment")
-        .select(
-          "assignment_id, exam_id, total_score, status, created_at, exam_master(title, total_questions, exam_type, layout_settings)"
-        )
+        .select("assignment_id, exam_id, class_id, total_score, status, created_at, exam_master(*)")
         .eq("student_id", studentId)
         .order("created_at", { ascending: false }),
       supabaseAdmin
@@ -846,171 +1034,1051 @@ export async function getStudentPortalExamDataAction({
         .select("code, description, is_correct, score_ratio, admission_ratio"),
     ]);
 
-    const validAssignments = (assignments || [])
-      .filter((a: any) => {
-        if (["응시전", "미응시", "예정", "대기"].includes(a.status)) return false;
-        const master = Array.isArray(a.exam_master) ? a.exam_master[0] : a.exam_master;
-        if (master?.exam_type !== "주간테스트") return false;
-        return true;
-      })
-      .slice(0, 10);
+    const studentName = String(stuRow?.name || "").trim();
+    const classIds = Array.from(
+      new Set((enrollRows || []).map((r: any) => r.class_id).filter(Boolean))
+    );
 
-    if (validAssignments.length === 0) {
+    // 주교재 목록 조회 (새 과정 1주차 구분선 라벨용)
+    let mainTextbooks: any[] = [];
+    if (classIds.length > 0) {
+      const { data: cbDataRaw } = await supabaseAdmin
+        .from("class_textbook")
+        .select("*, textbook(title, book_type), class(name)")
+        .in("class_id", classIds);
+      mainTextbooks = (cbDataRaw || [])
+        .map((cb: any) => {
+          const tb = Array.isArray(cb?.textbook) ? cb.textbook[0] : cb?.textbook;
+          const cls = Array.isArray(cb?.class) ? cb.class[0] : cb?.class;
+          return {
+            class_textbook_id: cb.class_textbook_id,
+            class_id: cb.class_id,
+            book_id: cb.book_id,
+            title: String(tb?.title || "").trim(),
+            book_type: String(tb?.book_type || "").trim(),
+            status: String(cb.status || "").trim(),
+            start_date: cb.start_date || null,
+            created_at: cb.created_at || null,
+            className: String(cls?.name || "").trim(),
+          };
+        })
+        .filter((b: any) => {
+          if (!b.title) return false;
+          if (["워크북", "과제", "부교재", "연산", "테스트"].includes(b.book_type)) return false;
+          if (["주교재", "본교재", "개념서", "심화서"].includes(b.book_type)) return true;
+          return !/워크북|WORKBOOK|연산|부교재|추가문제|쌍둥이|유사|클리닉|오답/i.test(b.title);
+        });
+    }
+
+    const preStatuses = ["응시전", "미응시", "예정", "대기"];
+    const categorized: { assign: any; master: any; subTab: PortalTestSubTabId }[] = [];
+    (assignments || []).forEach((a: any) => {
+      if (preStatuses.includes(String(a.status || "").trim())) return;
+      const master = Array.isArray(a.exam_master) ? a.exam_master[0] : a.exam_master;
+      const subTab = classifyPortalTestSubTab(master);
+      if (!subTab) return;
+      categorized.push({ assign: a, master, subTab });
+    });
+
+    if (categorized.length === 0) {
       return {
+        ...emptyPayload,
         success: true,
-        validAssignments: [],
-        allAssignmentsForExams: [],
-        examItems: [],
-        gcData: gcData || [],
-        allAnswers: [],
-        studentAnswersForCategory: [],
-        questions: [],
-        catMapEntries: [],
+        mainTextbooks,
         schoolExams: schoolExams || [],
       };
     }
 
-    const examIds = Array.from(new Set(validAssignments.map((a: any) => a.exam_id)));
-    const targetAssignIdSet = new Set(validAssignments.map((a: any) => String(a.assignment_id)));
+    const gcMeta: Record<string, any> = {};
+    (gcData || []).forEach((row: any) => {
+      if (row.code) gcMeta[row.code] = row;
+    });
 
-    // 2단계: 같은 시험지를 본 전체 배정 목록 + 시험 문항(question_db.taxonomy_id 조인 포함)을 한 번에 병렬 조회
-    const [{ data: allAssignmentsForExams }, { data: rawExamItems }] = await Promise.all([
-      supabaseAdmin
-        .from("exam_assignment")
-        .select("assignment_id, exam_id")
-        .in("exam_id", examIds)
-        .not("status", "in", '("응시전","미응시","예정","대기")'),
-      supabaseAdmin
-        .from("exam_item")
-        .select("exam_id, question_id, sort_order, assigned_score, question_db(question_id, taxonomy_id)")
-        .in("exam_id", examIds)
-        .order("sort_order"),
+    const examIds = Array.from(
+      new Set(categorized.map((c) => c.assign.exam_id).filter(Boolean))
+    );
+
+    // 2단계: 동일 시험지 응시 배정 + 시험 문항 목록 병렬 조회
+    const [allAssignmentsForExams, examItems] = await Promise.all([
+      fetchAllAdminRows((from, to) =>
+        supabaseAdmin
+          .from("exam_assignment")
+          .select("assignment_id, exam_id, status, total_score, student(name)")
+          .in("exam_id", examIds)
+          .not("status", "in", '("응시전","미응시","예정","대기")')
+          .range(from, to)
+      ),
+      fetchAllAdminRows((from, to) =>
+        supabaseAdmin
+          .from("exam_item")
+          .select("exam_id, question_id, sort_order, assigned_score")
+          .in("exam_id", examIds)
+          .order("sort_order")
+          .range(from, to)
+      ),
     ]);
 
-    const examItems = (rawExamItems || []).map((it: any) => ({
-      exam_id: it.exam_id,
-      question_id: it.question_id,
-      sort_order: it.sort_order,
-      assigned_score: it.assigned_score,
-    }));
+    const itemsByExam = new Map<string, any[]>();
+    (examItems || []).forEach((it: any) => {
+      const k = String(it.exam_id);
+      if (!itemsByExam.has(k)) itemsByExam.set(k, []);
+      itemsByExam.get(k)!.push(it);
+    });
 
-    const questionsMap = new Map<string, { question_id: any; taxonomy_id: string }>();
-    (rawExamItems || []).forEach((it: any) => {
-      const qdb = Array.isArray(it.question_db) ? it.question_db[0] : it.question_db;
-      if (qdb && qdb.question_id && qdb.taxonomy_id) {
-        questionsMap.set(String(qdb.question_id), {
-          question_id: qdb.question_id,
-          taxonomy_id: qdb.taxonomy_id,
+    const examScoreConfigMap = new Map<
+      string,
+      {
+        scoreByQuestionId: Map<string, number>;
+        defaultScore: number;
+        groupCount: number;
+        totalItems: number;
+      }
+    >();
+    categorized.forEach(({ assign, master }) => {
+      const k = String(assign.exam_id);
+      if (!examScoreConfigMap.has(k)) {
+        const items = itemsByExam.get(k) || [];
+        const { scoreByQuestionId, groupCount } = buildExamQuestionScoreMap(
+          items,
+          master?.layout_settings,
+          master?.exam_type,
+          master?.total_questions || 1
+        );
+        examScoreConfigMap.set(k, {
+          scoreByQuestionId,
+          defaultScore: 100 / (groupCount || master?.total_questions || 1),
+          groupCount: groupCount || master?.total_questions || items.length || 0,
+          totalItems: items.length || master?.total_questions || 0,
         });
       }
     });
 
-    const d4Codes = new Set<string>();
-    questionsMap.forEach((q) => {
-      const parts = String(q.taxonomy_id).split("-");
-      const d4Code = parts.length >= 2 ? parts.slice(0, 2).join("-") : String(q.taxonomy_id);
-      if (d4Code) d4Codes.add(d4Code);
-    });
+    // 3단계: 전체 응시 배정의 답안 일괄 조회
+    const allAssignIdSet = new Set<any>();
+    (allAssignmentsForExams || []).forEach((a: any) => allAssignIdSet.add(a.assignment_id));
+    categorized.forEach((c) => allAssignIdSet.add(c.assign.assignment_id));
+    const allAssignIds = Array.from(allAssignIdSet);
 
-    const allAssignIds = (allAssignmentsForExams || []).map((a: any) => a.assignment_id);
-    const answerChunks: any[][] = [];
+    let allAnswers: any[] = [];
     for (let i = 0; i < allAssignIds.length; i += 200) {
-      answerChunks.push(allAssignIds.slice(i, i + 200));
+      const chunk = allAssignIds.slice(i, i + 200);
+      const chunkRows = await fetchAllAdminRows((from, to) =>
+        supabaseAdmin
+          .from("student_answer")
+          .select("exam_assignment_id, question_id, grading_code, earned_score, is_correct")
+          .in("exam_assignment_id", chunk)
+          .range(from, to)
+      );
+      if (chunkRows) allAnswers = allAnswers.concat(chunkRows);
     }
 
-    const uniqueD4List = Array.from(d4Codes).filter(Boolean);
-    const orFilter = uniqueD4List
-      .map((code) => `category_id.eq.${code},category_id.like.${code}-%`)
-      .join(",");
-
-    // 3단계: 모든 학생 답안 청크들과 단원명(master_category)을 단일 라운드트립으로 동시 병렬 조회
-    const [answerChunkResults, catResult] = await Promise.all([
-      Promise.all(
-        answerChunks.map((chunk) =>
-          supabaseAdmin
-            .from("student_answer")
-            .select("exam_assignment_id, question_id, grading_code, earned_score, is_correct")
-            .in("exam_assignment_id", chunk)
-        )
-      ),
-      uniqueD4List.length > 0
-        ? supabaseAdmin
-            .from("master_category")
-            .select("category_id, depth4")
-            .or(orFilter)
-        : Promise.resolve({ data: [] as any[] }),
-    ]);
-
-    const allAnswers: any[] = [];
-    answerChunkResults.forEach((res: any) => {
-      if (res?.data) allAnswers.push(...res.data);
+    const dedupAnsMap = new Map<string, any>();
+    allAnswers.forEach((ans) => {
+      if (!ans.grading_code && ans.is_correct == null) return;
+      const k = `${ans.exam_assignment_id}_${ans.question_id}`;
+      const ex = dedupAnsMap.get(k);
+      if (!ex || Number(ans.earned_score || 0) >= Number(ex.earned_score || 0)) {
+        dedupAnsMap.set(k, ans);
+      }
     });
 
-    // 해당 학생 본인의 답안만 필터링하여 단원별 성취도 분석에 사용 (중복 DB 조회 제거)
-    const studentAnswersForCategory = allAnswers.filter((a: any) =>
-      targetAssignIdSet.has(String(a.exam_assignment_id))
+    const assignToExamMap = new Map<any, string>();
+    (allAssignmentsForExams || []).forEach((a: any) =>
+      assignToExamMap.set(a.assignment_id, String(a.exam_id))
+    );
+    categorized.forEach(({ assign }) =>
+      assignToExamMap.set(assign.assignment_id, String(assign.exam_id))
     );
 
-    // 만약 exam_item에 없던 question_id가 답안에 있는 경우에만 보조 조회
-    const missingQIds = Array.from(
+    const assignCounts: Record<
+      string,
+      {
+        o: number;
+        ro: number;
+        to: number;
+        totalAns: number;
+        x: number;
+        initScore: number;
+        finScore: number;
+      }
+    > = {};
+    const answersByAssign = new Map<string, any[]>();
+
+    dedupAnsMap.forEach((ans) => {
+      const aId = String(ans.exam_assignment_id);
+      if (!answersByAssign.has(aId)) answersByAssign.set(aId, []);
+      answersByAssign.get(aId)!.push(ans);
+
+      if (!ans.grading_code) return;
+      if (!assignCounts[aId]) {
+        assignCounts[aId] = { o: 0, ro: 0, to: 0, totalAns: 0, x: 0, initScore: 0, finScore: 0 };
+      }
+      const c = assignCounts[aId];
+      c.totalAns++;
+      const exId = assignToExamMap.get(ans.exam_assignment_id) || "";
+      const cfg = examScoreConfigMap.get(exId);
+      const qScore = cfg?.scoreByQuestionId.get(String(ans.question_id)) ?? cfg?.defaultScore ?? 5;
+
+      if (ans.grading_code === "O") {
+        c.o++;
+        c.initScore += qScore;
+      } else if (ans.grading_code === "RO") {
+        c.ro++;
+      } else if (ans.grading_code === "TO") {
+        c.to++;
+      } else if (["X", "TX"].includes(ans.grading_code)) {
+        c.x++;
+      }
+      c.finScore += calcScoreRatio(ans.grading_code, qScore, gcMeta, false).newEarned;
+    });
+
+    const examScoreMap = new Map<string, { initSum: number; finSum: number; count: number }>();
+    (allAssignmentsForExams || []).forEach((a: any) => {
+      const counts = assignCounts[String(a.assignment_id)];
+      if (!counts || counts.totalAns === 0) return;
+
+      const initScore = roundScore(counts.initScore);
+      const finScore = roundScore(counts.finScore);
+      const exKey = String(a.exam_id);
+      if (!examScoreMap.has(exKey)) {
+        examScoreMap.set(exKey, { initSum: 0, finSum: 0, count: 0 });
+      }
+      const avgData = examScoreMap.get(exKey)!;
+      avgData.initSum += initScore;
+      avgData.finSum += finScore;
+      avgData.count += 1;
+    });
+
+    const examResultsBySubTab: Record<PortalTestSubTabId, any[]> = {
+      weekly: [],
+      weekly_incorrect: [],
+      midterm: [],
+      quarterly: [],
+    };
+    const validCategorized: { assign: any; master: any; subTab: PortalTestSubTabId }[] = [];
+
+    categorized.forEach(({ assign, master, subTab }) => {
+      const aIdStr = String(assign.assignment_id);
+      const counts = assignCounts[aIdStr] || {
+        o: 0,
+        ro: 0,
+        to: 0,
+        totalAns: 0,
+        x: 0,
+        initScore: 0,
+        finScore: 0,
+      };
+      if (
+        ["진행중", "응시중"].includes(String(assign.status || "").trim()) &&
+        counts.totalAns === 0 &&
+        !(Number(assign.total_score) > 0)
+      ) {
+        return;
+      }
+
+      validCategorized.push({ assign, master, subTab });
+
+      const originalScore =
+        counts.totalAns > 0 ? roundScore(counts.initScore) : roundScore(assign.total_score || 0);
+      const finalScore =
+        counts.totalAns > 0 ? roundScore(counts.finScore) : roundScore(assign.total_score || 0);
+
+      const exKey = String(assign.exam_id);
+      const avgData = examScoreMap.get(exKey);
+      const classInitAvg =
+        avgData && avgData.count > 0 ? roundScore(avgData.initSum / avgData.count) : originalScore;
+      const classFinAvg =
+        avgData && avgData.count > 0 ? roundScore(avgData.finSum / avgData.count) : finalScore;
+
+      const rawTitle =
+        master?.title ||
+        (subTab === "weekly"
+          ? "주간테스트"
+          : subTab === "weekly_incorrect"
+          ? "주차별 오답"
+          : subTab === "midterm"
+          ? "중간평가"
+          : "분기평가");
+      const cleanTitle = stripPortalStudentPrefix(rawTitle, studentName) || rawTitle;
+      const weekNum = extractPortalWeekNumber(cleanTitle, master?.sub_title);
+      const cfg = examScoreConfigMap.get(exKey);
+      const effectiveDate = master?.exam_date || assign.created_at;
+
+      examResultsBySubTab[subTab].push({
+        assignment_id: assign.assignment_id,
+        exam_id: assign.exam_id,
+        class_id: assign.class_id || null,
+        subTab,
+        exam_type: master?.exam_type || "",
+        title: cleanTitle,
+        sub_title: master?.sub_title || "",
+        major_grade:
+          master?.major_grade && master.major_grade !== "공통 과정" ? master.major_grade : "",
+        week_num: weekNum,
+        main_question_count: cfg?.groupCount || master?.total_questions || 0,
+        total_item_count: cfg?.totalItems || master?.total_questions || 0,
+        original_score: originalScore,
+        final_score: finalScore,
+        oCount: counts.o,
+        roCount: counts.ro,
+        toCount: counts.to,
+        xCount: counts.x,
+        class_init_avg: classInitAvg,
+        class_fin_avg: classFinAvg,
+        exam_date: master?.exam_date || null,
+        effective_date: effectiveDate,
+        created_at: assign.created_at,
+      });
+    });
+
+    (Object.keys(examResultsBySubTab) as PortalTestSubTabId[]).forEach((k) => {
+      examResultsBySubTab[k].sort(
+        (a, b) =>
+          new Date(b.effective_date || b.created_at).getTime() -
+          new Date(a.effective_date || a.created_at).getTime()
+      );
+    });
+
+    // 4단계: 주간·주차별오답 최근 2개월 단원분석(최대 8개) + 중간·분기평가 리포트용 문항 DB 일괄 조회
+    const twoMonthsCutoff = new Date();
+    twoMonthsCutoff.setMonth(twoMonthsCutoff.getMonth() - 2);
+    twoMonthsCutoff.setHours(0, 0, 0, 0);
+    const cutoffMs = twoMonthsCutoff.getTime();
+
+    const recentWeeklyAssignIds = examResultsBySubTab.weekly
+      .filter((r) => new Date(r.effective_date || r.created_at).getTime() >= cutoffMs)
+      .map((r) => String(r.assignment_id));
+    const recentIncorrectAssignIds = examResultsBySubTab.weekly_incorrect
+      .filter((r) => new Date(r.effective_date || r.created_at).getTime() >= cutoffMs)
+      .map((r) => String(r.assignment_id));
+
+    const periodicCategorized = validCategorized.filter(
+      (c) => c.subTab === "midterm" || c.subTab === "quarterly"
+    );
+
+    const neededQIdSet = new Set<string>();
+    [...recentWeeklyAssignIds, ...recentIncorrectAssignIds].forEach((aId) => {
+      (answersByAssign.get(aId) || []).forEach((ans) => {
+        if (ans.question_id) neededQIdSet.add(String(ans.question_id));
+      });
+    });
+    periodicCategorized.forEach(({ assign }) => {
+      (itemsByExam.get(String(assign.exam_id)) || []).forEach((it) => {
+        if (it.question_id) neededQIdSet.add(String(it.question_id));
+      });
+    });
+
+    const allNeededQIds = Array.from(neededQIdSet);
+    const uuidQIds = allNeededQIds.filter((id) => id.includes("-"));
+    const numQIds = allNeededQIds
+      .filter((id) => !id.includes("-") && !isNaN(Number(id)))
+      .map(Number);
+
+    const fetchedQuestions: any[] = [];
+    for (let i = 0; i < uuidQIds.length; i += 200) {
+      const chunk = uuidQIds.slice(i, i + 200);
+      const { data: qRows, error: qErr } = await supabaseAdmin
+        .from("question_db")
+        .select(
+          "question_id, item_id, parent_question_id, question_number, sub_num, pdf_source, detected_page_num, final_printed_page, book_name, source_book_name, taxonomy_id, taxonomy_name, sub_taxonomy_id, thk_taxonomy_id, thk_taxonomy_name, difficulty, solving_probability"
+        )
+        .in("question_id", chunk);
+      if (!qErr && qRows) {
+        fetchedQuestions.push(...qRows);
+      } else {
+        const { data: fbRows } = await supabaseAdmin
+          .from("question_db")
+          .select("*")
+          .in("question_id", chunk);
+        if (fbRows) fetchedQuestions.push(...fbRows);
+      }
+    }
+
+    const foundUuidSet = new Set(fetchedQuestions.map((q) => String(q.question_id)));
+    const missingUuids = uuidQIds.filter((id) => !foundUuidSet.has(id));
+    if (missingUuids.length > 0) {
+      const { data: tqUuids } = await supabaseAdmin
+        .from("textbook_question")
+        .select("*")
+        .in("question_id", missingUuids);
+      if (tqUuids) fetchedQuestions.push(...tqUuids);
+    }
+    if (numQIds.length > 0) {
+      const { data: tqNums } = await supabaseAdmin
+        .from("textbook_question")
+        .select("*")
+        .in("tq_id", numQIds);
+      if (tqNums) fetchedQuestions.push(...tqNums);
+    }
+
+    const qMap: Record<string, any> = {};
+    fetchedQuestions.forEach((q) => {
+      if (q.question_id) qMap[String(q.question_id)] = q;
+      if (q.tq_id) qMap[String(q.tq_id)] = q;
+    });
+
+    // master_item · master_category · taxonomy_competency · thinking_category 조회
+    const rawTaxTokens = Array.from(
       new Set(
-        studentAnswersForCategory
-          .map((a: any) => a.question_id)
-          .filter((qid: any) => qid && !questionsMap.has(String(qid)))
+        fetchedQuestions
+          .flatMap((q) => [q.item_id, q.taxonomy_id, q.sub_taxonomy_id])
+          .filter((v) => v && v !== "미분류" && v !== "NULL" && v !== "UNDEFINED")
+          .map((v) => String(v).trim())
       )
     );
-    if (missingQIds.length > 0) {
-      const { data: extraQs } = await supabaseAdmin
-        .from("question_db")
-        .select("question_id, taxonomy_id")
-        .in("question_id", missingQIds);
-      (extraQs || []).forEach((q: any) => {
-        if (q?.question_id && q?.taxonomy_id) {
-          questionsMap.set(String(q.question_id), q);
-          const parts = String(q.taxonomy_id).split("-");
-          const d4Code = parts.length >= 2 ? parts.slice(0, 2).join("-") : String(q.taxonomy_id);
-          if (d4Code) d4Codes.add(d4Code);
+
+    const itemToCatId = new Map<string, string>();
+    const catIdsToFetch = new Set<string>();
+    const prefixSetForFallback = new Set<string>();
+
+    for (let i = 0; i < rawTaxTokens.length; i += 200) {
+      const chunk = rawTaxTokens.slice(i, i + 200);
+      const { data: mItems } = await supabaseAdmin
+        .from("master_item")
+        .select("item_id, category_id")
+        .in("item_id", chunk);
+      (mItems || []).forEach((mi: any) => {
+        if (mi.item_id && mi.category_id) {
+          const iKey = String(mi.item_id).trim();
+          const cKey = String(mi.category_id).trim();
+          itemToCatId.set(iKey, cKey);
+          catIdsToFetch.add(cKey);
+        }
+      });
+      chunk.forEach((tok) => {
+        if (!itemToCatId.has(tok)) {
+          const parts = tok.split("-");
+          if (parts.length >= 6 || (parts.length >= 4 && /^\d{3}$/.test(parts[parts.length - 1]))) {
+            const parentCat = parts.slice(0, -1).join("-");
+            itemToCatId.set(tok, parentCat);
+            catIdsToFetch.add(parentCat);
+          }
+          catIdsToFetch.add(tok);
+          if (parts.length >= 2) {
+            prefixSetForFallback.add(parts.slice(0, 2).join("-"));
+          }
         }
       });
     }
 
-    const catMapEntries: [string, string][] = [];
-    const resolvedCodes = new Set<string>();
-    (catResult?.data || []).forEach((row: any) => {
-      if (!row?.category_id || !row?.depth4) return;
-      const parts = String(row.category_id).split("-");
-      const d4Code = parts.length >= 2 ? parts.slice(0, 2).join("-") : String(row.category_id);
-      if (d4Codes.has(d4Code) && !resolvedCodes.has(d4Code)) {
-        resolvedCodes.add(d4Code);
-        catMapEntries.push([d4Code, row.depth4]);
+    fetchedQuestions.forEach((q) => {
+      if (q.thk_taxonomy_id) catIdsToFetch.add(String(q.thk_taxonomy_id).trim());
+    });
+
+    const catIdsArr = Array.from(catIdsToFetch);
+    const catByIdMap = new Map<string, any>();
+    const compByCatIdMap = new Map<
+      string,
+      { primary: PortalCompetencyKey | null; secondary: PortalCompetencyKey | null }
+    >();
+
+    for (let i = 0; i < catIdsArr.length; i += 200) {
+      const chunk = catIdsArr.slice(i, i + 200);
+      const [catRes, compRes] = await Promise.all([
+        supabaseAdmin
+          .from("master_category")
+          .select("category_id, depth1, depth2, depth3, depth4, depth5, depth6, depth7")
+          .in("category_id", chunk),
+        supabaseAdmin
+          .from("taxonomy_competency")
+          .select("category_id, status, final_primary, ai_primary, final_secondary, ai_secondary")
+          .in("category_id", chunk),
+      ]);
+
+      (catRes.data || []).forEach((raw: any) => {
+        const norm = normalizeMasterCategoryRow(raw);
+        if (norm?.category_id) {
+          const cid = String(norm.category_id).trim();
+          catByIdMap.set(cid, norm);
+          catByIdMap.set(cid.toUpperCase(), norm);
+        }
+      });
+
+      (compRes.data || []).forEach((row: any) => {
+        if (!row?.category_id) return;
+        const pair = extractPortalCompetencyPair(row);
+        if (pair.primary || pair.secondary) {
+          const cid = String(row.category_id).trim();
+          compByCatIdMap.set(cid, pair);
+          compByCatIdMap.set(cid.toUpperCase(), pair);
+        }
+      });
+    }
+
+    // 상위 prefix 폴백 (단원명 및 교과역량)
+    const unresolvedCatPrefixes = Array.from(
+      new Set([
+        ...Array.from(prefixSetForFallback),
+        ...catIdsArr
+          .filter((cid) => !cid.startsWith("THK-") && (!catByIdMap.has(cid) || !compByCatIdMap.has(cid)))
+          .map((cid) => cid.split("-").slice(0, 3).join("-"))
+          .filter((p) => p.length >= 6),
+      ])
+    );
+
+    const prefixFallbackUnitName = new Map<string, string>();
+    if (unresolvedCatPrefixes.length > 0) {
+      await Promise.all(
+        unresolvedCatPrefixes.slice(0, 40).map(async (prefix) => {
+          try {
+            const [{ data: fbCats }, { data: fbComps }] = await Promise.all([
+              supabaseAdmin
+                .from("master_category")
+                .select("category_id, depth3, depth4")
+                .like("category_id", `${prefix}%`)
+                .limit(1),
+              supabaseAdmin
+                .from("taxonomy_competency")
+                .select("category_id, status, final_primary, ai_primary, final_secondary, ai_secondary")
+                .like("category_id", `${prefix}%`)
+                .limit(1),
+            ]);
+            if (fbCats && fbCats.length > 0) {
+              const norm = normalizeMasterCategoryRow(fbCats[0]);
+              if (norm.depth4 || norm.depth3) {
+                prefixFallbackUnitName.set(prefix, norm.depth4 || norm.depth3);
+                prefixFallbackUnitName.set(prefix.toUpperCase(), norm.depth4 || norm.depth3);
+              }
+              catIdsArr
+                .filter((u) => u.startsWith(prefix) && !catByIdMap.has(u))
+                .forEach((u) => catByIdMap.set(u, norm));
+            }
+            if (fbComps && fbComps.length > 0) {
+              const pair = extractPortalCompetencyPair(fbComps[0]);
+              if (pair.primary || pair.secondary) {
+                catIdsArr
+                  .filter((u) => u.startsWith(prefix) && !compByCatIdMap.has(u))
+                  .forEach((u) => compByCatIdMap.set(u, pair));
+              }
+            }
+          } catch {}
+        })
+      );
+    }
+
+    // 사고력 분류 로드
+    const thinkingMap = new Map<string, ThinkingCategoryItem>();
+    THINKING_CATEGORIES.forEach((tc) => thinkingMap.set(tc.category_id, tc));
+    if (periodicCategorized.length > 0) {
+      try {
+        const { data: thkRows } = await supabaseAdmin
+          .from("thinking_category")
+          .select("category_id, depth1, depth2, depth3, full_path");
+        (thkRows || []).forEach((r: any) => {
+          if (r?.category_id && r?.depth1) {
+            thinkingMap.set(String(r.category_id).trim(), {
+              category_id: String(r.category_id).trim(),
+              depth1: String(r.depth1).trim(),
+              depth2: String(r.depth2 || "").trim(),
+              depth3: String(r.depth3 || "").trim(),
+              full_path: String(r.full_path || "").trim(),
+            });
+          }
+        });
+      } catch {}
+    }
+
+    const resolveQuestionCatId = (q: any): string => {
+      const cands = [q?.item_id, q?.taxonomy_id, q?.sub_taxonomy_id]
+        .filter((v) => v && v !== "미분류")
+        .map((v) => String(v).trim());
+      for (const c of cands) {
+        if (itemToCatId.has(c)) return itemToCatId.get(c)!;
+        if (itemToCatId.has(c.toUpperCase())) return itemToCatId.get(c.toUpperCase())!;
       }
+      return cands[0] || "";
+    };
+
+    // 4-A: 주간테스트 & 주차별 오답 최근 2개월 상위 최대 8개 단원 성취도 구축
+    const resolveUnitForRadar = (qId: string): { key: string; name: string } | null => {
+      const q = qMap[qId];
+      if (!q) return null;
+      const cid = resolveQuestionCatId(q);
+      if (!cid) return null;
+      const cat = catByIdMap.get(cid) || catByIdMap.get(cid.toUpperCase());
+      if (cat) {
+        const unitName = String(cat.depth4 || cat.depth3 || cat.depth2 || "").trim();
+        if (unitName) {
+          return {
+            key: `${cat.depth1 || ""}|${cat.depth2 || ""}|${unitName}`,
+            name: unitName,
+          };
+        }
+      }
+      const parts = cid.split("-");
+      const p2 = parts.length >= 2 ? parts.slice(0, 2).join("-") : cid;
+      const fbName = prefixFallbackUnitName.get(p2) || prefixFallbackUnitName.get(p2.toUpperCase());
+      if (fbName) return { key: p2, name: fbName };
+      return null;
+    };
+
+    const buildTop8Units = (assignIds: string[]) => {
+      const agg = new Map<
+        string,
+        { code: string; name: string; total: number; initCorrect: number; finCorrect: number }
+      >();
+      assignIds.forEach((aId) => {
+        (answersByAssign.get(aId) || []).forEach((a) => {
+          const u = resolveUnitForRadar(String(a.question_id));
+          if (!u) return;
+          if (!agg.has(u.key)) {
+            agg.set(u.key, {
+              code: u.key,
+              name: u.name,
+              total: 0,
+              initCorrect: 0,
+              finCorrect: 0,
+            });
+          }
+          const obj = agg.get(u.key)!;
+          obj.total += 1;
+          if (a.grading_code === "O") {
+            obj.initCorrect += 1;
+            obj.finCorrect += 1;
+          } else if (a.grading_code === "RO" || a.grading_code === "TO") {
+            obj.finCorrect += 1;
+          } else if (!a.grading_code && a.is_correct) {
+            obj.initCorrect += 1;
+            obj.finCorrect += 1;
+          }
+        });
+      });
+
+      return Array.from(agg.values())
+        .sort((a, b) => b.total - a.total || a.name.localeCompare(b.name, "ko"))
+        .slice(0, 8)
+        .map((d) => ({
+          ...d,
+          initial_rate: d.total > 0 ? Math.round((d.initCorrect / d.total) * 100) : 0,
+          final_rate: d.total > 0 ? Math.round((d.finCorrect / d.total) * 100) : 0,
+        }));
+    };
+
+    const categoryAnalysisBySubTab = {
+      weekly: buildTop8Units(recentWeeklyAssignIds),
+      weekly_incorrect: buildTop8Units(recentIncorrectAssignIds),
+    };
+
+    // 4-B: 중간평가 & 분기평가 모바일 성적 분석 리포트 구축
+    const periodicReportsBySubTab: { midterm: any[]; quarterly: any[] } = {
+      midterm: [],
+      quarterly: [],
+    };
+
+    periodicCategorized.forEach(({ assign, master, subTab }) => {
+      if (subTab !== "midterm" && subTab !== "quarterly") return;
+      const examPaperId = String(assign.exam_id);
+      const rawItems = [...(itemsByExam.get(examPaperId) || [])].sort(
+        (a, b) => (Number(a.sort_order) || 0) - (Number(b.sort_order) || 0)
+      );
+      if (rawItems.length === 0) return;
+
+      const expectedMainCount = subTab === "quarterly" ? 30 : 20;
+      const hideQuestionPoints = subTab === "midterm";
+
+      const mergedArrays = extractMergedQuestionGroups(master?.layout_settings);
+      const customGroupMap = new Map<string, string>();
+      mergedArrays.forEach((arr, idx) => {
+        const gId = `custom_group_${idx}`;
+        arr.forEach((qid) => customGroupMap.set(String(qid), gId));
+      });
+
+      const examQIdSet = new Set(rawItems.map((it) => String(it.question_id)));
+      const parentCountMap = new Map<string, number>();
+      rawItems.forEach((it) => {
+        const q = qMap[String(it.question_id)] || {};
+        const pId = String(q.parent_question_id || q.parent_tq_id || "").trim();
+        if (pId && pId !== "null") {
+          parentCountMap.set(pId, (parentCountMap.get(pId) || 0) + 1);
+        }
+      });
+
+      const buildExamGroups = (allowSourcePageMerge: boolean) => {
+        const gm = new Map<string, { id: string; sort_order: number; items: any[] }>();
+        const list: { id: string; sort_order: number; items: any[] }[] = [];
+
+        rawItems.forEach((item, idx) => {
+          const qidStr = String(item.question_id);
+          const q = qMap[qidStr] || {};
+          let gId = customGroupMap.get(qidStr) || "";
+
+          if (!gId) {
+            const pId = String(q.parent_question_id || q.parent_tq_id || "").trim();
+            if (
+              pId &&
+              pId !== "null" &&
+              (examQIdSet.has(pId) || (parentCountMap.get(pId) || 0) > 1)
+            ) {
+              gId = `parent_${pId}`;
+            } else if (examQIdSet.has(qidStr) && (parentCountMap.get(qidStr) || 0) >= 1) {
+              gId = `parent_${qidStr}`;
+            }
+          }
+
+          if (!gId && allowSourcePageMerge) {
+            const src = String(q.pdf_source || "").trim();
+            const page = String(q.detected_page_num || q.final_printed_page || "").trim();
+            const baseNumMatch = String(q.question_number || "").match(/\d+/);
+            if (src && page && baseNumMatch) {
+              gId = `src_${src}_${page}_${baseNumMatch[0]}`;
+            }
+          }
+
+          if (!gId) gId = `single_${qidStr}_${idx}`;
+
+          if (!gm.has(gId)) {
+            const newG = { id: gId, sort_order: Number(item.sort_order) || idx, items: [] as any[] };
+            gm.set(gId, newG);
+            list.push(newG);
+          }
+          gm.get(gId)!.items.push({
+            sort_order: Number(item.sort_order) || idx,
+            assigned_score: item.assigned_score,
+            question_id: qidStr,
+            question: q,
+          });
+        });
+
+        list.forEach((g) => {
+          g.sort_order = Math.min(...g.items.map((i) => i.sort_order));
+        });
+        list.sort((a, b) => a.sort_order - b.sort_order);
+        return list;
+      };
+
+      let groups = buildExamGroups(false);
+      if (mergedArrays.length === 0 && groups.length > expectedMainCount) {
+        const fbGroups = buildExamGroups(true);
+        if (fbGroups.length >= Math.min(10, expectedMainCount)) {
+          groups = fbGroups;
+        }
+      }
+
+      const groupCount = groups.length || 1;
+      const baseGroupScore = 100 / groupCount;
+      const isWeightedExam =
+        subTab === "quarterly" ||
+        Boolean(
+          master?.exam_type &&
+            (master.exam_type.includes("분기평가") || master.exam_type.includes("분기테스트"))
+        );
+
+      const explicitMaxes = groups.map((g) =>
+        Math.max(...g.items.map((i: any) => parseFloat(i.assigned_score) || 0))
+      );
+      const useExplicitGroupMax =
+        isWeightedExam && explicitMaxes.reduce((acc, v) => acc + v, 0) > 0;
+
+      const groupConfigs = groups.map((g, idx) => {
+        const gMax = useExplicitGroupMax && explicitMaxes[idx] > 0 ? explicitMaxes[idx] : baseGroupScore;
+        const subScore = gMax / (g.items.length || 1);
+        return { ...g, qNum: idx + 1, maxScore: gMax, subScore };
+      });
+
+      const scoreAssignOriginal = (aIdStr: string) => {
+        const ansRows = answersByAssign.get(aIdStr) || [];
+        const ansByQId = new Map<string, any>();
+        ansRows.forEach((r) => ansByQId.set(String(r.question_id), r));
+
+        let initTotal = 0;
+        const perGroup: number[] = [];
+
+        groupConfigs.forEach((g) => {
+          let gInit = 0;
+          g.items.forEach((it: any) => {
+            const ans = ansByQId.get(String(it.question_id));
+            if (!ans) return;
+            const code = ans.grading_code ? String(ans.grading_code).trim() : "";
+            if (code) {
+              if (code === "O") gInit += g.subScore;
+              else if (["a", "b", "c", "q"].includes(code)) {
+                gInit += calcScoreRatio(code, g.subScore, gcMeta, subTab === "quarterly").newEarned;
+              }
+            } else if (ans.is_correct === true) {
+              gInit += g.subScore;
+            }
+          });
+          gInit = Math.min(g.maxScore, gInit);
+          initTotal += gInit;
+          perGroup.push(gInit);
+        });
+
+        return { hasGraded: ansByQId.size > 0, initTotal, perGroup };
+      };
+
+      const targetAId = String(assign.assignment_id);
+      const myScored = scoreAssignOriginal(targetAId);
+
+      // 동일 시험지 응시 코호트 (테스트 계정 제외)
+      const sameExamAssigns = (allAssignmentsForExams || []).filter(
+        (a: any) => String(a.exam_id) === examPaperId
+      );
+      let cohortCandidates = sameExamAssigns.filter((a: any) => {
+        const st = Array.isArray(a.student) ? a.student[0] : a.student;
+        const nm = String(st?.name || "").trim();
+        if (!nm || nm.includes("테스트") || nm.toLowerCase().includes("test")) return false;
+        return true;
+      });
+      if (cohortCandidates.length === 0) cohortCandidates = sameExamAssigns;
+
+      const cohortIdSet = new Set(cohortCandidates.map((a: any) => String(a.assignment_id)));
+      if (cohortIdSet.size === 0) cohortIdSet.add(targetAId);
+
+      let validSampleCount = 0;
+      let cohortInitSum = 0;
+      const cohortGroupInitSum = new Array(groupConfigs.length).fill(0);
+
+      cohortIdSet.forEach((cidStr) => {
+        const sc = scoreAssignOriginal(cidStr);
+        if (!sc.hasGraded) return;
+        validSampleCount += 1;
+        cohortInitSum += roundScore(sc.initTotal);
+        sc.perGroup.forEach((val, idx) => {
+          cohortGroupInitSum[idx] += val;
+        });
+      });
+
+      const initTotalScore = myScored.hasGraded
+        ? roundScore(myScored.initTotal)
+        : roundScore(assign.total_score || 0);
+      const cohortAvgInit =
+        validSampleCount > 0 ? roundScore(cohortInitSum / validSampleCount) : initTotalScore;
+
+      let fullCorrectCount = 0;
+      let partialCount = 0;
+      let wrongCount = 0;
+
+      const questions = groupConfigs.map((g, idx) => {
+        const gInit = myScored.perGroup[idx] ?? 0;
+        const cohortAvgEarned =
+          validSampleCount > 0 ? cohortGroupInitSum[idx] / validSampleCount : gInit;
+        const cohortAccPct =
+          validSampleCount > 0 && g.maxScore > 0
+            ? Math.round((cohortAvgEarned / g.maxScore) * 100)
+            : null;
+
+        let status: "O" | "TRI" | "X" = "X";
+        if (gInit >= g.maxScore - 0.05 && g.maxScore > 0) {
+          status = "O";
+          fullCorrectCount += 1;
+        } else if (gInit > 0) {
+          status = "TRI";
+          partialCount += 1;
+        } else {
+          wrongCount += 1;
+        }
+
+        // 주·보조 교과역량 추출
+        const compList: PortalCompetencyKey[] = [];
+        const pushComp = (v: PortalCompetencyKey | null | undefined) => {
+          if (v && !compList.includes(v)) compList.push(v);
+        };
+        for (const it of g.items) {
+          const q = it.question || {};
+          const cid = resolveQuestionCatId(q);
+          if (cid) {
+            const c = compByCatIdMap.get(cid) || compByCatIdMap.get(cid.toUpperCase());
+            if (c) {
+              pushComp(c.primary);
+              pushComp(c.secondary);
+            }
+          }
+          const thkCid = String(q.thk_taxonomy_id || "").trim();
+          if (thkCid && compByCatIdMap.has(thkCid)) {
+            const c = compByCatIdMap.get(thkCid)!;
+            pushComp(c.primary);
+            pushComp(c.secondary);
+          }
+          if (compList.length >= 2) break;
+        }
+
+        const primaryItem =
+          g.items.find(
+            (it: any) =>
+              it.question?.item_id ||
+              it.question?.taxonomy_id ||
+              it.question?.thk_taxonomy_id ||
+              it.question?.taxonomy_name ||
+              it.question?.thk_taxonomy_name
+          ) || g.items[0];
+        const pq = primaryItem?.question || {};
+        const rawDiff = String(pq.difficulty || "").trim();
+        const cid = resolveQuestionCatId(pq);
+        const cat = cid ? catByIdMap.get(cid) || catByIdMap.get(cid.toUpperCase()) : null;
+        const thk = pq.thk_taxonomy_id
+          ? thinkingMap.get(String(pq.thk_taxonomy_id).trim())
+          : null;
+
+        let unitName = "";
+        let detailTopic = "";
+        if (cat) {
+          unitName = stripPortalLeadingIndex(cat.depth4 || cat.depth3 || cat.depth2 || "");
+          detailTopic = stripPortalLeadingIndex(cat.depth6 || cat.depth5 || unitName);
+        } else if (thk) {
+          unitName = thk.depth1;
+          detailTopic = thk.depth3 || thk.depth2 || thk.depth1;
+        }
+
+        const competencies: PortalCompetencyKey[] =
+          compList.length > 0
+            ? compList.slice(0, 2)
+            : inferPortalFallbackCompetencies(
+                `${unitName} ${detailTopic} ${pq.thk_taxonomy_name || ""} ${pq.taxonomy_name || ""}`
+              );
+
+        // 문항 전체 정답률(solving_probability) 산출
+        const dbProbs = g.items
+          .map((it: any) => Number(it.question?.solving_probability))
+          .filter((v: number) => Number.isFinite(v) && v > 0 && v <= 100);
+
+        let questionAccPct = 50;
+        if (dbProbs.length > 0) {
+          questionAccPct = Math.max(
+            1,
+            Math.min(
+              99,
+              Math.round(dbProbs.reduce((acc: number, v: number) => acc + v, 0) / dbProbs.length)
+            )
+          );
+        } else if (validSampleCount >= 3 && cohortAccPct !== null) {
+          questionAccPct = Math.max(1, Math.min(99, cohortAccPct));
+        } else {
+          const d = rawDiff.replace(/\s+/g, "");
+          if (["최하", "1", "Lv.1", "Lv1"].includes(d)) questionAccPct = 85;
+          else if (["하", "2", "Lv.2", "Lv2"].includes(d)) questionAccPct = 72;
+          else if (d === "중하") questionAccPct = 62;
+          else if (["중", "3", "Lv.3", "Lv3"].includes(d)) questionAccPct = 50;
+          else if (["중상", "4", "Lv.4", "Lv4"].includes(d)) {
+            questionAccPct = useExplicitGroupMax && g.maxScore >= 4.5 ? 32 : 42;
+          } else if (d === "상") questionAccPct = 30;
+          else if (["최상", "5", "Lv.5", "Lv5"].includes(d)) questionAccPct = 20;
+          else if (useExplicitGroupMax && g.maxScore <= 2.5) questionAccPct = 80;
+          else if (useExplicitGroupMax && g.maxScore >= 4.5) questionAccPct = 28;
+        }
+
+        let diffTier: PortalDiffTierKey = "MID";
+        if (questionAccPct >= 70) diffTier = "BASIC";
+        else if (questionAccPct < 40) diffTier = "KILLER";
+
+        return {
+          qNum: g.qNum,
+          subCount: g.items.length,
+          maxScore: roundScore(g.maxScore),
+          initEarned: roundScore(gInit),
+          cohortAvgEarned,
+          questionAccPct,
+          status,
+          competencies,
+          diffTier,
+        };
+      });
+
+      const compRows = PORTAL_COMPETENCY_ORDER.map((compName) => {
+        const qs = questions.filter((q) => q.competencies.includes(compName));
+        const maxS = qs.reduce((acc, q) => acc + q.maxScore, 0);
+        const initS = qs.reduce((acc, q) => acc + q.initEarned, 0);
+        const cohS = qs.reduce((acc, q) => acc + q.cohortAvgEarned, 0);
+        return {
+          name: compName,
+          qCount: qs.length,
+          maxScore: roundScore(maxS),
+          initEarned: roundScore(initS),
+          cohortAvg: roundScore(cohS),
+          initPct: maxS > 0 ? Math.round((initS / maxS) * 100) : null,
+          cohortPct: maxS > 0 ? Math.round((cohS / maxS) * 100) : null,
+        };
+      });
+
+      const tierDefs: { key: PortalDiffTierKey; label: string; axisRange: string }[] = [
+        { key: "BASIC", label: "핵심 기본", axisRange: "(70%↑)" },
+        { key: "MID", label: "중급 응용", axisRange: "(40~69%)" },
+        { key: "KILLER", label: "고난도 심화", axisRange: "(40%↓)" },
+      ];
+
+      const diffRows = tierDefs.map((tm) => {
+        const qs = questions.filter((q) => q.diffTier === tm.key);
+        const maxS = qs.reduce((s, q) => s + q.maxScore, 0);
+        const initS = qs.reduce((s, q) => s + q.initEarned, 0);
+        const cohS = qs.reduce((s, q) => s + q.cohortAvgEarned, 0);
+        return {
+          key: tm.key,
+          label: tm.label,
+          axisRange: tm.axisRange,
+          qCount: qs.length,
+          maxScore: roundScore(maxS),
+          initEarned: roundScore(initS),
+          cohortAvg: roundScore(cohS),
+          initPct: maxS > 0 ? Math.round((initS / maxS) * 100) : 0,
+          cohortPct: maxS > 0 ? Math.round((cohS / maxS) * 100) : 0,
+        };
+      });
+
+      const hasKillerQuestions = questions.some((q) => q.diffTier === "KILLER");
+      const mistakeQuestions = questions
+        .filter((q) => q.diffTier === "BASIC" && q.status !== "O")
+        .sort((a, b) => b.questionAccPct - a.questionAccPct || a.qNum - b.qNum)
+        .slice(0, 5)
+        .map((q) => ({ qNum: q.qNum, questionAccPct: q.questionAccPct }));
+      const killerSolvedQuestions = questions
+        .filter((q) => q.diffTier === "KILLER" && q.status === "O")
+        .sort((a, b) => a.questionAccPct - b.questionAccPct || a.qNum - b.qNum)
+        .slice(0, 5)
+        .map((q) => ({ qNum: q.qNum, questionAccPct: q.questionAccPct }));
+
+      const rawTitle = master?.title || (subTab === "quarterly" ? "분기평가" : "중간평가");
+      const cleanTitle = stripPortalStudentPrefix(rawTitle, studentName) || rawTitle;
+      const courseBadge =
+        master?.sub_title ||
+        (master?.major_grade && master.major_grade !== "공통 과정"
+          ? master.major_grade
+          : "") ||
+        (subTab === "quarterly" ? "분기평가" : "중간평가");
+
+      periodicReportsBySubTab[subTab].push({
+        assignment_id: assign.assignment_id,
+        exam_id: assign.exam_id,
+        subTab,
+        evalKindLabel: subTab === "quarterly" ? "분기평가" : "중간평가",
+        hideQuestionPoints,
+        title: cleanTitle,
+        courseBadge,
+        effective_date: master?.exam_date || assign.created_at,
+        created_at: assign.created_at,
+        totalMainQuestions: questions.length,
+        totalSubItems: rawItems.length,
+        initTotalScore,
+        cohortAvgInit,
+        cohortSampleCount: validSampleCount,
+        fullCorrectCount,
+        partialCount,
+        wrongCount,
+        questions: questions.map(({ cohortAvgEarned: _omit, ...rest }) => rest),
+        compRows,
+        diffRows,
+        hasKillerQuestions,
+        mistakeQuestions,
+        killerSolvedQuestions,
+      });
+    });
+
+    (["midterm", "quarterly"] as const).forEach((k) => {
+      periodicReportsBySubTab[k].sort(
+        (a, b) =>
+          new Date(b.effective_date || b.created_at).getTime() -
+          new Date(a.effective_date || a.created_at).getTime()
+      );
     });
 
     return {
       success: true,
-      validAssignments,
-      allAssignmentsForExams: allAssignmentsForExams || [],
-      examItems,
-      gcData: gcData || [],
-      allAnswers,
-      studentAnswersForCategory,
-      questions: Array.from(questionsMap.values()),
-      catMapEntries,
+      examResultsBySubTab,
+      categoryAnalysisBySubTab,
+      periodicReportsBySubTab,
+      mainTextbooks,
       schoolExams: schoolExams || [],
     };
   } catch (err: any) {
     console.error("[getStudentPortalExamDataAction]", err);
-    return {
-      success: false,
-      validAssignments: [],
-      allAssignmentsForExams: [],
-      examItems: [],
-      gcData: [],
-      allAnswers: [],
-      studentAnswersForCategory: [],
-      questions: [],
-      catMapEntries: [],
-      schoolExams: [],
-    };
+    return emptyPayload;
   }
 }

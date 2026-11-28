@@ -3,6 +3,7 @@
 
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase"; 
+import { triggerRealtimeQuestionCalibration } from "@/lib/questionRateCalibrationClient";
 
 interface GradingModalProps {
   isOpen: boolean;
@@ -74,6 +75,7 @@ export default function GradingModal({ isOpen, examId, title, onClose, onUpdate 
       await supabase.from('student_answer').delete().eq('exam_assignment_id', assignmentId);
       await supabase.from('admission_test_report').delete().eq('assignment_id', assignmentId);
       await supabase.from('exam_assignment').delete().eq('assignment_id', assignmentId);
+      triggerRealtimeQuestionCalibration({ examIds: [examId] });
       alert("출제가 취소되었습니다.");
       loadAssignments(); 
       onUpdate();
@@ -164,6 +166,25 @@ export default function GradingModal({ isOpen, examId, title, onClose, onUpdate 
                     </div>
                     
                     <div className="flex items-center gap-2 shrink-0 pl-4 border-l border-slate-100">
+                      {isCompleted &&
+                        (examType.includes('중간평가') ||
+                          examType.includes('중간테스트') ||
+                          examType.includes('분기평가') ||
+                          examType.includes('분기테스트')) && (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              window.open(
+                                `/print/eval-report?assignment_id=${a.assignment_id}`,
+                                '_blank'
+                              )
+                            }
+                            className="px-3 py-2 bg-[#1e493b] text-white hover:bg-[#122e25] rounded-lg text-xs font-bold transition-colors shadow-sm"
+                            title="A4 1페이지 평가 분석 리포트 열기"
+                          >
+                            📊 리포트
+                          </button>
+                        )}
                       <button 
                         onClick={() => openGradingPanel(a.assignment_id, a.student_id)} 
                         className="px-4 py-2 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200 rounded-lg text-xs font-bold transition-colors shadow-sm"

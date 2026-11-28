@@ -7,6 +7,7 @@ import { getActiveSeatLayout } from '@/app/actions/clinicSeatLayout';
 import { listPadDevicesByTenant } from '@/app/actions/clinicPadDevice';
 import { Seat, SEAT_LAYOUT_UPDATED_EVENT, DEFAULT_CANVAS_W, DEFAULT_CANVAS_H, DEFAULT_SEAT_CARD_W, DEFAULT_SEAT_CARD_H } from '@/lib/clinicSeatLayout';
 import { resolvePositionLabel } from '@/app/clinic/ta/taAccess';
+import { triggerRealtimeQuestionCalibration } from '@/lib/questionRateCalibrationClient';
 
 // 대문항(그룹) 기준 균등 배점 + 서브문항((1),(2) 등) 분할 배점 및 TO/RO 부분점수(score_ratio) 계산 유틸리티
 
@@ -1626,6 +1627,7 @@ export function useSupervisorData() {
                     const defaultQScore = 100 / (groupCount || em?.total_questions || 1);
                     const qScore = scoreByQuestionId.get(String(targetRecheck.questionId)) ?? defaultQScore;
                     await supabaseClient.from('student_answer').update({ is_correct: true, grading_code: 'O', earned_score: qScore }).eq('exam_assignment_id', targetRecheck.examAssignmentId).eq('student_id', st.studentId).eq('question_id', targetRecheck.questionId);
+                    triggerRealtimeQuestionCalibration({ questionIds: [targetRecheck.questionId], studentIds: [st.studentId] });
                     const { data: rows } = await supabaseClient.from('student_answer').select('question_id, grading_code, is_correct').eq('exam_assignment_id', targetRecheck.examAssignmentId).eq('student_id', st.studentId);
                     if (rows && rows.length > 0) {
                         let sum = 0;

@@ -11,6 +11,7 @@ import { deleteConsultLog as deleteConsultLogAction } from "@/app/actions/consul
 import { deleteStudentCompletely } from "@/app/actions/consultation";
 import { getParentProfileAction, getStudentPortalExtraDataAction } from "@/app/actions/parentAuth";
 import { getStudentMessageHistoryAction } from "@/app/actions/alimtalk";
+import { normalizeMasterCategoryRow } from "@/lib/normalize";
 
 const DOUBLE_SURNAMES = ["남궁", "황보", "제갈", "선우", "독고", "사공", "서문", "소봉", "장곡", "강전"];
 
@@ -197,7 +198,11 @@ function buildExamQuestionScoreMap(
   const groupCount = groups.length || 1;
   const baseGroupScore = 100 / groupCount;
   const isAdmissionExam = Boolean(
-    examType && (examType.includes("입학테스트") || examType.includes("진단평가"))
+    examType &&
+      (examType.includes("입학테스트") ||
+        examType.includes("진단평가") ||
+        examType.includes("분기평가") ||
+        examType.includes("분기테스트"))
   );
 
   groups.forEach((g) => {
@@ -258,10 +263,134 @@ const getTodayKST = () => {
   return d.toISOString().split('T')[0];
 };
 
-function TabInitHandler({ setActiveTab }: { setActiveTab: (tab: string) => void }) {
+type TestSubTabId = "weekly" | "weekly_incorrect" | "midterm" | "quarterly";
+
+function classifyStudentTestSubTab(master: any): TestSubTabId | null {
+  if (!master) return null;
+  const typeStr = String(master.exam_type || "").normalize("NFC").trim();
+  const titleStr = String(master.title || "").normalize("NFC").trim();
+  const subTitleStr = String(master.sub_title || "").normalize("NFC").trim();
+  const tagsStr = String(master.exam_tags || "").normalize("NFC").trim();
+
+  // 1) 미완료과제 · 과제 · 진단평가(입학테스트) · [통합] 누적 오답 클리닉 제외
+  if (
+    typeStr === "미완료과제" ||
+    /^\[미완료\s*과제\]/.test(titleStr) ||
+    /미완료\s*프린트/.test(titleStr)
+  ) {
+    return null;
+  }
+  if (["과제", "과제프린트", "과제오답유사"].includes(typeStr)) {
+    return null;
+  }
+  if (
+    ["입학테스트", "진단평가"].some(
+      (kw) =>
+        typeStr.includes(kw) ||
+        titleStr.includes(kw) ||
+        subTitleStr.includes(kw) ||
+        tagsStr.includes(kw)
+    )
+  ) {
+    return null;
+  }
+  if (titleStr.includes("[통합]") || subTitleStr === "누적 오답 모음") {
+    return null;
+  }
+
+  // 2) n주차 오답 (주간테스트에 섞이지 않도록 최우선 판별)
+  const combinedText = `${titleStr} ${subTitleStr} ${typeStr}`;
+  const hasWeekKeyword = /([0-9xX]+\s*주차|[0-9]+\s*주|주차|주간)/.test(combinedText);
+  const hasWrongKeyword = /오답\s*(?:프린트|클리닉|노트|유사)?/.test(combinedText);
+  if (
+    (hasWeekKeyword && hasWrongKeyword) ||
+    (["오답프린트", "오답"].includes(typeStr) && !/과제|중간평가|분기평가|단원평가/.test(titleStr))
+  ) {
+    return "weekly_incorrect";
+  }
+
+  // 3) 분기평가
+  const isQuarterly =
+    !/오답/.test(titleStr) &&
+    (typeStr === "분기평가" ||
+      typeStr === "분기테스트" ||
+      typeStr.includes("분기평가") ||
+      typeStr.includes("분기테스트") ||
+      (!["주간테스트", "중간평가", "중간테스트", "단원평가"].includes(typeStr) &&
+        (titleStr.includes("분기평가") ||
+          titleStr.includes("분기테스트") ||
+          subTitleStr.includes("분기평가") ||
+          tagsStr.includes("분기평가"))));
+  if (isQuarterly) return "quarterly";
+
+  // 4) 중간평가
+  const isMidterm =
+    !/오답/.test(titleStr) &&
+    (typeStr === "중간평가" ||
+      typeStr === "중간테스트" ||
+      typeStr.includes("중간평가") ||
+      typeStr.includes("중간테스트") ||
+      (!["주간테스트", "분기평가", "분기테스트", "단원평가"].includes(typeStr) &&
+        (titleStr.includes("중간평가") ||
+          titleStr.includes("중간테스트") ||
+          subTitleStr.includes("중간평가") ||
+          tagsStr.includes("중간평가"))));
+  if (isMidterm) return "midterm";
+
+  // 5) 주간테스트
+  const isWeekly =
+    !/오답/.test(titleStr) &&
+    (typeStr === "주간테스트" ||
+      /[0-9xX]+\s*주차\s*(?:평가|테스트)/.test(titleStr) ||
+      /[0-9xX]+\s*주차\s*(?:평가|테스트)/.test(subTitleStr));
+  if (isWeekly) return "weekly";
+
+  return null;
+}
+
+function stripStudentPrefixFromTitle(rawTitle: string, studentName?: string): string {
+  let t = String(rawTitle || "").trim();
+  if (!t) return "";
+  if (studentName) {
+    const escaped = studentName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    t = t.replace(new RegExp(`^\\[${escaped}\\]\\s*`), "").trim();
+  }
+  if (!t.startsWith("[통합]") && !t.startsWith("[미완료")) {
+    t = t.replace(/^\[[^\]]{1,12}\]\s*/, "").trim();
+  }
+  return t;
+}
+
+function extractExamWeekNumber(title?: string, subTitle?: string): number | null {
+  const src = `${title || ""} ${subTitle || ""}`;
+  const mSpecific = src.match(/(\d+)\s*주차\s*(?:평가|테스트|주간|오답)/);
+  if (mSpecific) return parseInt(mSpecific[1], 10);
+  const mAny = src.match(/(\d+)\s*주차/);
+  if (mAny) return parseInt(mAny[1], 10);
+  return null;
+}
+
+function TabInitHandler({
+  setActiveTab,
+  setActiveExamSubTab,
+}: {
+  setActiveTab: (tab: string) => void;
+  setActiveExamSubTab: (sub: TestSubTabId) => void;
+}) {
   const searchParams = useSearchParams();
-  const tabParam = searchParams.get('tab');
-  useEffect(() => { if (tabParam) setActiveTab(tabParam); }, [tabParam, setActiveTab]);
+  const tabParam = searchParams.get("tab");
+  const subParam = searchParams.get("sub");
+  useEffect(() => {
+    if (tabParam && tabParam !== "clinic") setActiveTab(tabParam);
+    if (
+      subParam === "weekly" ||
+      subParam === "weekly_incorrect" ||
+      subParam === "midterm" ||
+      subParam === "quarterly"
+    ) {
+      setActiveExamSubTab(subParam);
+    }
+  }, [tabParam, subParam, setActiveTab, setActiveExamSubTab]);
   return null;
 }
 
@@ -275,6 +404,43 @@ export default function StudentDetailPage() {
 
   const [currentUser, setCurrentUser] = useState({ instId: "", name: "", isAdmin: false });
   const [activeTab, setActiveTab] = useState<string>("info");
+  const [activeExamSubTab, setActiveExamSubTab] = useState<TestSubTabId>("weekly");
+
+  const handleSelectTab = (nextTab: string) => {
+    setActiveTab(nextTab);
+    if (typeof window !== "undefined") {
+      try {
+        const paramsObj = new URLSearchParams(window.location.search);
+        paramsObj.set("tab", nextTab);
+        if (nextTab === "exam") {
+          paramsObj.set("sub", activeExamSubTab);
+        } else {
+          paramsObj.delete("sub");
+        }
+        window.history.replaceState(
+          null,
+          "",
+          `${window.location.pathname}?${paramsObj.toString()}`
+        );
+      } catch {}
+    }
+  };
+
+  const handleSelectExamSubTab = (nextSub: TestSubTabId) => {
+    setActiveExamSubTab(nextSub);
+    if (typeof window !== "undefined") {
+      try {
+        const paramsObj = new URLSearchParams(window.location.search);
+        paramsObj.set("tab", "exam");
+        paramsObj.set("sub", nextSub);
+        window.history.replaceState(
+          null,
+          "",
+          `${window.location.pathname}?${paramsObj.toString()}`
+        );
+      } catch {}
+    }
+  };
   const [isNotFound, setIsNotFound] = useState(false);
   const [allowedActions, setAllowedActions] = useState<string[]>([]);
 
@@ -285,12 +451,24 @@ export default function StudentDetailPage() {
   const [consultLogs, setConsultLogs] = useState<any[]>([]);
   const [attendances, setAttendances] = useState<any[]>([]);
   const [progressBooks, setProgressBooks] = useState<any[]>([]);
-  const [examResults, setExamResults] = useState<any[]>([]);
+  const [mainTextbooks, setMainTextbooks] = useState<any[]>([]);
+  const [examResultsBySubTab, setExamResultsBySubTab] = useState<Record<TestSubTabId, any[]>>({
+    weekly: [],
+    weekly_incorrect: [],
+    midterm: [],
+    quarterly: [],
+  });
+  const [categoryAnalysisBySubTab, setCategoryAnalysisBySubTab] = useState<
+    Record<"weekly" | "weekly_incorrect", any[]>
+  >({
+    weekly: [],
+    weekly_incorrect: [],
+  });
+  const [isExamLoading, setIsExamLoading] = useState<boolean>(false);
   const [hwList, setHwList] = useState<any[]>([]);
   const [lessonLogList, setLessonLogList] = useState<any[]>([]);
   const [isLessonLogLoading, setIsLessonLogLoading] = useState<boolean>(false);
   const [parentAvatarUrl, setParentAvatarUrl] = useState<string | null>(null);
-  const [clinicList, setClinicList] = useState<any[]>([]);
   const [makeupList, setMakeupList] = useState<any[]>([]); // 🌟 보강 데이터 상태 추가
   const [billingList, setBillingList] = useState<any[]>([]);
   const [msgHistory, setMsgHistory] = useState<{ dbLogs: any[]; solapiLogs: any[]; trackedPhones: string[] }>({
@@ -300,7 +478,6 @@ export default function StudentDetailPage() {
   });
   const [isMsgLoading, setIsMsgLoading] = useState<boolean>(false);
   const [schoolExams, setSchoolExams] = useState<any[]>([]);
-  const [categoryAnalysis, setCategoryAnalysis] = useState<any[]>([]);
 
   // 모달 및 폼 상태
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
@@ -348,10 +525,9 @@ export default function StudentDetailPage() {
   useEffect(() => {
     if (activeTab === "billing") loadBillings();
     if (activeTab === "messages") loadMessageHistory();
-    if (activeTab === "exam") { loadExamResults(); loadSchoolExams(); loadCategoryAnalysis(); }
+    if (activeTab === "exam") { loadAllTestTabData(); loadSchoolExams(); }
     if (activeTab === "hw") loadHwList();
     if (activeTab === "lesson_log") loadLessonLogs();
-    if (activeTab === "clinic") loadClinicList();
     if (activeTab === "makeup") loadMakeupList(); // 🌟 보강 데이터 로드 함수 호출
   }, [activeTab]);
 
@@ -444,6 +620,7 @@ export default function StudentDetailPage() {
         loadProgressData(normalizedEnrolls.map((e: any) => e.class_id), activeClassIds);
       } else {
         setProgressBooks([]);
+        setMainTextbooks([]);
       }
     } catch (error) { console.error("로딩 에러:", error); }
   };
@@ -482,8 +659,36 @@ export default function StudentDetailPage() {
   };
 
   const loadProgressData = async (classIds: string[], activeClassIds?: Set<string>) => {
-    if (classIds.length === 0) { setProgressBooks([]); return; }
+    if (classIds.length === 0) { setProgressBooks([]); setMainTextbooks([]); return; }
     const { data: cbDataRaw } = await supabase.from('class_textbook').select('*, textbook(*), class(name)').in('class_id', classIds);
+
+    // 🌟 과정 구분선 라벨용: 이전 반 이력을 포함한 모든 주교재 목록 보존
+    const extractedMainBooks = (cbDataRaw || [])
+      .map((cb: any) => {
+        const tb = unwrap(cb?.textbook);
+        const cls = unwrap(cb?.class);
+        return {
+          class_textbook_id: cb.class_textbook_id,
+          class_id: cb.class_id,
+          book_id: cb.book_id,
+          title: String(tb?.title || "").trim(),
+          book_type: String(tb?.book_type || "").trim(),
+          status: String(cb.status || "").trim(),
+          start_date: cb.start_date || null,
+          target_end_date: cb.target_end_date || null,
+          actual_end_date: cb.actual_end_date || null,
+          created_at: cb.created_at || null,
+          className: String(cls?.name || "").trim(),
+        };
+      })
+      .filter((b: any) => {
+        if (!b.title) return false;
+        if (["워크북", "과제", "부교재", "연산", "테스트"].includes(b.book_type)) return false;
+        if (["주교재", "본교재", "개념서", "심화서"].includes(b.book_type)) return true;
+        return !/워크북|WORKBOOK|연산|부교재|추가문제|쌍둥이|유사|클리닉|오답/i.test(b.title);
+      });
+    setMainTextbooks(extractedMainBooks);
+
     const cbData = (cbDataRaw || []).filter((cb: any) => {
       if (cb.status === '완료') return true;
       return !activeClassIds || activeClassIds.has(cb.class_id);
@@ -557,45 +762,59 @@ export default function StudentDetailPage() {
     setProgressBooks(books);
   };
 
-  const loadExamResults = async () => {
+  const loadAllTestTabData = async () => {
+    setIsExamLoading(true);
     try {
-      const { data: assignments, error } = await supabase.from("exam_assignment")
-        .select("assignment_id, exam_id, total_score, status, created_at, exam_master(title, total_questions, exam_type, layout_settings)")
+      const { data: assignments, error } = await supabase
+        .from("exam_assignment")
+        .select("assignment_id, exam_id, class_id, total_score, status, created_at, exam_master(*)")
         .eq("student_id", studentId)
         .order("created_at", { ascending: false });
 
       if (error) console.error("시험결과 로드 에러:", error);
 
-      const validAssignments = (assignments || []).filter((a: any) => {
-        if (['응시전', '미응시', '예정', '대기'].includes(a.status)) return false;
-        const master = Array.isArray(a.exam_master) ? a.exam_master[0] : a.exam_master;
-        const eType = master?.exam_type || '';
-        if (eType !== '주간테스트') return false;
-        return true;
-      }).slice(0, 10); 
+      const preStatuses = ["응시전", "미응시", "예정", "대기"];
+      const categorized: { assign: any; master: any; subTab: TestSubTabId }[] = [];
 
-      if (validAssignments.length === 0) {
-        setExamResults([]);
+      (assignments || []).forEach((a: any) => {
+        if (preStatuses.includes(String(a.status || "").trim())) return;
+        const master = unwrap(a.exam_master);
+        const subTab = classifyStudentTestSubTab(master);
+        if (!subTab) return;
+        categorized.push({ assign: a, master, subTab });
+      });
+
+      if (categorized.length === 0) {
+        setExamResultsBySubTab({ weekly: [], weekly_incorrect: [], midterm: [], quarterly: [] });
+        setCategoryAnalysisBySubTab({ weekly: [], weekly_incorrect: [] });
         return;
       }
 
-      const examIds = Array.from(new Set(validAssignments.map((a: any) => a.exam_id)));
+      const examIds = Array.from(
+        new Set(categorized.map((c) => c.assign.exam_id).filter(Boolean))
+      );
 
-      const [{ data: allAssignmentsForExams }, { data: examItems }, { data: gcData }] = await Promise.all([
-        supabase.from("exam_assignment")
-          .select("assignment_id, exam_id")
-          .in("exam_id", examIds)
-          .not("status", "in", '("응시전","미응시","예정","대기")'),
-        supabase.from("exam_item")
-          .select("exam_id, question_id, sort_order, assigned_score")
-          .in("exam_id", examIds)
-          .order("sort_order"),
-        supabase.from("master_grading_code")
-          .select("code, description, is_correct, score_ratio, admission_ratio")
-      ]);
+      const [{ data: allAssignmentsForExams }, { data: examItems }, { data: gcData }] =
+        await Promise.all([
+          supabase
+            .from("exam_assignment")
+            .select("assignment_id, exam_id, status")
+            .in("exam_id", examIds)
+            .not("status", "in", '("응시전","미응시","예정","대기")'),
+          supabase
+            .from("exam_item")
+            .select("exam_id, question_id, sort_order, assigned_score")
+            .in("exam_id", examIds)
+            .order("sort_order"),
+          supabase
+            .from("master_grading_code")
+            .select("code, description, is_correct, score_ratio, admission_ratio"),
+        ]);
 
       const gcMeta: Record<string, any> = {};
-      gcData?.forEach((row: any) => { if (row.code) gcMeta[row.code] = row; });
+      gcData?.forEach((row: any) => {
+        if (row.code) gcMeta[row.code] = row;
+      });
 
       const itemsByExam = new Map<string, any[]>();
       examItems?.forEach((it: any) => {
@@ -604,10 +823,17 @@ export default function StudentDetailPage() {
         itemsByExam.get(k)!.push(it);
       });
 
-      const examScoreConfigMap = new Map<string, { scoreByQuestionId: Map<string, number>; defaultScore: number }>();
-      validAssignments.forEach((a: any) => {
-        const master = Array.isArray(a.exam_master) ? a.exam_master[0] : a.exam_master;
-        const k = String(a.exam_id);
+      const examScoreConfigMap = new Map<
+        string,
+        {
+          scoreByQuestionId: Map<string, number>;
+          defaultScore: number;
+          groupCount: number;
+          totalItems: number;
+        }
+      >();
+      categorized.forEach(({ assign, master }) => {
+        const k = String(assign.exam_id);
         if (!examScoreConfigMap.has(k)) {
           const items = itemsByExam.get(k) || [];
           const { scoreByQuestionId, groupCount } = buildExamQuestionScoreMap(
@@ -618,25 +844,31 @@ export default function StudentDetailPage() {
           );
           examScoreConfigMap.set(k, {
             scoreByQuestionId,
-            defaultScore: 100 / (groupCount || master?.total_questions || 1)
+            defaultScore: 100 / (groupCount || master?.total_questions || 1),
+            groupCount: groupCount || master?.total_questions || items.length || 0,
+            totalItems: items.length || master?.total_questions || 0,
           });
         }
       });
 
-      const allAssignIds = (allAssignmentsForExams || []).map(a => a.assignment_id);
+      const allAssignIdSet = new Set<any>();
+      (allAssignmentsForExams || []).forEach((a: any) => allAssignIdSet.add(a.assignment_id));
+      categorized.forEach((c) => allAssignIdSet.add(c.assign.assignment_id));
+      const allAssignIds = Array.from(allAssignIdSet);
 
       let allAnswers: any[] = [];
       for (let i = 0; i < allAssignIds.length; i += 200) {
         const chunk = allAssignIds.slice(i, i + 200);
-        const { data: chunkAnswers } = await supabase.from("student_answer")
-          .select("exam_assignment_id, question_id, grading_code, earned_score")
+        const { data: chunkAnswers } = await supabase
+          .from("student_answer")
+          .select("exam_assignment_id, question_id, grading_code, earned_score, is_correct")
           .in("exam_assignment_id", chunk);
-        if (chunkAnswers) allAnswers = [...allAnswers, ...chunkAnswers];
+        if (chunkAnswers) allAnswers = allAnswers.concat(chunkAnswers);
       }
 
       const dedupAnsMap = new Map<string, any>();
-      allAnswers.forEach(ans => {
-        if (!ans.grading_code) return;
+      allAnswers.forEach((ans) => {
+        if (!ans.grading_code && ans.is_correct == null) return;
         const k = `${ans.exam_assignment_id}_${ans.question_id}`;
         const ex = dedupAnsMap.get(k);
         if (!ex || Number(ans.earned_score || 0) >= Number(ex.earned_score || 0)) {
@@ -645,210 +877,381 @@ export default function StudentDetailPage() {
       });
 
       const assignToExamMap = new Map<any, string>();
-      (allAssignmentsForExams || []).forEach(a => assignToExamMap.set(a.assignment_id, String(a.exam_id)));
-      validAssignments.forEach((a: any) => assignToExamMap.set(a.assignment_id, String(a.exam_id)));
+      (allAssignmentsForExams || []).forEach((a: any) =>
+        assignToExamMap.set(a.assignment_id, String(a.exam_id))
+      );
+      categorized.forEach(({ assign }) =>
+        assignToExamMap.set(assign.assignment_id, String(assign.exam_id))
+      );
 
-      const assignCounts: Record<string, { o: number, ro: number, to: number, totalAns: number, x: number, initScore: number, finScore: number }> = {};
-      dedupAnsMap.forEach(ans => {
-        const aId = ans.exam_assignment_id;
+      const assignCounts: Record<
+        string,
+        {
+          o: number;
+          ro: number;
+          to: number;
+          totalAns: number;
+          x: number;
+          initScore: number;
+          finScore: number;
+        }
+      > = {};
+      const myAnswersByAssign = new Map<string, any[]>();
+      const myAssignIdSet = new Set(categorized.map((c) => String(c.assign.assignment_id)));
+
+      dedupAnsMap.forEach((ans) => {
+        const aId = String(ans.exam_assignment_id);
+        if (myAssignIdSet.has(aId)) {
+          if (!myAnswersByAssign.has(aId)) myAnswersByAssign.set(aId, []);
+          myAnswersByAssign.get(aId)!.push(ans);
+        }
+
+        if (!ans.grading_code) return;
         if (!assignCounts[aId]) {
-          assignCounts[aId] = { o:0, ro:0, to:0, totalAns:0, x:0, initScore:0, finScore:0 };
+          assignCounts[aId] = { o: 0, ro: 0, to: 0, totalAns: 0, x: 0, initScore: 0, finScore: 0 };
         }
         const c = assignCounts[aId];
         c.totalAns++;
-        const exId = assignToExamMap.get(aId) || '';
+        const exId = assignToExamMap.get(ans.exam_assignment_id) || "";
         const cfg = examScoreConfigMap.get(exId);
         const qScore = cfg?.scoreByQuestionId.get(String(ans.question_id)) ?? cfg?.defaultScore ?? 5;
 
-        if (ans.grading_code === 'O') {
+        if (ans.grading_code === "O") {
           c.o++;
           c.initScore += qScore;
-        } else if (ans.grading_code === 'RO') {
+        } else if (ans.grading_code === "RO") {
           c.ro++;
-        } else if (ans.grading_code === 'TO') {
+        } else if (ans.grading_code === "TO") {
           c.to++;
-        } else if (['X', 'TX'].includes(ans.grading_code)) {
+        } else if (["X", "TX"].includes(ans.grading_code)) {
           c.x++;
         }
         c.finScore += calcScoreRatio(ans.grading_code, qScore, gcMeta, false).newEarned;
       });
 
-      const examScoreMap = new Map();
-      (allAssignmentsForExams || []).forEach(a => {
-         const counts = assignCounts[a.assignment_id];
-         if (!counts || counts.totalAns === 0) return;
+      const examScoreMap = new Map<
+        string,
+        { initSum: number; finSum: number; count: number }
+      >();
+      (allAssignmentsForExams || []).forEach((a: any) => {
+        const counts = assignCounts[String(a.assignment_id)];
+        if (!counts || counts.totalAns === 0) return;
 
-         const initScore = roundScore(counts.initScore);
-         const finScore = roundScore(counts.finScore);
+        const initScore = roundScore(counts.initScore);
+        const finScore = roundScore(counts.finScore);
+        const exKey = String(a.exam_id);
 
-         if(!examScoreMap.has(a.exam_id)) examScoreMap.set(a.exam_id, { initSum: 0, finSum: 0, count: 0 });
-         const avgData = examScoreMap.get(a.exam_id);
-         avgData.initSum += initScore;
-         avgData.finSum += finScore;
-         avgData.count += 1;
+        if (!examScoreMap.has(exKey)) {
+          examScoreMap.set(exKey, { initSum: 0, finSum: 0, count: 0 });
+        }
+        const avgData = examScoreMap.get(exKey)!;
+        avgData.initSum += initScore;
+        avgData.finSum += finScore;
+        avgData.count += 1;
       });
 
-      const results = validAssignments.map((a: any) => {
-        const counts = assignCounts[a.assignment_id] || { o:0, ro:0, to:0, totalAns:0, x:0, initScore:0, finScore:0 };
-        
-        const originalScore = roundScore(counts.initScore);
-        const finalScore = counts.totalAns > 0 ? roundScore(counts.finScore) : roundScore(a.total_score || 0);
-        
-        const avgData = examScoreMap.get(a.exam_id);
-        const classInitAvg = avgData && avgData.count > 0 ? roundScore(avgData.initSum / avgData.count) : 0;
-        const classFinAvg = avgData && avgData.count > 0 ? roundScore(avgData.finSum / avgData.count) : 0;
+      const groupedResults: Record<TestSubTabId, any[]> = {
+        weekly: [],
+        weekly_incorrect: [],
+        midterm: [],
+        quarterly: [],
+      };
 
-        return {
-          assignment_id: a.assignment_id,
-          title: Array.isArray(a.exam_master) ? a.exam_master[0]?.title : a.exam_master?.title || '주간테스트',
+      const studentDisplayName = student?.name || "";
+
+      categorized.forEach(({ assign, master, subTab }) => {
+        const aIdStr = String(assign.assignment_id);
+        const counts = assignCounts[aIdStr] || {
+          o: 0,
+          ro: 0,
+          to: 0,
+          totalAns: 0,
+          x: 0,
+          initScore: 0,
+          finScore: 0,
+        };
+        // 응시중/진행중이면서 채점된 문항도 없고 점수도 없는 배정은 제외
+        if (
+          ["진행중", "응시중"].includes(String(assign.status || "").trim()) &&
+          counts.totalAns === 0 &&
+          !(Number(assign.total_score) > 0)
+        ) {
+          return;
+        }
+
+        const originalScore =
+          counts.totalAns > 0 ? roundScore(counts.initScore) : roundScore(assign.total_score || 0);
+        const finalScore =
+          counts.totalAns > 0 ? roundScore(counts.finScore) : roundScore(assign.total_score || 0);
+
+        const exKey = String(assign.exam_id);
+        const avgData = examScoreMap.get(exKey);
+        const classInitAvg =
+          avgData && avgData.count > 0 ? roundScore(avgData.initSum / avgData.count) : originalScore;
+        const classFinAvg =
+          avgData && avgData.count > 0 ? roundScore(avgData.finSum / avgData.count) : finalScore;
+
+        const rawTitle =
+          master?.title ||
+          (subTab === "weekly"
+            ? "주간테스트"
+            : subTab === "weekly_incorrect"
+            ? "주차별 오답"
+            : subTab === "midterm"
+            ? "중간평가"
+            : "분기평가");
+        const cleanTitle = stripStudentPrefixFromTitle(rawTitle, studentDisplayName) || rawTitle;
+        const weekNum = extractExamWeekNumber(cleanTitle, master?.sub_title);
+        const cfg = examScoreConfigMap.get(exKey);
+        const effectiveDate = master?.exam_date || assign.created_at;
+
+        groupedResults[subTab].push({
+          assignment_id: assign.assignment_id,
+          exam_id: assign.exam_id,
+          class_id: assign.class_id || null,
+          subTab,
+          exam_type: master?.exam_type || "",
+          title: cleanTitle,
+          raw_title: rawTitle,
+          sub_title: master?.sub_title || "",
+          major_grade:
+            master?.major_grade && master.major_grade !== "공통 과정" ? master.major_grade : "",
+          week_num: weekNum,
+          main_question_count: cfg?.groupCount || master?.total_questions || 0,
+          total_item_count: cfg?.totalItems || master?.total_questions || 0,
           original_score: originalScore,
           final_score: finalScore,
           oCount: counts.o,
           roCount: counts.ro,
           toCount: counts.to,
           xCount: counts.x,
+          takers: avgData?.count || 1,
           class_init_avg: classInitAvg,
           class_fin_avg: classFinAvg,
-          created_at: a.created_at
-        };
+          exam_date: master?.exam_date || null,
+          effective_date: effectiveDate,
+          created_at: assign.created_at,
+        });
       });
 
-      setExamResults(results); 
-    } catch (err) {
-      console.error("시험 결과 로드 실패:", err);
-      setExamResults([]);
-    }
-  };
+      // 최신순 정렬 고정
+      (Object.keys(groupedResults) as TestSubTabId[]).forEach((k) => {
+        groupedResults[k].sort(
+          (a, b) =>
+            new Date(b.effective_date || b.created_at).getTime() -
+            new Date(a.effective_date || a.created_at).getTime()
+        );
+      });
 
-  const loadCategoryAnalysis = async () => {
-    try {
-      const { data: assignments } = await supabase.from("exam_assignment")
-        .select("assignment_id, status, exam_master(exam_type)")
-        .eq("student_id", studentId)
-        .order("created_at", { ascending: false });
+      setExamResultsBySubTab(groupedResults);
 
-      const validAssignments = (assignments || []).filter((a: any) => {
-        if (['응시전', '미응시', '예정', '대기'].includes(a.status)) return false;
-        const master = Array.isArray(a.exam_master) ? a.exam_master[0] : a.exam_master;
-        if (master?.exam_type !== '주간테스트') return false;
-        return true;
-      }).slice(0, 10);
+      // 🌟 방사차트 단원별 성취도 분석: 최근 2개월 문항 수 기준 상위 최대 8개 단원 (주간테스트 & n주차 오답)
+      const twoMonthsCutoff = new Date();
+      twoMonthsCutoff.setMonth(twoMonthsCutoff.getMonth() - 2);
+      twoMonthsCutoff.setHours(0, 0, 0, 0);
+      const cutoffMs = twoMonthsCutoff.getTime();
 
-      if (validAssignments.length === 0) {
-        setCategoryAnalysis([]);
+      const recentWeeklyAssignIds = groupedResults.weekly
+        .filter((r) => new Date(r.effective_date || r.created_at).getTime() >= cutoffMs)
+        .map((r) => String(r.assignment_id));
+      const recentIncorrectAssignIds = groupedResults.weekly_incorrect
+        .filter((r) => new Date(r.effective_date || r.created_at).getTime() >= cutoffMs)
+        .map((r) => String(r.assignment_id));
+
+      const targetRecentAssignIds = Array.from(
+        new Set([...recentWeeklyAssignIds, ...recentIncorrectAssignIds])
+      );
+
+      const qIdsForCatSet = new Set<string>();
+      targetRecentAssignIds.forEach((aId) => {
+        (myAnswersByAssign.get(aId) || []).forEach((ans) => {
+          if (ans.question_id) qIdsForCatSet.add(String(ans.question_id));
+        });
+      });
+
+      const qIdsForCat = Array.from(qIdsForCatSet);
+      if (qIdsForCat.length === 0) {
+        setCategoryAnalysisBySubTab({ weekly: [], weekly_incorrect: [] });
         return;
       }
 
-      const targetAssignIds = validAssignments.map(a => a.assignment_id);
-
-      const { data: answers, error: ansErr } = await supabase
-        .from('student_answer')
-        .select('question_id, is_correct, grading_code')
-        .in('exam_assignment_id', targetAssignIds);
-
-      if (ansErr || !answers || answers.length === 0) {
-        setCategoryAnalysis([]);
-        return;
-      }
-
-      const qIds = Array.from(new Set(answers.map(a => a.question_id)));
-      
       let questions: any[] = [];
-      for (let i = 0; i < qIds.length; i += 200) {
-        const chunk = qIds.slice(i, i + 200);
+      for (let i = 0; i < qIdsForCat.length; i += 200) {
+        const chunk = qIdsForCat.slice(i, i + 200);
         const { data: qData } = await supabase
-          .from('question_db')
-          .select('question_id, taxonomy_id')
-          .in('question_id', chunk);
-        if (qData) questions = [...questions, ...qData];
+          .from("question_db")
+          .select("question_id, taxonomy_id, item_id")
+          .in("question_id", chunk);
+        if (qData) questions = questions.concat(qData);
       }
 
-      const d4Codes = new Set<string>();
-      const qIdToD4 = new Map<string, string>();
-
-      questions.forEach(q => {
-        if (!q.taxonomy_id) return;
-        const parts = q.taxonomy_id.split('-');
-        const d4Code = parts.length >= 2 ? parts.slice(0, 2).join('-') : q.taxonomy_id;
-        d4Codes.add(d4Code);
-        qIdToD4.set(q.question_id, d4Code);
+      const qTaxMap = new Map<string, string>();
+      const rawTaxSet = new Set<string>();
+      questions.forEach((q) => {
+        const tid = String(q.taxonomy_id || q.item_id || "").trim().toUpperCase();
+        if (!tid || tid === "미분류" || tid === "NULL" || tid === "UNDEFINED") return;
+        qTaxMap.set(String(q.question_id), tid);
+        rawTaxSet.add(tid);
       });
 
-      const uniqueD4Array = Array.from(d4Codes).filter(Boolean);
-      if (uniqueD4Array.length === 0) {
-        setCategoryAnalysis([]);
+      const rawTaxArr = Array.from(rawTaxSet);
+      if (rawTaxArr.length === 0) {
+        setCategoryAnalysisBySubTab({ weekly: [], weekly_incorrect: [] });
         return;
       }
 
-      const catMap = new Map<string, string>();
-      
-      await Promise.all(uniqueD4Array.map(async (code) => {
-        try {
-          const { data, error } = await supabase
-            .from('master_category')
-            .select('category_id, depth4')
-            .eq('category_id', code)
-            .limit(1);
-            
-          if (data && data.length > 0 && data[0].depth4) {
-            catMap.set(code, data[0].depth4);
-            return;
+      const itemToCat = new Map<string, string>();
+      const catIdsToFetch = new Set<string>();
+      const d4PrefixFallbackCodes = new Set<string>();
+
+      for (let i = 0; i < rawTaxArr.length; i += 150) {
+        const chunk = rawTaxArr.slice(i, i + 150);
+        const { data: mItems } = await supabase
+          .from("master_item")
+          .select("item_id, category_id")
+          .in("item_id", chunk);
+        mItems?.forEach((row: any) => {
+          const iId = String(row.item_id || "").trim().toUpperCase();
+          const cId = String(row.category_id || "").trim().toUpperCase();
+          if (iId && cId) {
+            itemToCat.set(iId, cId);
+            catIdsToFetch.add(cId);
           }
-
-          const { data: likeData, error: likeErr } = await supabase
-            .from('master_category')
-            .select('category_id, depth4')
-            .like('category_id', `${code}-%`)
-            .limit(1);
-            
-          if (likeData && likeData.length > 0 && likeData[0].depth4) {
-            catMap.set(code, likeData[0].depth4);
+        });
+        chunk.forEach((tid) => {
+          if (!itemToCat.has(tid)) {
+            const parts = tid.split("-");
+            if (parts.length >= 6 || (parts.length >= 4 && /^\d{3}$/.test(parts[parts.length - 1]))) {
+              const parentCat = parts.slice(0, -1).join("-");
+              itemToCat.set(tid, parentCat);
+              catIdsToFetch.add(parentCat);
+            }
+            catIdsToFetch.add(tid);
+            if (parts.length >= 2) {
+              d4PrefixFallbackCodes.add(parts.slice(0, 2).join("-"));
+            }
           }
-        } catch (e) {
-          console.error("단원명 역추적 실패:", code, e);
-        }
-      }));
+        });
+      }
 
-      const aggMap = new Map();
-      answers.forEach(a => {
-        const d4Code = qIdToD4.get(a.question_id);
-        if (!d4Code) return;
+      const catIdsArr = Array.from(catIdsToFetch);
+      const catById = new Map<string, any>();
+      for (let i = 0; i < catIdsArr.length; i += 150) {
+        const chunk = catIdsArr.slice(i, i + 150);
+        const { data: mCats } = await supabase
+          .from("master_category")
+          .select("category_id, depth1, depth2, depth3, depth4, depth5")
+          .in("category_id", chunk);
+        mCats?.forEach((rawC: any) => {
+          const c = normalizeMasterCategoryRow(rawC);
+          catById.set(String(c.category_id || "").trim().toUpperCase(), c);
+        });
+      }
 
-        let depth4Name = catMap.get(d4Code);
-        
-        if (!depth4Name || depth4Name.trim() === '') {
-          depth4Name = d4Code;
-        }
-
-        if (!aggMap.has(d4Code)) {
-          aggMap.set(d4Code, { code: d4Code, name: depth4Name, total: 0, initCorrect: 0, finCorrect: 0 });
-        }
-        const obj = aggMap.get(d4Code);
-        obj.total += 1;
-        
-        if (a.grading_code === 'O') {
-          obj.initCorrect += 1;
-          obj.finCorrect += 1;
-        } else if (a.grading_code === 'RO' || a.grading_code === 'TO') {
-          obj.finCorrect += 1;
-        } else if (!a.grading_code && a.is_correct) {
-          obj.initCorrect += 1;
-          obj.finCorrect += 1;
-        }
+      // 직접 매칭되지 않은 구형 코드에 대해서만 prefix(E411-01-%) 폴백 조회
+      const unresolvedPrefixes = Array.from(d4PrefixFallbackCodes).filter((prefix) => {
+        return !rawTaxArr.some((tid) => {
+          if (!tid.startsWith(prefix)) return false;
+          const cId = itemToCat.get(tid) || tid;
+          return catById.has(cId);
+        });
       });
+      const prefixFallbackName = new Map<string, string>();
+      if (unresolvedPrefixes.length > 0) {
+        await Promise.all(
+          unresolvedPrefixes.map(async (prefix) => {
+            try {
+              const { data: likeData } = await supabase
+                .from("master_category")
+                .select("category_id, depth3, depth4")
+                .like("category_id", `${prefix}-%`)
+                .limit(1);
+              if (likeData && likeData.length > 0) {
+                const norm = normalizeMasterCategoryRow(likeData[0]);
+                if (norm.depth4 || norm.depth3) {
+                  prefixFallbackName.set(prefix, norm.depth4 || norm.depth3);
+                }
+              }
+            } catch {}
+          })
+        );
+      }
 
-      const finalData = Array.from(aggMap.values())
-        .map(d => ({
-          ...d,
-          initial_rate: d.total > 0 ? Math.round((d.initCorrect / d.total) * 100) : 0,
-          final_rate: d.total > 0 ? Math.round((d.finCorrect / d.total) * 100) : 0
-        }))
-        .sort((a, b) => a.code.localeCompare(b.code));
+      const resolveQuestionUnit = (qId: string): { key: string; name: string } | null => {
+        const tid = qTaxMap.get(qId);
+        if (!tid) return null;
+        const cId = itemToCat.get(tid) || tid;
+        const cat = catById.get(cId) || catById.get(tid);
+        if (cat) {
+          const unitName = String(cat.depth4 || cat.depth3 || cat.depth2 || "").trim();
+          if (unitName) {
+            const unitKey = `${cat.depth1 || ""}|${cat.depth2 || ""}|${unitName}`;
+            return { key: unitKey, name: unitName };
+          }
+        }
+        const parts = tid.split("-");
+        const prefix = parts.length >= 2 ? parts.slice(0, 2).join("-") : tid;
+        const fbName = prefixFallbackName.get(prefix);
+        if (fbName) return { key: prefix, name: fbName };
+        return null;
+      };
 
-      setCategoryAnalysis(finalData);
+      const buildTop8CategoryAnalysis = (assignIds: string[]) => {
+        const aggMap = new Map<
+          string,
+          { code: string; name: string; total: number; initCorrect: number; finCorrect: number }
+        >();
+
+        assignIds.forEach((aId) => {
+          (myAnswersByAssign.get(aId) || []).forEach((a) => {
+            const unit = resolveQuestionUnit(String(a.question_id));
+            if (!unit) return;
+
+            if (!aggMap.has(unit.key)) {
+              aggMap.set(unit.key, {
+                code: unit.key,
+                name: unit.name,
+                total: 0,
+                initCorrect: 0,
+                finCorrect: 0,
+              });
+            }
+            const obj = aggMap.get(unit.key)!;
+            obj.total += 1;
+
+            if (a.grading_code === "O") {
+              obj.initCorrect += 1;
+              obj.finCorrect += 1;
+            } else if (a.grading_code === "RO" || a.grading_code === "TO") {
+              obj.finCorrect += 1;
+            } else if (!a.grading_code && a.is_correct) {
+              obj.initCorrect += 1;
+              obj.finCorrect += 1;
+            }
+          });
+        });
+
+        // 최근 2달간 문항 수(total) 기준 내림차순 정렬 후 최대 8개 항목 제한
+        return Array.from(aggMap.values())
+          .map((d) => ({
+            ...d,
+            initial_rate: d.total > 0 ? Math.round((d.initCorrect / d.total) * 100) : 0,
+            final_rate: d.total > 0 ? Math.round((d.finCorrect / d.total) * 100) : 0,
+          }))
+          .sort((a, b) => b.total - a.total || a.code.localeCompare(b.code, "ko", { numeric: true }))
+          .slice(0, 8);
+      };
+
+      setCategoryAnalysisBySubTab({
+        weekly: buildTop8CategoryAnalysis(recentWeeklyAssignIds),
+        weekly_incorrect: buildTop8CategoryAnalysis(recentIncorrectAssignIds),
+      });
     } catch (err) {
-      console.error("단원별 성취도 역추적 로드 실패:", err);
-      setCategoryAnalysis([]);
+      console.error("테스트 성적 데이터 로드 실패:", err);
+      setExamResultsBySubTab({ weekly: [], weekly_incorrect: [], midterm: [], quarterly: [] });
+      setCategoryAnalysisBySubTab({ weekly: [], weekly_incorrect: [] });
+    } finally {
+      setIsExamLoading(false);
     }
   };
 
@@ -932,11 +1335,6 @@ export default function StudentDetailPage() {
     } finally {
       setIsLessonLogLoading(false);
     }
-  };
-
-  const loadClinicList = async () => {
-    const { data } = await supabase.from("clinic_task").select("*, textbook_question(question_number)").eq("student_id", studentId).order("created_at", { ascending: false });
-    setClinicList(data || []);
   };
 
   // 🌟 보강(Makeup) 데이터를 불러오는 함수 추가
@@ -1179,24 +1577,22 @@ export default function StudentDetailPage() {
 
   if (!student) return <div className="p-10 text-center font-bold text-slate-500">데이터를 불러오는 중입니다...</div>;
 
-  // 🌟 [수정 포인트] 탭 구성에 '보강 이력' 탭 추가
   const TABS = [
     { id: 'info', name: '상세 정보 및 수강반' },
     ...(allowedActions.includes('action_view_consult') ? [{ id: 'consult', name: '상담 기록' }] : []),
     { id: 'attend', name: '출결 기록' },
     { id: 'progress', name: '진도 기록' },
-    ...(allowedActions.includes('action_view_exam') ? [{ id: 'exam', name: '주간테스트 성적' }] : []),
+    ...(allowedActions.includes('action_view_exam') ? [{ id: 'exam', name: '테스트 성적' }] : []),
     { id: 'hw', name: '과제 현황' },
     { id: 'lesson_log', name: '수업일지' },
-    ...(allowedActions.includes('action_view_clinic') ? [{ id: 'clinic', name: '오답 클리닉' }] : []),
-    { id: 'makeup', name: '보강 이력' }, // 🌟 새로 추가된 부분
+    { id: 'makeup', name: '보강 이력' },
     { id: 'billing', name: '수납/청구' },
     { id: 'messages', name: '카톡/문자 내역' }
   ];
 
   return (
     <div className="flex-1 flex flex-col min-w-0 bg-slate-50 h-full relative overflow-y-auto custom-scroll p-4 pt-20 sm:p-8 sm:pt-24 font-pretendard">
-      <Suspense fallback={null}><TabInitHandler setActiveTab={setActiveTab} /></Suspense>
+      <Suspense fallback={null}><TabInitHandler setActiveTab={setActiveTab} setActiveExamSubTab={setActiveExamSubTab} /></Suspense>
 
       <div className="max-w-[1300px] w-full mx-auto space-y-5 pb-20">
         
@@ -1251,22 +1647,33 @@ export default function StudentDetailPage() {
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden flex flex-col min-h-[600px]">
           <div className="flex overflow-x-auto border-b border-slate-200 bg-slate-50/80 px-2 pt-2 custom-scroll shrink-0">
             {TABS.map(tab => (
-              <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`px-5 py-3 font-bold text-[12px] whitespace-nowrap border-b-2 transition-colors ${activeTab === tab.id ? 'text-brand border-brand' : 'text-slate-400 border-transparent hover:text-slate-700 hover:bg-slate-100/50'}`}>
+              <button key={tab.id} onClick={() => handleSelectTab(tab.id)} className={`px-5 py-3 font-bold text-[12px] whitespace-nowrap border-b-2 transition-colors ${activeTab === tab.id ? 'text-brand border-brand' : 'text-slate-400 border-transparent hover:text-slate-700 hover:bg-slate-100/50'}`}>
                 {tab.name}
               </button>
             ))}
           </div>
 
           <div className="p-6 bg-white flex-1 relative overflow-hidden">
-            {activeTab === "info" && <InfoTab student={student} enrollments={enrollments} consultLogs={consultLogs} setActiveTab={setActiveTab} calendarBlock={renderCalendarBlock()} />}
+            {activeTab === "info" && <InfoTab student={student} enrollments={enrollments} consultLogs={consultLogs} setActiveTab={handleSelectTab} calendarBlock={renderCalendarBlock()} />}
             {activeTab === "consult" && <ConsultTab consultLogs={consultLogs} setSelectedConsultLog={setSelectedConsultLog} setIsConsultModalOpen={setIsConsultModalOpen} deleteConsultLog={deleteConsultLog} calendarBlock={renderCalendarBlock()} />}
             {activeTab === "attend" && <AttendTab calMonth={calMonth} attSummary={attSummary} selectedDate={selectedDate} attendForm={attendForm} setAttendForm={setAttendForm} allowedActions={allowedActions} deleteAttendance={deleteAttendance} saveAttendance={saveAttendance} calendarBlock={renderCalendarBlock()} />}
             {activeTab === "progress" && <ProgressTab progressBooks={progressBooks} />}
-            {activeTab === "exam" && <ExamTab examResults={examResults} schoolExams={schoolExams} categoryAnalysis={categoryAnalysis} setIsSchoolExamModalOpen={setIsSchoolExamModalOpen} deleteSchoolExam={deleteSchoolExam} />}
+            {activeTab === "exam" && (
+              <ExamTab
+                activeExamSubTab={activeExamSubTab}
+                setActiveExamSubTab={handleSelectExamSubTab}
+                examResultsBySubTab={examResultsBySubTab}
+                categoryAnalysisBySubTab={categoryAnalysisBySubTab}
+                mainTextbooks={mainTextbooks}
+                isExamLoading={isExamLoading}
+                schoolExams={schoolExams}
+                setIsSchoolExamModalOpen={setIsSchoolExamModalOpen}
+                deleteSchoolExam={deleteSchoolExam}
+              />
+            )}
             {activeTab === "hw" && <HwTab hwList={hwList} />}
             {activeTab === "lesson_log" && <LessonLogTab lessonLogList={lessonLogList} isLoading={isLessonLogLoading} studentName={student.name} />}
-            {activeTab === "clinic" && <ClinicTab clinicList={clinicList} />}
-            {activeTab === "makeup" && <MakeupTab makeupList={makeupList} />} {/* 🌟 보강 이력 탭 컨텐츠 연결 */}
+            {activeTab === "makeup" && <MakeupTab makeupList={makeupList} />}
             {activeTab === "billing" && <BillingTab billingList={billingList} setIsBillingModalOpen={setIsBillingModalOpen} setPayFormInit={setPayFormInit} setIsPaymentModalOpen={setIsPaymentModalOpen} />}
             {activeTab === "messages" && <MessageHistoryTab msgHistory={msgHistory} isLoading={isMsgLoading} onRefresh={loadMessageHistory} />}
           </div>
@@ -1639,20 +2046,22 @@ const RadarChart = ({ data }: { data: any[] }) => {
     return <div className="text-center text-slate-400 text-xs font-bold py-10">데이터가 부족합니다.<br/>(방사 차트는 최소 3개 이상의 단원 데이터가 필요합니다.)</div>;
   }
 
-  const size = 320; 
+  const size = 320;
+  const padX = 28;
+  const padY = 8;
   const center = size / 2;
-  const radius = size * 0.35; 
+  const radius = size * 0.35;
   const levels = 5;
 
   const pointsFin = data.map((d, i) => {
     const angle = -Math.PI / 2 + (Math.PI * 2 * i) / data.length;
-    const value = Math.max(0.01, d.final_rate / 100); 
+    const value = Math.max(0.01, d.final_rate / 100);
     return { x: center + radius * value * Math.cos(angle), y: center + radius * value * Math.sin(angle) };
   });
 
   const pointsInit = data.map((d, i) => {
     const angle = -Math.PI / 2 + (Math.PI * 2 * i) / data.length;
-    const value = Math.max(0.01, d.initial_rate / 100); 
+    const value = Math.max(0.01, d.initial_rate / 100);
     return { x: center + radius * value * Math.cos(angle), y: center + radius * value * Math.sin(angle) };
   });
 
@@ -1665,7 +2074,7 @@ const RadarChart = ({ data }: { data: any[] }) => {
     };
   });
 
-  const bgPolygons = Array.from({length: levels}).map((_, levelIndex) => {
+  const bgPolygons = Array.from({ length: levels }).map((_, levelIndex) => {
     const r = radius * ((levelIndex + 1) / levels);
     const pts = data.map((_, i) => {
       const angle = -Math.PI / 2 + (Math.PI * 2 * i) / data.length;
@@ -1683,17 +2092,45 @@ const RadarChart = ({ data }: { data: any[] }) => {
   const polyInitStr = pointsInit.map(p => `${p.x},${p.y}`).join(' ');
 
   return (
-    <svg width="100%" height={size} viewBox={`0 0 ${size} ${size}`}>
+    <svg width="100%" height={size} viewBox={`${-padX} ${-padY} ${size + padX * 2} ${size + padY * 2}`}>
       {bgPolygons}
       {axes}
-      <polygon points={polyFinStr} fill="rgba(147, 197, 253, 0.4)" stroke="#93c5fd" strokeWidth="2" strokeLinejoin="round" />
-      {pointsFin.map((p, i) => <circle key={`fin-dot-${i}`} cx={p.x} cy={p.y} r="3" fill="#3b82f6" />)}
-      <polygon points={polyInitStr} fill="rgba(0, 40, 100, 0.5)" stroke="#002864" strokeWidth="2" strokeLinejoin="round" />
-      {pointsInit.map((p, i) => <circle key={`init-dot-${i}`} cx={p.x} cy={p.y} r="3" fill="#002864" />)}
+      {/* 최초 성취도: 은은한 슬레이트 점선으로 배경 기준선 역할 */}
+      <polygon
+        points={polyInitStr}
+        fill="rgba(100, 116, 139, 0.16)"
+        stroke="#64748b"
+        strokeWidth="1.6"
+        strokeDasharray="4 3"
+        strokeLinejoin="round"
+      />
+      {pointsInit.map((p, i) => (
+        <circle key={`init-dot-${i}`} cx={p.x} cy={p.y} r="2.6" fill="#64748b" />
+      ))}
+      {/* 최종 성취도: 최상단 레이어 + 선명한 블루 실선 및 화이트 링 포인트로 강조 */}
+      <polygon
+        points={polyFinStr}
+        fill="rgba(37, 99, 235, 0.24)"
+        stroke="#2563eb"
+        strokeWidth="2.8"
+        strokeLinejoin="round"
+        style={{ filter: "drop-shadow(0 1px 3px rgba(37, 99, 235, 0.28))" }}
+      />
+      {pointsFin.map((p, i) => (
+        <circle
+          key={`fin-dot-${i}`}
+          cx={p.x}
+          cy={p.y}
+          r="4.2"
+          fill="#2563eb"
+          stroke="#ffffff"
+          strokeWidth="1.6"
+        />
+      ))}
       {labelPoints.map((p, i) => {
         const lines = splitLabel(p.label);
         return (
-          <text key={`text-${i}`} fontSize="10" fill="#475569" textAnchor="middle" fontWeight="bold">
+          <text key={`text-${i}`} fontSize="10" fill="#334155" textAnchor="middle" fontWeight="bold">
             {lines.length === 1 ? (
               <tspan x={p.labelX} y={p.labelY} dominantBaseline="central">{lines[0]}</tspan>
             ) : (
@@ -1709,84 +2146,479 @@ const RadarChart = ({ data }: { data: any[] }) => {
   );
 };
 
-function ExamTab({ examResults, schoolExams, categoryAnalysis, setIsSchoolExamModalOpen, deleteSchoolExam }: any) {
+function extractGradeSemesterToken(raw: string): string | null {
+  const s = String(raw || "").trim();
+  if (!s) return null;
+  const mMid = s.match(/(?:중등|중학수학|중학|중)\s*([1-3])\s*-\s*([1-2])/);
+  if (mMid) return `M${mMid[1]}-${mMid[2]}`;
+  const mMidCompact = s.match(/(?:중등|중학수학|중학|중)\s*([1-3])([1-2])(?:[^0-9]|$)/);
+  if (mMidCompact) return `M${mMidCompact[1]}-${mMidCompact[2]}`;
+  const mSeven = s.match(/([7-9])\s*-\s*([1-2])/);
+  if (mSeven) return `M${Number(mSeven[1]) - 6}-${mSeven[2]}`;
+  const mElem = s.match(/([1-6])\s*-\s*([1-2])/);
+  if (mElem) return `E${mElem[1]}-${mElem[2]}`;
+  return null;
+}
+
+function estimateSvgPillWidth(label: string): number {
+  let w = 16;
+  for (const ch of label) {
+    if (/[가-힣ㄱ-ㅎㅏ-ㅣ]/.test(ch)) w += 8.6;
+    else if (ch === " ") w += 3.5;
+    else w += 5.4;
+  }
+  return Math.max(58, Math.ceil(w));
+}
+
+function ExamTab({
+  activeExamSubTab,
+  setActiveExamSubTab,
+  examResultsBySubTab,
+  categoryAnalysisBySubTab,
+  mainTextbooks,
+  isExamLoading,
+  schoolExams,
+  setIsSchoolExamModalOpen,
+  deleteSchoolExam,
+}: {
+  activeExamSubTab: TestSubTabId;
+  setActiveExamSubTab: (sub: TestSubTabId) => void;
+  examResultsBySubTab: Record<TestSubTabId, any[]>;
+  categoryAnalysisBySubTab: Record<"weekly" | "weekly_incorrect", any[]>;
+  mainTextbooks: any[];
+  isExamLoading: boolean;
+  schoolExams: any[];
+  setIsSchoolExamModalOpen: (v: boolean) => void;
+  deleteSchoolExam: (id: string) => void;
+}) {
   const router = useRouter();
   const params = useParams();
   const studentId = params.id as string;
-  
-  const renderGrowthChart = () => {
-    if (examResults.length === 0) return <div className="text-center py-20 text-slate-400 font-bold text-sm bg-slate-50 rounded-xl">최근 시험 데이터가 없습니다.</div>;
-    
-    const chartData = [...examResults.slice(0, 10)].reverse();
-    const height = 260;
-    const paddingX = 40;
-    const paddingY = 40;
-    const maxScore = 100;
-    const xStep = 85; 
-    const dynamicWidth = Math.max(500, paddingX * 2 + (chartData.length - 1) * xStep + 40);
-    const getY = (score: number) => height - paddingY - (score / maxScore) * (height - paddingY * 2);
 
-    const pointsInitAvg = chartData.map((r: any, i: number) => `${paddingX + (i * xStep) + 20},${getY(r.class_init_avg)}`).join(' ');
-    const pointsFinAvg = chartData.map((r: any, i: number) => `${paddingX + (i * xStep) + 20},${getY(r.class_fin_avg)}`).join(' ');
+  const SUB_TABS: { id: TestSubTabId; label: string; count: number }[] = [
+    { id: "weekly", label: "주간테스트", count: examResultsBySubTab.weekly.length },
+    { id: "weekly_incorrect", label: "주차별 오답", count: examResultsBySubTab.weekly_incorrect.length },
+    { id: "midterm", label: "중간평가", count: examResultsBySubTab.midterm.length },
+    { id: "quarterly", label: "분기평가", count: examResultsBySubTab.quarterly.length },
+  ];
+
+  const openExamReview = (ex: any) => {
+    try {
+      sessionStorage.removeItem("logica_exam_list_from_grading_modal");
+      sessionStorage.removeItem("logica_exam_list_grading_modal");
+      const paramsObj = new URLSearchParams(window.location.search);
+      paramsObj.set("tab", "exam");
+      paramsObj.set("sub", ex.subTab);
+      window.history.replaceState(
+        null,
+        "",
+        `${window.location.pathname}?${paramsObj.toString()}`
+      );
+    } catch {}
+    const returnQuery = `&from=student_exam&return_sub=${encodeURIComponent(ex.subTab)}`;
+    if (ex.subTab === "quarterly") {
+      router.push(
+        `/exam/review?assignment_id=${ex.assignment_id}&student_id=${studentId}${returnQuery}`
+      );
+    } else {
+      router.push(
+        `/homework/review?assignment_id=${ex.assignment_id}&student_id=${studentId}&is_exam_hw=true${returnQuery}`
+      );
+    }
+  };
+
+  const formatShortBarLabel = (r: any, mode: TestSubTabId): string => {
+    const t = String(r.title || "시험").trim();
+    if (r.week_num != null) {
+      if (mode === "weekly_incorrect") return `${r.week_num}주차 오답`;
+      if (mode === "weekly") return `${r.week_num}주차 평가`;
+    }
+    return t.length > 8 ? `${t.substring(0, 8)}..` : t;
+  };
+
+  const formatDateDisplay = (r: any) => {
+    const raw = r.exam_date || r.created_at;
+    if (!raw) return "-";
+    const d = new Date(raw);
+    if (isNaN(d.getTime())) return String(raw);
+    return d.toLocaleDateString();
+  };
+
+  // 이전 주차 평가 이후 다시 1주차 평가/오답으로 돌아올 때 새 과정 시작 여부 판별
+  const isNewCourseStartAt = (chartData: any[], idx: number, showCourseDivider: boolean): boolean => {
+    if (!showCourseDivider || idx <= 0) return false;
+    const prev = chartData[idx - 1];
+    const curr = chartData[idx];
+    if (!prev || !curr) return false;
+
+    const prevW = prev.week_num;
+    const currW = curr.week_num;
+
+    if (currW === 1) {
+      if (prevW !== 1) return true;
+      // 둘 다 1주차인데 과정(학년/학기)이나 시험지가 다른 새 과정 1주차인 경우
+      if (prev.exam_id !== curr.exam_id && prev.major_grade && curr.major_grade && prev.major_grade !== curr.major_grade) {
+        return true;
+      }
+    }
+    return false;
+  };
+
+  const renderGrowthChart = (
+    results: any[],
+    mode: TestSubTabId,
+    chartHeading: string,
+    chartDescription: string,
+    showCourseDivider: boolean
+  ) => {
+    if (results.length === 0) {
+      return (
+        <div className="text-center py-20 text-slate-400 font-bold text-sm bg-slate-50 rounded-xl border border-slate-100">
+          최근 시험 데이터가 없습니다.
+        </div>
+      );
+    }
+
+    const isPeriodicMode = mode === "midterm" || mode === "quarterly";
+    const maxChartItems = showCourseDivider ? 14 : 10;
+    const chartData = [...results.slice(0, maxChartItems)].reverse();
+    const height = 276;
+    const paddingX = 42;
+    const paddingTop = 48;
+    const paddingBottom = 40;
+    const maxScore = 100;
+    const xStep = 86;
+    const dynamicWidth = Math.max(500, paddingX * 2 + (chartData.length - 1) * xStep + 40);
+    const plotHeight = height - paddingTop - paddingBottom;
+    const getY = (score: number) => height - paddingBottom - (Math.max(0, Math.min(100, score)) / maxScore) * plotHeight;
+
+    // 새 과정 시작 구분선 위치 계산 및 새로 시작하는 주교재 이름 매칭
+    const dividerIndices = new Set<number>();
+    chartData.forEach((_, i) => {
+      if (isNewCourseStartAt(chartData, i, showCourseDivider)) {
+        dividerIndices.add(i);
+      }
+    });
+
+    const sortedDividers = Array.from(dividerIndices).sort((a, b) => a - b);
+    const maxDividerIdx = sortedDividers.length > 0 ? sortedDividers[sortedDividers.length - 1] : -1;
+    const usedBookKeys = new Set<string>();
+    const dividerLabelMap = new Map<number, { fullLabel: string; shortLabel: string }>();
+    const DAY_MS = 24 * 60 * 60 * 1000;
+
+    sortedDividers.forEach((idx) => {
+      const curr = chartData[idx];
+      const prev = chartData[idx - 1];
+      const currMs = new Date(curr?.effective_date || curr?.created_at || 0).getTime();
+      const prevMs = prev ? new Date(prev?.effective_date || prev?.created_at || 0).getTime() : 0;
+      const examToken = extractGradeSemesterToken(
+        `${curr?.major_grade || ""} ${curr?.sub_title || ""} ${curr?.title || ""}`
+      );
+
+      let bestTb: any = null;
+      let bestScore = -Infinity;
+
+      (mainTextbooks || []).forEach((tb) => {
+        const key = String(tb.class_textbook_id || `${tb.class_id}_${tb.book_id}`);
+        const rawDate = tb.start_date || tb.created_at;
+        const tbStartMs = rawDate ? new Date(rawDate).getTime() : NaN;
+        const tbToken = extractGradeSemesterToken(tb.title);
+
+        let score = 0;
+        if (!usedBookKeys.has(key)) score += 18;
+        if (curr?.class_id && String(tb.class_id) === String(curr.class_id)) score += 24;
+
+        if (examToken && tbToken) {
+          if (examToken === tbToken) score += 38;
+          else score -= 45;
+        }
+
+        if (!isNaN(tbStartMs) && !isNaN(currMs) && currMs > 0) {
+          const expectedStartMs = currMs - 7 * DAY_MS;
+          const distDays = Math.abs(tbStartMs - expectedStartMs) / DAY_MS;
+          score += Math.max(-45, 36 - distDays * 0.85);
+          if (prevMs > 0 && tbStartMs >= prevMs - 21 * DAY_MS && tbStartMs <= currMs + 21 * DAY_MS) {
+            score += 36;
+          }
+        }
+
+        if (idx === maxDividerIdx && tb.status === "진행중") {
+          score += 20;
+        }
+
+        if (score > bestScore) {
+          bestScore = score;
+          bestTb = tb;
+        }
+      });
+
+      let chosenTitle = "";
+      if (bestTb && bestScore >= 15) {
+        chosenTitle = bestTb.title;
+        usedBookKeys.add(
+          String(bestTb.class_textbook_id || `${bestTb.class_id}_${bestTb.book_id}`)
+        );
+      } else if (idx === maxDividerIdx) {
+        const activeMain =
+          (mainTextbooks || []).find(
+            (tb) =>
+              tb.status === "진행중" &&
+              (!curr?.class_id || String(tb.class_id) === String(curr.class_id))
+          ) || (mainTextbooks || []).find((tb) => tb.status === "진행중");
+        if (activeMain?.title) {
+          chosenTitle = activeMain.title;
+        }
+      }
+
+      if (!chosenTitle && examToken) {
+        const tokenMatched = (mainTextbooks || []).find(
+          (tb) => extractGradeSemesterToken(tb.title) === examToken
+        );
+        if (tokenMatched?.title) chosenTitle = tokenMatched.title;
+      }
+
+      if (!chosenTitle) {
+        chosenTitle =
+          curr?.sub_title ||
+          (curr?.major_grade ? `${curr.major_grade} 과정` : "새 과정 시작");
+      }
+
+      const shortLabel =
+        chosenTitle.length > 16 ? `${chosenTitle.slice(0, 15)}…` : chosenTitle;
+      dividerLabelMap.set(idx, { fullLabel: chosenTitle, shortLabel });
+    });
+
+    const segments: number[][] = [];
+    let currentSeg: number[] = [];
+    chartData.forEach((_, i) => {
+      if (dividerIndices.has(i) && currentSeg.length > 0) {
+        segments.push(currentSeg);
+        currentSeg = [i];
+      } else {
+        currentSeg.push(i);
+      }
+    });
+    if (currentSeg.length > 0) segments.push(currentSeg);
 
     return (
       <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-sm w-full shrink-0 flex flex-col">
-        <div className="flex flex-col md:flex-row justify-between items-start mb-6 w-full gap-4">
+        <div className="flex flex-col md:flex-row justify-between items-start mb-5 w-full gap-4">
           <div>
-             <h3 className="text-[13px] font-bold text-brand mb-1.5">최근 주간테스트 성장 그래프 (나 vs 반 평균)</h3>
-             <p className="text-xs font-bold text-slate-400 leading-relaxed whitespace-pre-wrap">
-               최초 정답(O)과 오답 정정(RO, TO) 후의 최종 점수 및{"\n"}같은 시험지의 반 평균 변화입니다.
-             </p>
+            <h3 className="text-[13px] font-bold text-brand mb-1.5">{chartHeading}</h3>
+            <p className="text-xs font-bold text-slate-400 leading-relaxed whitespace-pre-wrap">
+              {chartDescription}
+            </p>
           </div>
-          <div className="grid grid-cols-2 gap-x-6 gap-y-2 bg-slate-50 p-3 rounded-xl border border-slate-100 shrink-0">
-             <div className="flex items-center gap-2"><div className="w-5 flex justify-center"><div className="w-3 h-3 bg-brand rounded-sm"></div></div><span className="text-xs font-bold text-slate-600">최초 점수(나)</span></div>
-             <div className="flex items-center gap-2"><div className="w-5 flex justify-center"><div className="w-3 h-3 bg-[#93c5fd] rounded-sm"></div></div><span className="text-xs font-bold text-slate-600">최종 점수(나)</span></div>
-             <div className="flex items-center gap-2">
-               <div className="w-5 flex justify-center"><svg width="20" height="10"><line x1="0" y1="5" x2="20" y2="5" stroke="#94a3b8" strokeWidth="2" strokeDasharray="3 3" /><circle cx="10" cy="5" r="3.5" fill="#ffffff" stroke="#94a3b8" strokeWidth="2" /></svg></div>
-               <span className="text-xs font-bold text-slate-600">최초 (반 평균)</span>
-             </div>
-             <div className="flex items-center gap-2">
-               <div className="w-5 flex justify-center"><svg width="20" height="10"><line x1="0" y1="5" x2="20" y2="5" stroke="#10b981" strokeWidth="2" strokeDasharray="3 3" /><circle cx="10" cy="5" r="3.5" fill="#ffffff" stroke="#10b981" strokeWidth="2" /></svg></div>
-               <span className="text-xs font-bold text-slate-600">최종 (반 평균)</span>
-             </div>
-          </div>
+          {isPeriodicMode ? (
+            <div className="flex items-center gap-5 bg-slate-50 px-3.5 py-2.5 rounded-xl border border-slate-100 shrink-0">
+              <div className="flex items-center gap-2">
+                <div className="w-5 flex justify-center"><div className="w-3 h-3 bg-brand rounded-sm"></div></div>
+                <span className="text-xs font-bold text-slate-600">내 점수</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="w-5 flex justify-center">
+                  <svg width="20" height="10">
+                    <line x1="0" y1="5" x2="20" y2="5" stroke="#94a3b8" strokeWidth="2" strokeDasharray="3 3" />
+                    <circle cx="10" cy="5" r="3.5" fill="#ffffff" stroke="#94a3b8" strokeWidth="2" />
+                  </svg>
+                </div>
+                <span className="text-xs font-bold text-slate-600">응시자 평균</span>
+              </div>
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 gap-x-6 gap-y-2 bg-slate-50 p-3 rounded-xl border border-slate-100 shrink-0">
+              <div className="flex items-center gap-2">
+                <div className="w-5 flex justify-center"><div className="w-3 h-3 bg-brand rounded-sm"></div></div>
+                <span className="text-xs font-bold text-slate-600">최초 점수(나)</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="w-5 flex justify-center"><div className="w-3 h-3 bg-[#93c5fd] rounded-sm"></div></div>
+                <span className="text-xs font-bold text-slate-600">최종 점수(나)</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="w-5 flex justify-center">
+                  <svg width="20" height="10">
+                    <line x1="0" y1="5" x2="20" y2="5" stroke="#94a3b8" strokeWidth="2" strokeDasharray="3 3" />
+                    <circle cx="10" cy="5" r="3.5" fill="#ffffff" stroke="#94a3b8" strokeWidth="2" />
+                  </svg>
+                </div>
+                <span className="text-xs font-bold text-slate-600">최초 (평균)</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="w-5 flex justify-center">
+                  <svg width="20" height="10">
+                    <line x1="0" y1="5" x2="20" y2="5" stroke="#10b981" strokeWidth="2" strokeDasharray="3 3" />
+                    <circle cx="10" cy="5" r="3.5" fill="#ffffff" stroke="#10b981" strokeWidth="2" />
+                  </svg>
+                </div>
+                <span className="text-xs font-bold text-slate-600">최종 (평균)</span>
+              </div>
+            </div>
+          )}
         </div>
-        <div className="w-full overflow-x-auto overflow-y-hidden custom-scroll pb-2 mt-2">
-          <svg viewBox={`0 0 ${dynamicWidth} ${height}`} className="w-full" style={{ minWidth: dynamicWidth, height: height }}>
-            {[0, 25, 50, 75, 100].map(score => (
-              <g key={score}><line x1={paddingX - 10} y1={getY(score)} x2={dynamicWidth - 10} y2={getY(score)} stroke="#f1f5f9" strokeWidth="1.5" /><text x={paddingX - 15} y={getY(score) + 4} fontSize="10" fill="#94a3b8" textAnchor="end" fontWeight="bold">{score}</text></g>
+
+        <div className="w-full overflow-x-auto overflow-y-hidden custom-scroll pb-2 mt-1">
+          <svg viewBox={`0 0 ${dynamicWidth} ${height}`} className="w-full" style={{ minWidth: dynamicWidth, height }}>
+            {[0, 25, 50, 75, 100].map((score) => (
+              <g key={score}>
+                <line x1={paddingX - 10} y1={getY(score)} x2={dynamicWidth - 10} y2={getY(score)} stroke="#f1f5f9" strokeWidth="1.5" />
+                <text x={paddingX - 15} y={getY(score) + 4} fontSize="10" fill="#94a3b8" textAnchor="end" fontWeight="bold">
+                  {score}
+                </text>
+              </g>
             ))}
-            {chartData.map((r: any, i: number) => {
-               const cx = paddingX + (i * xStep) + 20; const barWidth = 32;
-               return <rect key={`bg-${i}`} x={cx - barWidth/2} y={getY(100)} width={barWidth} height={height - paddingY * 2} fill="#f8fafc" rx="6" />;
+
+            {/* 막대 배경 */}
+            {chartData.map((_, i) => {
+              const cx = paddingX + i * xStep + 20;
+              const barWidth = 32;
+              return (
+                <rect
+                  key={`bg-${i}`}
+                  x={cx - barWidth / 2}
+                  y={getY(100)}
+                  width={barWidth}
+                  height={plotHeight}
+                  fill="#f8fafc"
+                  rx="6"
+                />
+              );
             })}
-            {chartData.map((r: any, i: number) => {
-               const cx = paddingX + (i * xStep) + 20; 
-               const initialScore = r.original_score || 0; const finalScore = r.final_score || initialScore;
-               const yInitial = getY(initialScore); const yFinal = getY(finalScore);
-               const barWidth = 32; const shortTitle = (r.title || '시험').length > 8 ? (r.title || '시험').substring(0,8)+'..' : (r.title || '시험');
-               return (
-                 <g key={`bar-${i}`}>
-                   {finalScore > 0 && <rect x={cx - barWidth/2} y={yFinal} width={barWidth} height={height - paddingY - yFinal} fill="#93c5fd" rx="6" className="transition-all duration-500 hover:opacity-90" />}
-                   {initialScore > 0 && <rect x={cx - barWidth/2} y={yInitial} width={barWidth} height={height - paddingY - yInitial} fill="#002864" rx="6" className="transition-all duration-500 hover:opacity-90" />}
-                   <text x={cx} y={height - 15} fontSize="10" fill="#64748b" textAnchor="middle" fontWeight="bold">{shortTitle}</text>
-                 </g>
-               );
+
+            {/* 🌟 새 과정 시작 구분선 (새로 시작하는 주교재 이름 기준 표시) */}
+            {sortedDividers.map((idx) => {
+              const midX = paddingX + (idx - 0.5) * xStep + 20;
+              const lbl = dividerLabelMap.get(idx) || {
+                fullLabel: "새 과정 시작",
+                shortLabel: "새 과정 시작",
+              };
+              const pillWidth = estimateSvgPillWidth(lbl.shortLabel);
+              const clampedPillX = Math.max(
+                6,
+                Math.min(dynamicWidth - pillWidth - 6, midX - pillWidth / 2)
+              );
+              return (
+                <g key={`divider-${idx}`}>
+                  <title>{`새 과정 시작 주교재: ${lbl.fullLabel}`}</title>
+                  <line
+                    x1={midX}
+                    y1={24}
+                    x2={midX}
+                    y2={height - 8}
+                    stroke="#f59e0b"
+                    strokeWidth="2"
+                    strokeDasharray="4 3"
+                  />
+                  <rect
+                    x={clampedPillX}
+                    y={4}
+                    width={pillWidth}
+                    height={18}
+                    rx={9}
+                    fill="#fffbeb"
+                    stroke="#f59e0b"
+                    strokeWidth="1.2"
+                  />
+                  <text
+                    x={clampedPillX + pillWidth / 2}
+                    y={16.5}
+                    fontSize="9.5"
+                    fill="#b45309"
+                    textAnchor="middle"
+                    fontWeight="800"
+                  >
+                    {lbl.shortLabel}
+                  </text>
+                </g>
+              );
             })}
-            <polyline points={pointsInitAvg} fill="none" stroke="#94a3b8" strokeWidth="2.5" strokeDasharray="4 4" />
-            <polyline points={pointsFinAvg} fill="none" stroke="#10b981" strokeWidth="2.5" strokeDasharray="4 4" />
+
+            {/* 학생 점수 막대 */}
             {chartData.map((r: any, i: number) => {
-               const cx = paddingX + (i * xStep) + 20; 
-               return (
-                 <g key={`avg-dots-${i}`}>
-                   <circle cx={cx} cy={getY(r.class_init_avg)} r="4.5" fill="#ffffff" stroke="#94a3b8" strokeWidth="2.5" />
-                   <circle cx={cx} cy={getY(r.class_fin_avg)} r="4.5" fill="#ffffff" stroke="#10b981" strokeWidth="2.5" />
-                 </g>
-               );
+              const cx = paddingX + i * xStep + 20;
+              const initialScore = r.original_score || 0;
+              const finalScore = isPeriodicMode ? initialScore : (r.final_score || initialScore);
+              const yInitial = getY(initialScore);
+              const yFinal = getY(finalScore);
+              const barWidth = 32;
+              const shortTitle = formatShortBarLabel(r, mode);
+              return (
+                <g key={`bar-${i}`}>
+                  <title>
+                    {isPeriodicMode
+                      ? `${r.title} (${formatDateDisplay(r)}) - 내 점수 ${initialScore}점 / 평균 ${r.class_init_avg}점`
+                      : `${r.title} (${formatDateDisplay(r)}) - 최초 ${initialScore}점 / 최종 ${finalScore}점`}
+                  </title>
+                  {!isPeriodicMode && finalScore > 0 && (
+                    <rect
+                      x={cx - barWidth / 2}
+                      y={yFinal}
+                      width={barWidth}
+                      height={height - paddingBottom - yFinal}
+                      fill="#93c5fd"
+                      rx="6"
+                      className="transition-all duration-500 hover:opacity-90"
+                    />
+                  )}
+                  {initialScore > 0 && (
+                    <rect
+                      x={cx - barWidth / 2}
+                      y={yInitial}
+                      width={barWidth}
+                      height={height - paddingBottom - yInitial}
+                      fill="#002864"
+                      rx="6"
+                      className="transition-all duration-500 hover:opacity-90"
+                    />
+                  )}
+                  <text x={cx} y={height - 15} fontSize="10" fill="#64748b" textAnchor="middle" fontWeight="bold">
+                    {shortTitle}
+                  </text>
+                </g>
+              );
             })}
+
+            {/* 과정 세그먼트별 평균 추이선 */}
+            {segments.map((seg, sIdx) => {
+              if (seg.length < 2) return null;
+              const ptsInit = seg
+                .map((idx) => `${paddingX + idx * xStep + 20},${getY(chartData[idx].class_init_avg)}`)
+                .join(" ");
+              const ptsFin = seg
+                .map((idx) => `${paddingX + idx * xStep + 20},${getY(chartData[idx].class_fin_avg)}`)
+                .join(" ");
+              return (
+                <g key={`seg-${sIdx}`}>
+                  <polyline points={ptsInit} fill="none" stroke="#94a3b8" strokeWidth="2.5" strokeDasharray="4 4" />
+                  {!isPeriodicMode && (
+                    <polyline points={ptsFin} fill="none" stroke="#10b981" strokeWidth="2.5" strokeDasharray="4 4" />
+                  )}
+                </g>
+              );
+            })}
+
             {chartData.map((r: any, i: number) => {
-               const cx = paddingX + (i * xStep) + 20; const finalScore = r.final_score || (r.original_score || 0);
-               return finalScore > 0 ? <text key={`text-${i}`} x={cx} y={getY(100) - 12} fontSize="13" fill="#1e3a8a" textAnchor="middle" fontWeight="900">{finalScore}</text> : null;
+              const cx = paddingX + i * xStep + 20;
+              return (
+                <g key={`avg-dots-${i}`}>
+                  <circle cx={cx} cy={getY(r.class_init_avg)} r="4.5" fill="#ffffff" stroke="#94a3b8" strokeWidth="2.5" />
+                  {!isPeriodicMode && (
+                    <circle cx={cx} cy={getY(r.class_fin_avg)} r="4.5" fill="#ffffff" stroke="#10b981" strokeWidth="2.5" />
+                  )}
+                </g>
+              );
+            })}
+
+            {chartData.map((r: any, i: number) => {
+              const cx = paddingX + i * xStep + 20;
+              const topScore = isPeriodicMode
+                ? (r.original_score || 0)
+                : (r.final_score || r.original_score || 0);
+              return topScore > 0 ? (
+                <text key={`text-${i}`} x={cx} y={getY(100) - 10} fontSize="13" fill="#1e3a8a" textAnchor="middle" fontWeight="900">
+                  {topScore}
+                </text>
+              ) : null;
             })}
           </svg>
         </div>
@@ -1794,58 +2626,196 @@ function ExamTab({ examResults, schoolExams, categoryAnalysis, setIsSchoolExamMo
     );
   };
 
-  return (
-    <div className="space-y-6 animate-[fadeIn_0.2s_ease-out]">
+  const renderExamRecordCard = (ex: any, i: number, showMainQBadge: boolean = false) => {
+    const initial = ex.original_score || 0;
+    const final = ex.final_score || 0;
+    const badgeLabel = ex.sub_title || ex.major_grade || "";
+    const isPeriodicEval = ex.subTab === "midterm" || ex.subTab === "quarterly";
+    return (
+      <div
+        key={ex.assignment_id || i}
+        onClick={() => openExamReview(ex)}
+        className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex flex-col justify-between hover:border-blue-400 hover:shadow-md transition-all cursor-pointer group gap-3"
+      >
+        <div className="flex justify-between items-start gap-2">
+          <div className="flex flex-col gap-1.5 overflow-hidden pr-1 pt-0.5 min-w-0">
+            <div className="flex items-center gap-1.5 flex-wrap">
+              {badgeLabel && (
+                <span className="text-[11px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200 px-1.5 py-0.5 rounded shrink-0">
+                  {badgeLabel}
+                </span>
+              )}
+              {showMainQBadge && ex.main_question_count > 0 && (
+                <span className="text-[11px] font-bold bg-slate-100 text-slate-600 border border-slate-200 px-1.5 py-0.5 rounded shrink-0">
+                  메인 {ex.main_question_count}문항
+                  {ex.total_item_count > ex.main_question_count ? ` (세부 ${ex.total_item_count})` : ""}
+                </span>
+              )}
+            </div>
+            <div
+              className="text-[13px] font-bold text-slate-700 truncate group-hover:text-blue-600 transition-colors"
+              title={ex.title}
+            >
+              {ex.title}
+            </div>
+            <div className="text-xs text-slate-400 font-bold">{formatDateDisplay(ex)}</div>
+          </div>
+
+          {isPeriodicEval ? (
+            <div className="flex flex-col gap-0.5 shrink-0">
+              <div className="flex items-center justify-between bg-slate-50 px-2.5 py-1 rounded-md border border-slate-100 group-hover:bg-blue-50 group-hover:border-blue-100 transition-colors gap-3">
+                <span className="text-xs font-bold text-slate-500">내 점수</span>
+                <span className="text-[13px] font-extrabold text-brand min-w-[42px] text-right whitespace-nowrap">
+                  {initial}점
+                </span>
+              </div>
+              <div className="flex items-center justify-between px-2.5 py-0.5 gap-3">
+                <span className="text-xs font-bold text-slate-500">평균</span>
+                <span className="text-xs font-bold text-slate-600 min-w-[42px] text-right whitespace-nowrap">
+                  {ex.class_init_avg}점
+                </span>
+              </div>
+            </div>
+          ) : (
+            <div className="flex flex-col gap-0.5 shrink-0">
+              <div className="flex items-center bg-slate-50 px-2 py-1 rounded-md border border-slate-100 group-hover:bg-blue-50 group-hover:border-blue-100 transition-colors">
+                <span className="text-xs font-bold text-slate-500 w-10 text-left">내 점수</span>
+                <span className="text-[13px] font-bold text-brand min-w-[38px] text-right whitespace-nowrap">{initial}점</span>
+                <span className="text-slate-300 text-xs w-6 text-center">➔</span>
+                <span className="text-[13px] font-bold text-blue-600 min-w-[38px] text-right whitespace-nowrap">{final}점</span>
+              </div>
+              <div className="flex items-center px-2 py-0.5">
+                <span className="text-xs font-bold text-slate-500 w-10 text-left">평균</span>
+                <span className="text-xs font-bold text-slate-600 min-w-[38px] text-right whitespace-nowrap">{ex.class_init_avg}점</span>
+                <span className="text-slate-300 text-xs w-6 text-center">➔</span>
+                <span className="text-xs font-bold text-emerald-600 min-w-[38px] text-right whitespace-nowrap">{ex.class_fin_avg}점</span>
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div className="flex flex-wrap items-center justify-between gap-1.5 mt-auto pt-1">
+          <div className="flex flex-wrap gap-1">
+            {ex.oCount > 0 && <span className="bg-emerald-50 text-emerald-600 border border-emerald-200 px-1.5 py-0.5 rounded text-xs font-bold">O 정답 ({ex.oCount})</span>}
+            {!isPeriodicEval && ex.roCount > 0 && <span className="bg-blue-50 text-blue-600 border border-blue-200 px-1.5 py-0.5 rounded text-xs font-bold">RO 정정 ({ex.roCount})</span>}
+            {!isPeriodicEval && ex.toCount > 0 && <span className="bg-teal-50 text-teal-600 border border-teal-200 px-1.5 py-0.5 rounded text-xs font-bold">TO 힌트 ({ex.toCount})</span>}
+            {ex.xCount > 0 && <span className="bg-rose-50 text-rose-500 border border-rose-200 px-1.5 py-0.5 rounded text-xs font-bold">X 오답 ({ex.xCount})</span>}
+          </div>
+          <div className="flex items-center gap-2 ml-auto">
+            {isPeriodicEval && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  window.open(`/print/eval-report?assignment_id=${ex.assignment_id}`, "_blank");
+                }}
+                className="px-2.5 py-1 rounded-lg bg-[#1e493b] hover:bg-[#122e25] text-white text-[11px] font-extrabold shadow-sm transition-colors flex items-center gap-1 shrink-0"
+                title="A4 1페이지 성적 분석 리포트 열기 (인쇄·PDF 저장)"
+              >
+                📊 분석 리포트
+              </button>
+            )}
+            <span className="text-[11px] font-bold text-slate-400 group-hover:text-blue-600 transition-colors">
+              답안 상세 ➔
+            </span>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const renderWeeklyFormatSection = (
+    mode: "weekly" | "weekly_incorrect",
+    results: any[],
+    categories: any[]
+  ) => {
+    const isWeekly = mode === "weekly";
+    const chartHeading = isWeekly
+      ? "최근 주간테스트 성장 그래프 (나 vs 반 평균)"
+      : "최근 주차별 오답 성취 그래프 (나 vs 반 평균)";
+    const chartDesc = isWeekly
+      ? "최초 정답(O)과 오답 정정(RO, TO) 후의 최종 점수 및 같은 시험지의 반 평균 변화입니다.\n새 과정의 1주차 평가가 시작될 때 새로 시작하는 주교재 이름으로 구분선이 표시됩니다."
+      : "주차별 오답 프린트의 최초 정답(O)과 정정(RO, TO) 후 최종 점수 변화입니다.\n새 과정의 1주차 오답이 시작될 때 새로 시작하는 주교재 이름으로 구분선이 표시됩니다.";
+    const listTitle = isWeekly ? "주간테스트 상세 기록" : "주차별 오답 상세 기록";
+
+    return (
       <div className="flex flex-col lg:flex-row gap-6">
         <div className="flex-[3] flex flex-col gap-6 min-w-0">
-          {renderGrowthChart()}
+          {renderGrowthChart(results, mode, chartHeading, chartDesc, true)}
           <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm flex-1">
-            <h3 className="font-bold text-slate-700 text-[13px] flex items-center gap-1.5 mb-4 border-b border-slate-100 pb-2"><span className="w-1 h-3 bg-emerald-500 rounded-full"></span>주간테스트 상세 기록</h3>
+            <div className="flex items-center justify-between mb-4 border-b border-slate-100 pb-2">
+              <h3 className="font-bold text-slate-700 text-[13px] flex items-center gap-1.5">
+                <span className="w-1 h-3 bg-emerald-500 rounded-full"></span>
+                {listTitle}
+              </h3>
+              <span className="text-xs font-bold text-slate-400">총 {results.length}건</span>
+            </div>
             <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
-              {examResults.length === 0 ? <div className="col-span-full text-xs text-slate-400 text-center py-4 bg-slate-50 rounded-xl">테스트 기록이 없습니다.</div> :
-                 examResults.map((ex: any, i: number) => {
-                   const initial = ex.original_score || 0; const final = ex.final_score || 0;
-                   return (
-                     <div key={i} onClick={() => router.push(`/homework/review?assignment_id=${ex.assignment_id}&student_id=${studentId}&is_exam_hw=true`)} className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex flex-col justify-between hover:border-blue-400 hover:shadow-md transition-all cursor-pointer group gap-3">
-                       <div className="flex justify-between items-start">
-                          <div className="flex flex-col gap-1.5 overflow-hidden pr-2 pt-1"><div className="text-[13px] font-bold text-slate-700 truncate group-hover:text-blue-600 transition-colors" title={ex.title}>{ex.title}</div><div className="text-xs text-slate-400 font-bold">{ex.created_at ? new Date(ex.created_at).toLocaleDateString() : '-'}</div></div>
-                          <div className="flex flex-col gap-0.5 shrink-0">
-                             <div className="flex items-center bg-slate-50 px-2 py-1 rounded-md border border-slate-100 group-hover:bg-blue-50 group-hover:border-blue-100 transition-colors"><span className="text-xs font-bold text-slate-500 w-10 text-left">내 점수</span><span className="text-[13px] font-bold text-brand min-w-[38px] text-right whitespace-nowrap">{initial}점</span><span className="text-slate-300 text-xs w-6 text-center">➔</span><span className="text-[13px] font-bold text-blue-600 min-w-[38px] text-right whitespace-nowrap">{final}점</span></div>
-                             <div className="flex items-center px-2 py-0.5"><span className="text-xs font-bold text-slate-500 w-10 text-left">반 평균</span><span className="text-xs font-bold text-slate-600 min-w-[38px] text-right whitespace-nowrap">{ex.class_init_avg}점</span><span className="text-slate-300 text-xs w-6 text-center">➔</span><span className="text-xs font-bold text-emerald-600 min-w-[38px] text-right whitespace-nowrap">{ex.class_fin_avg}점</span></div>
-                          </div>
-                       </div>
-                       <div className="flex flex-wrap gap-1 mt-auto">
-                         {ex.oCount > 0 && <span className="bg-emerald-50 text-emerald-600 border border-emerald-200 px-1.5 py-0.5 rounded text-xs font-bold">O 정답 ({ex.oCount})</span>}
-                         {ex.roCount > 0 && <span className="bg-blue-50 text-blue-600 border border-blue-200 px-1.5 py-0.5 rounded text-xs font-bold">RO 정정 ({ex.roCount})</span>}
-                         {ex.toCount > 0 && <span className="bg-teal-50 text-teal-600 border border-teal-200 px-1.5 py-0.5 rounded text-xs font-bold">TO 힌트 ({ex.toCount})</span>}
-                         {ex.xCount > 0 && <span className="bg-rose-50 text-rose-500 border border-rose-200 px-1.5 py-0.5 rounded text-xs font-bold">X 오답 ({ex.xCount})</span>}
-                       </div>
-                     </div>
-                   )
-                 })
-              }
+              {results.length === 0 ? (
+                <div className="col-span-full text-xs text-slate-400 text-center py-8 bg-slate-50 rounded-xl font-bold">
+                  {isWeekly ? "주간테스트 기록이 없습니다." : "주차별 오답 기록이 없습니다."}
+                </div>
+              ) : (
+                results.map((ex, i) => renderExamRecordCard(ex, i, false))
+              )}
             </div>
           </div>
         </div>
+
         <div className="flex-[2] flex flex-col gap-6 min-w-0">
           <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm flex flex-col h-full">
-            <div className="flex justify-between items-end mb-4 border-b border-slate-100 pb-2 shrink-0">
-              <h3 className="font-bold text-slate-700 text-[13px] flex items-center gap-1.5"><span className="w-1 h-3 bg-indigo-500 rounded-full"></span>단원별 성취도 분석</h3>
-              <div className="flex gap-2">
-                 <span className="text-xs font-bold text-slate-500 flex items-center gap-1"><div className="w-2 h-2 bg-brand rounded-sm"></div>최초</span>
-                 <span className="text-xs font-bold text-slate-500 flex items-center gap-1"><div className="w-2 h-2 bg-[#93c5fd] rounded-sm"></div>최종</span>
+            <div className="flex justify-between items-start mb-4 border-b border-slate-100 pb-2.5 shrink-0 gap-2">
+              <div>
+                <h3 className="font-bold text-slate-700 text-[13px] flex items-center gap-1.5">
+                  <span className="w-1 h-3 bg-indigo-500 rounded-full"></span>단원별 성취도 분석
+                </h3>
+                <p className="text-[11px] font-bold text-slate-400 mt-0.5">
+                  최근 2개월 문항 수 상위 최대 8개 단원
+                </p>
+              </div>
+              <div className="flex gap-2.5 shrink-0 pt-0.5 items-center">
+                <span className="text-xs font-bold text-slate-400 flex items-center gap-1">
+                  <span className="w-2.5 h-2.5 bg-slate-200 border border-dashed border-slate-500 rounded-sm inline-block"></span>
+                  최초
+                </span>
+                <span className="text-xs font-extrabold text-blue-600 flex items-center gap-1">
+                  <span className="w-2.5 h-2.5 bg-[#2563eb] rounded-sm ring-2 ring-blue-100 inline-block"></span>
+                  최종
+                </span>
               </div>
             </div>
             <div className="flex-1 flex flex-col">
-              <div className="flex items-center justify-center py-2 shrink-0"><RadarChart data={categoryAnalysis} /></div>
+              <div className="flex items-center justify-center py-2 shrink-0">
+                <RadarChart data={categories} />
+              </div>
               <div className="mt-6 space-y-3 flex-1 overflow-y-auto custom-scroll pr-1">
-                {categoryAnalysis.length === 0 && <div className="text-center py-10 text-slate-400 text-xs font-bold bg-slate-50 rounded-xl">성취도 데이터가 없습니다.</div>}
-                {categoryAnalysis.map((cat: any, i: number) => (
-                  <div key={i} className="flex flex-col gap-1">
-                    <div className="flex justify-between items-center text-xs font-bold text-slate-700 mb-1"><span className="truncate pr-2">{cat.name}</span><span className="text-indigo-600 shrink-0">최종 {cat.final_rate}%</span></div>
+                {categories.length === 0 && (
+                  <div className="text-center py-10 text-slate-400 text-xs font-bold bg-slate-50 rounded-xl">
+                    최근 2개월 내 성취도 데이터가 없습니다.
+                  </div>
+                )}
+                {categories.map((cat: any, i: number) => (
+                  <div key={cat.code || i} className="flex flex-col gap-1">
+                    <div className="flex justify-between items-center text-xs font-bold text-slate-700 mb-1">
+                      <span className="truncate pr-2">
+                        {cat.name}
+                        <span className="text-[11px] text-slate-400 font-semibold ml-1">({cat.total}문항)</span>
+                      </span>
+                      <span className="shrink-0 flex items-center gap-1">
+                        <span className="text-[11px] text-slate-400 font-semibold">최초 {cat.initial_rate}%</span>
+                        <span className="text-slate-300 text-[10px]">➔</span>
+                        <span className="text-[#2563eb] font-extrabold">최종 {cat.final_rate}%</span>
+                      </span>
+                    </div>
                     <div className="w-full bg-slate-100 h-2 rounded-full relative overflow-hidden">
-                      <div className="absolute top-0 left-0 h-full bg-[#93c5fd] rounded-full transition-all duration-1000" style={{ width: `${cat.final_rate}%` }}></div>
-                      <div className="absolute top-0 left-0 h-full bg-brand rounded-full transition-all duration-1000" style={{ width: `${cat.initial_rate}%` }}></div>
+                      <div
+                        className="absolute top-0 left-0 h-full bg-[#2563eb] rounded-full transition-all duration-1000"
+                        style={{ width: `${cat.final_rate}%` }}
+                      ></div>
+                      <div
+                        className="absolute top-0 left-0 h-full bg-slate-800/35 rounded-l-full transition-all duration-1000"
+                        style={{ width: `${cat.initial_rate}%` }}
+                      ></div>
                     </div>
                   </div>
                 ))}
@@ -1854,21 +2824,133 @@ function ExamTab({ examResults, schoolExams, categoryAnalysis, setIsSchoolExamMo
           </div>
         </div>
       </div>
+    );
+  };
+
+  const renderPeriodicEvalSection = (mode: "midterm" | "quarterly", results: any[]) => {
+    const isMidterm = mode === "midterm";
+    const evalLabel = isMidterm ? "중간평가" : "분기평가";
+    const expectedMainCount = isMidterm ? 20 : 30;
+
+    return (
+      <div className="space-y-6">
+        {results.length > 0 &&
+          renderGrowthChart(
+            results,
+            mode,
+            `${evalLabel} 성적 추이 (나 vs 응시자 평균)`,
+            `응시한 ${evalLabel}(기본 메인 ${expectedMainCount}문항)의 점수 및 동일 시험지 응시자 평균 비교입니다.`,
+            false
+          )}
+
+        <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
+          <div className="flex items-center justify-between mb-4 border-b border-slate-100 pb-2">
+            <h3 className="font-bold text-slate-700 text-[13px] flex items-center gap-1.5">
+              <span className={`w-1 h-3 rounded-full ${isMidterm ? "bg-indigo-500" : "bg-fuchsia-500"}`}></span>
+              {evalLabel} 응시 및 채점 기록
+            </h3>
+            <span className="text-xs font-bold text-slate-400">총 {results.length}건</span>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {results.length === 0 ? (
+              <div className="col-span-full text-xs text-slate-400 text-center py-10 bg-slate-50 rounded-xl font-bold">
+                응시한 {evalLabel} 기록이 없습니다.
+              </div>
+            ) : (
+              results.map((ex, i) => renderExamRecordCard(ex, i, true))
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <div className="space-y-6 animate-[fadeIn_0.2s_ease-out]">
+      {/* 🌟 테스트 성적 하위 4개 분류 탭 */}
+      <div className="flex flex-wrap items-center gap-2 bg-slate-100/90 p-1.5 rounded-xl border border-slate-200 w-fit">
+        {SUB_TABS.map((st) => {
+          const isActive = activeExamSubTab === st.id;
+          return (
+            <button
+              key={st.id}
+              type="button"
+              onClick={() => setActiveExamSubTab(st.id)}
+              className={`px-4 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
+                isActive
+                  ? "bg-white text-brand shadow-sm border border-slate-200/80"
+                  : "text-slate-500 hover:text-slate-800 hover:bg-white/50 border border-transparent"
+              }`}
+            >
+              <span>{st.label}</span>
+              <span
+                className={`px-1.5 py-0.5 rounded-full text-[10.5px] leading-none ${
+                  isActive ? "bg-blue-50 text-blue-700" : "bg-slate-200/70 text-slate-500"
+                }`}
+              >
+                {st.count}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+
+      {isExamLoading ? (
+        <div className="text-center py-16 text-slate-400 font-bold text-xs bg-slate-50 border border-slate-200 rounded-xl">
+          테스트 성적 데이터를 불러오는 중입니다...
+        </div>
+      ) : (
+        <>
+          {activeExamSubTab === "weekly" &&
+            renderWeeklyFormatSection("weekly", examResultsBySubTab.weekly, categoryAnalysisBySubTab.weekly)}
+          {activeExamSubTab === "weekly_incorrect" &&
+            renderWeeklyFormatSection(
+              "weekly_incorrect",
+              examResultsBySubTab.weekly_incorrect,
+              categoryAnalysisBySubTab.weekly_incorrect
+            )}
+          {activeExamSubTab === "midterm" && renderPeriodicEvalSection("midterm", examResultsBySubTab.midterm)}
+          {activeExamSubTab === "quarterly" && renderPeriodicEvalSection("quarterly", examResultsBySubTab.quarterly)}
+        </>
+      )}
+
       <div>
         <div className="flex justify-between items-center mb-3 border-b border-slate-100 pb-2 mt-2">
-          <h3 className="font-bold text-slate-700 text-[13px] flex items-center gap-1.5"><span className="w-1 h-3 bg-indigo-500 rounded-full"></span>학교 내신 성적</h3>
-          <button onClick={() => setIsSchoolExamModalOpen(true)} className="px-2.5 py-1 bg-indigo-50 text-indigo-600 font-bold rounded text-xs hover:bg-indigo-100 transition-colors shadow-sm">+ 성적 추가</button>
+          <h3 className="font-bold text-slate-700 text-[13px] flex items-center gap-1.5">
+            <span className="w-1 h-3 bg-indigo-500 rounded-full"></span>학교 내신 성적
+          </h3>
+          <button
+            onClick={() => setIsSchoolExamModalOpen(true)}
+            className="px-2.5 py-1 bg-indigo-50 text-indigo-600 font-bold rounded text-xs hover:bg-indigo-100 transition-colors shadow-sm"
+          >
+            + 성적 추가
+          </button>
         </div>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          {schoolExams.length === 0 ? <div className="col-span-full text-xs text-center py-4 text-slate-400 bg-slate-50 rounded-xl">학교 성적이 없습니다.</div> :
+          {schoolExams.length === 0 ? (
+            <div className="col-span-full text-xs text-center py-4 text-slate-400 bg-slate-50 rounded-xl">
+              학교 성적이 없습니다.
+            </div>
+          ) : (
             schoolExams.map((se: any, idx: number) => (
               <div key={se.id || idx} className="bg-white p-3 rounded-xl border border-slate-200 shadow-sm relative group">
-                <button onClick={() => deleteSchoolExam(se.id)} className="absolute top-1.5 right-1.5 text-slate-300 hover:text-rose-500 opacity-0 group-hover:opacity-100 bg-white rounded-full w-5 h-5 flex items-center justify-center border border-slate-100 text-xs">✕</button>
-                <div className="text-xs font-bold text-slate-400 mb-0.5">{se.year}년 {se.semester}학기 {se.exam_type}</div>
-                <div className="flex justify-between items-end"><div className="font-bold text-xs text-slate-700">{se.subject}</div><div className="text-[13px] font-bold text-indigo-600">{se.score}점</div></div>
+                <button
+                  onClick={() => deleteSchoolExam(se.id)}
+                  className="absolute top-1.5 right-1.5 text-slate-300 hover:text-rose-500 opacity-0 group-hover:opacity-100 bg-white rounded-full w-5 h-5 flex items-center justify-center border border-slate-100 text-xs"
+                >
+                  ✕
+                </button>
+                <div className="text-xs font-bold text-slate-400 mb-0.5">
+                  {se.year}년 {se.semester}학기 {se.exam_type}
+                </div>
+                <div className="flex justify-between items-end">
+                  <div className="font-bold text-xs text-slate-700">{se.subject}</div>
+                  <div className="text-[13px] font-bold text-indigo-600">{se.score}점</div>
+                </div>
               </div>
             ))
-          }
+          )}
         </div>
       </div>
     </div>
@@ -1985,29 +3067,6 @@ function LessonLogTab({ lessonLogList, isLoading, studentName }: { lessonLogList
           ))}
         </div>
       )}
-    </div>
-  );
-}
-
-function ClinicTab({ clinicList }: any) {
-  return (
-    <div className="space-y-4 animate-[fadeIn_0.2s_ease-out]">
-      <h3 className="font-bold text-slate-700 text-[13px] mb-3">누적 오답 및 맞춤 클리닉 배부 내역</h3>
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-        {clinicList.length === 0 ? <div className="col-span-full text-center py-10 text-slate-400 font-bold text-xs bg-slate-50 border border-slate-200 rounded-xl">클리닉/오답 배부 내역이 없습니다.</div> :
-          clinicList.map((c: any, idx: number) => {
-            let typeCol = 'bg-rose-50 text-rose-500 border border-rose-100';
-            if(c.task_type === '유사') typeCol = 'bg-indigo-50 text-indigo-500 border border-indigo-100'; if(c.task_type === '쌍둥이') typeCol = 'bg-amber-50 text-amber-600 border border-amber-200';
-            return (
-              <div key={idx} className="bg-white p-3.5 rounded-xl border border-slate-200 flex flex-col justify-between shadow-sm hover:border-rose-300 transition-colors">
-                <div className="flex justify-between items-start mb-2"><span className={`text-xs px-1.5 py-0.5 rounded font-bold ${typeCol}`}>{c.task_type} 문항</span><span className={`text-xs font-bold px-1.5 py-0.5 rounded ${c.status==='해결'?'bg-emerald-50 text-emerald-600':'bg-slate-100 text-slate-500'}`}>{c.status}</span></div>
-                <div className="text-xs font-bold text-slate-700 mb-2">본교재 연결 문항: <span className="text-brand ml-0.5">{unwrap(c.textbook_question as any)?.question_number || '-'}번</span></div>
-                <div className="text-xs font-bold text-slate-400 mt-auto text-right">시도 횟수: {c.attempt_count}회</div>
-              </div>
-            );
-          })
-        }
-      </div>
     </div>
   );
 }

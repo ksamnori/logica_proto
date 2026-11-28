@@ -14,6 +14,7 @@ import PointBadge from "@/components/clinic/PointBadge";
 import { generateIncorrectPrint, finalizeSessionData } from '@/lib/clinicPrintActions';
 import { appendToExistingIncorrectPrintAction } from '@/app/actions/clinicActions';
 import { isConfidentialExamText, isConfidentialQuestionObj } from '@/lib/confidentialExamGuard';
+import { triggerRealtimeQuestionCalibration } from '@/lib/questionRateCalibrationClient';
 import { useClinicTimer } from "./hooks/useClinicTimer";
 import { useClinicDataFetch } from "./hooks/useClinicDataFetch";
 import { useClinicRealtime } from "./hooks/useClinicRealtime";
@@ -1179,6 +1180,7 @@ export default function ClinicViewer() {
               
               if (existingAns) await supabaseClient.from('student_answer').update(ansPayload).eq('answer_id', existingAns.answer_id);
               else await supabaseClient.from('student_answer').insert(ansPayload);
+              triggerRealtimeQuestionCalibration({ questionIds: [qItem.question_id], studentIds: [studentInfo.id] });
               
               if (!qItem.record_id && qItem.question_id) { qItem.record_id = await upsertIncorrectRecord(qItem, gradingCode); await appendToExistingIncorrectPrint(qItem); }
           } else if (rawAssignId) {
@@ -1194,6 +1196,7 @@ export default function ClinicViewer() {
               const payload = { homework_id: qItem.homework_id, student_id: studentInfo.id, tq_id: qItem.tq_id, student_input: myAns, is_correct: false, grading_code: gradingCode, earned_score: 0, wrong_attempts_log: wrongLog };
               if (existing) await supabaseClient.from('student_homework_answer').update(payload).eq('hw_answer_id', existing.hw_answer_id);
               else await supabaseClient.from('student_homework_answer').insert(payload);
+              triggerRealtimeQuestionCalibration({ questionIds: [qItem.question_id], tqIds: [qItem.tq_id], studentIds: [studentInfo.id] });
               if (!qItem.record_id && (qItem.tq_id || qItem.question_id)) { qItem.record_id = await upsertIncorrectRecord(qItem, gradingCode); await appendToExistingIncorrectPrint(qItem); }
           }
         }
@@ -1291,6 +1294,7 @@ export default function ClinicViewer() {
             
             if (existingAns) await supabaseClient.from('student_answer').update(ansPayload).eq('answer_id', existingAns.answer_id);
             else await supabaseClient.from('student_answer').insert(ansPayload);
+            triggerRealtimeQuestionCalibration({ questionIds: [qItem.question_id], studentIds: [studentInfo.id] });
             
             if (!params.retry) {
                 const remaining = (examAssignmentTotalsRef.current[assignId] || 1) - 1;
@@ -1303,6 +1307,7 @@ export default function ClinicViewer() {
             const payload = { homework_id: qItem.homework_id, student_id: studentInfo.id, tq_id: qItem.tq_id, student_input: studentAnswers.current[idx], is_correct: true, grading_code: gradingCode, earned_score: 1 };
             if (existing) await supabaseClient.from('student_homework_answer').update(payload).eq('hw_answer_id', existing.hw_answer_id);
             else await supabaseClient.from('student_homework_answer').insert(payload);
+            triggerRealtimeQuestionCalibration({ questionIds: [qItem.question_id], tqIds: [qItem.tq_id], studentIds: [studentInfo.id] });
             const { data: hwRes } = await supabaseClient.from('student_homework_result').select('hw_result_id, completed_tq_ids, homework_assignment(target_questions)').eq('homework_id', qItem.homework_id).eq('student_id', studentInfo.id).maybeSingle();
             if (hwRes) {
                 let comp = typeof hwRes.completed_tq_ids === 'string' ? JSON.parse(hwRes.completed_tq_ids) : hwRes.completed_tq_ids;

@@ -332,21 +332,23 @@ const splitLabel = (label: string) => {
   ];
 };
 
-// 🌟 방사 차트 컴포넌트 (산뜻한 블루 & 파스텔 스카이 톤)
+// 🌟 방사 차트 컴포넌트 (최초: 은은한 슬레이트 점선 / 고친 뒤: 선명한 블루 실선 최상단 강조)
 const RadarChart = ({ data }: { data: any[] }) => {
   if (!data || data.length < 3) {
     return (
-      <div className="text-center text-[#64748B] text-[14px] py-8 leading-relaxed">
-        단원이 3개 이상 쌓이면
+      <div className="text-center text-[#64748B] text-[13.5px] py-6 leading-relaxed">
+        최근 2개월 단원이 3개 이상 쌓이면
         <br />
-        그래프로 보여드려요.
+        방사형 그래프로 보여드려요.
       </div>
     );
   }
 
-  const size = 320;
+  const size = 280;
+  const padX = 28;
+  const padY = 8;
   const center = size / 2;
-  const radius = size * 0.35;
+  const radius = size * 0.34;
   const levels = 5;
 
   const pointsFin = data.map((d, i) => {
@@ -370,8 +372,8 @@ const RadarChart = ({ data }: { data: any[] }) => {
   const labelPoints = data.map((d, i) => {
     const angle = -Math.PI / 2 + (Math.PI * 2 * i) / data.length;
     return {
-      labelX: center + (radius + 32) * Math.cos(angle),
-      labelY: center + (radius + 32) * Math.sin(angle),
+      labelX: center + (radius + 29) * Math.cos(angle),
+      labelY: center + (radius + 29) * Math.sin(angle),
       label: d.name,
     };
   });
@@ -414,30 +416,46 @@ const RadarChart = ({ data }: { data: any[] }) => {
   const polyInitStr = pointsInit.map((p) => `${p.x},${p.y}`).join(" ");
 
   return (
-    <svg width="100%" height={size} viewBox={`0 0 ${size} ${size}`}>
+    <svg
+      width="100%"
+      height={size}
+      viewBox={`${-padX} ${-padY} ${size + padX * 2} ${size + padY * 2}`}
+    >
       {bgPolygons}
       {axes}
 
-      <polygon
-        points={polyFinStr}
-        fill="rgba(147, 197, 253, 0.42)"
-        stroke="#60A5FA"
-        strokeWidth="2"
-        strokeLinejoin="round"
-      />
-      {pointsFin.map((p, i) => (
-        <circle key={`fin-dot-${i}`} cx={p.x} cy={p.y} r="3" fill="#60A5FA" />
-      ))}
-
+      {/* 처음 성취도: 은은한 슬레이트 점선 (배경 기준선) */}
       <polygon
         points={polyInitStr}
-        fill="rgba(37, 99, 235, 0.28)"
-        stroke="#2563EB"
-        strokeWidth="2"
+        fill="rgba(100, 116, 139, 0.16)"
+        stroke="#64748B"
+        strokeWidth="1.6"
+        strokeDasharray="4 3"
         strokeLinejoin="round"
       />
       {pointsInit.map((p, i) => (
-        <circle key={`init-dot-${i}`} cx={p.x} cy={p.y} r="3" fill="#2563EB" />
+        <circle key={`init-dot-${i}`} cx={p.x} cy={p.y} r="2.6" fill="#64748B" />
+      ))}
+
+      {/* 고친 뒤 성취도: 최상단 레이어 + 선명한 블루 실선 및 화이트 링 포인트 */}
+      <polygon
+        points={polyFinStr}
+        fill="rgba(37, 99, 235, 0.24)"
+        stroke="#2563EB"
+        strokeWidth="2.8"
+        strokeLinejoin="round"
+        style={{ filter: "drop-shadow(0 1px 3px rgba(37, 99, 235, 0.28))" }}
+      />
+      {pointsFin.map((p, i) => (
+        <circle
+          key={`fin-dot-${i}`}
+          cx={p.x}
+          cy={p.y}
+          r="4"
+          fill="#2563EB"
+          stroke="#FFFFFF"
+          strokeWidth="1.5"
+        />
       ))}
 
       {labelPoints.map((p, i) => {
@@ -445,9 +463,10 @@ const RadarChart = ({ data }: { data: any[] }) => {
         return (
           <text
             key={`text-${i}`}
-            fontSize="11"
+            fontSize="10.5"
             fill="#334155"
             textAnchor="middle"
+            fontWeight="600"
           >
             {lines.length === 1 ? (
               <tspan x={p.labelX} y={p.labelY} dominantBaseline="central">
@@ -467,6 +486,739 @@ const RadarChart = ({ data }: { data: any[] }) => {
         );
       })}
     </svg>
+  );
+};
+
+type PortalTestSubTabId = "weekly" | "weekly_incorrect" | "midterm" | "quarterly";
+
+const MOBILE_COMPETENCY_META: Record<
+  string,
+  { textCls: string; dotColor: string }
+> = {
+  문제해결: { textCls: "text-blue-700", dotColor: "#1d4ed8" },
+  추론: { textCls: "text-indigo-700", dotColor: "#4338ca" },
+  의사소통: { textCls: "text-emerald-700", dotColor: "#047857" },
+  연결: { textCls: "text-amber-700", dotColor: "#b45309" },
+  정보처리: { textCls: "text-cyan-700", dotColor: "#0e7490" },
+};
+
+function fmtMobileScore(val: number): string {
+  const r = roundScore(val);
+  return Number.isInteger(r) ? String(r) : r.toFixed(1);
+}
+
+function extractGradeSemesterToken(raw: string): string | null {
+  const s = String(raw || "").trim();
+  if (!s) return null;
+  const mMid = s.match(/(?:중등|중학수학|중학|중)\s*([1-3])\s*-\s*([1-2])/);
+  if (mMid) return `M${mMid[1]}-${mMid[2]}`;
+  const mMidCompact = s.match(/(?:중등|중학수학|중학|중)\s*([1-3])([1-2])(?:[^0-9]|$)/);
+  if (mMidCompact) return `M${mMidCompact[1]}-${mMidCompact[2]}`;
+  const mSeven = s.match(/([7-9])\s*-\s*([1-2])/);
+  if (mSeven) return `M${Number(mSeven[1]) - 6}-${mSeven[2]}`;
+  const mElem = s.match(/([1-6])\s*-\s*([1-2])/);
+  if (mElem) return `E${mElem[1]}-${mElem[2]}`;
+  return null;
+}
+
+function estimateSvgPillWidth(label: string): number {
+  let w = 16;
+  for (const ch of label) {
+    if (/[가-힣ㄱ-ㅎㅏ-ㅣ]/.test(ch)) w += 8.4;
+    else if (ch === " ") w += 3.5;
+    else w += 5.3;
+  }
+  return Math.max(56, Math.ceil(w));
+}
+
+// 📊 정기평가(중간·분기) 모바일 그룹 막대 그래프 (세로 길이를 컴팩트하게 최적화)
+const MobileGroupedBarChart = ({
+  items,
+  myLegendColor = "#1e493b",
+  avgBarColor = "#94a3b8",
+  ariaLabel,
+}: {
+  items: {
+    labelLine1: string;
+    labelLine2?: string;
+    myPct: number;
+    avgPct: number;
+    myColor?: string;
+  }[];
+  myLegendColor?: string;
+  avgBarColor?: string;
+  ariaLabel: string;
+}) => {
+  if (!items || items.length === 0) return null;
+
+  const hasSubLabel = items.some((it) => Boolean(it.labelLine2));
+  const width = 340;
+  const padLeft = 28;
+  const padRight = 10;
+  const padTop = 20;
+  const plotHeight = 102;
+  const padBottom = hasSubLabel ? 36 : 24;
+  const height = padTop + plotHeight + padBottom;
+  const plotWidth = width - padLeft - padRight;
+  const step = plotWidth / items.length;
+  const barW = items.length <= 3 ? 20 : 14;
+  const gap = 3;
+
+  const getY = (pct: number) => {
+    const clamped = Math.max(0, Math.min(100, Number(pct) || 0));
+    return padTop + plotHeight - (clamped / 100) * plotHeight;
+  };
+
+  return (
+    <div className="flex flex-col gap-1.5 pt-1">
+      <div className="flex items-center justify-center gap-4 text-[11.5px] font-semibold text-[#334155]">
+        <span className="inline-flex items-center gap-1.5">
+          <span
+            className="w-2.5 h-2.5 rounded-[2px]"
+            style={{ backgroundColor: myLegendColor }}
+          />
+          내 성취율(%)
+        </span>
+        <span className="inline-flex items-center gap-1.5">
+          <span
+            className="w-2.5 h-2.5 rounded-[2px]"
+            style={{ backgroundColor: avgBarColor }}
+          />
+          응시 평균(%)
+        </span>
+      </div>
+
+      <svg
+        viewBox={`0 0 ${width} ${height}`}
+        className="w-full"
+        style={{ height }}
+        role="img"
+        aria-label={ariaLabel}
+      >
+        {[0, 25, 50, 75, 100].map((v) => (
+          <g key={v}>
+            <line
+              x1={padLeft}
+              y1={getY(v)}
+              x2={width - padRight}
+              y2={getY(v)}
+              stroke={v === 0 ? "#CBD5E1" : "#F1F5F9"}
+              strokeWidth={v === 0 ? "1.2" : "1"}
+            />
+            <text
+              x={padLeft - 5}
+              y={getY(v) + 3.5}
+              fontSize="9.5"
+              fill="#64748B"
+              textAnchor="end"
+              fontWeight="600"
+            >
+              {v}
+            </text>
+          </g>
+        ))}
+
+        {items.map((it, idx) => {
+          const cx = padLeft + step * idx + step / 2;
+          const myX = cx - barW - gap / 2;
+          const avgX = cx + gap / 2;
+          const myY = getY(it.myPct);
+          const avgY = getY(it.avgPct);
+          const myH = Math.max(it.myPct > 0 ? 2 : 0, padTop + plotHeight - myY);
+          const avgH = Math.max(it.avgPct > 0 ? 2 : 0, padTop + plotHeight - avgY);
+          const fillMy = it.myColor || myLegendColor;
+
+          return (
+            <g key={`${it.labelLine1}-${idx}`}>
+              {myH > 0 && (
+                <rect
+                  x={myX}
+                  y={myY}
+                  width={barW}
+                  height={myH}
+                  rx="3.5"
+                  fill={fillMy}
+                />
+              )}
+              {avgH > 0 && (
+                <rect
+                  x={avgX}
+                  y={avgY}
+                  width={barW}
+                  height={avgH}
+                  rx="3.5"
+                  fill={avgBarColor}
+                />
+              )}
+
+              <text
+                x={myX + barW / 2}
+                y={Math.max(10, myY - 4)}
+                fontSize="9"
+                fill={fillMy}
+                textAnchor="middle"
+                fontWeight="800"
+              >
+                {it.myPct}%
+              </text>
+              <text
+                x={avgX + barW / 2}
+                y={Math.max(10, avgY - 4)}
+                fontSize="8.5"
+                fill="#64748B"
+                textAnchor="middle"
+                fontWeight="700"
+              >
+                {it.avgPct}%
+              </text>
+
+              <text
+                x={cx}
+                y={padTop + plotHeight + 14}
+                fontSize="10.5"
+                fill="#1E293B"
+                textAnchor="middle"
+                fontWeight="700"
+              >
+                {it.labelLine1}
+              </text>
+              {it.labelLine2 && (
+                <text
+                  x={cx}
+                  y={padTop + plotHeight + 26}
+                  fontSize="9"
+                  fill="#64748B"
+                  textAnchor="middle"
+                  fontWeight="600"
+                >
+                  {it.labelLine2}
+                </text>
+              )}
+            </g>
+          );
+        })}
+      </svg>
+    </div>
+  );
+};
+
+// 📋 모바일 정기평가(중간평가 · 분기평가) 세로형 리포트 뷰 (점수 + 세부 채점표 + 그래프 2개, 선생님 코멘트 제외)
+const MobilePeriodicEvalReport = ({
+  reports,
+  subTab,
+  selectedIdx,
+  onSelectIdx,
+}: {
+  reports: any[];
+  subTab: "midterm" | "quarterly";
+  selectedIdx: number;
+  onSelectIdx: (idx: number) => void;
+}) => {
+  const evalName = subTab === "quarterly" ? "분기평가" : "중간평가";
+
+  if (!reports || reports.length === 0) {
+    return (
+      <div className="rounded-xl border border-[#E2E8F0] bg-white px-4 py-10 text-center text-[14px] text-[#64748B]">
+        아직 응시한 {evalName} 기록이 없어요.
+      </div>
+    );
+  }
+
+  const safeIdx = Math.min(selectedIdx, Math.max(0, reports.length - 1));
+  const report = reports[safeIdx];
+  const scoreDiff = roundScore((report.initTotalScore || 0) - (report.cohortAvgInit || 0));
+
+  // 모바일 가로폭에 맞춰 메인 문항을 5개씩 행 블록으로 분할 (중간 20문항=4줄, 분기 30문항=6줄)
+  const CHUNK_SIZE = 5;
+  const questionChunks: any[][] = [];
+  const qs = report.questions || [];
+  for (let i = 0; i < qs.length; i += CHUNK_SIZE) {
+    questionChunks.push(qs.slice(i, i + CHUNK_SIZE));
+  }
+
+  const activeCompRows = (report.compRows || []).filter((r: any) => r.qCount > 0);
+  const compBarItems = activeCompRows.map((r: any) => ({
+    labelLine1: r.name,
+    myPct: r.initPct ?? 0,
+    avgPct: r.cohortPct ?? 0,
+  }));
+
+  const diffColorMap: Record<string, string> = {
+    BASIC: "#0f766e",
+    MID: "#1e3a8a",
+    KILLER: "#7c3aed",
+  };
+  const activeDiffRows = (report.diffRows || []).filter((r: any) => r.qCount > 0);
+  const diffBarItems = activeDiffRows.map((r: any) => ({
+    labelLine1: r.label,
+    labelLine2: r.axisRange,
+    myPct: r.initPct ?? 0,
+    avgPct: r.cohortPct ?? 0,
+    myColor: diffColorMap[r.key] || "#0f766e",
+  }));
+
+  const formatShortEvalDate = (raw: string) => {
+    if (!raw) return "-";
+    const d = new Date(raw);
+    if (isNaN(d.getTime())) return String(raw);
+    return `${d.getFullYear()}. ${d.getMonth() + 1}. ${d.getDate()}.`;
+  };
+
+  return (
+    <div className="flex flex-col gap-3.5">
+      {/* 여러 회차 응시 시 상단 회차 선택 칩 */}
+      {reports.length > 1 && (
+        <div className="flex gap-1.5 overflow-x-auto pb-0.5">
+          {reports.map((rep: any, idx: number) => {
+            const active = idx === safeIdx;
+            return (
+              <button
+                key={rep.assignment_id || idx}
+                type="button"
+                onClick={() => onSelectIdx(idx)}
+                className={`shrink-0 rounded-lg px-3 py-1.5 text-[12.5px] font-bold border transition-colors ${
+                  active
+                    ? "bg-[#1e493b] text-white border-[#1e493b] shadow-sm"
+                    : "bg-white text-[#475569] border-[#CBD5E1]"
+                }`}
+              >
+                {rep.title}
+              </button>
+            );
+          })}
+        </div>
+      )}
+
+      {/* 1. 종합 점수 요약 카드 (세로 길이 절약을 위한 가로 배치) */}
+      <section className="rounded-xl bg-gradient-to-br from-[#1e493b] to-[#0f251d] text-white p-4 shadow-sm">
+        <div className="flex items-center justify-between gap-2 text-[11.5px]">
+          <span className="inline-flex items-center rounded-md bg-white/15 px-2 py-0.5 font-bold text-emerald-100">
+            과정: {report.courseBadge || evalName}
+          </span>
+          <span className="text-emerald-100/80 tabular-nums">
+            {formatShortEvalDate(report.effective_date || report.created_at)}
+          </span>
+        </div>
+        <h3 className="text-[15px] font-extrabold text-white mt-1.5 leading-snug">
+          {report.title}
+        </h3>
+
+        <div className="mt-3 pt-3 border-t border-white/15 flex items-end justify-between gap-3">
+          <div>
+            <div className="text-[11px] font-semibold text-emerald-200/90">
+              원점수 종합 성적
+            </div>
+            <div className="flex items-baseline gap-1 mt-0.5">
+              <span className="text-[34px] font-black leading-none tracking-tight tabular-nums text-white">
+                {fmtMobileScore(report.initTotalScore)}
+              </span>
+              <span className="text-[14px] font-bold text-emerald-100">점</span>
+              <span className="text-[11px] text-emerald-200/70 ml-0.5">/ 100</span>
+            </div>
+          </div>
+
+          <div className="flex flex-col items-end gap-1.5">
+            <div className="rounded-lg bg-white/10 border border-white/15 px-2.5 py-1 text-right">
+              <span className="text-[11px] text-emerald-100/85 mr-1.5">응시 평균</span>
+              <span className="text-[14px] font-extrabold tabular-nums text-white">
+                {fmtMobileScore(report.cohortAvgInit)}점
+              </span>
+              {scoreDiff !== 0 && (
+                <span
+                  className={`ml-1.5 text-[11px] font-bold tabular-nums ${
+                    scoreDiff > 0 ? "text-emerald-300" : "text-rose-200"
+                  }`}
+                >
+                  ({scoreDiff > 0 ? `+${fmtMobileScore(scoreDiff)}` : fmtMobileScore(scoreDiff)})
+                </span>
+              )}
+            </div>
+            <div className="flex items-center gap-1.5 text-[11px] font-bold">
+              <span className="rounded-full bg-emerald-400/20 text-emerald-200 px-2 py-0.5">
+                ○ 정답 {report.fullCorrectCount}
+              </span>
+              {report.partialCount > 0 && (
+                <span className="rounded-full bg-amber-400/20 text-amber-200 px-2 py-0.5">
+                  △ 부분 {report.partialCount}
+                </span>
+              )}
+              <span className="rounded-full bg-rose-400/20 text-rose-200 px-2 py-0.5">
+                × 오답 {report.wrongCount}
+              </span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* 2. 문항별 세부 채점표 (5문항 단위 컴팩트 테이블) */}
+      <section className="bg-white rounded-xl border border-[#E2E8F0] shadow-[0_1px_3px_rgba(15,23,42,0.03)] p-3.5 flex flex-col gap-2.5">
+        <div className="flex items-baseline justify-between gap-2">
+          <h4 className="text-[15px] font-bold text-[#1E293B]">
+            문항별 상세 채점 결과
+          </h4>
+          <span className="text-[11.5px] font-semibold text-[#64748B]">
+            메인 {report.totalMainQuestions}문항
+            {report.totalSubItems > report.totalMainQuestions
+              ? ` · 세부 ${report.totalSubItems}문항`
+              : ""}
+          </span>
+        </div>
+
+        <div className="flex flex-col gap-2">
+          {questionChunks.map((chunk, cIdx) => {
+            const emptySlots = Math.max(0, CHUNK_SIZE - chunk.length);
+            return (
+              <div
+                key={cIdx}
+                className="overflow-hidden rounded-lg border border-[#CBD5E1]"
+              >
+                <table className="w-full table-fixed border-collapse text-center">
+                  <tbody>
+                    {/* 문항 번호 행 */}
+                    <tr className="bg-[#F1F5F9] border-b border-[#CBD5E1]">
+                      <th className="w-[50px] py-1 text-[10.5px] font-bold text-[#475569] border-r border-[#CBD5E1]">
+                        문항
+                      </th>
+                      {chunk.map((q: any) => (
+                        <td
+                          key={q.qNum}
+                          className="py-1 text-[12px] font-extrabold text-[#1E293B] border-r border-[#E2E8F0] last:border-r-0 tabular-nums"
+                        >
+                          {q.qNum}
+                          {q.subCount > 1 && (
+                            <span className="text-[9px] font-semibold text-[#64748B] ml-0.5">
+                              ({q.subCount})
+                            </span>
+                          )}
+                        </td>
+                      ))}
+                      {Array.from({ length: emptySlots }).map((_, eIdx) => (
+                        <td
+                          key={`empty-num-${eIdx}`}
+                          className="py-1 bg-[#F8FAFC] border-r border-[#E2E8F0] last:border-r-0"
+                        />
+                      ))}
+                    </tr>
+
+                    {/* 교과역량 행 (주 역량 크게 · 보조 역량 작게) */}
+                    <tr className="bg-white border-b border-[#E2E8F0]">
+                      <th className="py-1 text-[10px] font-bold text-[#475569] bg-[#F8FAFC] border-r border-[#CBD5E1]">
+                        교과역량
+                      </th>
+                      {chunk.map((q: any) => (
+                        <td
+                          key={q.qNum}
+                          className="py-1 px-0.5 border-r border-[#E2E8F0] last:border-r-0 align-middle"
+                        >
+                          <div className="flex flex-col items-center justify-center leading-none">
+                            {(q.competencies || []).map((comp: string, idx: number) => {
+                              const meta = MOBILE_COMPETENCY_META[comp] || {
+                                textCls: "text-slate-700",
+                              };
+                              return (
+                                <span
+                                  key={comp}
+                                  className={`${meta.textCls} whitespace-nowrap ${
+                                    idx === 0
+                                      ? "text-[10.5px] font-black leading-[1.15]"
+                                      : "text-[8.5px] font-semibold leading-[1.1] opacity-80 mt-[1px]"
+                                  }`}
+                                >
+                                  {comp}
+                                </span>
+                              );
+                            })}
+                          </div>
+                        </td>
+                      ))}
+                      {Array.from({ length: emptySlots }).map((_, eIdx) => (
+                        <td
+                          key={`empty-comp-${eIdx}`}
+                          className="py-1 bg-[#F8FAFC] border-r border-[#E2E8F0] last:border-r-0"
+                        />
+                      ))}
+                    </tr>
+
+                    {/* 정답률 (중간평가) 또는 배점·정답률 (분기평가) 행 */}
+                    <tr className="bg-white border-b border-[#E2E8F0]">
+                      <th className="py-1 text-[9.5px] font-bold text-[#475569] bg-[#F8FAFC] border-r border-[#CBD5E1] tracking-tight">
+                        {report.hideQuestionPoints ? "정답률" : "배점·정답률"}
+                      </th>
+                      {chunk.map((q: any) => {
+                        const accColor =
+                          q.diffTier === "KILLER"
+                            ? "text-purple-700 font-extrabold"
+                            : q.diffTier === "BASIC"
+                            ? "text-emerald-700 font-bold"
+                            : "text-[#475569] font-semibold";
+                        return (
+                          <td
+                            key={q.qNum}
+                            className={`py-1 px-0.5 text-[9.5px] border-r border-[#E2E8F0] last:border-r-0 tabular-nums whitespace-nowrap ${accColor}`}
+                          >
+                            {report.hideQuestionPoints
+                              ? `${q.questionAccPct}%`
+                              : `${fmtMobileScore(q.maxScore)}점·${q.questionAccPct}%`}
+                          </td>
+                        );
+                      })}
+                      {Array.from({ length: emptySlots }).map((_, eIdx) => (
+                        <td
+                          key={`empty-acc-${eIdx}`}
+                          className="py-1 bg-[#F8FAFC] border-r border-[#E2E8F0] last:border-r-0"
+                        />
+                      ))}
+                    </tr>
+
+                    {/* 채점 결과 행 */}
+                    <tr>
+                      <th className="py-1 text-[10px] font-bold text-[#475569] bg-[#F8FAFC] border-r border-[#CBD5E1]">
+                        결과
+                      </th>
+                      {chunk.map((q: any) => {
+                        const isO = q.status === "O";
+                        const isTri = q.status === "TRI";
+                        return (
+                          <td
+                            key={q.qNum}
+                            className={`py-1 text-[13px] font-black border-r border-[#E2E8F0] last:border-r-0 ${
+                              isO
+                                ? "bg-emerald-50/60 text-emerald-600"
+                                : isTri
+                                ? "bg-amber-50/70 text-amber-600"
+                                : "bg-rose-50/60 text-rose-500"
+                            }`}
+                          >
+                            {isO ? "○" : isTri ? "△" : "×"}
+                          </td>
+                        );
+                      })}
+                      {Array.from({ length: emptySlots }).map((_, eIdx) => (
+                        <td
+                          key={`empty-res-${eIdx}`}
+                          className="py-1 bg-[#F8FAFC] border-r border-[#E2E8F0] last:border-r-0"
+                        />
+                      ))}
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            );
+          })}
+        </div>
+      </section>
+
+      {/* 3. 그래프 1 — 교과 역량별 성취 분석 */}
+      <section className="bg-white rounded-xl border border-[#E2E8F0] shadow-[0_1px_3px_rgba(15,23,42,0.03)] p-3.5 flex flex-col gap-2.5">
+        <div className="flex items-center justify-between gap-2">
+          <h4 className="text-[15px] font-bold text-[#1E293B]">
+            교과 역량별 성취 분석
+          </h4>
+          <span className="rounded-md bg-[#F1F5F9] px-2 py-0.5 text-[10.5px] font-bold text-[#475569]">
+            주·보조 역량 반영
+          </span>
+        </div>
+
+        <table className="w-full text-[11.5px] border-collapse">
+          <thead>
+            <tr className="bg-[#F8FAFC] border-y border-[#E2E8F0] text-[#475569]">
+              <th className="py-1.5 pl-2 text-left font-bold">교과 역량</th>
+              <th className="py-1.5 text-center font-bold w-11">만점</th>
+              <th className="py-1.5 text-center font-bold w-11">평균</th>
+              <th className="py-1.5 text-center font-bold w-12 bg-[#F1F5F9]/80 text-[#0F172A]">
+                획득
+              </th>
+              <th className="py-1.5 pr-1.5 text-center font-bold w-13 text-[#1e493b]">
+                성취율
+              </th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-[#F1F5F9]">
+            {(report.compRows || []).map((row: any) => {
+              const meta = MOBILE_COMPETENCY_META[row.name] || {
+                textCls: "text-slate-800",
+                dotColor: "#475569",
+              };
+              const isEmpty = row.qCount === 0;
+              return (
+                <tr key={row.name} className={isEmpty ? "opacity-45" : ""}>
+                  <td className="py-1.5 pl-2 font-bold text-[#1E293B]">
+                    <span className="inline-flex items-center gap-1.5">
+                      <span
+                        className="w-2 h-2 rounded-full shrink-0"
+                        style={{ backgroundColor: meta.dotColor }}
+                      />
+                      <span className={meta.textCls}>{row.name}</span>
+                      <span className="text-[10.5px] font-semibold text-[#94A3B8]">
+                        ({row.qCount})
+                      </span>
+                    </span>
+                  </td>
+                  <td className="py-1.5 text-center text-[#64748B] font-semibold tabular-nums">
+                    {isEmpty ? "-" : fmtMobileScore(row.maxScore)}
+                  </td>
+                  <td className="py-1.5 text-center text-[#64748B] font-semibold tabular-nums">
+                    {isEmpty ? "-" : fmtMobileScore(row.cohortAvg)}
+                  </td>
+                  <td className="py-1.5 text-center font-extrabold text-[#0F172A] bg-[#F8FAFC] tabular-nums">
+                    {isEmpty ? "-" : fmtMobileScore(row.initEarned)}
+                  </td>
+                  <td className="py-1.5 pr-1.5 text-center font-extrabold tabular-nums">
+                    {isEmpty || row.initPct === null ? (
+                      <span className="text-[#94A3B8]">-</span>
+                    ) : (
+                      <span
+                        className={
+                          row.initPct >= 80
+                            ? "text-emerald-600"
+                            : row.initPct < 50
+                            ? "text-rose-500"
+                            : "text-[#1E293B]"
+                        }
+                      >
+                        {row.initPct}%
+                      </span>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+
+        <MobileGroupedBarChart
+          items={compBarItems}
+          myLegendColor="#1e493b"
+          avgBarColor="#94a3b8"
+          ariaLabel="교과 역량별 성취율 막대 그래프"
+        />
+      </section>
+
+      {/* 4. 그래프 2 — 체감 난이도별 성취 분석 (표 → 실수/고난도 하이라이트 → 막대그래프) */}
+      <section className="bg-white rounded-xl border border-[#E2E8F0] shadow-[0_1px_3px_rgba(15,23,42,0.03)] p-3.5 flex flex-col gap-2.5">
+        <div className="flex items-center justify-between gap-2">
+          <h4 className="text-[15px] font-bold text-[#1E293B]">
+            체감 난이도별 성취 분석
+          </h4>
+          <span className="rounded-md bg-indigo-50 px-2 py-0.5 text-[10.5px] font-bold text-indigo-700">
+            문항 정답률 기준
+          </span>
+        </div>
+
+        <table className="w-full text-[11.5px] border-collapse">
+          <thead>
+            <tr className="bg-[#F8FAFC] border-y border-[#E2E8F0] text-[#475569]">
+              <th className="py-1.5 pl-2 text-left font-bold">체감 구간</th>
+              <th className="py-1.5 text-center font-bold w-11">만점</th>
+              <th className="py-1.5 text-center font-bold w-11">평균</th>
+              <th className="py-1.5 text-center font-bold w-12 bg-[#F1F5F9]/80 text-[#0F172A]">
+                획득
+              </th>
+              <th className="py-1.5 pr-1.5 text-center font-bold w-13 text-[#1e493b]">
+                성취율
+              </th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-[#F1F5F9]">
+            {(report.diffRows || []).map((row: any) => {
+              const isEmpty = row.qCount === 0;
+              return (
+                <tr key={row.key} className={isEmpty ? "opacity-45" : ""}>
+                  <td className="py-1.5 pl-2 font-bold text-[#1E293B]">
+                    <span>{row.label}</span>
+                    <span className="text-[10.5px] font-semibold text-[#64748B] ml-1">
+                      ({row.qCount}문항)
+                    </span>
+                  </td>
+                  <td className="py-1.5 text-center text-[#64748B] font-semibold tabular-nums">
+                    {isEmpty ? "-" : fmtMobileScore(row.maxScore)}
+                  </td>
+                  <td className="py-1.5 text-center text-[#64748B] font-semibold tabular-nums">
+                    {isEmpty ? "-" : fmtMobileScore(row.cohortAvg)}
+                  </td>
+                  <td className="py-1.5 text-center font-extrabold text-[#0F172A] bg-[#F8FAFC] tabular-nums">
+                    {isEmpty ? "-" : fmtMobileScore(row.initEarned)}
+                  </td>
+                  <td className="py-1.5 pr-1.5 text-center font-extrabold tabular-nums">
+                    {isEmpty ? (
+                      <span className="text-[#94A3B8]">-</span>
+                    ) : (
+                      <span
+                        className={
+                          row.initPct >= 80
+                            ? "text-emerald-600"
+                            : row.initPct < 50
+                            ? "text-rose-500"
+                            : "text-[#1E293B]"
+                        }
+                      >
+                        {row.initPct}%
+                      </span>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+
+        {/* 아쉬운 실수 & 고난도 정복 하이라이트 */}
+        <div className="flex flex-col gap-1.5">
+          <div className="rounded-lg bg-amber-50/70 border border-amber-200/80 px-2.5 py-1.5 flex items-center justify-between gap-2">
+            <span className="text-[11px] font-extrabold text-amber-800 shrink-0">
+              ⚠️ 아쉬운 실수
+            </span>
+            {(report.mistakeQuestions || []).length > 0 ? (
+              <div className="flex flex-wrap justify-end gap-1">
+                {report.mistakeQuestions.map((q: any) => (
+                  <span
+                    key={q.qNum}
+                    className="text-[10.5px] font-bold bg-white text-amber-900 border border-amber-300 px-1.5 py-0.5 rounded tabular-nums"
+                  >
+                    {q.qNum}번({q.questionAccPct}%)
+                  </span>
+                ))}
+              </div>
+            ) : (
+              <span className="text-[11px] font-bold text-emerald-700">
+                기본 문항 실수 없음 ✨
+              </span>
+            )}
+          </div>
+
+          <div className="rounded-lg bg-purple-50/70 border border-purple-200/80 px-2.5 py-1.5 flex items-center justify-between gap-2">
+            <span className="text-[11px] font-extrabold text-purple-800 shrink-0">
+              🌟 고난도 정복
+            </span>
+            {(report.killerSolvedQuestions || []).length > 0 ? (
+              <div className="flex flex-wrap justify-end gap-1">
+                {report.killerSolvedQuestions.map((q: any) => (
+                  <span
+                    key={q.qNum}
+                    className="text-[10.5px] font-bold bg-white text-purple-900 border border-purple-300 px-1.5 py-0.5 rounded tabular-nums"
+                  >
+                    {q.qNum}번({q.questionAccPct}%)
+                  </span>
+                ))}
+              </div>
+            ) : (
+              <span className="text-[11px] font-semibold text-[#64748B]">
+                {report.hasKillerQuestions
+                  ? "심화 문항 집중 도전 권장"
+                  : "이번 시험 고난도 문항 없음"}
+              </span>
+            )}
+          </div>
+        </div>
+
+        <MobileGroupedBarChart
+          items={diffBarItems}
+          myLegendColor="#0f766e"
+          avgBarColor="#cbd5e1"
+          ariaLabel="체감 난이도별 성취율 막대 그래프"
+        />
+      </section>
+    </div>
   );
 };
 
@@ -513,9 +1265,42 @@ export default function StudentCard({
   const [isLogsLoading, setIsLogsLoading] = useState(false);
   const [showAllLogs, setShowAllLogs] = useState(false);
 
-  // 성적 데이터 상태 및 중복 호출 방지 캐시
-  const [examResults, setExamResults] = useState<any[]>([]);
-  const [categoryAnalysis, setCategoryAnalysis] = useState<any[]>([]);
+  // 성적 탭 하위 탭 및 4종 테스트·리포트 데이터 상태
+  const [activeExamSubTab, setActiveExamSubTab] =
+    useState<PortalTestSubTabId>("weekly");
+  const [showAllExamRecordsByTab, setShowAllExamRecordsByTab] = useState<
+    Record<"weekly" | "weekly_incorrect", boolean>
+  >({
+    weekly: false,
+    weekly_incorrect: false,
+  });
+  const [selectedEvalIdxByTab, setSelectedEvalIdxByTab] = useState<
+    Record<"midterm" | "quarterly", number>
+  >({
+    midterm: 0,
+    quarterly: 0,
+  });
+  const [examResultsBySubTab, setExamResultsBySubTab] = useState<
+    Record<PortalTestSubTabId, any[]>
+  >({
+    weekly: [],
+    weekly_incorrect: [],
+    midterm: [],
+    quarterly: [],
+  });
+  const [categoryAnalysisBySubTab, setCategoryAnalysisBySubTab] = useState<
+    Record<"weekly" | "weekly_incorrect", any[]>
+  >({
+    weekly: [],
+    weekly_incorrect: [],
+  });
+  const [periodicReportsBySubTab, setPeriodicReportsBySubTab] = useState<
+    Record<"midterm" | "quarterly", any[]>
+  >({
+    midterm: [],
+    quarterly: [],
+  });
+  const [mainTextbooks, setMainTextbooks] = useState<any[]>([]);
   const [schoolExams, setSchoolExams] = useState<any[]>([]);
   const [isExamLoading, setIsExamLoading] = useState(false);
   const examBundlePromiseRef = useRef<{ key: string; promise: Promise<any> } | null>(null);
@@ -584,16 +1369,12 @@ export default function StudentCard({
     loadPendingHomework();
   }, [student?.student_id]);
 
-  // 🌟 [첫 화면 요약 + 성적 탭 백그라운드 선로딩] 카드 마운트 시 단 1회 호출로 주간테스트·단원성취도·학교시험 모두 선로딩
+  // 🌟 [첫 화면 요약 + 성적 탭 백그라운드 선로딩] 카드 마운트 시 단 1회 호출로 4종 성적·단원성취도·정기평가 리포트·학교시험 모두 선로딩
   useEffect(() => {
     if (student?.student_id) {
       const key = `${student.student_id}_${parentId || ""}_${authToken || ""}`;
       if (examDataLoadedKeyRef.current !== key) {
-        Promise.all([
-          loadExamResults(),
-          loadCategoryAnalysis(),
-          loadSchoolExams(),
-        ]).then(() => {
+        loadPortalExamBundle().then(() => {
           examDataLoadedKeyRef.current = key;
         });
       }
@@ -740,427 +1521,39 @@ export default function StudentCard({
       }
       const loadAllExamData = async () => {
         setIsExamLoading(true);
-        await Promise.all([
-          loadExamResults(),
-          loadCategoryAnalysis(),
-          loadSchoolExams(),
-        ]);
+        await loadPortalExamBundle();
         examDataLoadedKeyRef.current = key;
         setIsExamLoading(false);
       };
       loadAllExamData();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab, student?.student_id, parentId, authToken]);
 
-  const loadExamResults = async () => {
+  const loadPortalExamBundle = async () => {
     try {
-      let validAssignments: any[] = [];
-      let allAssignmentsForExams: any[] = [];
-      let examItems: any[] = [];
-      let gcData: any[] = [];
-      let allAnswers: any[] = [];
-
       const actionRes = await fetchExamBundleCached();
-
       if (actionRes && actionRes.success) {
-        validAssignments = actionRes.validAssignments || [];
-        allAssignmentsForExams = actionRes.allAssignmentsForExams || [];
-        examItems = actionRes.examItems || [];
-        gcData = actionRes.gcData || [];
-        allAnswers = actionRes.allAnswers || [];
-        if (actionRes.schoolExams) {
-          setSchoolExams(actionRes.schoolExams);
-        }
-      } else {
-        const { data: assignments } = await authSupabase
-          .from("exam_assignment")
-          .select(
-            "assignment_id, exam_id, total_score, status, created_at, exam_master(title, total_questions, exam_type, layout_settings)"
-          )
-          .eq("student_id", student.student_id)
-          .order("created_at", { ascending: false });
-
-        validAssignments = (assignments || [])
-          .filter((a: any) => {
-            if (["응시전", "미응시", "예정", "대기"].includes(a.status))
-              return false;
-            const master = Array.isArray(a.exam_master)
-              ? a.exam_master[0]
-              : a.exam_master;
-            if (master?.exam_type !== "주간테스트") return false;
-            return true;
-          })
-          .slice(0, 10);
-
-        if (validAssignments.length > 0) {
-          const examIds = Array.from(
-            new Set(validAssignments.map((a: any) => a.exam_id))
-          );
-          const [resAllAssign, resItems, resGc] = await Promise.all([
-            authSupabase
-              .from("exam_assignment")
-              .select("assignment_id, exam_id")
-              .in("exam_id", examIds)
-              .not("status", "in", '("응시전","미응시","예정","대기")'),
-            authSupabase
-              .from("exam_item")
-              .select("exam_id, question_id, sort_order, assigned_score")
-              .in("exam_id", examIds)
-              .order("sort_order"),
-            authSupabase
-              .from("master_grading_code")
-              .select("code, description, is_correct, score_ratio, admission_ratio"),
-          ]);
-          allAssignmentsForExams = resAllAssign.data || [];
-          examItems = resItems.data || [];
-          gcData = resGc.data || [];
-
-          const allAssignIds = allAssignmentsForExams.map(
-            (a: any) => a.assignment_id
-          );
-          for (let i = 0; i < allAssignIds.length; i += 200) {
-            const chunk = allAssignIds.slice(i, i + 200);
-            const { data: chunkAnswers } = await authSupabase
-              .from("student_answer")
-              .select("exam_assignment_id, question_id, grading_code, earned_score")
-              .in("exam_assignment_id", chunk);
-            if (chunkAnswers) allAnswers = [...allAnswers, ...chunkAnswers];
-          }
-        }
-      }
-
-      if (validAssignments.length === 0) {
-        setExamResults([]);
-        return;
-      }
-
-      const gcMeta: Record<string, any> = {};
-      gcData?.forEach((row: any) => {
-        if (row.code) gcMeta[row.code] = row;
-      });
-
-      const itemsByExam = new Map<string, any[]>();
-      examItems?.forEach((it: any) => {
-        const k = String(it.exam_id);
-        if (!itemsByExam.has(k)) itemsByExam.set(k, []);
-        itemsByExam.get(k)!.push(it);
-      });
-
-      const examScoreConfigMap = new Map<
-        string,
-        { scoreByQuestionId: Map<string, number>; defaultScore: number }
-      >();
-      validAssignments.forEach((a: any) => {
-        const master = Array.isArray(a.exam_master)
-          ? a.exam_master[0]
-          : a.exam_master;
-        const k = String(a.exam_id);
-        if (!examScoreConfigMap.has(k)) {
-          const items = itemsByExam.get(k) || [];
-          const { scoreByQuestionId, groupCount } = buildExamQuestionScoreMap(
-            items,
-            master?.layout_settings,
-            master?.exam_type,
-            master?.total_questions || 1
-          );
-          examScoreConfigMap.set(k, {
-            scoreByQuestionId,
-            defaultScore: 100 / (groupCount || master?.total_questions || 1),
-          });
-        }
-      });
-
-      const dedupAnsMap = new Map<string, any>();
-      allAnswers.forEach((ans) => {
-        if (!ans.grading_code) return;
-        const k = `${ans.exam_assignment_id}_${ans.question_id}`;
-        const ex = dedupAnsMap.get(k);
-        if (
-          !ex ||
-          Number(ans.earned_score || 0) >= Number(ex.earned_score || 0)
-        ) {
-          dedupAnsMap.set(k, ans);
-        }
-      });
-
-      const assignToExamMap = new Map<any, string>();
-      (allAssignmentsForExams || []).forEach((a) =>
-        assignToExamMap.set(a.assignment_id, String(a.exam_id))
-      );
-      validAssignments.forEach((a: any) =>
-        assignToExamMap.set(a.assignment_id, String(a.exam_id))
-      );
-
-      const assignCounts: Record<
-        string,
-        {
-          o: number;
-          ro: number;
-          to: number;
-          totalAns: number;
-          x: number;
-          initScore: number;
-          finScore: number;
-        }
-      > = {};
-      dedupAnsMap.forEach((ans) => {
-        const aId = ans.exam_assignment_id;
-        if (!assignCounts[aId])
-          assignCounts[aId] = {
-            o: 0,
-            ro: 0,
-            to: 0,
-            totalAns: 0,
-            x: 0,
-            initScore: 0,
-            finScore: 0,
-          };
-        const c = assignCounts[aId];
-        c.totalAns++;
-        const exId = assignToExamMap.get(aId) || "";
-        const cfg = examScoreConfigMap.get(exId);
-        const qScore =
-          cfg?.scoreByQuestionId.get(String(ans.question_id)) ??
-          cfg?.defaultScore ??
-          5;
-
-        if (ans.grading_code === "O") {
-          c.o++;
-          c.initScore += qScore;
-        } else if (ans.grading_code === "RO") c.ro++;
-        else if (ans.grading_code === "TO") c.to++;
-        else if (["X", "TX"].includes(ans.grading_code)) c.x++;
-        c.finScore += calcScoreRatio(
-          ans.grading_code,
-          qScore,
-          gcMeta,
-          false
-        ).newEarned;
-      });
-
-      const examScoreMap = new Map();
-      (allAssignmentsForExams || []).forEach((a) => {
-        const counts = assignCounts[a.assignment_id];
-        if (!counts || counts.totalAns === 0) return;
-
-        const initScore = roundScore(counts.initScore);
-        const finScore = roundScore(counts.finScore);
-
-        if (!examScoreMap.has(a.exam_id))
-          examScoreMap.set(a.exam_id, { initSum: 0, finSum: 0, count: 0 });
-        const avgData = examScoreMap.get(a.exam_id);
-        avgData.initSum += initScore;
-        avgData.finSum += finScore;
-        avgData.count += 1;
-      });
-
-      const results = validAssignments.map((a: any) => {
-        const counts = assignCounts[a.assignment_id] || {
-          o: 0,
-          ro: 0,
-          to: 0,
-          totalAns: 0,
-          x: 0,
-          initScore: 0,
-          finScore: 0,
-        };
-
-        const originalScore = roundScore(counts.initScore);
-        const finalScore =
-          counts.totalAns > 0
-            ? roundScore(counts.finScore)
-            : roundScore(a.total_score || 0);
-
-        const avgData = examScoreMap.get(a.exam_id);
-        const classInitAvg =
-          avgData && avgData.count > 0
-            ? roundScore(avgData.initSum / avgData.count)
-            : 0;
-        const classFinAvg =
-          avgData && avgData.count > 0
-            ? roundScore(avgData.finSum / avgData.count)
-            : 0;
-
-        return {
-          assignment_id: a.assignment_id,
-          title: Array.isArray(a.exam_master)
-            ? a.exam_master[0]?.title
-            : a.exam_master?.title || "주간테스트",
-          original_score: originalScore,
-          final_score: finalScore,
-          oCount: counts.o,
-          roCount: counts.ro,
-          toCount: counts.to,
-          xCount: counts.x,
-          class_init_avg: classInitAvg,
-          class_fin_avg: classFinAvg,
-          created_at: a.created_at,
-        };
-      });
-      setExamResults(results);
-    } catch (err) {
-      console.error("시험 결과 로드 실패:", err);
-    }
-  };
-
-  const loadCategoryAnalysis = async () => {
-    try {
-      let answers: any[] = [];
-      let questions: any[] = [];
-      const catMap = new Map<string, string>();
-
-      const actionRes = await fetchExamBundleCached();
-
-      if (actionRes && actionRes.success) {
-        answers = actionRes.studentAnswersForCategory || [];
-        questions = actionRes.questions || [];
-        (actionRes.catMapEntries || []).forEach(([k, v]: [string, string]) => {
-          catMap.set(k, v);
+        setExamResultsBySubTab({
+          weekly: actionRes.examResultsBySubTab?.weekly || [],
+          weekly_incorrect: actionRes.examResultsBySubTab?.weekly_incorrect || [],
+          midterm: actionRes.examResultsBySubTab?.midterm || [],
+          quarterly: actionRes.examResultsBySubTab?.quarterly || [],
         });
-      } else {
-        const { data: assignments } = await authSupabase
-          .from("exam_assignment")
-          .select("assignment_id, status, exam_master(exam_type)")
-          .eq("student_id", student.student_id)
-          .order("created_at", { ascending: false });
-
-        const validAssignments = (assignments || [])
-          .filter((a: any) => {
-            if (["응시전", "미응시", "예정", "대기"].includes(a.status))
-              return false;
-            const master = Array.isArray(a.exam_master)
-              ? a.exam_master[0]
-              : a.exam_master;
-            if (master?.exam_type !== "주간테스트") return false;
-            return true;
-          })
-          .slice(0, 10);
-
-        if (validAssignments.length === 0) {
-          setCategoryAnalysis([]);
-          return;
-        }
-        const targetAssignIds = validAssignments.map((a) => a.assignment_id);
-
-        const { data: ansData } = await authSupabase
-          .from("student_answer")
-          .select("question_id, is_correct, grading_code")
-          .in("exam_assignment_id", targetAssignIds);
-        answers = ansData || [];
-
-        if (answers.length > 0) {
-          const qIds = Array.from(new Set(answers.map((a) => a.question_id)));
-          for (let i = 0; i < qIds.length; i += 200) {
-            const chunk = qIds.slice(i, i + 200);
-            const { data: qData } = await authSupabase
-              .from("question_db")
-              .select("question_id, taxonomy_id")
-              .in("question_id", chunk);
-            if (qData) questions = [...questions, ...qData];
-          }
-        }
-      }
-
-      if (!answers || answers.length === 0) {
-        setCategoryAnalysis([]);
-        return;
-      }
-
-      const d4Codes = new Set<string>();
-      const qIdToD4 = new Map<string, string>();
-
-      questions.forEach((q) => {
-        if (!q.taxonomy_id) return;
-        const parts = q.taxonomy_id.split("-");
-        const d4Code =
-          parts.length >= 2 ? parts.slice(0, 2).join("-") : q.taxonomy_id;
-        d4Codes.add(d4Code);
-        qIdToD4.set(q.question_id, d4Code);
-      });
-
-      const uniqueD4Array = Array.from(d4Codes).filter(Boolean);
-      if (uniqueD4Array.length === 0) {
-        setCategoryAnalysis([]);
-        return;
-      }
-
-      if (catMap.size === 0) {
-        await Promise.all(
-          uniqueD4Array.map(async (code) => {
-            try {
-              const { data } = await authSupabase
-                .from("master_category")
-                .select("category_id, depth4")
-                .eq("category_id", code)
-                .limit(1);
-              if (data && data.length > 0 && data[0].depth4) {
-                catMap.set(code, data[0].depth4);
-                return;
-              }
-              const { data: likeData } = await authSupabase
-                .from("master_category")
-                .select("category_id, depth4")
-                .like("category_id", `${code}-%`)
-                .limit(1);
-              if (likeData && likeData.length > 0 && likeData[0].depth4) {
-                catMap.set(code, likeData[0].depth4);
-              }
-            } catch (e) {}
-          })
-        );
-      }
-
-      const aggMap = new Map();
-      answers.forEach((a) => {
-        const d4Code = qIdToD4.get(a.question_id);
-        if (!d4Code) return;
-        let depth4Name = catMap.get(d4Code);
-        if (!depth4Name || depth4Name.trim() === "") depth4Name = d4Code;
-
-        if (!aggMap.has(d4Code)) {
-          aggMap.set(d4Code, {
-            code: d4Code,
-            name: depth4Name,
-            total: 0,
-            initCorrect: 0,
-            finCorrect: 0,
-          });
-        }
-        const obj = aggMap.get(d4Code);
-        obj.total += 1;
-
-        if (a.grading_code === "O") {
-          obj.initCorrect += 1;
-          obj.finCorrect += 1;
-        } else if (a.grading_code === "RO" || a.grading_code === "TO") {
-          obj.finCorrect += 1;
-        } else if (!a.grading_code && a.is_correct) {
-          obj.initCorrect += 1;
-          obj.finCorrect += 1;
-        }
-      });
-
-      const finalData = Array.from(aggMap.values())
-        .map((d) => ({
-          ...d,
-          initial_rate:
-            d.total > 0 ? Math.round((d.initCorrect / d.total) * 100) : 0,
-          final_rate:
-            d.total > 0 ? Math.round((d.finCorrect / d.total) * 100) : 0,
-        }))
-        .sort((a, b) => a.code.localeCompare(b.code));
-
-      setCategoryAnalysis(finalData);
-    } catch (err) {}
-  };
-
-  const loadSchoolExams = async () => {
-    try {
-      const actionRes = await fetchExamBundleCached();
-      if (actionRes && actionRes.success) {
+        setCategoryAnalysisBySubTab({
+          weekly: actionRes.categoryAnalysisBySubTab?.weekly || [],
+          weekly_incorrect:
+            actionRes.categoryAnalysisBySubTab?.weekly_incorrect || [],
+        });
+        setPeriodicReportsBySubTab({
+          midterm: actionRes.periodicReportsBySubTab?.midterm || [],
+          quarterly: actionRes.periodicReportsBySubTab?.quarterly || [],
+        });
+        setMainTextbooks(actionRes.mainTextbooks || []);
         setSchoolExams(actionRes.schoolExams || []);
         return;
       }
+
       const { data } = await authSupabase
         .from("student_school_exam")
         .select("*")
@@ -1169,7 +1562,9 @@ export default function StudentCard({
         .order("semester", { ascending: false })
         .order("exam_type", { ascending: true });
       setSchoolExams(data || []);
-    } catch {}
+    } catch (err) {
+      console.error("시험 번들 로드 실패:", err);
+    }
   };
 
   const year = currentMonth.getFullYear();
@@ -1330,7 +1725,7 @@ export default function StudentCard({
   const mainBook =
     books.find((cb: any) => unwrap(cb.textbook)?.book_type === "주교재") ||
     books[0];
-  const latestExam = examResults[0];
+  const latestExam = examResultsBySubTab.weekly[0];
 
   const [selectedBookIdx, setSelectedBookIdx] = useState(0);
   const selectedBook =
@@ -1414,53 +1809,212 @@ export default function StudentCard({
     );
   };
 
-  const renderGrowthChart = () => {
-    if (examResults.length === 0)
-      return <EmptyBox text="아직 주간테스트 기록이 없어요." />;
+  const renderGrowthChart = (
+    results: any[],
+    mode: "weekly" | "weekly_incorrect"
+  ) => {
+    const isIncorrect = mode === "weekly_incorrect";
+    if (!results || results.length === 0) {
+      return (
+        <EmptyBox
+          text={
+            isIncorrect
+              ? "아직 주차별 오답 기록이 없어요."
+              : "아직 주간테스트 기록이 없어요."
+          }
+        />
+      );
+    }
 
-    const chartData = [...examResults.slice(0, 10)].reverse();
-    const height = 260;
-    const paddingX = 40;
-    const paddingY = 40;
+    const chartData = [...results.slice(0, 14)].reverse();
+    const height = 248;
+    const paddingX = 38;
+    const paddingTop = 44;
+    const paddingBottom = 34;
     const maxScore = 100;
-    const xStep = 85;
+    const xStep = 82;
     const dynamicWidth = Math.max(
       300,
       paddingX * 2 + (chartData.length - 1) * xStep + 40
     );
+    const plotHeight = height - paddingTop - paddingBottom;
     const getY = (score: number) =>
-      height - paddingY - (score / maxScore) * (height - paddingY * 2);
+      height -
+      paddingBottom -
+      (Math.max(0, Math.min(100, Number(score) || 0)) / maxScore) * plotHeight;
 
-    const pointsInitAvg = chartData
-      .map((r: any, i: number) => `${paddingX + i * xStep + 20},${getY(r.class_init_avg)}`)
-      .join(" ");
-    const pointsFinAvg = chartData
-      .map((r: any, i: number) => `${paddingX + i * xStep + 20},${getY(r.class_fin_avg)}`)
-      .join(" ");
+    // 이전 주차 이후 1주차로 돌아올 때 새 과정 시작 구분선 위치 판별
+    const isNewCourseStartAt = (idx: number): boolean => {
+      if (idx <= 0) return false;
+      const prev = chartData[idx - 1];
+      const curr = chartData[idx];
+      if (!prev || !curr) return false;
+      if (curr.week_num === 1) {
+        if (prev.week_num !== 1) return true;
+        if (
+          prev.exam_id !== curr.exam_id &&
+          prev.major_grade &&
+          curr.major_grade &&
+          prev.major_grade !== curr.major_grade
+        ) {
+          return true;
+        }
+      }
+      return false;
+    };
+
+    const dividerIndices = new Set<number>();
+    chartData.forEach((_, i) => {
+      if (isNewCourseStartAt(i)) dividerIndices.add(i);
+    });
+
+    const sortedDividers = Array.from(dividerIndices).sort((a, b) => a - b);
+    const maxDividerIdx =
+      sortedDividers.length > 0 ? sortedDividers[sortedDividers.length - 1] : -1;
+    const usedBookKeys = new Set<string>();
+    const dividerLabelMap = new Map<
+      number,
+      { fullLabel: string; shortLabel: string }
+    >();
+    const DAY_MS = 24 * 60 * 60 * 1000;
+
+    sortedDividers.forEach((idx) => {
+      const curr = chartData[idx];
+      const prev = chartData[idx - 1];
+      const currMs = new Date(
+        curr?.effective_date || curr?.created_at || 0
+      ).getTime();
+      const prevMs = prev
+        ? new Date(prev?.effective_date || prev?.created_at || 0).getTime()
+        : 0;
+      const examToken = extractGradeSemesterToken(
+        `${curr?.major_grade || ""} ${curr?.sub_title || ""} ${curr?.title || ""}`
+      );
+
+      let bestTb: any = null;
+      let bestScore = -Infinity;
+
+      (mainTextbooks || []).forEach((tb) => {
+        const key = String(
+          tb.class_textbook_id || `${tb.class_id}_${tb.book_id}`
+        );
+        const rawDate = tb.start_date || tb.created_at;
+        const tbStartMs = rawDate ? new Date(rawDate).getTime() : NaN;
+        const tbToken = extractGradeSemesterToken(tb.title);
+
+        let score = 0;
+        if (!usedBookKeys.has(key)) score += 18;
+        if (curr?.class_id && String(tb.class_id) === String(curr.class_id))
+          score += 24;
+
+        if (examToken && tbToken) {
+          if (examToken === tbToken) score += 38;
+          else score -= 45;
+        }
+
+        if (!isNaN(tbStartMs) && !isNaN(currMs) && currMs > 0) {
+          const expectedStartMs = currMs - 7 * DAY_MS;
+          const distDays = Math.abs(tbStartMs - expectedStartMs) / DAY_MS;
+          score += Math.max(-45, 36 - distDays * 0.85);
+          if (
+            prevMs > 0 &&
+            tbStartMs >= prevMs - 21 * DAY_MS &&
+            tbStartMs <= currMs + 21 * DAY_MS
+          ) {
+            score += 36;
+          }
+        }
+
+        if (idx === maxDividerIdx && tb.status === "진행중") {
+          score += 20;
+        }
+
+        if (score > bestScore) {
+          bestScore = score;
+          bestTb = tb;
+        }
+      });
+
+      let chosenTitle = "";
+      if (bestTb && bestScore >= 15) {
+        chosenTitle = bestTb.title;
+        usedBookKeys.add(
+          String(
+            bestTb.class_textbook_id || `${bestTb.class_id}_${bestTb.book_id}`
+          )
+        );
+      } else if (idx === maxDividerIdx) {
+        const activeMain =
+          (mainTextbooks || []).find(
+            (tb) =>
+              tb.status === "진행중" &&
+              !usedBookKeys.has(
+                String(
+                  tb.class_textbook_id || `${tb.class_id}_${tb.book_id}`
+                )
+              )
+          ) || unwrap(mainBook?.textbook);
+        if (activeMain?.title) {
+          chosenTitle = activeMain.title;
+        }
+      }
+
+      const fallbackTitle =
+        curr?.major_grade || curr?.sub_title || "새 과정 시작";
+      const fullLabel = (chosenTitle || fallbackTitle).trim();
+      const shortLabel =
+        fullLabel.length > 14
+          ? `${fullLabel.substring(0, 14)}…`
+          : fullLabel;
+      dividerLabelMap.set(idx, { fullLabel, shortLabel });
+    });
+
+    // 새 과정 경계를 넘어 반 평균 점선이 이어지지 않도록 과정 구간별로 분리
+    const segments: { start: number; items: any[] }[] = [];
+    let currentSeg: { start: number; items: any[] } = { start: 0, items: [] };
+    chartData.forEach((item, idx) => {
+      if (dividerIndices.has(idx) && currentSeg.items.length > 0) {
+        segments.push(currentSeg);
+        currentSeg = { start: idx, items: [item] };
+      } else {
+        currentSeg.items.push(item);
+      }
+    });
+    if (currentSeg.items.length > 0) segments.push(currentSeg);
+
+    const formatShortBarLabel = (r: any) => {
+      if (r.week_num != null) {
+        return isIncorrect ? `${r.week_num}주차 오답` : `${r.week_num}주차 평가`;
+      }
+      const t = String(r.title || "시험").trim();
+      return t.length > 8 ? `${t.substring(0, 8)}..` : t;
+    };
 
     return (
-      <section className="bg-white p-4 rounded-xl border border-[#E2E8F0] shadow-[0_1px_3px_rgba(15,23,42,0.03)] flex flex-col gap-3">
+      <section className="bg-white p-4 rounded-xl border border-[#E2E8F0] shadow-[0_1px_3px_rgba(15,23,42,0.03)] flex flex-col gap-2.5">
         <div>
-          <h3 className="text-[17px] font-bold text-[#1E293B]">
-            주간테스트 점수 변화
+          <h3 className="text-[16.5px] font-bold text-[#1E293B]">
+            {isIncorrect ? "주차별 오답 점수 변화" : "주간테스트 점수 변화"}
           </h3>
-          <p className="text-[13px] text-[#64748B] mt-1 leading-relaxed">
-            처음 푼 점수와 오답을 고친 뒤의 점수, 같은 시험의 반 평균이에요.
+          <p className="text-[12.5px] text-[#64748B] mt-0.5 leading-relaxed">
+            {isIncorrect
+              ? "주차별 오답 테스트의 처음 점수와 고친 뒤 점수, 반 평균 추이예요."
+              : "처음 푼 점수와 오답을 고친 뒤의 점수, 같은 시험의 반 평균이에요."}
           </p>
         </div>
-        <ul className="grid grid-cols-2 gap-2 text-[13px] text-[#475569]">
-          <li className="flex items-center gap-2">
-            <span className="w-3 h-3 rounded-sm bg-[#2563EB]"></span>처음 점수
+        <ul className="grid grid-cols-2 gap-1.5 text-[12px] text-[#475569]">
+          <li className="flex items-center gap-1.5">
+            <span className="w-2.5 h-2.5 rounded-sm bg-[#2563EB]"></span>처음 점수
           </li>
-          <li className="flex items-center gap-2">
-            <span className="w-3 h-3 rounded-sm bg-[#93C5FD]"></span>고친 뒤 점수
+          <li className="flex items-center gap-1.5">
+            <span className="w-2.5 h-2.5 rounded-sm bg-[#93C5FD]"></span>고친 뒤 점수
           </li>
-          <li className="flex items-center gap-2">
-            <svg width="20" height="10" aria-hidden="true">
+          <li className="flex items-center gap-1.5">
+            <svg width="18" height="10" aria-hidden="true">
               <line
                 x1="0"
                 y1="5"
-                x2="20"
+                x2="18"
                 y2="5"
                 stroke="#94A3B8"
                 strokeWidth="2"
@@ -1469,12 +2023,12 @@ export default function StudentCard({
             </svg>
             반 평균 (처음)
           </li>
-          <li className="flex items-center gap-2">
-            <svg width="20" height="10" aria-hidden="true">
+          <li className="flex items-center gap-1.5">
+            <svg width="18" height="10" aria-hidden="true">
               <line
                 x1="0"
                 y1="5"
-                x2="20"
+                x2="18"
                 y2="5"
                 stroke="#10B981"
                 strokeWidth="2"
@@ -1483,6 +2037,22 @@ export default function StudentCard({
             </svg>
             반 평균 (고친 뒤)
           </li>
+          {dividerIndices.size > 0 && (
+            <li className="col-span-2 flex items-center gap-1.5 text-[#EA580C] font-semibold">
+              <svg width="18" height="10" aria-hidden="true">
+                <line
+                  x1="0"
+                  y1="5"
+                  x2="18"
+                  y2="5"
+                  stroke="#F97316"
+                  strokeWidth="2"
+                  strokeDasharray="3 2"
+                />
+              </svg>
+              새 주교재(과정) 시작 구분선
+            </li>
+          )}
         </ul>
 
         <div className="w-full overflow-x-auto overflow-y-hidden pb-1">
@@ -1491,12 +2061,16 @@ export default function StudentCard({
             className="w-full"
             style={{ minWidth: dynamicWidth, height }}
             role="img"
-            aria-label="주간테스트 점수 막대 그래프"
+            aria-label={
+              isIncorrect
+                ? "주차별 오답 점수 막대 그래프"
+                : "주간테스트 점수 막대 그래프"
+            }
           >
             {[0, 25, 50, 75, 100].map((score) => (
               <g key={score}>
                 <line
-                  x1={paddingX - 10}
+                  x1={paddingX - 8}
                   y1={getY(score)}
                   x2={dynamicWidth - 10}
                   y2={getY(score)}
@@ -1504,9 +2078,9 @@ export default function StudentCard({
                   strokeWidth="1.5"
                 />
                 <text
-                  x={paddingX - 15}
+                  x={paddingX - 13}
                   y={getY(score) + 4}
-                  fontSize="11"
+                  fontSize="10.5"
                   fill="#64748B"
                   textAnchor="end"
                 >
@@ -1514,15 +2088,64 @@ export default function StudentCard({
                 </text>
               </g>
             ))}
+
+            {/* 새 과정(주교재) 시작 구분선 */}
+            {Array.from(dividerIndices).map((idx) => {
+              const prevCx = paddingX + (idx - 1) * xStep + 20;
+              const currCx = paddingX + idx * xStep + 20;
+              const lineX = (prevCx + currCx) / 2;
+              const labelMeta = dividerLabelMap.get(idx) || {
+                fullLabel: "새 과정 시작",
+                shortLabel: "새 과정 시작",
+              };
+              const rawPillW = estimateSvgPillWidth(labelMeta.shortLabel);
+              const pillX = Math.max(
+                4,
+                Math.min(dynamicWidth - rawPillW - 4, lineX - rawPillW / 2)
+              );
+              const pillCenterX = pillX + rawPillW / 2;
+              return (
+                <g key={`course-div-${idx}`}>
+                  <title>{labelMeta.fullLabel}</title>
+                  <line
+                    x1={lineX}
+                    y1={paddingTop - 22}
+                    x2={lineX}
+                    y2={height - paddingBottom + 6}
+                    stroke="#F97316"
+                    strokeWidth="1.8"
+                    strokeDasharray="4 3"
+                  />
+                  <rect
+                    x={pillX}
+                    y={5}
+                    width={rawPillW}
+                    height={19}
+                    rx={9.5}
+                    fill="#FFF7ED"
+                    stroke="#FDBA74"
+                    strokeWidth="1"
+                  />
+                  <text
+                    x={pillCenterX}
+                    y={17.5}
+                    fontSize="9.5"
+                    fill="#EA580C"
+                    textAnchor="middle"
+                    fontWeight="800"
+                  >
+                    {labelMeta.shortLabel}
+                  </text>
+                </g>
+              );
+            })}
+
             {chartData.map((r: any, i: number) => {
               const cx = paddingX + i * xStep + 20;
               const initialScore = r.original_score || 0;
               const finalScore = r.final_score || initialScore;
-              const barWidth = 32;
-              const shortTitle =
-                (r.title || "시험").length > 8
-                  ? (r.title || "시험").substring(0, 8) + ".."
-                  : r.title || "시험";
+              const barWidth = 30;
+              const shortTitle = formatShortBarLabel(r);
               return (
                 <g key={`bar-${i}`}>
                   {finalScore > 0 && (
@@ -1530,7 +2153,7 @@ export default function StudentCard({
                       x={cx - barWidth / 2}
                       y={getY(finalScore)}
                       width={barWidth}
-                      height={height - paddingY - getY(finalScore)}
+                      height={height - paddingBottom - getY(finalScore)}
                       fill="#93C5FD"
                       rx="5"
                     />
@@ -1540,25 +2163,26 @@ export default function StudentCard({
                       x={cx - barWidth / 2}
                       y={getY(initialScore)}
                       width={barWidth}
-                      height={height - paddingY - getY(initialScore)}
+                      height={height - paddingBottom - getY(initialScore)}
                       fill="#2563EB"
                       rx="5"
                     />
                   )}
                   <text
                     x={cx}
-                    y={height - 15}
-                    fontSize="11"
+                    y={height - 11}
+                    fontSize="10.5"
                     fill="#475569"
                     textAnchor="middle"
+                    fontWeight="600"
                   >
                     {shortTitle}
                   </text>
                   {finalScore > 0 && (
                     <text
                       x={cx}
-                      y={getY(100) - 12}
-                      fontSize="13"
+                      y={Math.max(26, getY(finalScore) - 6)}
+                      fontSize="12"
                       fill="#1E293B"
                       textAnchor="middle"
                       fontWeight="700"
@@ -1569,20 +2193,45 @@ export default function StudentCard({
                 </g>
               );
             })}
-            <polyline
-              points={pointsInitAvg}
-              fill="none"
-              stroke="#94A3B8"
-              strokeWidth="2"
-              strokeDasharray="4 4"
-            />
-            <polyline
-              points={pointsFinAvg}
-              fill="none"
-              stroke="#10B981"
-              strokeWidth="2"
-              strokeDasharray="4 4"
-            />
+
+            {segments.map((seg, sIdx) => {
+              if (seg.items.length < 2) return null;
+              const ptsInit = seg.items
+                .map(
+                  (r: any, j: number) =>
+                    `${paddingX + (seg.start + j) * xStep + 20},${getY(
+                      r.class_init_avg
+                    )}`
+                )
+                .join(" ");
+              const ptsFin = seg.items
+                .map(
+                  (r: any, j: number) =>
+                    `${paddingX + (seg.start + j) * xStep + 20},${getY(
+                      r.class_fin_avg
+                    )}`
+                )
+                .join(" ");
+              return (
+                <g key={`seg-avg-${sIdx}`}>
+                  <polyline
+                    points={ptsInit}
+                    fill="none"
+                    stroke="#94A3B8"
+                    strokeWidth="2"
+                    strokeDasharray="4 4"
+                  />
+                  <polyline
+                    points={ptsFin}
+                    fill="none"
+                    stroke="#10B981"
+                    strokeWidth="2"
+                    strokeDasharray="4 4"
+                  />
+                </g>
+              );
+            })}
+
             {chartData.map((r: any, i: number) => {
               const cx = paddingX + i * xStep + 20;
               return (
@@ -1590,7 +2239,7 @@ export default function StudentCard({
                   <circle
                     cx={cx}
                     cy={getY(r.class_init_avg)}
-                    r="4"
+                    r="3.8"
                     fill="#FFFFFF"
                     stroke="#94A3B8"
                     strokeWidth="2"
@@ -1598,7 +2247,7 @@ export default function StudentCard({
                   <circle
                     cx={cx}
                     cy={getY(r.class_fin_avg)}
-                    r="4"
+                    r="3.8"
                     fill="#FFFFFF"
                     stroke="#10B981"
                     strokeWidth="2"
@@ -2449,134 +3098,249 @@ export default function StudentCard({
           </>
         )}
 
-        {/* 성적 */}
+        {/* 성적 (4개 하위 탭: 주간테스트 · 주차별 오답 · 중간평가 · 분기평가) */}
         {activeTab === "exam" &&
           (isExamLoading ? (
             <LoadingBox text="성적을 불러오는 중이에요." />
           ) : (
             <>
-              {renderGrowthChart()}
+              {/* 4개 하위 탭 네비게이션 */}
+              <div
+                role="tablist"
+                aria-label="성적 종류 선택"
+                className="grid grid-cols-4 gap-1 rounded-xl bg-[#EEF2F6] p-1 border border-[#E2E8F0]"
+              >
+                {(
+                  [
+                    { id: "weekly", label: "주간테스트" },
+                    { id: "weekly_incorrect", label: "주차별 오답" },
+                    { id: "midterm", label: "중간평가" },
+                    { id: "quarterly", label: "분기평가" },
+                  ] as { id: PortalTestSubTabId; label: string }[]
+                ).map((sub) => {
+                  const isSubActive = activeExamSubTab === sub.id;
+                  return (
+                    <button
+                      key={sub.id}
+                      type="button"
+                      role="tab"
+                      aria-selected={isSubActive}
+                      onClick={() => setActiveExamSubTab(sub.id)}
+                      className={`py-2 px-1 rounded-lg text-[12px] sm:text-[13px] whitespace-nowrap transition-all ${
+                        isSubActive
+                          ? "bg-white text-[#1D4ED8] font-bold shadow-[0_1px_2px_rgba(15,23,42,0.08)]"
+                          : "text-[#64748B] font-semibold hover:text-[#334155]"
+                      }`}
+                    >
+                      {sub.label}
+                    </button>
+                  );
+                })}
+              </div>
 
-              <section className="bg-white rounded-xl border border-[#E2E8F0] shadow-[0_1px_3px_rgba(15,23,42,0.03)] p-4 flex flex-col gap-3">
-                <h3 className="text-[17px] font-bold text-[#1E293B]">
-                  주간테스트 기록
-                </h3>
-                {examResults.length === 0 ? (
-                  <p className="text-[14px] text-[#64748B]">
-                    아직 기록이 없어요.
-                  </p>
-                ) : (
-                  <div className="flex flex-col divide-y divide-[#F1F5F9]">
-                    {examResults.map((ex: any, i: number) => (
-                      <div key={i} className="py-3 flex flex-col gap-2">
-                        <div className="flex justify-between items-start gap-3">
-                          <div className="min-w-0">
-                            <div
-                              className="text-[15px] font-semibold text-[#1E293B] truncate"
-                              title={ex.title}
-                            >
-                              {ex.title}
+              {activeExamSubTab === "weekly" ||
+              activeExamSubTab === "weekly_incorrect" ? (
+                (() => {
+                  const weeklyMode = activeExamSubTab;
+                  const currentResults = examResultsBySubTab[weeklyMode] || [];
+                  const currentCats = categoryAnalysisBySubTab[weeklyMode] || [];
+                  const showAll = showAllExamRecordsByTab[weeklyMode];
+                  const visibleResults = showAll
+                    ? currentResults
+                    : currentResults.slice(0, 6);
+
+                  return (
+                    <>
+                      {renderGrowthChart(currentResults, weeklyMode)}
+
+                      <section className="bg-white rounded-xl border border-[#E2E8F0] shadow-[0_1px_3px_rgba(15,23,42,0.03)] p-4 flex flex-col gap-3">
+                        <div className="flex items-center justify-between gap-2">
+                          <h3 className="text-[16.5px] font-bold text-[#1E293B]">
+                            {weeklyMode === "weekly_incorrect"
+                              ? "주차별 오답 기록"
+                              : "주간테스트 기록"}
+                          </h3>
+                          {currentResults.length > 0 && (
+                            <span className="text-[12px] font-semibold text-[#64748B]">
+                              총 {currentResults.length}회
+                            </span>
+                          )}
+                        </div>
+                        {currentResults.length === 0 ? (
+                          <p className="text-[14px] text-[#64748B]">
+                            아직 기록이 없어요.
+                          </p>
+                        ) : (
+                          <>
+                            <div className="flex flex-col divide-y divide-[#F1F5F9]">
+                              {visibleResults.map((ex: any, i: number) => (
+                                <div
+                                  key={ex.assignment_id || i}
+                                  className="py-2.5 flex flex-col gap-1.5"
+                                >
+                                  <div className="flex justify-between items-start gap-3">
+                                    <div className="min-w-0">
+                                      <div
+                                        className="text-[14.5px] font-semibold text-[#1E293B] truncate"
+                                        title={ex.title}
+                                      >
+                                        {ex.title}
+                                      </div>
+                                      <div className="text-[12px] text-[#64748B]">
+                                        {ex.effective_date || ex.created_at
+                                          ? formatKDate(
+                                              ex.effective_date || ex.created_at
+                                            )
+                                          : "-"}
+                                      </div>
+                                    </div>
+                                    <div className="text-right shrink-0">
+                                      <div className="text-[14.5px] tabular-nums">
+                                        <span className="font-bold text-[#2563EB]">
+                                          {ex.original_score || 0}
+                                        </span>
+                                        <span className="text-[#94A3B8]">
+                                          {" "}
+                                          →{" "}
+                                        </span>
+                                        <span className="font-bold text-[#0F172A]">
+                                          {ex.final_score || 0}점
+                                        </span>
+                                      </div>
+                                      <div className="text-[11.5px] text-[#64748B] tabular-nums">
+                                        반 평균 {ex.class_init_avg} →{" "}
+                                        {ex.class_fin_avg}점
+                                      </div>
+                                    </div>
+                                  </div>
+                                  <div className="flex flex-wrap gap-1.5 text-[11.5px] font-semibold">
+                                    {ex.oCount > 0 && (
+                                      <span className="rounded-full px-2 py-0.5 bg-[#DCFCE7] text-[#15803D]">
+                                        처음부터 정답 {ex.oCount}
+                                      </span>
+                                    )}
+                                    {ex.roCount > 0 && (
+                                      <span className="rounded-full px-2 py-0.5 bg-[#DBEAFE] text-[#1D4ED8]">
+                                        스스로 고침 {ex.roCount}
+                                      </span>
+                                    )}
+                                    {ex.toCount > 0 && (
+                                      <span className="rounded-full px-2 py-0.5 bg-[#FEF3C7] text-[#B45309]">
+                                        힌트 후 정답 {ex.toCount}
+                                      </span>
+                                    )}
+                                    {ex.xCount > 0 && (
+                                      <span className="rounded-full px-2 py-0.5 bg-[#FFE4E6] text-[#BE123C]">
+                                        아직 오답 {ex.xCount}
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+                              ))}
                             </div>
-                            <div className="text-[12px] text-[#64748B]">
-                              {ex.created_at ? formatKDate(ex.created_at) : "-"}
-                            </div>
+
+                            {currentResults.length > 6 && (
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setShowAllExamRecordsByTab((prev) => ({
+                                    ...prev,
+                                    [weeklyMode]: !prev[weeklyMode],
+                                  }))
+                                }
+                                className="w-full py-2 rounded-lg bg-[#F8FAFC] border border-[#E2E8F0] text-[13px] font-semibold text-[#475569] hover:bg-[#F1F5F9] transition-colors"
+                              >
+                                {showAll
+                                  ? "기록 접기"
+                                  : `이전 기록 더 보기 (+${
+                                      currentResults.length - 6
+                                    }건)`}
+                              </button>
+                            )}
+                          </>
+                        )}
+                      </section>
+
+                      <section className="bg-white rounded-xl border border-[#E2E8F0] shadow-[0_1px_3px_rgba(15,23,42,0.03)] p-4 flex flex-col gap-3">
+                        <div className="flex justify-between items-start gap-2">
+                          <div>
+                            <h3 className="text-[16.5px] font-bold text-[#1E293B]">
+                              단원별 성취도
+                            </h3>
+                            <p className="text-[11.5px] text-[#64748B] mt-0.5">
+                              최근 2개월 기준 · 주요 단원 최대 8개
+                            </p>
                           </div>
-                          <div className="text-right shrink-0">
-                            <div className="text-[15px] tabular-nums">
-                              <span className="font-bold text-[#2563EB]">
-                                {ex.original_score || 0}
-                              </span>
-                              <span className="text-[#94A3B8]"> → </span>
-                              <span className="font-bold text-[#0F172A]">
-                                {ex.final_score || 0}점
-                              </span>
-                            </div>
-                            <div className="text-[12px] text-[#64748B] tabular-nums">
-                              반 평균 {ex.class_init_avg} → {ex.class_fin_avg}점
-                            </div>
+                          <div className="flex gap-2.5 text-[11.5px] text-[#475569] shrink-0 pt-0.5">
+                            <span className="flex items-center gap-1">
+                              <span className="w-2.5 h-2.5 rounded-sm bg-[#64748B]/70 border border-dashed border-[#475569]"></span>
+                              처음
+                            </span>
+                            <span className="flex items-center gap-1 font-bold text-[#1D4ED8]">
+                              <span className="w-2.5 h-2.5 rounded-sm bg-[#2563EB]"></span>
+                              고친 뒤
+                            </span>
                           </div>
                         </div>
-                        <div className="flex flex-wrap gap-1.5 text-[12px] font-semibold">
-                          {ex.oCount > 0 && (
-                            <span className="rounded-full px-2.5 py-0.5 bg-[#DCFCE7] text-[#15803D]">
-                              처음부터 정답 {ex.oCount}
-                            </span>
-                          )}
-                          {ex.roCount > 0 && (
-                            <span className="rounded-full px-2.5 py-0.5 bg-[#DBEAFE] text-[#1D4ED8]">
-                              스스로 고침 {ex.roCount}
-                            </span>
-                          )}
-                          {ex.toCount > 0 && (
-                            <span className="rounded-full px-2.5 py-0.5 bg-[#FEF3C7] text-[#B45309]">
-                              힌트 후 정답 {ex.toCount}
-                            </span>
-                          )}
-                          {ex.xCount > 0 && (
-                            <span className="rounded-full px-2.5 py-0.5 bg-[#FFE4E6] text-[#BE123C]">
-                              아직 오답 {ex.xCount}
-                            </span>
-                          )}
+                        <div className="flex items-center justify-center overflow-hidden">
+                          <RadarChart data={currentCats} />
                         </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </section>
+                        {currentCats.length === 0 ? (
+                          <p className="text-[14px] text-[#64748B]">
+                            최근 2개월 단원별 기록이 없어요.
+                          </p>
+                        ) : (
+                          <div className="flex flex-col gap-2.5">
+                            {currentCats.map((cat: any, i: number) => (
+                              <div key={cat.code || i} className="flex flex-col gap-1">
+                                <div className="flex justify-between items-center text-[13.5px]">
+                                  <span className="truncate pr-2 text-[#334155] font-medium">
+                                    {cat.name}
+                                  </span>
+                                  <span className="shrink-0 tabular-nums text-[12.5px]">
+                                    <span className="text-[#64748B]">
+                                      {cat.initial_rate}%
+                                    </span>
+                                    <span className="text-[#94A3B8]"> → </span>
+                                    <span className="font-bold text-[#1D4ED8]">
+                                      {cat.final_rate}%
+                                    </span>
+                                  </span>
+                                </div>
+                                <div className="w-full bg-[#EFF6FF] h-2 rounded-full relative overflow-hidden">
+                                  <div
+                                    className="absolute inset-y-0 left-0 bg-[#60A5FA] rounded-full"
+                                    style={{ width: `${cat.final_rate}%` }}
+                                  ></div>
+                                  <div
+                                    className="absolute inset-y-0 left-0 bg-[#2563EB] rounded-full"
+                                    style={{ width: `${cat.initial_rate}%` }}
+                                  ></div>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </section>
+                    </>
+                  );
+                })()
+              ) : (
+                <MobilePeriodicEvalReport
+                  reports={periodicReportsBySubTab[activeExamSubTab] || []}
+                  subTab={activeExamSubTab}
+                  selectedIdx={selectedEvalIdxByTab[activeExamSubTab] || 0}
+                  onSelectIdx={(idx) =>
+                    setSelectedEvalIdxByTab((prev) => ({
+                      ...prev,
+                      [activeExamSubTab]: idx,
+                    }))
+                  }
+                />
+              )}
 
               <section className="bg-white rounded-xl border border-[#E2E8F0] shadow-[0_1px_3px_rgba(15,23,42,0.03)] p-4 flex flex-col gap-3">
-                <div className="flex justify-between items-end gap-2">
-                  <h3 className="text-[17px] font-bold text-[#1E293B]">
-                    단원별 성취도
-                  </h3>
-                  <div className="flex gap-3 text-[12px] text-[#475569]">
-                    <span className="flex items-center gap-1">
-                      <span className="w-2.5 h-2.5 rounded-sm bg-[#2563EB]"></span>
-                      처음
-                    </span>
-                    <span className="flex items-center gap-1">
-                      <span className="w-2.5 h-2.5 rounded-sm bg-[#93C5FD]"></span>
-                      고친 뒤
-                    </span>
-                  </div>
-                </div>
-                <div className="flex items-center justify-center overflow-hidden">
-                  <RadarChart data={categoryAnalysis} />
-                </div>
-                {categoryAnalysis.length === 0 ? (
-                  <p className="text-[14px] text-[#64748B]">
-                    아직 단원별 기록이 없어요.
-                  </p>
-                ) : (
-                  <div className="flex flex-col gap-3">
-                    {categoryAnalysis.map((cat: any, i: number) => (
-                      <div key={i} className="flex flex-col gap-1">
-                        <div className="flex justify-between items-center text-[14px]">
-                          <span className="truncate pr-2 text-[#334155]">
-                            {cat.name}
-                          </span>
-                          <span className="shrink-0 tabular-nums font-bold text-[#1D4ED8]">
-                            {cat.final_rate}%
-                          </span>
-                        </div>
-                        <div className="w-full bg-[#EFF6FF] h-2 rounded-full relative overflow-hidden">
-                          <div
-                            className="absolute inset-y-0 left-0 bg-[#93C5FD] rounded-full"
-                            style={{ width: `${cat.final_rate}%` }}
-                          ></div>
-                          <div
-                            className="absolute inset-y-0 left-0 bg-[#2563EB] rounded-full"
-                            style={{ width: `${cat.initial_rate}%` }}
-                          ></div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </section>
-
-              <section className="bg-white rounded-xl border border-[#E2E8F0] shadow-[0_1px_3px_rgba(15,23,42,0.03)] p-4 flex flex-col gap-3">
-                <h3 className="text-[17px] font-bold text-[#1E293B]">
+                <h3 className="text-[16.5px] font-bold text-[#1E293B]">
                   학교 내신 성적
                 </h3>
                 {schoolExams.length === 0 ? (

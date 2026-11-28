@@ -637,7 +637,7 @@ export const hydrateMissingQuestionImages = async (supabaseClient: any, question
 export const getDiffLabelByRate = (rate: number | null | undefined) => {
   if(rate === null || rate === undefined) return '중';
   if(rate >= 80) return '최하'; if(rate >= 60) return '하';
-  if(rate >= 40) return '중'; if(rate >= 20) return '상'; return '최상';
+  if(rate >= 45) return '중'; if(rate >= 30) return '상'; return '최상';
 };
 
 export const getTypeName = (q: any) => {

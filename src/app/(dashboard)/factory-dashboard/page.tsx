@@ -5,6 +5,7 @@ import React, { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { isConfidentialExamText, isConfidentialQuestionObj } from "@/lib/confidentialExamGuard";
+import QuestionRateCalibrationPanel from "@/components/factory/QuestionRateCalibrationPanel";
 
 type DashboardStats = {
   totalQuestions: number;
@@ -412,6 +413,18 @@ export default function FactoryDashboardPage() {
               </div>
             </div>
           </div>
+
+          {/* 실데이터 기반 문항 정답률·난이도 자동 보정 패널 */}
+          <QuestionRateCalibrationPanel
+            onAfterApply={() => {
+              memoryStatsCache = null;
+              try {
+                localStorage.removeItem(STATS_CACHE_KEY);
+                sessionStorage.removeItem(STATS_CACHE_KEY);
+              } catch {}
+              loadDashboardData(true, true);
+            }}
+          />
         </div>
       )}
     </div>
